@@ -30,7 +30,10 @@ param(
     [string] $EngineDir  = 'd:\EpicGames\Engine\UE_5.8'
 )
 
-$ErrorActionPreference = 'Stop'
+# Deliberately NOT 'Stop'. Windows PowerShell 5.1 wraps a native executable's stderr in an
+# ErrorRecord, which under 'Stop' aborts the script on ordinary tool chatter even when the tool
+# returned 0. Both stages below check $LASTEXITCODE explicitly instead.
+$ErrorActionPreference = 'Continue'
 
 # Scripts/ -> HouseForge/ -> Plugins/ -> project root
 $PluginDir  = Split-Path -Parent $PSScriptRoot
