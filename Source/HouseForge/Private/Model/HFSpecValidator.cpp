@@ -280,6 +280,44 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 		}
 	}
 
+	// Two openings overlapping on one wall would boolean into a single ragged hole. Cheap to
+	// check, and easy to author by accident when a ventilator is placed over a door.
+	for (int32 i = 0; i < Spec.Openings.Num(); ++i)
+	{
+		const FHFOpening& A = Spec.Openings[i];
+		if (A.Width <= 0.0)
+		{
+			continue;
+		}
+
+		for (int32 j = i + 1; j < Spec.Openings.Num(); ++j)
+		{
+			const FHFOpening& B = Spec.Openings[j];
+			if (B.Width <= 0.0 || A.WallId != B.WallId || A.WallId.IsNone())
+			{
+				continue;
+			}
+
+			const double ANear = A.OffsetAlongWall - A.Width * 0.5;
+			const double AFar  = A.OffsetAlongWall + A.Width * 0.5;
+			const double BNear = B.OffsetAlongWall - B.Width * 0.5;
+			const double BFar  = B.OffsetAlongWall + B.Width * 0.5;
+
+			const bool bSeparatedAlongWall = AFar <= BNear + UE_KINDA_SMALL_NUMBER
+										  || BFar <= ANear + UE_KINDA_SMALL_NUMBER;
+			// Stacked openings - a ventilator sitting directly on a door head - are fine.
+			const bool bSeparatedVertically = A.HeadHeight() <= B.SillHeight + UE_KINDA_SMALL_NUMBER
+										   || B.HeadHeight() <= A.SillHeight + UE_KINDA_SMALL_NUMBER;
+
+			if (!bSeparatedAlongWall && !bSeparatedVertically)
+			{
+				Result.Add(EHFValidationSeverity::Error, TEXT("OpeningsOverlap"), A.Id,
+					FString::Printf(TEXT("Openings '%s' (%.0f-%.0f) and '%s' (%.0f-%.0f) overlap on wall '%s' and share a height range; they would cut one ragged hole."),
+						*Describe(A.Id), ANear, AFar, *Describe(B.Id), BNear, BFar, *Describe(A.WallId)));
+			}
+		}
+	}
+
 	// -------------------------------------------------------------------------------- rooms
 	for (const FHFRoom& Room : Spec.Rooms)
 	{

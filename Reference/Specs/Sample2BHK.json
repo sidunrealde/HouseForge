@@ -350,8 +350,8 @@
 		},
 		{
 			"id": "Vent_CBath",
-			"wallId": "W_Mid_Upper",
-			"offsetAlongWall": 5400,
+			"wallId": "W_Corr_CBath",
+			"offsetAlongWall": 900,
 			"width": 600,
 			"height": 450,
 			"sillHeight": 2100,
@@ -360,8 +360,8 @@
 		},
 		{
 			"id": "Vent_MBath",
-			"wallId": "W_Mid_Upper",
-			"offsetAlongWall": 7650,
+			"wallId": "W_CBath_MBath",
+			"offsetAlongWall": 900,
 			"width": 600,
 			"height": 450,
 			"sillHeight": 2100,
@@ -1101,14 +1101,14 @@
 			"label": "Base units, west run",
 			"position":
 			{
-				"x": 300,
+				"x": 415,
 				"y": 6900
 			},
-			"rotationDegrees": 0,
+			"rotationDegrees": 90,
 			"footprint":
 			{
-				"x": 600,
-				"y": 2400
+				"x": 2400,
+				"y": 600
 			},
 			"height": 850,
 			"baseZ": 0,
@@ -1138,7 +1138,7 @@
 			"position":
 			{
 				"x": 2100,
-				"y": 8100
+				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -1173,14 +1173,14 @@
 			"label": "Granite counter, west",
 			"position":
 			{
-				"x": 300,
+				"x": 415,
 				"y": 6900
 			},
-			"rotationDegrees": 0,
+			"rotationDegrees": 90,
 			"footprint":
 			{
-				"x": 600,
-				"y": 2400
+				"x": 2400,
+				"y": 600
 			},
 			"height": 40,
 			"baseZ": 850,
@@ -1210,7 +1210,7 @@
 			"position":
 			{
 				"x": 2100,
-				"y": 8100
+				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -1246,7 +1246,7 @@
 			"position":
 			{
 				"x": 2100,
-				"y": 8250
+				"y": 8135
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -1282,7 +1282,7 @@
 			"position":
 			{
 				"x": 2100,
-				"y": 8100
+				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -1317,10 +1317,10 @@
 			"label": "4-burner hob",
 			"position":
 			{
-				"x": 300,
+				"x": 415,
 				"y": 6300
 			},
-			"rotationDegrees": 0,
+			"rotationDegrees": 90,
 			"footprint":
 			{
 				"x": 580,
@@ -1353,10 +1353,10 @@
 			"label": "Chimney",
 			"position":
 			{
-				"x": 300,
+				"x": 415,
 				"y": 6300
 			},
-			"rotationDegrees": 0,
+			"rotationDegrees": 90,
 			"footprint":
 			{
 				"x": 600,
@@ -1533,14 +1533,14 @@
 			"label": "4-door wardrobe with loft",
 			"position":
 			{
-				"x": 9900,
+				"x": 10385,
 				"y": 6900
 			},
 			"rotationDegrees": 90,
 			"footprint":
 			{
-				"x": 600,
-				"y": 2400
+				"x": 2400,
+				"y": 600
 			},
 			"height": 2400,
 			"baseZ": 0,
@@ -1677,14 +1677,14 @@
 			"label": "3-door wardrobe",
 			"position":
 			{
-				"x": 10400,
+				"x": 10385,
 				"y": 2400
 			},
 			"rotationDegrees": 90,
 			"footprint":
 			{
-				"x": 600,
-				"y": 1800
+				"x": 1800,
+				"y": 600
 			},
 			"height": 2400,
 			"baseZ": 0,
