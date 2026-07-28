@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2480" height="1754" viewBox="0 0 2480 1754">
+<title>Sample 2BHK - Reflected Ceiling Plan</title>
+<rect width="2480" height="1754" fill="#ffffff"/>
+<polygon points="30.00,30.00 2450.00,30.00 2450.00,1724.00 30.00,1724.00" fill="none" stroke="#000000" stroke-width="2.50"/>
+<polygon points="48.00,48.00 2432.00,48.00 2432.00,1706.00 48.00,1706.00" fill="none" stroke="#000000" stroke-width="1.00"/>
+<polygon points="1712.00,1496.00 2432.00,1496.00 2432.00,1706.00 1712.00,1706.00" fill="#ffffff" stroke="#000000" stroke-width="2.00"/>
+<line x1="1712.00" y1="1554.00" x2="2432.00" y2="1554.00" stroke="#000000" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1712.00" y1="1614.00" x2="2432.00" y2="1614.00" stroke="#000000" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="2182.00" y1="1614.00" x2="2182.00" y2="1706.00" stroke="#000000" stroke-width="1.00" stroke-linecap="round"/>
+<text x="1730.00" y="1525.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="20.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">HOUSEFORGE  /  INTERIOR DESIGN SET</text>
+<text x="1730.00" y="1584.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="26.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">Sample 2BHK</text>
+<text x="1730.00" y="1636.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#787878" text-anchor="start" dominant-baseline="central">DRAWING</text>
+<text x="1730.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">REFLECTED CEILING PLAN</text>
+<text x="2200.00" y="1636.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#787878" text-anchor="start" dominant-baseline="central">SHEET</text>
+<text x="2200.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">03 / 10</text>
+<text x="70.00" y="82.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="30.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">REFLECTED CEILING PLAN</text>
+<text x="70.00" y="118.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#787878" text-anchor="start" dominant-baseline="central">ALL DIMENSIONS IN MILLIMETERS</text>
+<polygon points="642.35,1179.29 1837.65,1179.29 1837.65,1204.74 642.35,1204.74" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="1824.92,1192.01 1824.92,262.34 1850.38,262.34 1850.38,1192.01" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="1837.65,275.06 642.35,275.06 642.35,249.61 1837.65,249.61" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="655.08,262.34 655.08,1192.01 629.62,1192.01 629.62,262.34" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="642.35,787.22 1837.65,787.22 1837.65,799.94 642.35,799.94" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="642.35,588.00 1837.65,588.00 1837.65,600.73 642.35,600.73" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="1366.45,1192.01 1366.45,793.58 1379.17,793.58 1379.17,1192.01" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="835.20,793.58 835.20,594.36 847.93,594.36 847.93,793.58" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="1100.83,793.58 1100.83,594.36 1113.55,594.36 1113.55,793.58" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="1366.45,793.58 1366.45,594.36 1379.17,594.36 1379.17,793.58" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="1598.87,793.58 1598.87,594.36 1611.59,594.36 1611.59,793.58" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="1100.83,594.36 1100.83,262.34 1113.55,262.34 1113.55,594.36" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="642.35,1351.66 1107.19,1351.66 1107.19,1364.39 642.35,1364.39" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="635.99,1358.03 635.99,1192.01 648.71,1192.01 648.71,1358.03" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="1100.83,1358.03 1100.83,1192.01 1113.55,1192.01 1113.55,1358.03" fill="#e1e1e1" stroke="#000000" stroke-width="1.20"/>
+<polygon points="655.30,635.87 655.30,752.08 629.40,752.08 629.40,635.87" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="655.08" y1="635.87" x2="629.62" y2="635.87" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="655.08" y1="752.08" x2="629.62" y2="752.08" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="642.35" y1="752.08" x2="758.56" y2="752.08" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="775.16,1179.06 974.38,1179.06 974.38,1204.96 775.16,1204.96" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="775.16" y1="1179.29" x2="775.16" y2="1204.74" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="974.38" y1="1179.29" x2="974.38" y2="1204.74" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="775.16" y1="1186.41" x2="881.41" y2="1186.41" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<line x1="974.38" y1="1197.61" x2="868.13" y2="1197.61" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="1156.99,1179.06 1323.01,1179.06 1323.01,1204.96 1156.99,1204.96" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1156.99" y1="1179.29" x2="1156.99" y2="1204.74" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1323.01" y1="1179.29" x2="1323.01" y2="1204.74" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1156.99" y1="1197.61" x2="1323.01" y2="1197.61" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="1156.99" y1="1192.01" x2="1323.01" y2="1192.01" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="1156.99" y1="1186.41" x2="1323.01" y2="1186.41" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<polygon points="1522.22,1179.06 1688.24,1179.06 1688.24,1204.96 1522.22,1204.96" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1522.22" y1="1179.29" x2="1522.22" y2="1204.74" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1688.24" y1="1179.29" x2="1688.24" y2="1204.74" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1522.22" y1="1197.61" x2="1688.24" y2="1197.61" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="1522.22" y1="1192.01" x2="1688.24" y2="1192.01" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="1522.22" y1="1186.41" x2="1688.24" y2="1186.41" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<polygon points="1824.70,1059.20 1824.70,926.39 1850.60,926.39 1850.60,1059.20" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1824.92" y1="1059.20" x2="1850.38" y2="1059.20" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1824.92" y1="926.39" x2="1850.38" y2="926.39" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1843.25" y1="1059.20" x2="1843.25" y2="926.39" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="1837.65" y1="1059.20" x2="1837.65" y2="926.39" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="1832.05" y1="1059.20" x2="1832.05" y2="926.39" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<polygon points="1538.83,275.29 1339.61,275.29 1339.61,249.39 1538.83,249.39" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1538.83" y1="275.06" x2="1538.83" y2="249.61" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1339.61" y1="275.06" x2="1339.61" y2="249.61" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1538.83" y1="256.74" x2="1339.61" y2="256.74" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="1538.83" y1="262.34" x2="1339.61" y2="262.34" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="1538.83" y1="267.94" x2="1339.61" y2="267.94" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<polygon points="941.17,275.29 808.36,275.29 808.36,249.39 941.17,249.39" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="941.17" y1="275.06" x2="941.17" y2="249.61" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="808.36" y1="275.06" x2="808.36" y2="249.61" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="941.17" y1="256.74" x2="808.36" y2="256.74" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="941.17" y1="262.34" x2="808.36" y2="262.34" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<line x1="941.17" y1="267.94" x2="808.36" y2="267.94" stroke="#000000" stroke-width="1.10" stroke-linecap="round"/>
+<polygon points="1100.60,727.17 1100.60,660.77 1113.77,660.77 1113.77,727.17" fill="none" stroke="#787878" stroke-width="1.20" stroke-dasharray="10 7"/>
+<polygon points="1366.23,727.17 1366.23,660.77 1379.40,660.77 1379.40,727.17" fill="none" stroke="#787878" stroke-width="1.20" stroke-dasharray="10 7"/>
+<polygon points="924.57,787.00 1024.18,787.00 1024.18,800.17 924.57,800.17" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="924.57" y1="787.22" x2="924.57" y2="799.94" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1024.18" y1="787.22" x2="1024.18" y2="799.94" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="924.57" y1="793.58" x2="924.57" y2="693.97" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="1389.41,787.00 1489.02,787.00 1489.02,800.17 1389.41,800.17" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1389.41" y1="787.22" x2="1389.41" y2="799.94" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1489.02" y1="787.22" x2="1489.02" y2="799.94" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1489.02" y1="793.58" x2="1489.02" y2="693.97" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="924.57,587.78 1024.18,587.78 1024.18,600.95 924.57,600.95" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="924.57" y1="588.00" x2="924.57" y2="600.73" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1024.18" y1="588.00" x2="1024.18" y2="600.73" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="924.57" y1="594.36" x2="924.57" y2="494.76" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="1156.99,587.78 1256.60,587.78 1256.60,600.95 1156.99,600.95" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1156.99" y1="588.00" x2="1156.99" y2="600.73" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1256.60" y1="588.00" x2="1256.60" y2="600.73" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1256.60" y1="594.36" x2="1256.60" y2="494.76" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="1100.60,735.48 1100.60,652.47 1113.77,652.47 1113.77,735.48" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1100.83" y1="735.48" x2="1113.55" y2="735.48" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1100.83" y1="652.47" x2="1113.55" y2="652.47" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1107.19" y1="735.48" x2="1024.18" y2="735.48" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="1366.23,735.48 1366.23,652.47 1379.40,652.47 1379.40,735.48" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1366.45" y1="735.48" x2="1379.17" y2="735.48" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1366.45" y1="652.47" x2="1379.17" y2="652.47" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1372.81" y1="735.48" x2="1289.80" y2="735.48" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="1598.65,735.48 1598.65,652.47 1611.82,652.47 1611.82,735.48" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1598.87" y1="735.48" x2="1611.59" y2="735.48" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1598.87" y1="652.47" x2="1611.59" y2="652.47" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1605.23" y1="735.48" x2="1522.22" y2="735.48" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="642.35,1192.01 1372.81,1192.01 1372.81,793.58 642.35,793.58" fill="none" stroke="#8c2882" stroke-width="2.00"/>
+<polygon points="708.76,1125.61 1306.41,1125.61 1306.41,859.99 708.76,859.99" fill="none" stroke="#8c2882" stroke-width="1.40" stroke-dasharray="16 8"/>
+<polygon points="706.54,1127.82 1308.62,1127.82 1308.62,857.77 706.54,857.77" fill="none" stroke="#005aaa" stroke-width="2.40"/>
+<text x="1007.58" y="873.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">LIVING / DINING</text>
+<text x="1007.58" y="894.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">COVE</text>
+<text x="1007.58" y="913.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">DROP 200</text>
+<circle cx="775.16" cy="1059.20" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="762.99" y1="1059.20" x2="787.34" y2="1059.20" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="775.16" y1="1047.03" x2="775.16" y2="1071.38" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="775.16" cy="926.39" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="762.99" y1="926.39" x2="787.34" y2="926.39" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="775.16" y1="914.22" x2="775.16" y2="938.57" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="1240.00" cy="1059.20" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1227.83" y1="1059.20" x2="1252.17" y2="1059.20" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1240.00" y1="1047.03" x2="1240.00" y2="1071.38" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="1240.00" cy="926.39" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1227.83" y1="926.39" x2="1252.17" y2="926.39" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1240.00" y1="914.22" x2="1240.00" y2="938.57" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="1107.19,594.36 1837.65,594.36 1837.65,262.34 1107.19,262.34" fill="none" stroke="#8c2882" stroke-width="2.00"/>
+<polygon points="1173.59,527.96 1771.24,527.96 1771.24,328.74 1173.59,328.74" fill="none" stroke="#8c2882" stroke-width="1.40" stroke-dasharray="16 8"/>
+<text x="1472.42" y="328.74" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">MASTER BEDROOM</text>
+<text x="1472.42" y="349.74" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">PERIPHERAL</text>
+<text x="1472.42" y="368.74" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">DROP 200</text>
+<circle cx="1206.80" cy="494.76" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1194.62" y1="494.76" x2="1218.97" y2="494.76" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1206.80" y1="482.58" x2="1206.80" y2="506.93" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="1538.83" cy="494.76" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1526.65" y1="494.76" x2="1551.00" y2="494.76" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1538.83" y1="482.58" x2="1538.83" y2="506.93" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="1372.81,1192.01 1837.65,1192.01 1837.65,793.58 1372.81,793.58" fill="none" stroke="#8c2882" stroke-width="2.00"/>
+<polygon points="1428.15,1136.68 1782.31,1136.68 1782.31,848.92 1428.15,848.92" fill="none" stroke="#8c2882" stroke-width="1.40" stroke-dasharray="16 8"/>
+<text x="1605.23" y="873.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">BEDROOM 2</text>
+<text x="1605.23" y="894.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">PERIPHERAL</text>
+<text x="1605.23" y="913.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">DROP 200</text>
+<circle cx="1472.42" cy="1059.20" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1460.25" y1="1059.20" x2="1484.59" y2="1059.20" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1472.42" y1="1047.03" x2="1472.42" y2="1071.38" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="1704.84" cy="1059.20" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1692.66" y1="1059.20" x2="1717.01" y2="1059.20" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1704.84" y1="1047.03" x2="1704.84" y2="1071.38" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="642.35,594.36 1107.19,594.36 1107.19,262.34 642.35,262.34" fill="none" stroke="#8c2882" stroke-width="2.00"/>
+<text x="874.77" y="328.74" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">KITCHEN</text>
+<text x="874.77" y="349.74" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">FULL DROP</text>
+<text x="874.77" y="368.74" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">DROP 300</text>
+<circle cx="741.96" cy="494.76" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="729.78" y1="494.76" x2="754.13" y2="494.76" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="741.96" y1="482.58" x2="741.96" y2="506.93" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="941.17" cy="494.76" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="929.00" y1="494.76" x2="953.35" y2="494.76" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="941.17" y1="482.58" x2="941.17" y2="506.93" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="741.96" cy="328.74" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="729.78" y1="328.74" x2="754.13" y2="328.74" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="741.96" y1="316.57" x2="741.96" y2="340.92" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="941.17" cy="328.74" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="929.00" y1="328.74" x2="953.35" y2="328.74" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="941.17" y1="316.57" x2="941.17" y2="340.92" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="1107.19,793.58 1372.81,793.58 1372.81,594.36 1107.19,594.36" fill="none" stroke="#8c2882" stroke-width="2.00"/>
+<text x="1240.00" y="634.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">COMMON BATHROOM</text>
+<text x="1240.00" y="655.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">FULL DROP</text>
+<text x="1240.00" y="674.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">DROP 400</text>
+<circle cx="1240.00" cy="693.97" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1227.83" y1="693.97" x2="1252.17" y2="693.97" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1240.00" y1="681.80" x2="1240.00" y2="706.15" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="1372.81,793.58 1605.23,793.58 1605.23,594.36 1372.81,594.36" fill="none" stroke="#8c2882" stroke-width="2.00"/>
+<text x="1489.02" y="634.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">MASTER BATHROOM</text>
+<text x="1489.02" y="655.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">FULL DROP</text>
+<text x="1489.02" y="674.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">DROP 400</text>
+<circle cx="1489.02" cy="693.97" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1476.85" y1="693.97" x2="1501.20" y2="693.97" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1489.02" y1="681.80" x2="1489.02" y2="706.15" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="841.57,793.58 1107.19,793.58 1107.19,594.36 841.57,594.36" fill="none" stroke="#8c2882" stroke-width="2.00"/>
+<text x="974.38" y="634.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">CORRIDOR</text>
+<text x="974.38" y="655.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">BULKHEAD</text>
+<text x="974.38" y="674.21" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">DROP 300</text>
+<circle cx="907.97" cy="693.97" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="895.80" y1="693.97" x2="920.15" y2="693.97" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="907.97" y1="681.80" x2="907.97" y2="706.15" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="1040.78" cy="693.97" r="12.17" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="1028.61" y1="693.97" x2="1052.96" y2="693.97" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1040.78" y1="681.80" x2="1040.78" y2="706.15" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<circle cx="1007.58" cy="992.80" r="66.41" fill="none" stroke="#8c2882" stroke-width="1.20" stroke-dasharray="16 8"/>
+<line x1="1007.58" y1="992.80" x2="1007.58" y2="926.39" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<line x1="1007.58" y1="992.80" x2="950.07" y2="1026.00" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<line x1="1007.58" y1="992.80" x2="1065.09" y2="1026.00" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<circle cx="1007.58" cy="992.80" r="7.97" fill="#8c2882" stroke="#8c2882" stroke-width="1.00"/>
+<circle cx="1339.61" cy="428.35" r="66.41" fill="none" stroke="#8c2882" stroke-width="1.20" stroke-dasharray="16 8"/>
+<line x1="1339.61" y1="428.35" x2="1339.61" y2="361.94" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<line x1="1339.61" y1="428.35" x2="1282.10" y2="461.55" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<line x1="1339.61" y1="428.35" x2="1397.12" y2="461.55" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<circle cx="1339.61" cy="428.35" r="7.97" fill="#8c2882" stroke="#8c2882" stroke-width="1.00"/>
+<circle cx="1217.86" cy="583.30" r="15.49" fill="#ffffff" stroke="#005aaa" stroke-width="1.40"/>
+<line x1="1217.86" y1="583.30" x2="1244.21" y2="556.96" stroke="#005aaa" stroke-width="1.20" stroke-linecap="round"/>
+<text x="1247.30" y="550.76" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#005aaa" text-anchor="start" dominant-baseline="central">S6</text>
+<circle cx="1605.23" cy="992.80" r="66.41" fill="none" stroke="#8c2882" stroke-width="1.20" stroke-dasharray="16 8"/>
+<line x1="1605.23" y1="992.80" x2="1605.23" y2="926.39" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<line x1="1605.23" y1="992.80" x2="1547.72" y2="1026.00" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<line x1="1605.23" y1="992.80" x2="1662.74" y2="1026.00" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<circle cx="1605.23" cy="992.80" r="7.97" fill="#8c2882" stroke="#8c2882" stroke-width="1.00"/>
+<circle cx="753.03" cy="782.51" r="15.49" fill="#ffffff" stroke="#005aaa" stroke-width="1.40"/>
+<line x1="753.03" y1="782.51" x2="779.37" y2="756.17" stroke="#005aaa" stroke-width="1.20" stroke-linecap="round"/>
+<text x="782.47" y="749.97" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#005aaa" text-anchor="start" dominant-baseline="central">S4</text>
+<text x="741.96" y="693.97" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">FOYER</text>
+<text x="1721.44" y="693.97" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">UTILITY</text>
+<text x="874.77" y="1275.02" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">BALCONY</text>
+<circle cx="2310.00" cy="196.00" r="34.00" fill="none" stroke="#000000" stroke-width="1.60"/>
+<polygon points="2310.00,167.00 2299.00,218.00 2310.00,209.00 2321.00,218.00" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+<text x="2310.00" y="250.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="18.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">N</text>
+<line x1="88.00" y1="1640.00" x2="309.35" y2="1640.00" stroke="#000000" stroke-width="2.00" stroke-linecap="round"/>
+<polygon points="88.00,1633.00 143.34,1633.00 143.34,1640.00 88.00,1640.00" fill="#000000" stroke="#000000" stroke-width="0.50"/>
+<line x1="88.00" y1="1628.00" x2="88.00" y2="1646.00" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="143.34" y1="1628.00" x2="143.34" y2="1646.00" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
+<polygon points="198.68,1633.00 254.01,1633.00 254.01,1640.00 198.68,1640.00" fill="#000000" stroke="#000000" stroke-width="0.50"/>
+<line x1="198.68" y1="1628.00" x2="198.68" y2="1646.00" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="254.01" y1="1628.00" x2="254.01" y2="1646.00" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="309.35" y1="1628.00" x2="309.35" y2="1646.00" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
+<text x="88.00" y="1666.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">0</text>
+<text x="309.35" y="1666.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">2000</text>
+<text x="198.68" y="1614.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#787878" text-anchor="middle" dominant-baseline="central">SCALE</text>
+<text x="88.00" y="170.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="start" dominant-baseline="hanging" font-weight="bold">CEILING LEGEND</text>
+<line x1="88.00" y1="194.00" x2="448.00" y2="194.00" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="88.00" y1="216.00" x2="134.00" y2="216.00" stroke="#8c2882" stroke-width="2.00" stroke-linecap="round"/>
+<text x="154.00" y="216.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#000000" text-anchor="start" dominant-baseline="central">CEILING OUTLINE</text>
+<line x1="88.00" y1="246.00" x2="134.00" y2="246.00" stroke="#8c2882" stroke-width="1.40" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="154.00" y="246.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#000000" text-anchor="start" dominant-baseline="central">INNER BAND EDGE</text>
+<line x1="88.00" y1="276.00" x2="134.00" y2="276.00" stroke="#005aaa" stroke-width="2.40" stroke-linecap="round"/>
+<text x="154.00" y="276.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#000000" text-anchor="start" dominant-baseline="central">COVE / LED CHANNEL</text>
+<circle cx="111.00" cy="306.00" r="8.00" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
+<line x1="103.00" y1="306.00" x2="119.00" y2="306.00" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="111.00" y1="298.00" x2="111.00" y2="314.00" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
+<text x="154.00" y="306.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#000000" text-anchor="start" dominant-baseline="central">RECESSED LIGHT</text>
+<circle cx="111.00" cy="336.00" r="11.00" fill="none" stroke="#8c2882" stroke-width="1.20" stroke-dasharray="16 8"/>
+<line x1="111.00" y1="336.00" x2="111.00" y2="325.00" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<line x1="111.00" y1="336.00" x2="101.00" y2="342.00" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<line x1="111.00" y1="336.00" x2="121.00" y2="342.00" stroke="#8c2882" stroke-width="1.60" stroke-linecap="round"/>
+<text x="154.00" y="336.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#000000" text-anchor="start" dominant-baseline="central">CEILING FAN</text>
+<circle cx="111.00" cy="366.00" r="8.00" fill="#ffffff" stroke="#005aaa" stroke-width="1.40"/>
+<text x="154.00" y="366.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#000000" text-anchor="start" dominant-baseline="central">SWITCH PLATE</text>
+</svg>

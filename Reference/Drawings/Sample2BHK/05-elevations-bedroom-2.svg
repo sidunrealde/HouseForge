@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2480" height="1754" viewBox="0 0 2480 1754">
+<title>Sample 2BHK - Elevations - Bedroom 2</title>
+<rect width="2480" height="1754" fill="#ffffff"/>
+<polygon points="30.00,30.00 2450.00,30.00 2450.00,1724.00 30.00,1724.00" fill="none" stroke="#000000" stroke-width="2.50"/>
+<polygon points="48.00,48.00 2432.00,48.00 2432.00,1706.00 48.00,1706.00" fill="none" stroke="#000000" stroke-width="1.00"/>
+<polygon points="1712.00,1496.00 2432.00,1496.00 2432.00,1706.00 1712.00,1706.00" fill="#ffffff" stroke="#000000" stroke-width="2.00"/>
+<line x1="1712.00" y1="1554.00" x2="2432.00" y2="1554.00" stroke="#000000" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1712.00" y1="1614.00" x2="2432.00" y2="1614.00" stroke="#000000" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="2182.00" y1="1614.00" x2="2182.00" y2="1706.00" stroke="#000000" stroke-width="1.00" stroke-linecap="round"/>
+<text x="1730.00" y="1525.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="20.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">HOUSEFORGE  /  INTERIOR DESIGN SET</text>
+<text x="1730.00" y="1584.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="26.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">Sample 2BHK</text>
+<text x="1730.00" y="1636.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#787878" text-anchor="start" dominant-baseline="central">DRAWING</text>
+<text x="1730.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">ELEVATIONS - BEDROOM 2</text>
+<text x="2200.00" y="1636.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#787878" text-anchor="start" dominant-baseline="central">SHEET</text>
+<text x="2200.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">05 / 10</text>
+<text x="70.00" y="82.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="30.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">ELEVATIONS - BEDROOM 2</text>
+<text x="70.00" y="118.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#787878" text-anchor="start" dominant-baseline="central">ALL DIMENSIONS IN MILLIMETERS</text>
+<polygon points="441.88,320.20 948.12,320.20 948.12,681.80 441.88,681.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
+<line x1="407.88" y1="681.80" x2="982.12" y2="681.80" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<line x1="421.88" y1="320.20" x2="968.12" y2="320.20" stroke="#787878" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="441.88" y1="344.31" x2="948.12" y2="344.31" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="956.12" y="344.31" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2800</text>
+<polygon points="441.88,669.75 948.12,669.75 948.12,681.80 441.88,681.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
+<polygon points="556.39,609.48 737.19,609.48 737.19,681.80 556.39,681.80" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="567.23,569.70 726.34,569.70 726.34,609.48 567.23,609.48" fill="none" stroke="#464646" stroke-width="1.20"/>
+<line x1="556.39" y1="634.79" x2="737.19" y2="634.79" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="604.60,410.60 785.40,410.60 785.40,573.32 604.60,573.32" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
+<line x1="695.00" y1="410.60" x2="695.00" y2="573.32" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="604.60" y1="491.96" x2="785.40" y2="491.96" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<text x="695.00" y="396.60" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">Win_Bed2_S</text>
+<line x1="441.88" y1="721.80" x2="948.12" y2="721.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="441.88" y1="681.80" x2="441.88" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<line x1="948.12" y1="681.80" x2="948.12" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<text x="695.00" y="707.80" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">4200</text>
+<line x1="397.88" y1="320.20" x2="397.88" y2="681.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
+<text x="383.88" y="501.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central" transform="rotate(-90.00 383.88 501.00)">3000</text>
+<text x="695.00" y="758.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">ELEVATION A</text>
+<text x="695.00" y="784.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOOKING NORTH</text>
+<polygon points="1568.04,320.20 2001.96,320.20 2001.96,681.80 1568.04,681.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
+<line x1="1534.04" y1="681.80" x2="2035.96" y2="681.80" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<line x1="1548.04" y1="320.20" x2="2021.96" y2="320.20" stroke="#787878" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1568.04" y1="344.31" x2="2001.96" y2="344.31" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="2009.96" y="344.31" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2800</text>
+<polygon points="1568.04,669.75 2001.96,669.75 2001.96,681.80 1568.04,681.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1752.84,669.75 1961.80,669.75 1961.80,681.80 1752.84,681.80" fill="#eeeeee" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1748.84,392.52 1965.80,392.52 1965.80,669.75 1748.84,669.75" fill="none" stroke="#464646" stroke-width="1.60"/>
+<polygon points="1751.84,394.52 1818.16,394.52 1818.16,667.75 1751.84,667.75" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="1807.16" y1="515.13" x2="1807.16" y2="547.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="1824.16,394.52 1890.48,394.52 1890.48,667.75 1824.16,667.75" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="1835.16" y1="515.13" x2="1835.16" y2="547.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="1896.48,394.52 1962.80,394.52 1962.80,667.75 1896.48,667.75" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="1951.80" y1="515.13" x2="1951.80" y2="547.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="1748.84,385.29 1965.80,385.29 1965.80,392.52 1748.84,392.52" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="1821.16" y1="385.29" x2="1821.16" y2="392.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="1893.48" y1="385.29" x2="1893.48" y2="392.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<text x="1857.32" y="388.90" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOFT</text>
+<polygon points="1712.68,410.60 1857.32,410.60 1857.32,573.32 1712.68,573.32" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
+<line x1="1785.00" y1="410.60" x2="1785.00" y2="573.32" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="1712.68" y1="491.96" x2="1857.32" y2="491.96" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<text x="1785.00" y="396.60" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">Win_Bed2_E</text>
+<line x1="1568.04" y1="721.80" x2="2001.96" y2="721.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="1568.04" y1="681.80" x2="1568.04" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<line x1="2001.96" y1="681.80" x2="2001.96" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<text x="1785.00" y="707.80" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">3600</text>
+<line x1="1524.04" y1="320.20" x2="1524.04" y2="681.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
+<text x="1510.04" y="501.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central" transform="rotate(-90.00 1510.04 501.00)">3000</text>
+<text x="1785.00" y="758.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">ELEVATION B</text>
+<text x="1785.00" y="784.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOOKING WEST</text>
+<polygon points="441.88,942.20 948.12,942.20 948.12,1303.80 441.88,1303.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
+<line x1="407.88" y1="1303.80" x2="982.12" y2="1303.80" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<line x1="421.88" y1="942.20" x2="968.12" y2="942.20" stroke="#787878" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="441.88" y1="966.31" x2="948.12" y2="966.31" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="956.12" y="966.31" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2800</text>
+<polygon points="441.88,1291.75 948.12,1291.75 948.12,1303.80 441.88,1303.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
+<polygon points="459.74,1291.75 524.06,1291.75 524.06,1303.80 459.74,1303.80" fill="#eeeeee" stroke="#787878" stroke-width="1.00"/>
+<polygon points="455.74,1014.52 528.06,1014.52 528.06,1291.75 455.74,1291.75" fill="none" stroke="#464646" stroke-width="1.60"/>
+<polygon points="458.74,1016.52 476.85,1016.52 476.85,1289.75 458.74,1289.75" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="465.85" y1="1137.13" x2="465.85" y2="1169.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="482.85,1016.52 500.95,1016.52 500.95,1289.75 482.85,1289.75" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="493.85" y1="1137.13" x2="493.85" y2="1169.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="506.95,1016.52 525.06,1016.52 525.06,1289.75 506.95,1289.75" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="514.06" y1="1137.13" x2="514.06" y2="1169.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="455.74,1007.29 528.06,1007.29 528.06,1014.52 455.74,1014.52" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="479.85" y1="1007.29" x2="479.85" y2="1014.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="503.95" y1="1007.29" x2="503.95" y2="1014.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<text x="491.90" y="1010.90" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOFT</text>
+<polygon points="831.59,1302.59 944.12,1302.59 944.12,1303.80 831.59,1303.80" fill="#eeeeee" stroke="#787878" stroke-width="1.00"/>
+<polygon points="827.59,1213.40 948.12,1213.40 948.12,1302.59 827.59,1302.59" fill="none" stroke="#464646" stroke-width="1.60"/>
+<polygon points="830.59,1272.48 945.12,1272.48 945.12,1284.54 830.59,1284.54" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="869.77" y1="1278.51" x2="905.93" y2="1278.51" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="830.59,1288.54 945.12,1288.54 945.12,1300.59 830.59,1300.59" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="869.77" y1="1294.57" x2="905.93" y2="1294.57" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="821.56,1050.68 930.04,1050.68 930.04,1303.80 821.56,1303.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
+<polygon points="828.56,1057.68 923.04,1057.68 923.04,1296.80 828.56,1296.80" fill="none" stroke="#787878" stroke-width="1.00"/>
+<circle cx="912.04" cy="1177.24" r="3.40" fill="#464646" stroke="#464646" stroke-width="1.00"/>
+<text x="875.80" y="1036.68" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">D_Bed2</text>
+<line x1="441.88" y1="1343.80" x2="948.12" y2="1343.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="441.88" y1="1303.80" x2="441.88" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<line x1="948.12" y1="1303.80" x2="948.12" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<text x="695.00" y="1329.80" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">4200</text>
+<line x1="397.88" y1="942.20" x2="397.88" y2="1303.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
+<text x="383.88" y="1123.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central" transform="rotate(-90.00 383.88 1123.00)">3000</text>
+<text x="695.00" y="1380.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">ELEVATION C</text>
+<text x="695.00" y="1406.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOOKING SOUTH</text>
+<polygon points="1568.04,942.20 2001.96,942.20 2001.96,1303.80 1568.04,1303.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
+<line x1="1534.04" y1="1303.80" x2="2035.96" y2="1303.80" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<line x1="1548.04" y1="942.20" x2="2021.96" y2="942.20" stroke="#787878" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1568.04" y1="966.31" x2="2001.96" y2="966.31" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="2009.96" y="966.31" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2800</text>
+<polygon points="1568.04,1291.75 2001.96,1291.75 2001.96,1303.80 1568.04,1303.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1575.05,1302.59 1633.35,1302.59 1633.35,1303.80 1575.05,1303.80" fill="#eeeeee" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1571.05,1213.40 1637.35,1213.40 1637.35,1302.59 1571.05,1302.59" fill="none" stroke="#464646" stroke-width="1.60"/>
+<polygon points="1574.05,1272.48 1634.35,1272.48 1634.35,1284.54 1574.05,1284.54" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="1594.20" y1="1278.51" x2="1614.20" y2="1278.51" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="1574.05,1288.54 1634.35,1288.54 1634.35,1300.59 1574.05,1300.59" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="1594.20" y1="1294.57" x2="1614.20" y2="1294.57" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<line x1="1568.04" y1="1343.80" x2="2001.96" y2="1343.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="1568.04" y1="1303.80" x2="1568.04" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<line x1="2001.96" y1="1303.80" x2="2001.96" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<text x="1785.00" y="1329.80" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">3600</text>
+<line x1="1524.04" y1="942.20" x2="1524.04" y2="1303.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
+<text x="1510.04" y="1123.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central" transform="rotate(-90.00 1510.04 1123.00)">3000</text>
+<text x="1785.00" y="1380.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">ELEVATION D</text>
+<text x="1785.00" y="1406.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOOKING EAST</text>
+<text x="88.00" y="1632.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="start" dominant-baseline="central">BEDROOM 2   4200 x 3600   15.12 SQM   CEILING 3000</text>
+</svg>

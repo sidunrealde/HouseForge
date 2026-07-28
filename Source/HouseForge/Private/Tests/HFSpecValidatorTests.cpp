@@ -168,6 +168,63 @@ bool FHFValidatorOpeningRulesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * Two openings overlapping on one wall boolean into a single ragged hole. Easy to author by
+ * accident - it happened in the reference 2BHK, where a bathroom ventilator was placed on the
+ * same wall as the master bedroom door and ran straight through it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorOpeningOverlapTest, "HouseForge.Model.Validator.OpeningsOverlap", HF_TEST_FLAGS)
+
+bool FHFValidatorOpeningOverlapTest::RunTest(const FString& Parameters)
+{
+	{
+		// Door spans 155..245; a second opening at 200 sits right on top of it.
+		FHFHouseSpec Spec = MakeValidSpec();
+		FHFOpening Extra = Spec.Openings[0];
+		Extra.Id = TEXT("W1");
+		Extra.Kind = EHFOpeningKind::Window;
+		Extra.OffsetAlongWall = 200.0;
+		Extra.Width = 60.0;
+		Extra.SillHeight = 90.0;
+		Extra.Height = 100.0;			// 90..190, inside the door's 0..210
+		Spec.Openings.Add(Extra);
+		ExpectIssue(*this, Spec, TEXT("OpeningsOverlap"), EHFValidationSeverity::Error);
+	}
+	{
+		// A ventilator stacked directly on a door head is how bathrooms without an external wall
+		// are actually ventilated, so it must not be flagged.
+		FHFHouseSpec Spec = MakeValidSpec();
+		FHFOpening Vent;
+		Vent.Id = TEXT("V1");
+		Vent.WallId = TEXT("W_South");
+		Vent.OffsetAlongWall = 200.0;
+		Vent.Width = 60.0;
+		Vent.SillHeight = 210.0;		// exactly the door head
+		Vent.Height = 45.0;
+		Vent.Kind = EHFOpeningKind::Ventilator;
+		Spec.Openings.Add(Vent);
+
+		const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
+		TestFalse(TEXT("A ventilator stacked on a door head is not an overlap"),
+			Result.Contains(TEXT("OpeningsOverlap")));
+	}
+	{
+		// Openings side by side on the same wall are fine.
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Openings[0].OffsetAlongWall = 100.0;	// 55..145
+		FHFOpening Second = Spec.Openings[0];
+		Second.Id = TEXT("D2");
+		Second.OffsetAlongWall = 300.0;				// 255..345
+		Spec.Openings.Add(Second);
+
+		const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
+		TestFalse(TEXT("Separated openings on one wall are not an overlap"),
+			Result.Contains(TEXT("OpeningsOverlap")));
+	}
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorRoomRulesTest, "HouseForge.Model.Validator.RoomRules", HF_TEST_FLAGS)
 
 bool FHFValidatorRoomRulesTest::RunTest(const FString& Parameters)

@@ -207,9 +207,11 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// W_North runs east to west from (X5,Y3), so offsets count back from the north-east corner.
 	B.AddWindow(TEXT("Win_MBed_N"),  TEXT("W_North"), X5 - 7200.0, 1800.0);
 	B.AddWindow(TEXT("Win_Kitchen"), TEXT("W_North"), X5 - 2100.0, 1200.0);
-	// Ventilators over the bathrooms, high in the service band's north partition.
-	B.AddOpening(TEXT("Vent_CBath"), TEXT("W_Mid_Upper"), 5400.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
-	B.AddOpening(TEXT("Vent_MBath"), TEXT("W_Mid_Upper"), 7650.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
+	// Ventilators sit directly on the head of each bathroom door, which is where they go when the
+	// bathroom has no external wall. Stacking them on the door rather than putting them in
+	// W_Mid_Upper also keeps them clear of the master bedroom doorway.
+	B.AddOpening(TEXT("Vent_CBath"), TEXT("W_Corr_CBath"), 900.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
+	B.AddOpening(TEXT("Vent_MBath"), TEXT("W_CBath_MBath"), 900.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
 
 	// Internal doors. W_Mid_Lower and W_Mid_Upper both run west to east from X0.
 	B.AddDoor(TEXT("D_Living"),  TEXT("W_Mid_Lower"), 3000.0, EHFSwing::InwardLeft);
@@ -295,8 +297,10 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Kitchen: an L-shaped modular run along the west and north walls.
 	{
+		// footprint.x is always the run length and .y the depth; rotation orients it. A 90 degree
+		// yaw therefore puts a 2400 long, 600 deep run against the west wall.
 		FHFFixture& BaseWest = B.AddFixture(TEXT("F_Kitchen_BaseW"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, west run"), FVector2D(300.0, 6900.0), FVector2D(600.0, 2400.0), 850.0);
+			TEXT("Base units, west run"), FVector2D(415.0, 6900.0), FVector2D(2400.0, 600.0), 850.0, 90.0);
 		BaseWest.AnchorWallId = TEXT("W_West");
 		BaseWest.Params.ShutterCount = 2;
 		BaseWest.Params.DrawerCount = 3;
@@ -304,7 +308,7 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		BaseWest.Params.HandleStyle = EHFHandleStyle::JProfile;
 
 		FHFFixture& BaseNorth = B.AddFixture(TEXT("F_Kitchen_BaseN"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, north run"), FVector2D(2100.0, 8100.0), FVector2D(3000.0, 600.0), 850.0);
+			TEXT("Base units, north run"), FVector2D(2100.0, 7985.0), FVector2D(3000.0, 600.0), 850.0);
 		BaseNorth.AnchorWallId = TEXT("W_North");
 		BaseNorth.Params.ShutterCount = 3;
 		BaseNorth.Params.DrawerCount = 2;
@@ -313,17 +317,17 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		// Counters run along their walls, so they anchor to them like the cabinets beneath.
 		FHFFixture& CounterW = B.AddFixture(TEXT("F_Kitchen_CounterW"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, west"), FVector2D(300.0, 6900.0), FVector2D(600.0, 2400.0), 40.0, 0.0, 850.0);
+			TEXT("Granite counter, west"), FVector2D(415.0, 6900.0), FVector2D(2400.0, 600.0), 40.0, 90.0, 850.0);
 		CounterW.AnchorWallId = TEXT("W_West");
 		CounterW.Params.UpstandHeight = 100.0;
 
 		FHFFixture& CounterN = B.AddFixture(TEXT("F_Kitchen_CounterN"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, north"), FVector2D(2100.0, 8100.0), FVector2D(3000.0, 600.0), 40.0, 0.0, 850.0);
+			TEXT("Granite counter, north"), FVector2D(2100.0, 7985.0), FVector2D(3000.0, 600.0), 40.0, 0.0, 850.0);
 		CounterN.AnchorWallId = TEXT("W_North");
 		CounterN.Params.UpstandHeight = 100.0;
 
 		FHFFixture& WallUnits = B.AddFixture(TEXT("F_Kitchen_Wall"), TEXT("R_Kitchen"), EHFFixtureType::KitchenWallCabinet,
-			TEXT("Wall units, north run"), FVector2D(2100.0, 8250.0), FVector2D(3000.0, 300.0), 700.0, 0.0, 1400.0);
+			TEXT("Wall units, north run"), FVector2D(2100.0, 8135.0), FVector2D(3000.0, 300.0), 700.0, 0.0, 1400.0);
 		WallUnits.AnchorWallId = TEXT("W_North");
 		WallUnits.Params.ShutterCount = 4;
 		WallUnits.Params.ShelfCount = 2;
@@ -332,13 +336,14 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		WallUnits.Params.HandleStyle = EHFHandleStyle::Bar;
 
 		B.AddFixture(TEXT("F_Kitchen_Sink"), TEXT("R_Kitchen"), EHFFixtureType::Sink,
-			TEXT("Double-bowl sink"), FVector2D(2100.0, 8100.0), FVector2D(800.0, 450.0), 200.0, 0.0, 690.0);
+			TEXT("Double-bowl sink"), FVector2D(2100.0, 7985.0), FVector2D(800.0, 450.0), 200.0, 0.0, 690.0);
 
+		// Set into the west counter, so they turn with it.
 		B.AddFixture(TEXT("F_Kitchen_Hob"), TEXT("R_Kitchen"), EHFFixtureType::Hob,
-			TEXT("4-burner hob"), FVector2D(300.0, 6300.0), FVector2D(580.0, 500.0), 60.0, 0.0, 850.0);
+			TEXT("4-burner hob"), FVector2D(415.0, 6300.0), FVector2D(580.0, 500.0), 60.0, 90.0, 850.0);
 
 		FHFFixture& Chimney = B.AddFixture(TEXT("F_Kitchen_Chimney"), TEXT("R_Kitchen"), EHFFixtureType::Chimney,
-			TEXT("Chimney"), FVector2D(300.0, 6300.0), FVector2D(600.0, 500.0), 700.0, 0.0, 1500.0);
+			TEXT("Chimney"), FVector2D(415.0, 6300.0), FVector2D(600.0, 500.0), 700.0, 90.0, 1500.0);
 		Chimney.AnchorWallId = TEXT("W_West");
 
 		FHFFixture& Fridge = B.AddFixture(TEXT("F_Kitchen_Fridge"), TEXT("R_Kitchen"), EHFFixtureType::Refrigerator,
@@ -358,8 +363,9 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		B.AddFixture(TEXT("F_MBed_Night2"), TEXT("R_MBed"), EHFFixtureType::Nightstand,
 			TEXT("Nightstand"), FVector2D(7500.0, 8000.0), FVector2D(450.0, 400.0), 550.0);
 
+		// 2400 long run, 600 deep, turned to stand against the east wall at X=10800.
 		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_MBed_Wardrobe"), TEXT("R_MBed"), EHFFixtureType::Wardrobe,
-			TEXT("4-door wardrobe with loft"), FVector2D(9900.0, 6900.0), FVector2D(600.0, 2400.0), 2400.0, 90.0);
+			TEXT("4-door wardrobe with loft"), FVector2D(10385.0, 6900.0), FVector2D(2400.0, 600.0), 2400.0, 90.0);
 		Wardrobe.AnchorWallId = TEXT("W_East");
 		Wardrobe.Params.ShutterCount = 4;
 		Wardrobe.Params.ShelfCount = 5;
@@ -386,7 +392,7 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Bed.AnchorWallId = TEXT("W_South");
 
 		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_Bed2_Wardrobe"), TEXT("R_Bed2"), EHFFixtureType::Wardrobe,
-			TEXT("3-door wardrobe"), FVector2D(10400.0, 2400.0), FVector2D(600.0, 1800.0), 2400.0, 90.0);
+			TEXT("3-door wardrobe"), FVector2D(10385.0, 2400.0), FVector2D(1800.0, 600.0), 2400.0, 90.0);
 		Wardrobe.AnchorWallId = TEXT("W_East");
 		Wardrobe.Params.ShutterCount = 3;
 		Wardrobe.Params.ShelfCount = 4;
