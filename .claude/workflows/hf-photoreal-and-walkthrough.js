@@ -29,6 +29,21 @@ The user also wants to change the TIME OF DAY, so the sun, sky and interior ligh
 driven from one control rather than baked into fixed values.
 `
 
+// Budget per item, never across the array. Slicing a serialised array at a fixed length lets a
+// long first item push every later one out of the prompt, silently - a design workflow did exactly
+// that, delivered one of three designs to its judges, and produced a "winner" that was really the
+// only candidate. Truncation should cost an item its own tail and say so.
+const summarise = (items, perItem = 3000) => (items ?? [])
+  .map((item, index) => {
+    const text = typeof item === 'string' ? item : JSON.stringify(item ?? null, null, 1)
+    if (!text) return `[${index + 1}] (empty - that agent returned nothing)`
+    const body = text.length > perItem
+      ? `${text.slice(0, perItem)}\n[...truncated, ${text.length - perItem} chars omitted]`
+      : text
+    return `[${index + 1}] ${body}`
+  })
+  .join('\n\n')
+
 phase('Gap analysis')
 
 // The most valuable phase: the user said they may have missed things, so go and find them.
@@ -234,7 +249,8 @@ const verdicts = await parallel([
 
 Geometry quality: ${String(geometry).slice(0, 4000)}
 Time of day: ${String(timeOfDay).slice(0, 4000)}
-Rendering and walkthrough: ${JSON.stringify(output.filter(Boolean), null, 1).slice(0, 6000)}
+Rendering and walkthrough:
+${summarise(output, 4000)}
 
 Evaluate through the lens of ${lens}.
 

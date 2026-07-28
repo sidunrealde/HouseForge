@@ -70,6 +70,21 @@ milestone.`,
 
 log(`Planned ${plan?.fixtures?.length ?? 0} fixture types; ${plan?.modelChangesNeeded?.length ?? 0} model changes flagged`)
 
+// Budget per item, never across the array. Slicing a serialised array at a fixed length lets a
+// long first item push every later one out of the prompt, silently - a design workflow did exactly
+// that, delivered one of three designs to its judges, and produced a "winner" that was really the
+// only candidate. Truncation should cost an item its own tail and say so.
+const summarise = (items, perItem = 3000) => (items ?? [])
+  .map((item, index) => {
+    const text = typeof item === 'string' ? item : JSON.stringify(item ?? null, null, 1)
+    if (!text) return `[${index + 1}] (empty - that agent returned nothing)`
+    const body = text.length > perItem
+      ? `${text.slice(0, perItem)}\n[...truncated, ${text.length - perItem} chars omitted]`
+      : text
+    return `[${index + 1}] ${body}`
+  })
+  .join('\n\n')
+
 phase('Implement')
 
 const CONTEXT = `${RULES}
@@ -153,7 +168,7 @@ const wholeHouse = await agent(
   `${CONTEXT}
 
 Per-group results:
-${JSON.stringify(groups.flat().filter(Boolean), null, 1).slice(0, 12000)}
+${summarise(groups.flat(), 1800)}
 
 Now verify what per-group review cannot: the whole reference 2BHK with every fixture generated.
 
