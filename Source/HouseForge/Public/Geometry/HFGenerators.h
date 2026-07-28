@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "Model/HFArticulation.h"
 #include "Model/HFTypes.h"
 
 /**
@@ -61,9 +62,29 @@ public:
 	/**
 	 * What sits inside an opening: a door leaf, or a window's frame and glazing.
 	 *
+	 * The whole infill as one mesh, with every moving part in its closed pose. Kept for callers
+	 * that want a static snapshot; an actor uses GenerateOpeningFixedInfill plus BuildOpeningParts
+	 * instead, so its door can actually open.
+	 *
 	 * Returns an empty mesh for an archway, which is a hole and nothing else.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateOpeningInfill(const FHFOpening& Opening, const FHFWall& Wall);
+
+	/** The part of an opening's infill that never moves: a window's frame and glazing. */
+	static UE::Geometry::FDynamicMesh3 GenerateOpeningFixedInfill(const FHFOpening& Opening, const FHFWall& Wall);
+
+	/**
+	 * The moving parts of an opening: a hinged leaf for a door, a sliding one for a sliding door.
+	 *
+	 * Pure, like every other generator: each part's mesh comes back in the part's own local space
+	 * with the origin on its pivot - the hinge jamb for a swing door - and the caller places it.
+	 * The leaf runs along local +X from the pivot, its thickness on local Y and its height on
+	 * local Z from zero at the sill.
+	 */
+	static void BuildOpeningParts(const FHFOpening& Opening, const FHFWall& Wall, TArray<FHFMeshPart>& OutParts);
+
+	/** A door leaf in its own local space: +X from the hinge, +Z from the sill. */
+	static UE::Geometry::FDynamicMesh3 GenerateDoorLeaf(const FHFOpening& Opening);
 
 	/** Centre point of an opening along its wall, in plan. */
 	static FVector2D OpeningCentre(const FHFOpening& Opening, const FHFWall& Wall);

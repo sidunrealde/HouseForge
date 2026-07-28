@@ -34,11 +34,21 @@ public:
 	 * long afterwards.
 	 */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
-	void Regenerate();
+	virtual void Regenerate();
 
 	/** Throws away hand edits and rebuilds from the parameters. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
-	void RevertToGenerated();
+	virtual void RevertToGenerated();
+
+	/**
+	 * True when this element carries work a house-level rebuild must not throw away.
+	 *
+	 * The house rebuild preserves an actor rather than destroying and respawning it when this
+	 * returns true. Virtual because an element can hold hand-edited work somewhere other than its
+	 * own root mesh - an articulated element carries a flag per moving part, and respawning the
+	 * actor would destroy those just as surely.
+	 */
+	virtual bool ShouldPreserveOnRebuild() const { return bArtistEdited; }
 
 	/**
 	 * True once the mesh has been modified outside of generation - by the Modeling Tools, or any
@@ -76,10 +86,16 @@ protected:
 	/** Starts watching the component so external edits set bArtistEdited. */
 	void WatchForEdits();
 
-private:
-	/** Suppresses edit detection while we are the ones changing the mesh. */
+	/**
+	 * Suppresses edit detection while we are the ones changing a mesh.
+	 *
+	 * Protected rather than private because a subclass with more than one mesh component has to
+	 * write those under the same guard, or generating a part would mark it as hand-edited and it
+	 * would never regenerate again.
+	 */
 	bool bGenerating = false;
 
+private:
 	bool bWatching = false;
 
 	void HandleMeshChanged();
@@ -189,20 +205,5 @@ protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;
 };
 
-/** What sits inside an opening: a door leaf, or a window frame and its glazing. */
-UCLASS()
-class HOUSEFORGE_API AHFOpeningActor : public AHFElementActor
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ShowOnlyInnerProperties))
-	FHFOpening Opening;
-
-	/** The wall this opening sits in, needed to place the leaf in the wall's plane. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
-	FHFWall HostWall;
-
-protected:
-	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;
-};
+// AHFOpeningActor lives in Actors/HFOpeningActor.h: a door leaf moves, so it derives from
+// AHFArticulatedActor, which in turn derives from the base declared here.

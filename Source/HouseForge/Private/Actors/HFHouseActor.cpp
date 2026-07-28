@@ -3,6 +3,7 @@
 #include "Actors/HFHouseActor.h"
 
 #include "Actors/HFElementActors.h"
+#include "Actors/HFOpeningActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
 #include "Geometry/HFGenerators.h"
@@ -126,7 +127,7 @@ void AHFHouseActor::BuildGeometry()
 	for (AActor* Element : ElementActors)
 	{
 		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
-		if (IsValid(Typed) && Typed->bArtistEdited)
+		if (IsValid(Typed) && Typed->ShouldPreserveOnRebuild())
 		{
 			Preserved.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
 			Survivors.Add(Typed);

@@ -2,6 +2,7 @@
 
 #include "Geometry/HFGenerators.h"
 
+#include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFMeshOps.h"
 
 using namespace UE::Geometry;
@@ -385,7 +386,119 @@ FDynamicMesh3 FHFGenerators::GenerateColumn(const FHFColumn& Column)
 	return Mesh;
 }
 
+FDynamicMesh3 FHFGenerators::GenerateDoorLeaf(const FHFOpening& Opening)
+{
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	if (Opening.Width <= 0.0 || Opening.Height <= 0.0)
+	{
+		return Mesh;
+	}
+
+	// Leaf-local space: the pivot is the origin, the leaf runs along +X to the far jamb, its
+	// thickness sits on Y and its height on Z from the sill. Generating it here rather than in
+	// place is what lets the actor swing it without the generator knowing anything about the
+	// house - see .claude/rules/04-conventions.md.
+	//
+	// The half-centimetre inset all round is the gap a real leaf leaves in its frame; without it
+	// the leaf shares faces with the reveal and the two z-fight.
+	FHFMeshOps::AppendBox(Mesh,
+		FVector3d(Opening.Width * 0.5, 0.0, Opening.Height * 0.5),
+		FVector3d(Opening.Width * 0.5 - 0.5, DoorLeafThickness * 0.5, Opening.Height * 0.5 - 0.5),
+		0.0, EHFSurfaceRole::DoorLeaf);
+
+	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+	return Mesh;
+}
+
+void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& Wall, TArray<FHFMeshPart>& OutParts)
+{
+	const FWallFrame Frame = MakeWallFrame(Wall.Start, Wall.End);
+	if (!Frame.bValid || Opening.Width <= 0.0 || Opening.Height <= 0.0)
+	{
+		return;
+	}
+
+	const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
+	if (!bIsDoor)
+	{
+		// Window sashes are still fixed. They articulate in the retrofit that follows the joinery
+		// kit; claiming they move before they do would be worse than saying they do not.
+		return;
+	}
+
+	const FVector2D Centre = Wall.Start + Frame.Direction * Opening.OffsetAlongWall;
+	const double SillZ = Wall.BaseZ + Opening.SillHeight;
+	const double HalfWidth = Opening.Width * 0.5;
+
+	// Which jamb the leaf hangs on, matching the swing arc the plan preview draws. A door hung on
+	// the wrong jamb is invisible in elevation and wrong in every walkthrough.
+	const bool bHingeAtNear =
+		Opening.Swing == EHFSwing::InwardLeft ||
+		Opening.Swing == EHFSwing::OutwardLeft ||
+		Opening.Swing == EHFSwing::None;
+
+	const FVector2D HingePlan = bHingeAtNear
+		? Centre - Frame.Direction * HalfWidth
+		: Centre + Frame.Direction * HalfWidth;
+
+	// Local +X points from the pivot towards the other jamb, so the leaf mesh is the same whichever
+	// jamb it hangs on and only the pivot rotation differs.
+	const FVector2D LeafDirection = bHingeAtNear ? Frame.Direction : -Frame.Direction;
+	const double LeafYaw = FMath::RadiansToDegrees(FMath::Atan2(LeafDirection.Y, LeafDirection.X));
+
+	FHFMeshPart Part;
+	Part.PartId = TEXT("Leaf");
+	Part.Mesh = GenerateDoorLeaf(Opening);
+	Part.PivotTransform = FTransform(
+		FRotator(0.0, LeafYaw, 0.0),
+		FVector(HingePlan.X, HingePlan.Y, SillZ));
+
+	if (Opening.Kind == EHFOpeningKind::SlidingDoor)
+	{
+		// Slides along its own length, clearing the opening at full travel.
+		Part.Motion.Type = EHFMotionType::Slide;
+		Part.Motion.Axis = FVector::XAxisVector;
+		Part.Motion.MaxTravelCm = Opening.Width;
+	}
+	else
+	{
+		// Local +Y is up-cross-leaf-direction, which is the wall normal when the leaf hangs on the
+		// near jamb and its opposite when it hangs on the far one. Inward swings follow the wall
+		// normal, outward swings oppose it, so the sign flips with both choices.
+		const double InwardSign =
+			(Opening.Swing == EHFSwing::OutwardLeft || Opening.Swing == EHFSwing::OutwardRight) ? -1.0 : 1.0;
+		const double HingeSign = bHingeAtNear ? InwardSign : -InwardSign;
+
+		Part.Motion.Type = EHFMotionType::Hinge;
+		Part.Motion.Axis = FVector::ZAxisVector;
+		Part.Motion.MaxAngleDegrees = 90.0 * HingeSign;
+	}
+
+	OutParts.Add(MoveTemp(Part));
+}
+
 FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, const FHFWall& Wall)
+{
+	FDynamicMesh3 Mesh = GenerateOpeningFixedInfill(Opening, Wall);
+
+	// Every moving part in its closed pose. Composing the snapshot from the same parts the actor
+	// hangs is what guarantees a closed door looks identical to the one-piece infill it replaced.
+	TArray<FHFMeshPart> Parts;
+	BuildOpeningParts(Opening, Wall, Parts);
+
+	for (const FHFMeshPart& Part : Parts)
+	{
+		FDynamicMesh3 Posed = Part.Mesh;
+		MeshTransforms::ApplyTransform(Posed, FTransformSRT3d(Part.PivotTransform), /*bReverseOrientationIfNeeded*/ true);
+		Mesh.AppendWithOffsets(Posed);
+	}
+
+	return Mesh;
+}
+
+FDynamicMesh3 FHFGenerators::GenerateOpeningFixedInfill(const FHFOpening& Opening, const FHFWall& Wall)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -396,8 +509,10 @@ FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, co
 		return Mesh;
 	}
 
-	// An archway is a hole and nothing else.
-	if (Opening.Kind == EHFOpeningKind::Archway)
+	// An archway is a hole and nothing else, and a door's only infill is its leaf, which moves.
+	if (Opening.Kind == EHFOpeningKind::Archway ||
+		Opening.Kind == EHFOpeningKind::Door ||
+		Opening.Kind == EHFOpeningKind::SlidingDoor)
 	{
 		return Mesh;
 	}
@@ -406,18 +521,6 @@ FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, co
 	const double SillZ = Wall.BaseZ + Opening.SillHeight;
 	const double CentreZ = SillZ + Opening.Height * 0.5;
 
-	const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
-
-	if (bIsDoor)
-	{
-		// The leaf, sitting in the plane of the wall. It is drawn closed: an open leaf would be
-		// modelled at whatever angle, and the swing is already legible from the plan.
-		FHFMeshOps::AppendBox(Mesh,
-			FVector3d(Plan.X, Plan.Y, CentreZ),
-			FVector3d(Opening.Width * 0.5 - 0.5, DoorLeafThickness * 0.5, Opening.Height * 0.5 - 0.5),
-			Frame.YawDegrees, EHFSurfaceRole::DoorLeaf);
-	}
-	else
 	{
 		// Window: a frame around the reveal, with glazing inside it.
 		const double HalfWidth = Opening.Width * 0.5;

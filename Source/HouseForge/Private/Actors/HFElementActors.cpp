@@ -148,8 +148,3 @@ FDynamicMesh3 AHFColumnActor::BuildMesh() const
 {
 	return FHFGenerators::GenerateColumn(Column);
 }
-
-FDynamicMesh3 AHFOpeningActor::BuildMesh() const
-{
-	return FHFGenerators::GenerateOpeningInfill(Opening, HostWall);
-}

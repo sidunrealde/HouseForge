@@ -237,6 +237,12 @@ Part 0's `UStaticMeshComponent` is a constructor default subobject (`CreateDefau
 
 Today every element has exactly one source component, so `BakedParts` has one entry â€” but the **shape is per-part from day one** because rule 04 says a bake must not weld a chest of drawers into a block. Walls and beams would never expose the flaw, so a single-mesh design would ship and the joinery milestone would then require rewriting the bake model rather than extending it. The cost of getting the shape right now is one `TArray` instead of one pointer.
 
+**Articulated elements (`AHFArticulatedActor`) bind into this without changing any of it.** Their source components are the root `Mesh` (all fixed geometry) plus one `UDynamicMeshComponent` per moving part, in `GetPartComponents()` order and index-parallel to `Parts`. The bake enumerates those the same way it enumerates any element's meshes, so one part gives one `FHFBakedPart` and one static mesh asset.
+
+The one rule that is specific to articulation: **each baked part's `UStaticMeshComponent` attaches to that part's dynamic mesh component, not to `Mesh`, with an identity relative transform.** The part component carries the live pose, so the baked mesh inherits the articulation for free: opening a shutter moves the baked one exactly as it moves the dynamic one, and `SetPartOpenAmount` needs no bake-aware branch. Attaching every baked part to the root instead would produce a fixture that is only correct while it is closed - a failure invisible in the screenshot that would be taken to check it. The source mesh for a part is baked from that part's own local space, which is already the space the generator produced it in.
+
+`ApplyRenderMode` extends unchanged in shape: visibility, hidden-in-game and collision flip on each part component alongside the root, and `bPropagateToChildren` must stay false throughout or hiding `Mesh` would hide every part hanging off it.
+
 ### 4.4 The switch â€” one function, nowhere else touches visibility
 
 ```cpp
@@ -275,7 +281,7 @@ Collision switches with visibility. Leaving both on double-traces every wall, an
 - **Bake bakes the current mesh.** A hand-edited wall bakes its sculpted form; unbaking restores that same sculpted form. `Regenerate()` still refuses artist-edited elements, baked or not.
 - **`bUnbakeOnHandEdit` (default true).** In `HandleMeshChanged`, if `RenderMode == Baked`, switch to Dynamic. Without this the artist sculpts an invisible mesh, sees nothing change, and undoes work that actually applied.
 - **`bAutoRebakeOnRegenerate` (default true).** After `CommitMesh` on a baked element, request a rebake through `FHFBakeHooks`. Otherwise a parameter edit leaves the viewport showing stale geometry and `CaptureTopDown` screenshots a house that no longer matches the spec â€” the same silent false-pass `ApplySpecJson`'s validation gate exists to prevent.
-- **`AHFHouseActor::BuildGeometry` must preserve baked elements too.** Today only `bArtistEdited` survives. Change the preservation predicate to `Typed->bArtistEdited || Typed->RenderMode == EHFRenderMode::Baked`, refresh the preserved actor's parameter struct from the spec, regenerate it if not artist-edited, then rebake if `bRebakePreservedElementsOnRebuild`. Without this, a rebuild destroys baked actors and orphans every asset.
+- **`AHFHouseActor::BuildGeometry` must preserve baked elements too.** The preservation predicate is now the virtual `AHFElementActor::ShouldPreserveOnRebuild()` (base: `bArtistEdited`; articulated: that or any hand-edited part). Extend it to `Super::ShouldPreserveOnRebuild() || RenderMode == EHFRenderMode::Baked` rather than re-testing `bArtistEdited` at the call site, then refresh the preserved actor's parameter struct from the spec, regenerate it if not artist-edited, and rebake if `bRebakePreservedElementsOnRebuild`. Without this, a rebuild destroys baked actors and orphans every asset.
 - **Undo.** Wrap panel-driven bakes in `FScopedTransaction` and `Modify()` the actor and its components. Asset creation is not transactional; undoing a bake leaves the asset on disk, which is correct â€” re-baking then costs nothing.
 - **Asset load failure.** `PostLoad` calls `ReconcileBakeState()`: if `RenderMode == Baked` and any part's mesh is null, fall back to Dynamic and set `bBakeAssetMissing`. Never render nothing.
 
