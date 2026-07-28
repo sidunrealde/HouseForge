@@ -11,6 +11,7 @@ namespace
 	// source drawing without needing labels.
 	const FLinearColor ColourWall(0.10f, 0.10f, 0.12f);
 	const FLinearColor ColourOpening(0.95f, 0.65f, 0.10f);
+	const FLinearColor ColourSwing(0.95f, 0.35f, 0.05f);
 	const FLinearColor ColourRoom(0.20f, 0.55f, 0.85f);
 	const FLinearColor ColourBeam(0.85f, 0.25f, 0.25f);
 	const FLinearColor ColourColumn(0.55f, 0.20f, 0.55f);
@@ -217,6 +218,48 @@ void AHFHouseActor::DrawOpenings()
 		const double BottomZ = Wall->BaseZ + Opening.SillHeight;
 		const double TopZ = Wall->BaseZ + Opening.HeadHeight();
 		DrawPrism(Reveal, BottomZ, TopZ, ColourOpening, 2.5f);
+
+		DrawSwing(Opening, *Wall, Direction, Normal, Near, Far, BottomZ);
+	}
+}
+
+void AHFHouseActor::DrawSwing(const FHFOpening& Opening, const FHFWall& Wall,
+	const FVector2D& Direction, const FVector2D& Normal,
+	const FVector2D& Near, const FVector2D& Far, double BaseZ)
+{
+	if (Opening.Kind != EHFOpeningKind::Door || Opening.Swing == EHFSwing::None || Lines == nullptr)
+	{
+		return;
+	}
+
+	// Without this a door hung on the wrong side is completely invisible from above, which makes
+	// the swing impossible to check against the drawing's swing arc.
+	const bool bHingeAtNear = (Opening.Swing == EHFSwing::InwardLeft || Opening.Swing == EHFSwing::OutwardLeft);
+	const FVector2D Hinge = bHingeAtNear ? Near : Far;
+	const double Side = (Opening.Swing == EHFSwing::InwardLeft || Opening.Swing == EHFSwing::InwardRight) ? 1.0 : -1.0;
+
+	const double Width = Opening.Width;
+	const FVector2D LeafTip = Hinge + Normal * (Width * Side);
+
+	// The leaf, drawn open at ninety degrees as it is on a plan.
+	const FVector HingePoint(Hinge.X, Hinge.Y, BaseZ);
+	Lines->DrawLine(HingePoint, FVector(LeafTip.X, LeafTip.Y, BaseZ), ColourSwing, DepthPriority, 2.0f, 0.0f);
+
+	// The arc it sweeps, from the open leaf back to the closed position in the wall.
+	const FVector2D Closed = bHingeAtNear ? Far : Near;
+	constexpr int32 Segments = 12;
+	FVector2D Previous = LeafTip;
+	for (int32 i = 1; i <= Segments; ++i)
+	{
+		const double Alpha = static_cast<double>(i) / Segments;
+		const FVector2D Swept =
+			Normal * Side * FMath::Cos(Alpha * HALF_PI) +
+			(Closed - Hinge).GetSafeNormal() * FMath::Sin(Alpha * HALF_PI);
+
+		const FVector2D Point = Hinge + Swept * Width;
+		Lines->DrawLine(FVector(Previous.X, Previous.Y, BaseZ), FVector(Point.X, Point.Y, BaseZ),
+			ColourSwing, DepthPriority, 1.0f, 0.0f);
+		Previous = Point;
 	}
 }
 

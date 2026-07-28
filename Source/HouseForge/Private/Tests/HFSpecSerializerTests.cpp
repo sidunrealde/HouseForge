@@ -69,6 +69,15 @@ bool FHFSpecRoundTripTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Schema version survives"), Parsed.SchemaVersion, Original.SchemaVersion);
 	TestEqual(TEXT("Name survives"), Parsed.Name, Original.Name);
 	TestEqual(TEXT("Units survive"), Parsed.Units, Original.Units);
+	TestEqual(TEXT("Units source survives"), Parsed.UnitsSource, Original.UnitsSource);
+
+	// Swing was previously carried but never asserted; a dropped swing hangs a door on the wrong
+	// side, which is invisible from above.
+	if (Parsed.Openings.Num() > 0 && Original.Openings.Num() > 0)
+	{
+		TestEqual(TEXT("Opening kind survives"), Parsed.Openings[0].Kind, Original.Openings[0].Kind);
+		TestEqual(TEXT("Opening swing survives"), Parsed.Openings[0].Swing, Original.Openings[0].Swing);
+	}
 
 	// Collections
 	TestEqual(TEXT("Wall count survives"), Parsed.Walls.Num(), Original.Walls.Num());

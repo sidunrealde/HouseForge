@@ -48,6 +48,17 @@ public:
 	static FString ImportDrawings(const FString& SourcePaths, const FString& SetName);
 
 	/**
+	 * Converts a dimension written the way it appears on a drawing into centimetres.
+	 *
+	 * Handles imperial forms that are easy to get wrong by hand - 12'-6", 12' 6", 78" - and metric
+	 * with or without a suffix: 3600, 3600mm, 3.6m. Use it rather than converting mentally.
+	 * @param Text The dimension exactly as written on the drawing.
+	 * @param DefaultUnits Units for a bare number with no suffix: Millimeters, Centimeters, Meters, Feet or Inches.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString ConvertLength(const FString& Text, const FString& DefaultUnits);
+
+	/**
 	 * Checks a House Spec without building anything, returning every problem in one pass.
 	 * Always validate before applying: the report names the exact rule and the offending numbers.
 	 * @param SpecJson The House Spec as JSON.

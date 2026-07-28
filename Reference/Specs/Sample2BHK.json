@@ -3,6 +3,7 @@
 	"name": "Sample 2BHK",
 	"sourceDrawing": "Reference/Drawings/Sample2BHK/01-blank-layout.png",
 	"units": "Millimeters",
+	"unitsSource": "Sheet header: ALL DIMENSIONS IN MILLIMETERS",
 	"defaultWallThickness": 115,
 	"defaultWallHeight": 3000,
 	"walls": [

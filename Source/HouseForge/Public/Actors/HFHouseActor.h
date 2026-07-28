@@ -82,6 +82,11 @@ private:
 
 	void DrawWalls();
 	void DrawOpenings();
+
+	/** Leaf and sweep arc for a hinged door, so its direction is checkable from above. */
+	void DrawSwing(const FHFOpening& Opening, const FHFWall& Wall,
+		const FVector2D& Direction, const FVector2D& Normal,
+		const FVector2D& Near, const FVector2D& Far, double BaseZ);
 	void DrawRooms();
 	void DrawStructure();
 	void DrawFixtures();

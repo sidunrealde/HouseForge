@@ -22,6 +22,7 @@ namespace HouseForgeTest
 		Spec.SchemaVersion = 1;
 		Spec.Name = TEXT("Test Unit");
 		Spec.Units = EHFUnits::Centimeters;
+		Spec.UnitsSource = TEXT("test fixture");
 		Spec.DefaultWallThickness = 11.5;
 		Spec.DefaultWallHeight = 300.0;
 

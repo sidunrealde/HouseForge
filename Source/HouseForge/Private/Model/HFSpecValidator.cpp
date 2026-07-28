@@ -203,6 +203,149 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 	CheckDuplicateIds(Spec.Beams, TEXT("beam"), TEXT("DuplicateBeamId"), [](const FHFBeam& B) { return B.Id; }, Result);
 	CheckDuplicateIds(Spec.Columns, TEXT("column"), TEXT("DuplicateColumnId"), [](const FHFColumn& C) { return C.Id; }, Result);
 
+	// -------------------------------------------------------------------- plausibility of scale
+	// A unit misread is uniquely dangerous: it leaves the spec perfectly self-consistent - every
+	// wall still meets, every opening still fits - and simply builds the house at the wrong scale.
+	// No structural rule can catch it. Only asking "is this the size of a dwelling?" can.
+	{
+		const double Scale = FHFUnits::ToCentimeterScale(Spec.Units);
+		const double AreaSqM = (Spec.TotalFloorArea() * Scale * Scale) / 10'000.0;
+
+		constexpr double MinPlausibleSqM = 8.0;
+		constexpr double MaxPlausibleSqM = 2000.0;
+
+		if (!Spec.Rooms.IsEmpty() && (AreaSqM < MinPlausibleSqM || AreaSqM > MaxPlausibleSqM))
+		{
+			// Work out which unit would have made this plausible, and say so - that turns an
+			// unhelpful "wrong size" into an actionable "you probably meant millimetres".
+			FString Suggestion;
+			for (const EHFUnits Candidate : { EHFUnits::Millimeters, EHFUnits::Centimeters,
+											  EHFUnits::Meters, EHFUnits::Feet, EHFUnits::Inches })
+			{
+				if (Candidate == Spec.Units)
+				{
+					continue;
+				}
+
+				const double CandidateScale = FHFUnits::ToCentimeterScale(Candidate);
+				const double CandidateArea = (Spec.TotalFloorArea() * CandidateScale * CandidateScale) / 10'000.0;
+				if (CandidateArea >= MinPlausibleSqM && CandidateArea <= MaxPlausibleSqM)
+				{
+					Suggestion = FString::Printf(
+						TEXT(" Read as %s the total would be %.1f sq m, which is plausible - check the drawing's title block."),
+						*FHFUnits::ShortName(Candidate), CandidateArea);
+					break;
+				}
+			}
+
+			Result.Add(EHFValidationSeverity::Error, TEXT("ImplausibleScale"), NAME_None,
+				FString::Printf(TEXT("Total floor area is %.2f sq m with units declared as %s, which is not a plausible dwelling.%s"),
+					AreaSqM, *FHFUnits::ShortName(Spec.Units), *Suggestion));
+		}
+
+		if (Spec.UnitsSource.IsEmpty())
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("MissingUnitsSource"), NAME_None,
+				TEXT("unitsSource is blank. Record where the units were read from on the drawing - a title block note, a dimension string, a scale bar - so the units are read rather than assumed."));
+		}
+
+		// Per-element sanity. These catch a single mistyped figure, which the aggregate check
+		// above would average away.
+		for (const FHFRoom& Room : Spec.Rooms)
+		{
+			const double HeightCm = Room.CeilingHeight * Scale;
+			if (HeightCm > 0.0 && (HeightCm < 200.0 || HeightCm > 500.0))
+			{
+				Result.Add(EHFValidationSeverity::Warning, TEXT("ImplausibleCeilingHeight"), Room.Id,
+					FString::Printf(TEXT("Room '%s' has a ceiling height of %.0f cm; dwellings are normally 240 to 400."),
+						*Describe(Room.Id), HeightCm));
+			}
+		}
+
+		for (const FHFWall& Wall : Spec.Walls)
+		{
+			const double ThicknessCm = Wall.Thickness * Scale;
+			if (ThicknessCm > 0.0 && (ThicknessCm < 4.0 || ThicknessCm > 60.0))
+			{
+				Result.Add(EHFValidationSeverity::Warning, TEXT("ImplausibleWallThickness"), Wall.Id,
+					FString::Printf(TEXT("Wall '%s' is %.1f cm thick; partitions are normally 8 to 30."),
+						*Describe(Wall.Id), ThicknessCm));
+			}
+		}
+
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
+			if (!bIsDoor)
+			{
+				continue;
+			}
+
+			const double WidthCm = Opening.Width * Scale;
+			const double HeightCm = Opening.Height * Scale;
+
+			if (WidthCm > 0.0 && (WidthCm < 45.0 || WidthCm > 250.0))
+			{
+				Result.Add(EHFValidationSeverity::Warning, TEXT("ImplausibleDoorSize"), Opening.Id,
+					FString::Printf(TEXT("Door '%s' is %.0f cm wide; doors are normally 60 to 120."),
+						*Describe(Opening.Id), WidthCm));
+			}
+			if (HeightCm > 0.0 && (HeightCm < 160.0 || HeightCm > 300.0))
+			{
+				Result.Add(EHFValidationSeverity::Warning, TEXT("ImplausibleDoorSize"), Opening.Id,
+					FString::Printf(TEXT("Door '%s' is %.0f cm tall; doors are normally 200 to 240."),
+						*Describe(Opening.Id), HeightCm));
+			}
+		}
+	}
+
+	// ------------------------------------------------------------------------- door swings
+	for (const FHFOpening& Opening : Spec.Openings)
+	{
+		if (Opening.Kind != EHFOpeningKind::Door)
+		{
+			continue;
+		}
+
+		if (Opening.Swing == EHFSwing::None)
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("MissingSwing"), Opening.Id,
+				FString::Printf(TEXT("Door '%s' has no swing direction. Read the swing arc on the plan; a door hung on the wrong side is invisible in a top-down view."),
+					*Describe(Opening.Id)));
+			continue;
+		}
+
+		const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+		if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		// The leaf sweeps perpendicular to the wall. If its tip lands outside every room, the
+		// door opens into solid construction or into nothing - a misread swing arc.
+		const FVector2D Direction = (Wall->End - Wall->Start) / Wall->Length();
+		const FVector2D Normal(-Direction.Y, Direction.X);
+		const double Side = (Opening.Swing == EHFSwing::InwardLeft || Opening.Swing == EHFSwing::InwardRight) ? 1.0 : -1.0;
+
+		const FVector2D Hinge = Wall->Start + Direction * Opening.OffsetAlongWall;
+		const FVector2D LeafTip = Hinge + Normal * (Opening.Width * 0.9 * Side);
+
+		const bool bOpensIntoARoom = Spec.Rooms.ContainsByPredicate(
+			[&LeafTip](const FHFRoom& Room)
+			{
+				return Room.Boundary.Num() >= 3 && Room.ContainsPoint(LeafTip);
+			});
+
+		if (!bOpensIntoARoom)
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("SwingBlocked"), Opening.Id,
+				FString::Printf(TEXT("Door '%s' swings %s but its leaf reaches (%.0f, %.0f), which is not inside any room; it would open into solid construction."),
+					*Describe(Opening.Id),
+					Side > 0.0 ? TEXT("inward") : TEXT("outward"),
+					LeafTip.X, LeafTip.Y));
+		}
+	}
+
 	// -------------------------------------------------------------------------------- beams
 	for (const FHFBeam& Beam : Spec.Beams)
 	{
