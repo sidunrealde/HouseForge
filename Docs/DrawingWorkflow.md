@@ -80,12 +80,36 @@ against what a dwelling actually measures, and names the unit that would have be
 Conversion to Unreal centimetres happens exactly once, when the house actor takes the spec.
 Everything after that — tools, preview, geometry — is in centimetres and never has to ask.
 
-## Current state of the geometry
+## Editing the result
 
-`AHFHouseActor` holds the spec and draws a colour-coded wireframe: walls, openings, rooms, beams,
-columns, fixtures and false-ceiling soffits. That is deliberate scaffolding for this milestone — it
-makes the read-to-level loop verifiable by screenshot now. The mesh generators replace it without
-changing anything the tools see.
+Everything generated is a `UDynamicMeshComponent`, which means **Unreal's Modeling Tools work on it
+directly** — sculpt, cut, bevel, weld, whatever the geometry needs. That is the point of using
+dynamic meshes rather than baking static meshes up front.
+
+There are two levels of editing, and they don't fight each other:
+
+**Parametric.** Select a wall and change its thickness, height or openings in the details panel;
+only that wall rebuilds. Each element actor owns its own parameter struct, which is why editing one
+thing doesn't disturb the rest of the house.
+
+**By hand.** Take the Modeling Tools to any element. The moment its mesh changes outside of
+generation, the element is flagged `bArtistEdited` and **opts out of regeneration** — parameter
+changes and whole-house rebuilds both leave it alone, and a house rebuild preserves the actor
+rather than destroying and respawning it. Modelling work is never silently overwritten.
+
+To go back, use **Revert To Generated** on the element (or untick `bArtistEdited`). That is the only
+thing that discards hand edits, and it is explicit.
+
+## What generates today
+
+Walls with their openings boolean-cut out, floor slabs, skirting that stops at doorways, beams,
+columns, door leaves, and window frames with glazing. Every triangle carries a surface-role
+polygroup and real-world-scale UVs, so one UV tile is a fixed number of centimetres — that is what
+lets the material panel express tiling in millimetres later.
 
 Beams generate regardless of ceilings. A false ceiling does not create or delete a beam, it just
 conceals it — so in a room with no false ceiling the beams are simply visible, which is correct.
+
+`AHFHouseActor` also keeps the colour-coded wireframe preview, now off by default. It is still
+useful when the meshes look wrong and you want to see what the spec actually says, and it is the
+only thing that draws door swing arcs.

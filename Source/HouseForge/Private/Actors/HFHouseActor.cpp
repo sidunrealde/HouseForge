@@ -2,7 +2,10 @@
 
 #include "Actors/HFHouseActor.h"
 
+#include "Actors/HFElementActors.h"
 #include "Components/LineBatchComponent.h"
+#include "Engine/World.h"
+#include "Geometry/HFGenerators.h"
 #include "HouseForge.h"
 
 namespace
@@ -91,6 +94,177 @@ void AHFHouseActor::SetSpec(const FHFHouseSpec& InSpec)
 	}
 
 	Rebuild();
+	BuildGeometry();
+}
+
+void AHFHouseActor::ClearGeometry()
+{
+	for (AActor* Element : ElementActors)
+	{
+		if (IsValid(Element))
+		{
+			Element->Destroy();
+		}
+	}
+	ElementActors.Reset();
+}
+
+void AHFHouseActor::BuildGeometry()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	// Hand-edited elements survive a rebuild. Destroying and respawning everything would throw
+	// away modelling work without warning, which is exactly the failure the per-element edit flag
+	// exists to prevent - it would be pointless if the house-level rebuild ignored it.
+	TMap<TPair<UClass*, FName>, AHFElementActor*> Preserved;
+	TArray<TObjectPtr<AActor>> Survivors;
+
+	for (AActor* Element : ElementActors)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (IsValid(Typed) && Typed->bArtistEdited)
+		{
+			Preserved.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
+			Survivors.Add(Typed);
+		}
+		else if (IsValid(Element))
+		{
+			Element->Destroy();
+		}
+	}
+
+	ElementActors = MoveTemp(Survivors);
+	const int32 PreservedCount = ElementActors.Num();
+
+	FActorSpawnParameters Params;
+	Params.Owner = this;
+
+	// Returns null when an element was preserved, which tells the caller to leave it alone.
+	auto Spawn = [&](UClass* Class, const FName& Id, const FString& Label) -> AActor*
+	{
+		if (Preserved.Contains({ Class, Id }))
+		{
+			return nullptr;
+		}
+
+		AActor* Actor = World->SpawnActor<AActor>(Class, FTransform::Identity, Params);
+		if (Actor != nullptr)
+		{
+#if WITH_EDITOR
+			Actor->SetActorLabel(Label);
+#endif
+			if (AHFElementActor* Typed = Cast<AHFElementActor>(Actor))
+			{
+				Typed->ElementId = Id;
+			}
+			Actor->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
+			ElementActors.Add(Actor);
+		}
+		return Actor;
+	};
+
+	// Walls carry their own openings, so each wall owns everything it needs to rebuild itself
+	// when its thickness or height is edited.
+	for (const FHFWall& Wall : Spec.Walls)
+	{
+		AHFWallActor* WallActor = Cast<AHFWallActor>(Spawn(AHFWallActor::StaticClass(), Wall.Id,
+			FString::Printf(TEXT("Wall_%s"), *Wall.Id.ToString())));
+		if (WallActor == nullptr)
+		{
+			continue;
+		}
+
+		WallActor->Wall = Wall;
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			if (Opening.WallId == Wall.Id)
+			{
+				WallActor->Openings.Add(Opening);
+			}
+		}
+		WallActor->Regenerate();
+	}
+
+	// Doorway positions per room, so skirting stops at each opening instead of running across it.
+	for (const FHFRoom& Room : Spec.Rooms)
+	{
+		AHFRoomActor* RoomActor = Cast<AHFRoomActor>(Spawn(AHFRoomActor::StaticClass(), Room.Id,
+			FString::Printf(TEXT("Room_%s"), *Room.Id.ToString())));
+		if (RoomActor == nullptr)
+		{
+			continue;
+		}
+
+		RoomActor->Room = Room;
+		RoomActor->SlabThickness = SlabThickness;
+
+		double WidestDoor = 100.0;
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			const bool bIsDoorway =
+				Opening.Kind == EHFOpeningKind::Door ||
+				Opening.Kind == EHFOpeningKind::SlidingDoor ||
+				Opening.Kind == EHFOpeningKind::Archway;
+
+			if (!bIsDoorway || Opening.SillHeight > 1.0)
+			{
+				continue;
+			}
+
+			if (const FHFWall* Wall = Spec.FindWall(Opening.WallId))
+			{
+				RoomActor->DoorwayCentres.Add(FHFGenerators::OpeningCentre(Opening, *Wall));
+				WidestDoor = FMath::Max(WidestDoor, Opening.Width);
+			}
+		}
+		RoomActor->DoorwayWidth = WidestDoor;
+		RoomActor->Regenerate();
+	}
+
+	for (const FHFBeam& Beam : Spec.Beams)
+	{
+		if (AHFBeamActor* BeamActor = Cast<AHFBeamActor>(Spawn(AHFBeamActor::StaticClass(), Beam.Id,
+			FString::Printf(TEXT("Beam_%s"), *Beam.Id.ToString()))))
+		{
+			BeamActor->Beam = Beam;
+			BeamActor->Regenerate();
+		}
+	}
+
+	for (const FHFColumn& Column : Spec.Columns)
+	{
+		if (AHFColumnActor* ColumnActor = Cast<AHFColumnActor>(Spawn(AHFColumnActor::StaticClass(), Column.Id,
+			FString::Printf(TEXT("Column_%s"), *Column.Id.ToString()))))
+		{
+			ColumnActor->Column = Column;
+			ColumnActor->Regenerate();
+		}
+	}
+
+	for (const FHFOpening& Opening : Spec.Openings)
+	{
+		const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+		if (Wall == nullptr || Opening.Kind == EHFOpeningKind::Archway)
+		{
+			continue;
+		}
+
+		if (AHFOpeningActor* OpeningActor = Cast<AHFOpeningActor>(Spawn(AHFOpeningActor::StaticClass(), Opening.Id,
+			FString::Printf(TEXT("Opening_%s"), *Opening.Id.ToString()))))
+		{
+			OpeningActor->Opening = Opening;
+			OpeningActor->HostWall = *Wall;
+			OpeningActor->Regenerate();
+		}
+	}
+
+	UE_LOG(LogHouseForge, Log,
+		TEXT("HouseForge built '%s': %d element actors, %d preserved as hand-edited."),
+		*Spec.Name, ElementActors.Num(), PreservedCount);
 }
 
 void AHFHouseActor::PostLoad()
