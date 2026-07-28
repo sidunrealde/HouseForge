@@ -3,13 +3,13 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "HouseForge",
-	"Description": "",
-	"Category": "Other",
+	"Description": "Generates editable interior geometry for 2BHK/3BHK residential layouts from AutoCAD drawings, driven by Claude over Unreal MCP.",
+	"Category": "Architecture",
 	"CreatedBy": "Siddartha G",
 	"CreatedByURL": "",
 	"DocsURL": "",
 	"MarketplaceURL": "",
-	"SupportURL": "",
+	"SupportURL": "https://github.com/sidunrealde/HouseForge",
 	"CanContainContent": true,
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
@@ -19,6 +19,26 @@
 			"Name": "HouseForge",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "HouseForgeEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "GeometryScripting",
+			"Enabled": true
+		},
+		{
+			"Name": "ToolsetRegistry",
+			"Enabled": true
 		}
 	]
 }

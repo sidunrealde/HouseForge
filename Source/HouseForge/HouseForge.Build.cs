@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Siddartha G. All Rights Reserved.
 
 using UnrealBuildTool;
 
@@ -7,46 +7,39 @@ public class HouseForge : ModuleRules
 	public HouseForge(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-		
-		PublicIncludePaths.AddRange(
-			new string[] {
-				// ... add public include paths required here ...
-			}
-			);
-				
-		
-		PrivateIncludePaths.AddRange(
-			new string[] {
-				// ... add other private include paths required here ...
-			}
-			);
-			
-		
+
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
 				"Core",
-				// ... add other public dependencies that you statically link with here ...
+				"CoreUObject",
+				"Engine",
+
+				// Procedural geometry. GeometryFramework brings UDynamicMeshComponent;
+				// DynamicMesh/GeometryCore bring FDynamicMesh3 and the operators the
+				// generators are built on.
+				"GeometryCore",
+				"GeometryFramework",
+				"DynamicMesh",
+				"GeometryScriptingCore",
 			}
 			);
-			
-		
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"CoreUObject",
-				"Engine",
+				"Projects",
 				"Slate",
 				"SlateCore",
-				// ... add private dependencies that you statically link with here ...	
-			}
-			);
-		
-		
-		DynamicallyLoadedModuleNames.AddRange(
-			new string[]
-			{
-				// ... add any modules that your module loads dynamically here ...
+
+				// House spec serialisation.
+				"Json",
+				"JsonUtilities",
+
+				// Baking dynamic meshes down to static meshes.
+				"MeshDescription",
+				"StaticMeshDescription",
+				"MeshConversion",
 			}
 			);
 	}
