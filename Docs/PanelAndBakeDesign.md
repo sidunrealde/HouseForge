@@ -4,178 +4,111 @@ Produced by the `houseforge-panel-and-bake-design` workflow (11 agents) against 
 source, not against assumptions. It is the design input for the `hf-bake-and-assets` and
 `hf-control-panel` milestones.
 
-**Read the caveat in "How much to trust this" before treating the panel design as settled.**
+---
+
+# HouseForge Control Panel + Reversible Bake â€” implementation specification
+
+Supersedes `Docs/PanelAndBakeDesign.md` (that doc was a single-candidate critique; this is the synthesis). Grounded in the real source: `AHFElementActor` (root `UDynamicMeshComponent`, `bArtistEdited`, `HandleMeshChanged`, `bGenerating` guard, `CommitMesh`), `AHFArticulatedActor` (per-part `UDynamicMeshComponent`s â€” `AHFOpeningActor` already ships one moving part today), `AHFHouseActor::BuildGeometry` (preserves only `ShouldPreserveOnRebuild()`), `UHFEditorSubsystem` (the single API), `FHFValidationResult` (`Code` / `ElementId` / `Message`).
+
+Shape: **artist-station** â€” a flat vertical stack of sections over the editor's own selection, no workflow rail, no tree. Grafts applied: live readiness band, generation actions promoted to the top, concrete issue rows, provenance/units line, filter chips on a flat list, whole-house bulk bake inside the BAKE section.
 
 ---
 
-# HouseForge Control Panel + Reversible Bake â€” Implementation Specification
+## 1. Wireframe â€” main state (house in level, 5 actors selected in the viewport)
 
-Grounded in the actual source: `AHFElementActor` (single `UDynamicMeshComponent` root, `bArtistEdited`, `HandleMeshChanged`, `bGenerating` guard), `AHFHouseActor::BuildGeometry` (preserves only artist-edited elements), `UHFEditorSubsystem` (the single API), `UHFToolset` (thin wrapper), `FHFValidationResult`.
+```
++= HouseForge ================================================[...]=+
+| Sample2BHK      63 elements      mm -> cm (?)          [X]1 [!]4  |
+| from Sample2BHK/Plan-01.png                                        |
+| [ Re-validate ] [ Rebuild all ] [ Capture top-down ] [ Open last ] |
++--------------------------------------------------------------------+
+| v ISSUES                                     1 error, 4 warnings   |
+|   [X] OpeningExceedsWall   D2                                      |
+|       spans 0..95 but wall W3 is only 90 long                      |
+|   [!] MissingSwing         D4    door has no swing direction       |
+|   [!] LowHeadroom          FC_Living   soffit 2.34 m under beam B2 |
+|   [!] OverlappingFixtures  WD_Bed1                                 |
+|   [!] ImplausibleScale     -     total floor area 412 m2           |
++--------------------------------------------------------------------+
+| ROOMS   (Living)(M.Bed)(Bed 2)(Kitchen)(Bath)(Utility)(Foyer)      |
+|         (Balcony)  (not in any room 3)                             |
++--------------------------------------------------------------------+
+| [ find element............. ]  (Err)(Warn)(Edited)(Baked)(Stale)   |
+|   W3    wall  internal 2100 x 115 x 3000   [X] D2         [#]      |
+|   W4    wall  internal 1800 x 115 x 3000   * edited       [ ]      |
+|   D2    door  900 x 2100  sill 0  in W3                   [#]!     |
+|   R_Living  room  13.4 m2  h 3.00                         [#]      |
+|                                    ... 12 of 63 shown  [Select all]|
++--------------------------------------------------------------------+
+| SELECTED  R_Living floor + 4 walls        [Details] [Revert] [Del] |
++--------------------------------------------------------------------+
+| v BAKE                                          47 / 63 baked      |
+|   [ -o- ] Baked            mixed: 3 of 5 selected                  |
+|   Dynamic meshes are kept. Switching back restores them exactly.   |
+|   (!) 3 baked elements are stale     [ Rebake stale (3) ]          |
+|   [ Bake all ]  [ All live ]      -> /Game/HouseForge/Baked/...    |
++--------------------------------------------------------------------+
+| ok setup ready              last MCP: ModifyElement  12:04:31      |
++--------------------------------------------------------------------+
+
+ [ ] live   [#] showing baked   [#]! baked but stale   [-] mixed
+```
+
+Two other states, same stack:
+
+* **Readiness failing** â€” a red band pushes in *above* the house bar: `[X] Python environment missing â€” PDF import needs Scripts/.venv (Pillow, PyMuPDF). Nothing is installed system-wide. [Set up now]` / `[X] MCP server not running [Start server & write .mcp.json] [ ] start with the editor` / `[v] MCP toolset registered (13 tools)`. Everything below stays usable.
+* **No house** â€” house bar, issues, rooms, find, selected and bake sections are all absent (not collapsed â€” absent). In their place: `1 DRAWINGS` (sets + counts + `[Import...]` with a working **Set name** field + `[Open folder]`), `2 READ â€” this step happens in Claude, not here [Copy prompt]`, `3 BUILD from a saved spec` (list of `Reference/Specs/*.json`, excluding `Sample2BHK.json` with a visible footnote that it is test ground truth).
 
 ---
 
-## 1. The panel, final shape
+## 2. Sections â€” default state
 
-One nomad tab. **No workflow rail.** The judge's core criticism holds: three of five rail nodes are one-time, two are permanent activities, and Materials/Lighting/Assets are activities not stages. The panel is instead a **vertical stack of collapsible sections** whose visibility is derived from state, with the one-time sections disappearing for good once a house exists.
-
-### Wireframe â€” main state (house built, correcting it)
-
-```
-+----------------------------------------------------------------+
-| HouseForge                                            [.] [:]   |   .=setup  :=overflow
-+----------------------------------------------------------------+
-|  Sample2BHK    63 elements    Plan-01.png                       |
-|  units mm (title block)   78.4 m2   [f=]      [ Re-validate ]   |
-|  [ Capture Top-Down ]  [ Open last capture ]  [ Rebuild all ]   |
-+----------------------------------------------------------------+
-| v  ISSUES                                  1 error, 4 warnings  |
-|    [X] OpeningExceedsWall  D2                                   |
-|        spans 0..95 but wall W3 is only 90 long                  |
-|    [!] MissingSwing        D4                                   |
-|    [!] LowHeadroom         FC_Living                            |
-|    [!] OverlappingFixtures WD_Bed1                              |
-|    [!] ImplausibleScale    -                                    |
-+----------------------------------------------------------------+
-| [ search elements................ ]  [ All v ]  [ ! only ]      |
-+----------------------------------------------------------------+
-|  ELEMENT                              STATE        DISPLAY      |
-| -------------------------------------------------------------- |
-|  v Walls (12)                                        [-]        |
-|      W1    external  4200 x 230       hand-edited    [#]        |
-|      W2    external  3300 x 230                      [ ]        |
-|      W3    internal  2100 x 115       [X] D2         [ ]        |
-|      W4    internal  1800 x 115                      [#]!       |
-|  v Rooms (6)                                         [#]        |
-|      R_Living    Living    13.4 m2                   [#]        |
-|      R_Kitchen   Kitchen    6.1 m2                   [#]        |
-|  > Openings (14)                                     [-]        |
-|  > Beams (5)                                         [ ]        |
-|  > Columns (2)                                       [ ]        |
-|  > Ceilings (4)                                      [ ]        |
-|  > Fixtures (21)   spec only - no geometry yet       [o]        |
-+----------------------------------------------------------------+
-|  W3  internal wall            [ Details ]  [ Revert ]  [ Del ]  |
-|  2100 x 115 x 3000 . 1 opening . generated . live               |
-+----------------------------------------------------------------+
-|  Display  All 63   [ Live | Baked ]   47/63 baked   ^ stale (3) |
-+----------------------------------------------------------------+
-|  ok  setup ready          ModifyElement W3  12:04:31            |
-+----------------------------------------------------------------+
-
-  [ ] live dynamic mesh     [#] showing baked mesh
-  [#]! baked, stale         [-] mixed group      [o] no actor
-```
-
-### First run / setup broken â€” the setup card takes over the top
-
-```
-+----------------------------------------------------------------+
-| HouseForge                                            [.] [:]   |
-+----------------------------------------------------------------+
-|  !!  HouseForge is not ready                                    |
-|                                                                 |
-|  [X] Python environment missing                                 |
-|      PDF import needs Scripts/.venv (Pillow, PyMuPDF).          |
-|      Nothing is installed system-wide.       [ Set up now ]     |
-|  [X] MCP server not running                                     |
-|      Claude cannot reach HouseForge until it is.                |
-|                          [ Start server & write .mcp.json ]     |
-|      [ ] Start automatically with the editor                    |
-|  [v] MCP toolset registered   (13 tools)                        |
-+----------------------------------------------------------------+
-```
-
-### No house in the level â€” the one-time card
-
-```
-+----------------------------------------------------------------+
-|  1  DRAWINGS                                       3 sets       |
-|     Sample2BHK  11 sheets   [img][img][img][img]  [folder]      |
-|     Flat-402     4 sheets   [img][img]            [folder]      |
-|     ..........................................................  |
-|     |            Drop PNG, JPG or PDF sheets here            |  |
-|     |        [ Import... ]   Set name [ Flat-402....... ]    |  |
-|     ..........................................................  |
-|                                                                 |
-|  2  READ - this step happens in Claude, not here                |
-|     [ Copy prompt ]  "Read the drawings in Sample2BHK and       |
-|                       build the house."                         |
-|     [ Spec schema ]  [ Workflow guide ]                         |
-|                                                                 |
-|  3  BUILD from a saved spec                                     |
-|     Flat-402.json      3 Jul   [ Build ]                        |
-|     (Sample2BHK.json is test ground truth, not build input)     |
-+----------------------------------------------------------------+
-|  ok  setup ready          ListDrawings  12:01:02                |
-+----------------------------------------------------------------+
-```
-
----
-
-## 2. Sections â€” visible by default vs collapsed
-
-| Section | Shown when | Default state |
+| Section | Present when | Default |
 |---|---|---|
-| **Title bar** | always | visible. `[.]` opens setup popup (or is a red badge when a probe fails). `[:]` overflow: Show Drawings Folder, Show Specs Folder, Copy Spec JSON, Save Spec Asâ€¦, Length Converterâ€¦, Show Spec Wireframe (checkbox), Browse Baked Assets, Delete Orphan Baked Assets |
-| **Setup card** | any probe fails | expanded, pinned above everything, everything below dimmed but still usable |
-| **Get-started card** | `FindHouseActor() == nullptr` | expanded; the whole card vanishes once a house exists (it is not collapsed to a header â€” dead pixels) |
-| **House summary** | house exists | visible, never collapsible. 3 lines |
-| **Issues** | house exists | expanded when errors exist; collapsed to the header line when warnings only; the header alone reading "No issues" when clean |
-| **Search + filter** | house exists | visible, empty |
-| **Element tree** | house exists | Walls + Rooms expanded, everything else collapsed. Expansion persists per project in `EditorPerProjectUserSettings` |
-| **Inspector strip** | exactly 1 row selected | visible; "3 elements selected" for multi; hidden on empty selection |
-| **Bake bar** | house exists | always visible |
-| **Footer** | always | one line: setup status + last MCP tool call & timestamp |
-
-Two deliberate omissions from the winning design: the five-node rail (replaced by section presence) and the "Finish" stage card (Save Spec As lives in the overflow menu; it is one button, not a stage).
-
-**Extension point.** Sections are constructed from `TArray<FHFPanelSection>` in `SHFHousePanel::Construct`, each `{ FName Id; TFunction<bool(const FHFPanelState&)> IsRelevant; TFunction<TSharedRef<SWidget>()> Build; }`. Materials/Lighting/Assets append entries later. When a third heavy section lands the stack gets long â€” at that point convert the same array into a mode strip. That is one change in `Construct`, not a re-layout of the sections. Reserving the code seam rather than pixels is the honest version of "no re-layout later"; three greyed "planned" stubs in the UI are not.
+| Readiness band | any probe fails | expanded, pinned top. Collapses to the footer's `ok setup ready` when all three pass. Probes re-run on a 5 s ticker and on tab activate â€” the MCP server can stop mid-session |
+| House bar | house exists | always visible, never collapsible. 2 lines. `mm -> cm` tooltip shows `FHFHouseSpec::UnitsSource` verbatim; the drawing path is a hyperlink that opens the sheet in the OS viewer |
+| Action row | house exists | always visible. Re-validate / Rebuild all / Capture top-down / Open last capture. **Explicitly a temporary promotion** â€” these belong in `[...]` once the daily loop stops being read â†’ build â†’ spot misread â†’ rebuild |
+| `[...]` menu | always | Import drawings (with Set name)â€¦, Open specâ€¦, Save spec asâ€¦, Copy spec JSON, Convert lengthâ€¦, Show drawings folder, Show specs folder, Show baked folder, Start MCP server, Show spec wireframe (checkbox â†’ `bShowPreview`), Delete orphan baked assetsâ€¦ |
+| ISSUES | house exists | **expanded** when any error; **collapsed to its header** when warnings only; header reads `No issues` when clean. Never hidden â€” a clean house should say so |
+| ROOMS | house exists and â‰¥1 room | visible. Chips wrap; `not in any room (N)` chip appears only when N > 0 |
+| FIND | house exists | visible, empty text, all chips off. List renders only when text or a chip is active â€” an always-on 63-row list in a 400 px dock is the thing that made the tree designs unpleasant |
+| SELECTED | â‰¥1 HouseForge actor selected | visible, 1 line. `3 elements selected` for multi. Greys in place on empty selection; does not collapse |
+| BAKE | house exists | expanded |
+| Footer | always | 1 line: setup status + last MCP tool name and time |
+| SURFACES / ASSETS / LIGHT | never, this milestone | not built, not stubbed. Section registry is the reservation (Â§3) |
 
 ---
 
-## 3. C++ classes to create
-
-### Editor module â€” `.../Source/HouseForgeEditor/`
+## 3. C++ to create â€” `Plugins/HouseForge/Source/HouseForgeEditor/`
 
 | Path | What it does |
 |---|---|
-| `Private/UI/HFPanelIds.h` | `HFPanelTabIds::HouseForgePanel` FName constant, shared by the spawner and the layout extender. |
-| `Private/UI/FHFPanelState.h/.cpp` | Non-widget controller. Caches the spec snapshot, `FHFValidationResult`, the flattened `FHFElementRow` array, setup probe results, and the MCP heartbeat. Broadcasts `FSimpleMulticastDelegate OnChanged`. Every widget reads this; nothing else calls the subsystem for reads. Refreshes on `FEditorDelegates::MapChange`, `OnLevelActorAdded/Deleted`, `FCoreUObjectDelegates::OnObjectPropertyChanged` (filtered to HouseForge actors) and an explicit `RequestRefresh()`, all debounced through one `FTSTicker` tick. |
-| `Private/UI/FHFElementRow.h` | Row model: `FName Id; FName Category; TWeakObjectPtr<AHFElementActor> Actor; FString Summary; bool bArtistEdited; EHFRenderMode RenderMode; bool bStale; EHFValidationSeverity WorstIssue; TArray<TSharedPtr<FHFElementRow>> Children;` â€” group headers are rows with children and no actor. |
-| `Private/UI/SHFHousePanel.h/.cpp` | Tab root. Builds the section stack, owns `FHFPanelState` and `FUICommandList`, handles panel-wide file drop. |
-| `Private/UI/SHFSetupCard.h/.cpp` | Three probes with a fix button each, plus the auto-start checkbox. |
-| `Private/UI/SHFGetStartedCard.h/.cpp` | Drawing sets + thumbnails + `SDropTarget` + Import with a live Set name field + Copy prompt + saved-spec build list. |
-| `Private/UI/SHFHouseSummary.h/.cpp` | Name/count/source, units line with the `[f=]` converter popup, Re-validate, Capture Top-Down, Open last capture, Rebuild all. |
-| `Private/UI/SHFIssuesList.h/.cpp` | One `FHFValidationIssue` per row; click selects the offending actor via the same path the element list uses. |
-| `Private/UI/SHFElementList.h/.cpp` | `SSearchBox` + `TTextFilter<FHFElementRow>` + category combo + errors-only toggle over an `STreeView` (two levels: group, element). Multi-select, context menu. |
-| `Private/UI/SHFElementListRow.h/.cpp` | `SMultiColumnTableRow<TSharedPtr<FHFElementRow>>` â€” columns `Element`, `State`, `Display`. |
-| `Private/UI/SHFInspectorStrip.h/.cpp` | Two read-only lines + Details / Revert / Delete buttons. |
-| `Private/UI/SHFBakeBar.h/.cpp` | Scope label, `SSegmentedControl<EHFRenderMode>`, baked count hyperlink to the Content Browser folder, stale-rebake button. |
-| `Private/UI/SHFLengthConverter.h/.cpp` | Small popup over `FHFUnits::ParseLengthToCentimeters`. ~60 lines; the only pure-convenience widget, kept because a unit misread is the failure mode that produces a self-consistent wrong house. |
-| `Private/UI/FHFPanelCommands.h/.cpp` | `TCommands<FHFPanelCommands>`: SelectInViewport, FocusInViewport, RevertToGenerated, DeleteElement, ToggleBaked, RebakeStale, Revalidate. |
-| `Private/Setup/FHFSetupProbe.h/.cpp` | `Probe()` returns `FHFSetupStatus { bVenvReady, bMcpRunning, bToolsetRegistered, FString Detail[3] }`. `ProvisionPython()` runs `hf-drawings.ps1 -ProvisionOnly` via `FMonitoredProcess`; `StartMcp()` runs the two Exec commands `StartMcpServer()` already runs; `SetMcpAutoStart(bool)` writes `bAutoStartServer` into `EditorPerProjectUserSettings` under `[/Script/ModelContextProtocolEngine.ModelContextProtocolSettings]` via `GConfig`. |
-| `Private/Bake/FHFBakeService.h/.cpp` | The only code that creates assets. `Bake(AHFElementActor*, FString& OutError)`, `BakeMany(TArrayView<AHFElementActor*>, FHFBakeReport&)`, `FindOrphans(UWorld*)`, `DeleteOrphans()`. Converts `FDynamicMesh3` â†’ `FMeshDescription` â†’ `UStaticMesh::BuildFromMeshDescriptions`, creates the package under the house's `BakedAssetFolder`, stamps `UHFBakedMeshUserData`, registers with the asset registry, saves. |
-| `Private/HFMcpHeartbeat.h/.cpp` | Records `{FString ToolName; FDateTime At;}` â€” every `UHFToolset` static sets it on entry. ~30 lines, and it is the only evidence the artist gets that Claude is working rather than hung. |
+| `Private/UI/HFPanelIds.h` | `HFPanelTabIds::HouseForgePanel` FName, shared by spawner, layout extender and the Tools menu entry |
+| `Private/UI/FHFPanelSection.h` | `struct FHFPanelSection { FName Id; TFunction<bool(const FHFPanelState&)> IsRelevant; TFunction<TSharedRef<SWidget>()> Build; }`. `SHFHousePanel::Construct` builds from a `TArray` of these â€” the seam materials/lighting/assets append to later |
+| `Private/UI/FHFPanelState.h/.cpp` | Non-widget controller and the only read path. Caches: house weak ptr, spec snapshot, `FHFValidationResult`, flattened `TArray<TSharedPtr<FHFElementRow>>`, room chips, bake tallies, setup status, MCP heartbeat. `FSimpleMulticastDelegate OnChanged`. Refreshes on `FEditorDelegates::MapChange`, `OnLevelActorAdded/Deleted`, `FCoreUObjectDelegates::OnObjectPropertyChanged` (filtered to `AHF*`), `USelection::SelectionChangedEvent`, plus `RequestRefresh()`; all debounced through one `FTSTicker`. Testable headlessly â€” this is where the panel's logic lives |
+| `Private/UI/HFElementRow.h` | `FHFElementRow { FName Id; FName Category; TWeakObjectPtr<AHFElementActor> Actor; FString Summary; bool bArtistEdited; EHFRenderMode RenderMode; bool bStale; EHFValidationSeverity WorstIssue; TArray<FName> Rooms; }` and `FHFRoomChip { FName RoomId; FString Label; EHFRoomType Type; TArray<TWeakObjectPtr<AHFElementActor>> Members; }` |
+| `Private/UI/SHFHousePanel.h/.cpp` | Tab root. Owns `FHFPanelState`, the section array, `FUICommandList` |
+| `Private/UI/SHFReadinessBand.h/.cpp` | Three probe rows, one fix button each, plus the MCP auto-start checkbox |
+| `Private/UI/SHFHouseBar.h/.cpp` | Name / element count / units badge / provenance hyperlink / issue badge / action row / `[...]` menu |
+| `Private/UI/SHFIssuesList.h/.cpp` | `SListView<TSharedPtr<FHFValidationIssue>>`. Row = severity glyph, `Code`, `ElementId`, then `Message` verbatim on line 2. Click selects the offending actor through the same path the find list uses; nothing else |
+| `Private/UI/SHFRoomChips.h/.cpp` | `SWrapBox` of `SHFRoomChip` toggle buttons. Click selects that room's members, ctrl-click adds |
+| `Private/UI/SHFFindList.h/.cpp` | `SSearchBox` + `TTextFilter<FHFElementRow>` + `SBasicFilterBar` chips (Errors, Warnings, Edited, Baked, Stale) over a flat `SListView`, multi-select, context menu (Select / Frame / Revert / Delete element and dependents), `[Select all N]` |
+| `Private/UI/SHFFindRow.h/.cpp` | `SMultiColumnTableRow` â€” columns `Element`, `State`, `Display` |
+| `Private/UI/SHFSelectionStrip.h/.cpp` | One-line readback in HouseForge vocabulary + `[Details]` (focuses `LevelEditorSelectionDetails`) / `[Revert]` / `[Delete]` |
+| `Private/UI/SHFBakeSection.h/.cpp` | Tri-state `SCheckBox` (ToggleButton style) scoped to selection, scope caption, `N / M baked`, the permanent reassurance sentence, stale row, `[Bake all]` / `[All live]`, folder hyperlink |
+| `Private/UI/SHFLengthConverter.h/.cpp` | ~60-line popup over `FHFUnits::ParseLengthToCentimeters`. Kept because a unit misread produces a self-consistent wrong house |
+| `Private/UI/FHFPanelCommands.h/.cpp` | `TCommands`: SelectInViewport, FrameInViewport, RevertToGenerated, DeleteElement, ToggleBaked, RebakeStale, Revalidate |
+| `Private/UI/FHFRoomMembership.h/.cpp` | Pure static: `Resolve(const FHFHouseSpec&, double Tolerance, TMap<FName,TArray<FName>>& OutRoomToElements, TArray<FName>& OutUnassigned)`. Exact for rooms/ceilings/fixtures (`RoomId` exists); **derived** for walls and openings by centreline-vs-polygon containment. Editor-side, no world access, unit-testable |
+| `Private/Setup/FHFSetupProbe.h/.cpp` | `Probe() -> FHFSetupStatus { bVenvReady, bMcpRunning, bToolsetRegistered, FString Detail[3] }`; `ProvisionPython()` runs `hf-drawings.ps1 -ProvisionOnly` via `FMonitoredProcess`; `StartMcp()` runs the two Exec commands `StartMcpServer()` already runs; `SetMcpAutoStart(bool)` writes `bAutoStartServer` into `EditorPerProjectUserSettings` via `GConfig` |
+| `Private/Bake/FHFBakeService.h/.cpp` | The only code that creates assets. `Bake(AHFElementActor*, FHFBakeReport&)`, `BakeMany(TArrayView<AHFElementActor*>, FHFBakeReport&)`, `RebakeStale(UWorld*, int32&)`, `FindOrphans(UWorld*, TArray<FAssetData>&)`, `DeleteOrphans(...)`. `FDynamicMesh3` â†’ `FMeshDescription` â†’ package under the house's `BakedAssetFolder` â†’ stamp `UHFBakedMeshUserData` â†’ asset registry â†’ save |
+| `Private/HFMcpActivity.h/.cpp` | `{FString ToolName; FDateTime At;}` set on entry by every `UHFToolset` static. ~30 lines, and the only evidence the artist gets that Claude is working rather than hung |
+| `Private/Tests/HFPanelStateTests.cpp`, `HFBakeServiceTests.cpp`, `HFRoomMembershipTests.cpp`, `HFEditorApiTests.cpp` | Â§6 |
 
-### Runtime module additions â€” `.../Source/HouseForge/`
+**Runtime module additions** (unavoidable â€” bake *state* lives on the actor):
+`Source/HouseForge/Public/Actors/HFBakeTypes.h` + `Private/Actors/HFBakeTypes.cpp` â€” `EHFRenderMode`, `FHFBakedPart`, `UHFBakedMeshUserData : UAssetUserData`, `FHFBakeHooks` (static delegate the editor module binds).
+Modified: `HFElementActors.h/.cpp`, `HFArticulatedActor.h/.cpp` (expose `GetBakeSourceComponents()`), `HFHouseActor.h/.cpp`, `HFEditorSubsystem.h/.cpp`, `HFToolset.h/.cpp`, `HouseForgeEditor.cpp`, `HouseForgeEditor.Build.cs` (+`MeshDescription`, `StaticMeshDescription`, `MeshConversion`, `AssetRegistry`, `EditorWidgets`), `Scripts/hf-drawings.ps1` (+`-ProvisionOnly`).
 
-Necessary and unavoidable; the bake *state* must live on the actor, which is runtime.
-
-| Path | What it does |
-|---|---|
-| `Public/Actors/HFBakeTypes.h` | `EHFRenderMode { Dynamic, Baked }`, `FHFBakedPart`, `UHFBakedMeshUserData : UAssetUserData`, `FHFBakeHooks` (the delegate the editor module binds). |
-| `Private/Actors/HFBakeTypes.cpp` | Definition of the static hook. |
-
-### Modified files
-
-- `Public/Actors/HFElementActors.h/.cpp` â€” bake state, `SetRenderMode`, `MeshRevision`.
-- `Public/Actors/HFHouseActor.h/.cpp` â€” `BakedAssetFolder`, and `BuildGeometry` preserving baked elements (Â§4.6).
-- `Public/HFEditorSubsystem.h/.cpp` â€” new API (Â§4.7).
-- `Private/Toolset/HFToolset.h/.cpp` â€” `SetRenderMode`, `GetBakeReport`, heartbeat calls.
-- `Private/HouseForgeEditor.cpp` â€” tab spawner, layout extension, `Tools > HouseForge > HouseForge Panel`, bind `FHFBakeHooks`.
-- `HouseForgeEditor.Build.cs` â€” add `MeshDescription`, `StaticMeshDescription`, `MeshConversion`, `AssetRegistry`, `EditorWidgets` (for `SDropTarget`).
-
-**Tab registration** (in a `UToolMenus::RegisterStartupCallback` handler, not raw `StartupModule`):
+**Tab registration** â€” inside the existing `UToolMenus::RegisterStartupCallback` handler, not raw `StartupModule`:
 
 ```cpp
 FGlobalTabmanager::Get()->RegisterNomadTabSpawner(HFPanelTabIds::HouseForgePanel,
@@ -189,61 +122,56 @@ Extender.ExtendLayout(FTabId("LevelEditorSelectionDetails"), ELayoutExtensionPos
     FTabManager::FTab(FTabId(HFPanelTabIds::HouseForgePanel), ETabState::ClosedTab));
 ```
 
-Plus a `Tools > HouseForge > HouseForge Panel` entry invoking the same tab. Two doors, one tab â€” users who found "Import Interior Drawings" under Tools will look there.
+Plus `Tools > HouseForge > HouseForge Panel`, invoking the same tab id. Two doors, one tab.
+
+**Selection model.** The panel owns no selection. Viewport â†’ panel: subscribe to `USelection::SelectionChangedEvent`, filter to `AHFElementActor`/`AHFHouseActor`, ignore anything else rather than blanking. Panel â†’ viewport: resolve rows to actors by `(UClass, ElementId)` â€” the same key `BuildGeometry`'s `Preserved` map already uses â€” then `BeginBatchSelectOperation` / `SelectNone(false,true)` / `SelectActor` per actor / `EndBatchSelectOperation` / `NoteSelectionChange`, inside one transaction. **Single click never moves the camera**; double-click / Enter / context-menu Frame does.
 
 ---
 
-## 4. Reversible bake â€” final implementation instructions
+## 4. Reversible bake â€” final instructions
 
-### 4.1 Framing
+### 4.1 Framing (a standing rule, not a panel choice)
 
-The user-visible control is **`Display: Live | Baked`**, never "Bake"/"Convert"/"Flatten". Reversibility is communicated by the control's grammar, so no confirm dialog and no tooltip are needed to make it safe. "Bake" appears only where it means *the static mesh asset that was produced*.
+The control is **`Baked`**, a switch. No control anywhere in HouseForge may carry a word implying replacement â€” no *Flatten*, no *Convert to Static Mesh*, no *Bake and remove*. "Bake" appears only where it means *the static mesh asset that was produced*. The sentence **"Dynamic meshes are kept. Switching back restores them exactly."** sits permanently under the switch, at the point of action, not in a tooltip. No confirmation dialog: a control that needs one is the wrong control.
 
-### 4.2 State on `AHFElementActor`
+### 4.2 State â€” `HFBakeTypes.h`
 
 ```cpp
-// HFBakeTypes.h
 UENUM(BlueprintType) enum class EHFRenderMode : uint8 { Dynamic, Baked };
 
 USTRUCT() struct FHFBakedPart
 {
-    UPROPERTY(VisibleAnywhere) FName SourceComponentName;              // "Mesh" for part 0
-    UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMesh> BakedMesh;      // hard ref: cooker + reference viewer must see it
+    UPROPERTY(VisibleAnywhere) FName SourceComponentName;           // NAME_None = the root Mesh
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMesh> BakedMesh;   // hard ref: cooker + reference viewer must see it
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Component;
-    UPROPERTY(VisibleAnywhere) FSoftObjectPath BakedAssetPath;         // survives a force-delete so we can name what went missing
+    UPROPERTY(VisibleAnywhere) FSoftObjectPath BakedAssetPath;      // survives a force-delete, so we can name what went missing
     UPROPERTY(VisibleAnywhere) int32 BakedAtMeshRevision = INDEX_NONE;
 };
 ```
 
-On the actor:
+On `AHFElementActor`:
 
 ```cpp
 UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="HouseForge|Bake") EHFRenderMode RenderMode = EHFRenderMode::Dynamic;
-UPROPERTY(VisibleAnywhere, Category="HouseForge|Bake")                 TArray<FHFBakedPart> BakedParts;
-UPROPERTY(EditAnywhere,    Category="HouseForge|Bake")                 bool bAutoRebakeOnRegenerate = true;
-UPROPERTY(EditAnywhere,    Category="HouseForge|Bake")                 bool bUnbakeOnHandEdit = true;
+UPROPERTY(VisibleAnywhere,  Category="HouseForge|Bake") TArray<FHFBakedPart> BakedParts;
+UPROPERTY(EditAnywhere,     Category="HouseForge|Bake") bool bAutoRebakeOnRegenerate = true;
+UPROPERTY(EditAnywhere,     Category="HouseForge|Bake") bool bUnbakeOnHandEdit = true;
 UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category="HouseForge|Bake") int32 MeshRevision = 0;
 UPROPERTY(NonTransactional, VisibleAnywhere, AdvancedDisplay, Category="HouseForge|Bake") FGuid BakeOwnerGuid;
-UPROPERTY(Transient, VisibleAnywhere, Category="HouseForge|Bake")      bool bBakeAssetMissing = false;
+UPROPERTY(Transient, VisibleAnywhere, Category="HouseForge|Bake") bool bBakeAssetMissing = false;
 ```
 
-`bArtistEdited` semantics are **unchanged and orthogonal**. All four combinations {edited, generated} Ã— {baked, dynamic} must round-trip through save/load.
+`bArtistEdited` semantics are **unchanged and orthogonal**. All four of {edited, generated} Ã— {baked, dynamic} must round-trip through save/load.
 
-`BakeOwnerGuid` is `NonTransactional` on purpose: undoing a bake must not revert the guid, or the redo would fail to recognise its own asset and mint a duplicate.
+`BakeOwnerGuid` is `NonTransactional` deliberately: undoing a bake must not revert the guid, or a redo fails to recognise its own asset and mints a duplicate.
 
-### 4.3 Component model
+**Per-part from day one is required, not speculative.** `AHFOpeningActor` already builds a moving door leaf as its own `UDynamicMeshComponent` (`AHFOpeningActor::BuildParts` â†’ `FHFGenerators::BuildOpeningParts`). A single-mesh bake would weld a door shut today, which rule 04 forbids outright.
 
-Part 0's `UStaticMeshComponent` is a constructor default subobject (`CreateDefaultSubobject<UStaticMeshComponent>("BakedMesh_0")`, `SetupAttachment(Mesh)`, created hidden and non-colliding). Parts >0 are lazily created by `EnsurePartComponent(int32)` using `NewObject` + `AddInstanceComponent` + `RegisterComponent`.
+### 4.3 Components
 
-Today every element has exactly one source component, so `BakedParts` has one entry â€” but the **shape is per-part from day one** because rule 04 says a bake must not weld a chest of drawers into a block. Walls and beams would never expose the flaw, so a single-mesh design would ship and the joinery milestone would then require rewriting the bake model rather than extending it. The cost of getting the shape right now is one `TArray` instead of one pointer.
+Part 0's `UStaticMeshComponent` is a constructor default subobject (`CreateDefaultSubobject<UStaticMeshComponent>("BakedMesh_0")`, `SetupAttachment(Mesh)`, created hidden and non-colliding). Parts > 0 are created by `EnsurePartComponent(int32)` with `NewObject` + `AddInstanceComponent` + `RegisterComponent`, attached to **that part's dynamic component** so it inherits the articulated pose for free.
 
-**Articulated elements (`AHFArticulatedActor`) bind into this without changing any of it.** Their source components are the root `Mesh` (all fixed geometry) plus one `UDynamicMeshComponent` per moving part, in `GetPartComponents()` order and index-parallel to `Parts`. The bake enumerates those the same way it enumerates any element's meshes, so one part gives one `FHFBakedPart` and one static mesh asset.
-
-The one rule that is specific to articulation: **each baked part's `UStaticMeshComponent` attaches to that part's dynamic mesh component, not to `Mesh`, with an identity relative transform.** The part component carries the live pose, so the baked mesh inherits the articulation for free: opening a shutter moves the baked one exactly as it moves the dynamic one, and `SetPartOpenAmount` needs no bake-aware branch. Attaching every baked part to the root instead would produce a fixture that is only correct while it is closed - a failure invisible in the screenshot that would be taken to check it. The source mesh for a part is baked from that part's own local space, which is already the space the generator produced it in.
-
-`ApplyRenderMode` extends unchanged in shape: visibility, hidden-in-game and collision flip on each part component alongside the root, and `bPropagateToChildren` must stay false throughout or hiding `Mesh` would hide every part hanging off it.
-
-### 4.4 The switch â€” one function, nowhere else touches visibility
+### 4.4 The switch â€” the only place visibility or collision is touched
 
 ```cpp
 void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
@@ -251,165 +179,187 @@ void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
     const bool bBaked = (Mode == EHFRenderMode::Baked) && HasAllBakedAssets();
     bBakeAssetMissing = (Mode == EHFRenderMode::Baked) && !bBaked;
 
-    Mesh->SetVisibility(!bBaked);                 // bPropagateToChildren defaults false - must stay false
-    Mesh->SetHiddenInGame(bBaked);
-    Mesh->SetCollisionEnabled(bBaked ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryAndPhysics);
-    Mesh->SetIsEditable(!bBaked);
-
-    for (FHFBakedPart& Part : BakedParts)
+    for (UDynamicMeshComponent* Src : GetBakeSourceComponents())
     {
-        if (!Part.Component) continue;
-        Part.Component->SetVisibility(bBaked);
-        Part.Component->SetHiddenInGame(!bBaked);
-        Part.Component->SetCollisionEnabled(bBaked ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+        Src->SetVisibility(bBaked ? false : true);   // bPropagateToChildren stays false
+        Src->SetHiddenInGame(bBaked);
+        Src->SetCollisionEnabled(bBaked ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryAndPhysics);
+        Src->SetIsEditable(!bBaked);
+    }
+    for (FHFBakedPart& P : BakedParts)
+    {
+        if (!P.Component) continue;
+        if (bBaked && !P.Component->IsRegistered()) P.Component->RegisterComponent();
+        P.Component->SetVisibility(bBaked);
+        P.Component->SetHiddenInGame(!bBaked);
+        P.Component->SetCollisionEnabled(bBaked ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+        if (!bBaked && P.Component->IsRegistered()) P.Component->UnregisterComponent();
     }
     RenderMode = bBaked ? EHFRenderMode::Baked : EHFRenderMode::Dynamic;
 }
 ```
 
-Collision switches with visibility. Leaving both on double-traces every wall, and leaves a complex-as-simple dynamic collision under a mesh the user thinks is the only thing there.
+Two non-obvious requirements. **Collision switches with visibility** â€” leaving both on double-traces every wall and leaves complex-as-simple dynamic collision under a mesh the user believes is the only thing there. **The baked component is unregistered while Dynamic**, not merely hidden: a hidden-but-registered `UStaticMeshComponent` is a candidate `UStaticMeshComponentToolTarget`, and an artist starting a Modeling Tool on what they believe is the live wall must not silently edit a baked asset instead. Unregistering removes the candidate entirely. (In Baked mode the hazard reverses and is acceptable: the switch is visibly on, the dynamic mesh is untouched, and any edit to the baked asset is discarded by the next rebake â€” the panel says so in the stale row.)
 
-**The `FDynamicMesh3` is never read-modify-written, never cleared, never rebuilt by baking.** Bake touches component state and creates an asset; that is the whole reason unbake is instant and lossless.
+**The `FDynamicMesh3` is never read, modified, cleared or rebuilt by baking.** Bake creates an asset and flips component state. That is the entire reason unbake is instant and lossless.
 
 ### 4.5 Staleness
 
-`MeshRevision` increments in `CommitMesh()` (unconditionally, including under the `bGenerating` guard) and in `HandleMeshChanged()`. `IsBakeStale()` is `Part.BakedMesh && Part.BakedAtMeshRevision != MeshRevision`. No mesh hashing â€” hashing 63 dynamic meshes to rediscover a fact the actor already knows is pure cost. A counter rather than a bool because it yields "baked 3 edits ago" and survives save/load and undo interleaving.
+`MeshRevision` increments in `CommitMesh()` (unconditionally, including under the `bGenerating` guard) and in `HandleMeshChanged()` / `HandlePartMeshChanged()`. `IsBakeStale()` is `any P: P.BakedMesh && P.BakedAtMeshRevision != MeshRevision`. One actor-level counter rather than one per part: editing a door leaf marks the frame stale too, which over-rebakes slightly, and buys a model simple enough to reason about. No mesh hashing â€” hashing 63 meshes to rediscover a fact the actor already knows is pure cost. A counter rather than a bool gives "baked 3 edits ago" and survives save/load and undo interleaving.
 
 ### 4.6 Interaction rules
 
-- **`PostEditChangeProperty`** must intercept `RenderMode` by `GET_MEMBER_NAME_CHECKED` and call `SetRenderMode()` *before* the existing catch-all falls through to `Regenerate()` â€” otherwise flipping the toggle regenerates the element.
-- **Bake bakes the current mesh.** A hand-edited wall bakes its sculpted form; unbaking restores that same sculpted form. `Regenerate()` still refuses artist-edited elements, baked or not.
-- **`bUnbakeOnHandEdit` (default true).** In `HandleMeshChanged`, if `RenderMode == Baked`, switch to Dynamic. Without this the artist sculpts an invisible mesh, sees nothing change, and undoes work that actually applied.
-- **`bAutoRebakeOnRegenerate` (default true).** After `CommitMesh` on a baked element, request a rebake through `FHFBakeHooks`. Otherwise a parameter edit leaves the viewport showing stale geometry and `CaptureTopDown` screenshots a house that no longer matches the spec â€” the same silent false-pass `ApplySpecJson`'s validation gate exists to prevent.
-- **`AHFHouseActor::BuildGeometry` must preserve baked elements too.** The preservation predicate is now the virtual `AHFElementActor::ShouldPreserveOnRebuild()` (base: `bArtistEdited`; articulated: that or any hand-edited part). Extend it to `Super::ShouldPreserveOnRebuild() || RenderMode == EHFRenderMode::Baked` rather than re-testing `bArtistEdited` at the call site, then refresh the preserved actor's parameter struct from the spec, regenerate it if not artist-edited, and rebake if `bRebakePreservedElementsOnRebuild`. Without this, a rebuild destroys baked actors and orphans every asset.
-- **Undo.** Wrap panel-driven bakes in `FScopedTransaction` and `Modify()` the actor and its components. Asset creation is not transactional; undoing a bake leaves the asset on disk, which is correct â€” re-baking then costs nothing.
-- **Asset load failure.** `PostLoad` calls `ReconcileBakeState()`: if `RenderMode == Baked` and any part's mesh is null, fall back to Dynamic and set `bBakeAssetMissing`. Never render nothing.
+* `PostEditChangeProperty` intercepts `RenderMode` by `GET_MEMBER_NAME_CHECKED` and calls `SetRenderMode()` **before** the existing catch-all falls through to `Regenerate()`. Without this, flipping the toggle regenerates the element.
+* **Bake bakes what is on screen.** Never call `Regenerate()` first. A hand-edited wall bakes its sculpted form and unbakes back to that same sculpted form.
+* `bUnbakeOnHandEdit` (default true): in `HandleMeshChanged`, if baked, switch to Dynamic. Otherwise the artist sculpts an invisible mesh, sees nothing change, and undoes work that actually applied.
+* `bAutoRebakeOnRegenerate` (default true): after `CommitMesh` on a baked element, request a rebake through `FHFBakeHooks`. Off, a parameter edit leaves the viewport showing old geometry and `CaptureTopDown` screenshots a house that no longer matches the spec â€” the same silent false-pass `ApplySpecJson`'s validation gate exists to prevent.
+* **`AHFHouseActor::BuildGeometry` must preserve baked elements.** Change the predicate to `Typed->ShouldPreserveOnRebuild() || Typed->RenderMode == EHFRenderMode::Baked`, then for a preserved-because-baked element: refresh its parameter struct from the spec, `Regenerate()` (it is not artist-edited), and rebake if `bRebakePreservedElementsOnRebuild`. Without this a rebuild destroys baked actors and orphans every asset.
+* **Undo.** Panel-driven bakes run inside `FScopedTransaction` with `Modify()` on the actor and every touched component. Asset creation is not transactional; undoing a bake leaves the asset on disk, which is correct â€” re-baking then costs nothing.
+* **`PostLoad` calls `ReconcileBakeState()`**: baked with any null part mesh â‡’ fall back to Dynamic and set `bBakeAssetMissing`. Never render nothing.
 
 ### 4.7 Routing â€” bake goes through the subsystem
 
-The panel must not call `AHFElementActor::SetRenderMode` directly. Add to `UHFEditorSubsystem`:
+The panel must not call `AHFElementActor::SetRenderMode` directly. Add to `UHFEditorSubsystem` (and wrap the first four in `UHFToolset`):
 
 ```cpp
 FHFOperationResult SetElementRenderMode(const FString& Category, const FString& ElementId, bool bBaked);
 FHFOperationResult SetHouseRenderMode(bool bBaked, int32& OutChanged);
 FHFOperationResult RebakeStale(int32& OutRebaked);
-FHFOperationResult GetBakeReport(FString& OutReport) const;      // counts, stale ids, missing ids, folder size
-FHFOperationResult LoadSpecFromFile(const FString& FileName, FString& OutSpecJson);  // finally calls FHFSpecSerializer::LoadFromFile
+FHFOperationResult GetBakeReport(FString& OutReport) const;
 FHFOperationResult GetValidationReportForLevel(FHFValidationResult& OutResult) const;
+FHFOperationResult LoadSpecFromFile(const FString& FileName, FString& OutSpecJson);  // finally calls FHFSpecSerializer::LoadFromFile
 FHFSetupStatus     GetSetupStatus() const;
 ```
 
-and wrap `SetRenderMode` / `GetBakeReport` in `UHFToolset`. As designed by the winning angle, the panel's flagship feature would have been the one operation Claude could not perform, and the two surfaces would drift from day one.
+`LoadSpecFromFile` is deliberately **not** an MCP tool: a build-from-file tool is exactly the shortcut past drawing-reading that `HouseForge.Architecture.SampleIsNotOnTheBuildPath` guards. If the panel's flagship feature were the one thing Claude could not do, the two surfaces would drift from day one â€” hence everything else is wrapped.
 
-`LoadSpecFromFile` is deliberately **not** exposed over MCP â€” a build-from-file tool is exactly the shortcut past drawing-reading that `HouseForge.Architecture.SampleIsNotOnTheBuildPath` guards. The panel's build list additionally excludes `Sample2BHK.json` with a visible footnote.
+### 4.8 Assets
 
-### 4.8 Asset production
-
-`FHFBakeService` lives in the **editor** module because package creation and saving cannot be reached from the runtime module. The actor exposes only `AdoptBakedMesh(int32 PartIndex, UStaticMesh*, int32 AtRevision)` and `SetRenderMode()`. The actor's `CallInEditor` "Rebake Now" button and `bAutoRebakeOnRegenerate` reach the service through `FHFBakeHooks::BakeElement`, a static delegate declared in the runtime module and bound by `FHouseForgeEditorModule::StartupModule`. Unbound (cooked/runtime) it simply does nothing.
-
-Assets go to `AHFHouseActor::BakedAssetFolder`, defaulting to `/Game/HouseForge/Baked/<LevelName>`, resolved and written back on first bake so a later level rename does not scatter assets. Under `/Game`, never plugin content â€” rule 01: generated output is user output.
-
-`UHFBakedMeshUserData` stamps `{OwnerGuid, ElementId, ElementClassName, LevelPackageName, SourceMeshRevision, BakedAtUtc}`. `LevelPackageName` is what makes orphan deletion safe: a scan can only see the open level, and without it the scan would delete assets belonging to an unopened one.
+`FHFBakeService` lives in the editor module (package creation is unreachable from runtime). The actor exposes only `AdoptBakedMesh(int32 PartIndex, UStaticMesh*, int32 AtRevision)` and `SetRenderMode()`, and reaches the service through `FHFBakeHooks::BakeElement`, a static delegate bound in `FHouseForgeEditorModule::StartupModule` and inert when unbound. Assets go to `AHFHouseActor::BakedAssetFolder`, defaulting to `/Game/HouseForge/Baked/<LevelName>` and written back on first bake so a later level rename does not scatter them â€” under `/Game`, never plugin content (rule 01: generated output is user output). `UHFBakedMeshUserData` stamps `{OwnerGuid, ElementId, ElementClassName, LevelPackageName, SourceMeshRevision, BakedAtUtc}`; `LevelPackageName` is what makes orphan deletion safe, because a scan can only see the open level.
 
 ---
 
 ## 5. Build order
 
-Each step ships something usable on its own.
+Each step ships something usable alone.
 
-1. **Tab shell + `FHFPanelState` + house summary + footer heartbeat.** One dockable panel that says what house is in the level, its element count, its declared units and its source drawing, plus Re-validate and Capture Top-Down. Already more than exists today, and it establishes the state/refresh plumbing everything else hangs off.
-2. **Issues list.** 49 validator rule sites currently reachable only as a text blob. Click-to-select the offending actor. This is the single highest value-per-line item in the whole spec.
-3. **Element tree + search + inspector strip.** Read-only plus Select / Focus / Revert / Delete (routed to the cascading `DeleteElement`, not actor deletion). Now the panel is the correction loop.
-4. **Setup card + probes.** Fixes the venv discoverability hole and turns the "go tick a box in Editor Preferences" dialog into a checkbox.
-5. **Bake runtime.** `HFBakeTypes.h`, actor state, `ApplyRenderMode`, `MeshRevision`, `BuildGeometry` preservation. Testable headlessly before any UI exists.
-6. **`FHFBakeService`** + subsystem routing + toolset wrappers.
-7. **Bake bar + DISPLAY column.** The marquee feature lands last because it is the only part that needs all of 5 and 6 working first.
-8. **Get-started card.** Import with a working `SetName` (fixing `HouseForgeEditor.cpp:52`, which hardcodes `FString()` so every interactive import is named after the first file), drop target, copy-prompt, build-from-saved-spec.
+1. **Tab shell + `FHFPanelState` + house bar + action row + footer.** A dockable panel naming the house, its element count, its declared units, its source drawing, with Re-validate / Rebuild all / Capture top-down. This alone makes *building and checking a house* reachable from the editor for the first time, and it establishes the state/refresh plumbing everything hangs off.
+2. **ISSUES list.** 49 validator rule sites currently exist only as a text blob inside an MCP result. Click-to-select the offending actor. Highest value per line in the spec.
+3. **FIND list + filter chips + SELECTED strip.** Read-only rows plus Select / Frame / Revert / Delete (routed to the cascading `DeleteElement`, never actor deletion). The panel is now the correction loop.
+4. **Readiness band + probes + Import with a working Set name.** Closes the venv discoverability hole and fixes `HouseForgeEditor.cpp:52`, which hardcodes `FString()` so every interactive import is named after the first file.
+5. **Bake runtime.** `HFBakeTypes.h`, per-part state, `ApplyRenderMode`, `MeshRevision`, `BuildGeometry` preservation, `ReconcileBakeState`. Fully testable headless with no UI and no asset creation (stub `AdoptBakedMesh` with a throwaway `UStaticMesh`).
+6. **`FHFBakeService`** + subsystem routing + toolset wrappers + orphan scan.
+7. **BAKE section UI.** The marquee feature lands seventh because it is the only part that needs 5 and 6 working first.
+8. **ROOMS chips.** Last, because they are the only inferred thing in the panel and the find list already covers navigation; if the inference disappoints on a real plan, nothing above depends on it.
 
-Steps 1â€“4 are roughly a week part-time and are useful immediately. 5â€“7 are the second week. Step 8 is last because the drawings folder is already reachable from the Tools menu, badly. Honest total: three weeks part-time, not one.
+Steps 1â€“4 are the useful panel. 5â€“7 are the user's other request. 8 is optional. Honest estimate: three weeks part-time, not one.
 
 ---
 
-## 6. What to defer, and why
+## 6. Defer, and why
 
 | Deferred | Why |
 |---|---|
-| **Group by Room** | Fixtures and false ceilings carry `RoomId`; walls, openings, beams and columns do not, so room grouping needs geometric containment plus an "Unassigned" bucket. With ~63 elements the category tree is browsable. Revisit the moment fixture generators land and a real 2BHK produces 100+ fixture rows â€” that is when "the kitchen is wrong" beats "wall W34 is wrong". |
-| **Materials / Lighting / Asset-replacement sections** | Not built. One greyed line per unbuilt feature is fake UI. The section registry is the reservation. |
-| **Per-property editing in the panel** | The Details panel already does it better â€” `ShowOnlyInnerProperties`, `ClampMin`, `CallInEditor` are all in place. The panel gets a `[Details]` button, not a reimplementation. |
-| **Details-panel customisation for bake** | `UPROPERTY(EditAnywhere, Category="HouseForge|Bake")` on `RenderMode` gives the dropdown, `CallInEditor` gives Rebake Now. A customisation buys ordering only. |
-| **Multi-part bake components** | The data shape is per-part now; `EnsurePartComponent` for parts >0 is written when joinery lands and there is a second part to create. |
-| **Fixture rows doing anything but focus** | Fixtures have no actor class. Clicking a fixture row must **not** silently flip `bShowPreview`/`bShowFixtures` on `AHFHouseActor` â€” that is a selection gesture mutating saved actor state and changing what is rendered without being asked. "Show spec wireframe" goes in the overflow menu as a visible toggle. |
-| **Thumbnail rendering of drawing sheets** | Needs an image-wrapper decode path and a cache. The get-started card ships with filename rows; thumbnails are a later polish pass. |
-| **Undo of orphan deletion** | Asset deletion is not transactional. Deleting orphans always shows the list first and requires confirmation. |
+| SURFACES / ASSETS / LIGHT sections | The material library, asset override and lighting do not exist in `Source/`. Three greyed "planned" rows are fake UI. The `FHFPanelSection` array is the reservation; reserving a code seam is honest, reserving pixels is not |
+| Per-property editing in the panel | The Details panel already does it better â€” `ShowOnlyInnerProperties`, `ClampMin`, `CallInEditor`, undo, multi-object edit. The panel gets a `[Details]` button, not a reimplementation that must be kept in sync with `FHFWall` forever |
+| A spec JSON text editor | Rule 04: the spec is the import/export format, not a live second source of truth. `Copy spec JSON` in `[...]` is the whole surface |
+| Element creation (Add Wall / Room / Fixture) | Houses come from drawings; `SampleIsNotOnTheBuildPath` enforces it. A creation UI is a plan editor â€” a different product, and it becomes the path everyone uses instead of reading the drawing |
+| Drawing thumbnails | Needs an image-wrapper decode path and a cache. Filename rows first |
+| Details-panel customisation for bake | `UPROPERTY(EditAnywhere, Category="HouseForge|Bake")` gives the dropdown, `CallInEditor` gives Rebake Now. A customisation buys ordering only |
+| Cross-level orphan GC | A scan sees only the open level. Orphan deletion always lists candidates and requires confirmation, and is scoped to `LevelPackageName` matches |
+| Undo of orphan deletion | Asset deletion is not transactional. Confirmation is the mitigation |
+| `UHFHouseSpecAsset` factory | The class compiles and has zero references. Giving it a factory adds a second authoring path before anyone has asked for one |
+| Fixture rows doing anything but focus | Fixtures have no actor class yet. A fixture row must **not** silently flip `bShowPreview`/`bShowFixtures` â€” that is a selection gesture mutating saved actor state. `Show spec wireframe` is a visible checkbox in `[...]` instead |
 
 ---
 
 ## 7. Automation tests
 
-All under `HouseForge.*` so the existing gate catches them. Runtime bake tests in `Source/HouseForge/Private/Tests/HFBakeTests.cpp`; the rest in `Source/HouseForgeEditor/Private/Tests/`.
+All named `HouseForge.*` so `hf-validate.ps1` catches them.
 
-**`HouseForge.Bake.*`** (`HFBakeTests.cpp`, runtime â€” no service, pure state)
-- `DynamicMeshSurvivesBake` â€” bake, assert the `UDynamicMeshComponent`'s triangle count and vertex positions are byte-identical afterwards. The central claim of the whole feature.
-- `UnbakeRestoresLiveMesh` â€” bake â†’ unbake â†’ mesh identical, dynamic visible, baked hidden.
-- `BakeDoesNotSetArtistEdited` â€” `bGenerating`/hook guard holds; `bArtistEdited` still false after a bake.
-- `ArtistEditedBakesSculptedForm` â€” hand-edit, bake, unbake; the edit is still there and `bArtistEdited` is still true.
-- `HandEditWhileBakedUnbakes` â€” `bUnbakeOnHandEdit` fires and the artist sees their edit.
-- `CollisionFollowsVisibility` â€” exactly one of the two components has collision enabled in each mode.
-- `MeshRevisionMarksBakeStale` â€” regenerate after bake â‡’ `IsBakeStale()`.
-- `MissingAssetFallsBackToDynamic` â€” null the baked mesh, `ReconcileBakeState()`, assert Dynamic + `bBakeAssetMissing`.
-- `AllFourStateCombinationsRoundTrip` â€” {edited, generated} Ã— {baked, dynamic} through serialise/deserialise.
+**`HouseForge.Bake.*`** â€” `Source/HouseForge/Private/Tests/HFBakeTests.cpp` (pure state, no service):
+* `DynamicMeshSurvivesBake` â€” bake, then assert the `UDynamicMeshComponent`'s triangle count and every vertex position are identical. The central claim of the feature.
+* `UnbakeRestoresLiveMesh` â€” bake â†’ unbake â†’ mesh identical, dynamic visible and registered, baked hidden and unregistered.
+* `BakeDoesNotSetArtistEdited` â€” `bArtistEdited` still false after a bake.
+* `ArtistEditedBakesSculptedForm` â€” hand-edit, bake, unbake; the edit is still there and `bArtistEdited` is still true.
+* `HandEditWhileBakedUnbakes` â€” `bUnbakeOnHandEdit` fires.
+* `CollisionFollowsVisibility` â€” exactly one of the two components has collision enabled, in each mode.
+* `MeshRevisionMarksBakeStale` â€” regenerate after bake â‡’ `IsBakeStale()`.
+* `MissingAssetFallsBackToDynamic` â€” null a part mesh, `ReconcileBakeState()`, assert Dynamic + `bBakeAssetMissing`.
+* `AllFourStateCombinationsRoundTrip` â€” {edited, generated} Ã— {baked, dynamic} through serialise/deserialise.
+* `ArticulatedBakeKeepsPartsSeparate` â€” bake an `AHFOpeningActor`, assert one `FHFBakedPart` per source component and that the leaf still moves with `SetPartOpenAmount`. Rule 04's "a bake must not weld a chest of drawers into a block", tested on the one articulated element that exists today.
 
-**`HouseForge.Editor.Bake.*`**
-- `HouseRebuildPreservesBakedElements` â€” extends the existing `HFHouseRebuildPreservesEditsTest`: a baked, non-artist-edited element survives `BuildGeometry`, keeps its asset, and is not orphaned.
-- `BakeCreatesStampedAsset` â€” asset exists at the expected path with `UHFBakedMeshUserData` carrying the right `ElementId` and `LevelPackageName`.
-- `RebakeReusesSameAsset` â€” no duplicate package, `BakeOwnerGuid` unchanged.
-- `OrphanScanIgnoresOtherLevels` â€” an asset stamped with a different `LevelPackageName` is never reported as an orphan.
+**`HouseForge.Editor.Bake.*`**:
+* `HouseRebuildPreservesBakedElements` â€” extends the existing rebuild-preserves-edits test: a baked, non-artist-edited element survives `BuildGeometry`, keeps its asset, is not orphaned.
+* `BakeCreatesStampedAsset` â€” asset at the expected path with `UHFBakedMeshUserData` carrying the right `ElementId` and `LevelPackageName`.
+* `RebakeReusesSameAsset` â€” no duplicate package, `BakeOwnerGuid` unchanged.
+* `OrphanScanIgnoresOtherLevels` â€” an asset stamped with a different `LevelPackageName` is never reported.
 
-**`HouseForge.Editor.Api.*`**
-- `SetElementRenderModeRoutesThroughSubsystem` â€” the subsystem method exists, is `BlueprintCallable`, and `UHFToolset` has a matching wrapper. Guards against the panel growing a private path.
-- `LoadSpecFromFileRoundTrips` â€” save then load then compare, finally exercising `FHFSpecSerializer::LoadFromFile`.
-- `LoadSpecFromFileIsNotAnMcpTool` â€” reflection assert that `UHFToolset` has no `AICallable` function that builds from a file path. Extends the existing `SampleIsNotOnTheBuildPath` guard.
+**`HouseForge.Editor.Api.*`**:
+* `SetElementRenderModeRoutesThroughSubsystem` â€” the subsystem method exists, is `BlueprintCallable`, and `UHFToolset` has a matching wrapper. Guards against the panel growing a private path.
+* `LoadSpecFromFileRoundTrips` â€” finally exercises `FHFSpecSerializer::LoadFromFile`.
+* `LoadSpecFromFileIsNotAnMcpTool` â€” reflection assert that no `AICallable` function on `UHFToolset` builds from a file path.
 
-**`HouseForge.Editor.Panel.*`** (headless-safe; no `SLATE_TEST` harness needed)
-- `PanelStateDerivesRowsFromSpec` â€” build the sample house in a temp world, construct `FHFPanelState`, assert row counts per category and that summaries match the spec.
-- `PanelStateFlagsIssuesOnRows` â€” an element with a validation error carries `WorstIssue == Error`.
-- `SetupProbeReportsMissingVenv` â€” probe against a temp path with no `.venv` returns `bVenvReady == false` with actionable detail text.
-- `TabSpawnerIsRegistered` â€” `FGlobalTabmanager::Get()->HasTabSpawner(HFPanelTabIds::HouseForgePanel)`.
+**`HouseForge.Editor.Panel.*`** (headless-safe; no Slate harness):
+* `PanelStateDerivesRowsFromSpec` â€” build the sample house in a temp world, construct `FHFPanelState`, assert per-category row counts and summaries.
+* `PanelStateFlagsIssuesOnRows` â€” an element with a validation error carries `WorstIssue == Error`.
+* `PanelStateTracksBakeTallies` â€” `N / M baked` and the stale count match actor state.
+* `SetupProbeReportsMissingVenv` â€” probe a temp path with no `.venv`, expect `bVenvReady == false` and actionable detail text.
+* `TabSpawnerIsRegistered` â€” `FGlobalTabmanager::Get()->HasTabSpawner(HFPanelTabIds::HouseForgePanel)`.
 
-Widget rendering is not tested. Slate render tests are expensive to write and brittle; the value is in `FHFPanelState`, which is deliberately a plain non-widget class so it can be tested without a tab ever being spawned.
+**`HouseForge.Editor.Rooms.*`**:
+* `MembershipIsExactForRoomIdElements` â€” ceilings and fixtures map by `RoomId`, never by geometry.
+* `WallsOffPolygonLandInUnassigned` â€” a wall displaced past tolerance appears in the unassigned bucket, not in a wrong room.
+* `SharedWallAppearsInBothRooms` â€” and each actor is selected once, not twice.
 
----
-
-## 8. Trade-offs stated plainly
-
-- **No workflow rail.** The rail communicated one-time progress well and permanent activity badly, and it cost a third of the panel's height forever. Section presence carries the same information for free. The loss is real: a first-time user no longer sees the whole workflow at a glance. The get-started card's numbered 1/2/3 layout is the compensation, and it disappears once it is no longer true.
-- **Sections stack vertically.** This will get long. It is the right shape for two heavy sections and the wrong shape for five. The registry makes the eventual conversion cheap; it does not make it free.
-- **Bake asset creation lives in the editor module, reached from the runtime actor through a delegate.** That indirection is ugly. The alternative â€” runtime module depending on `UnrealEd` â€” is worse.
-- **Per-part bake data with one part.** Pure future-proofing cost today, paid because the milestone that exposes the flaw is the one that would make it expensive to fix.
-- **`bAutoRebakeOnRegenerate` defaults on.** It makes parameter edits on baked elements slower. Off, the viewport lies about what the spec says, and `CaptureTopDown` â€” the tool Claude uses to check its own work â€” screenshots the lie.
+Widget rendering is not tested. Slate render tests are expensive and brittle; the value is in `FHFPanelState`, which is a plain non-widget class precisely so it can be tested without a tab ever being spawned.
 
 ---
 
-## How much to trust this
+## 8. Trade-offs, stated plainly
 
-The scoring phase was meant to judge three competing panel designs. Only design A reached
-the judges - the design array was truncated mid-object, so B and C were never delivered.
-All three judges said so unprompted. What follows is therefore a critique-and-amend of a
-single candidate, not the result of a contest. The amendments are the valuable part; the
-word "winner" is not.
+* **No workflow rail.** It reads beautifully on day 1 and is dead pixels on day 20, and its centre node â€” "Claude reads the drawing" â€” is a step the panel cannot perform. Section presence carries the same information for free. The loss is real: a first-time user no longer sees the whole workflow at a glance, and the no-house card's 1/2/3 layout is the only compensation.
+* **The action row is a knowingly temporary graft.** Re-validate / Rebuild all / Capture belong in `[...]` for a finished product. They sit at the top because that is today's loop. Expect to demote them, and treat that as success, not churn.
+* **Room chips are inferred for walls and openings.** `FHFWall` has no `RoomId` (HFTypes.h:195); only `FHFFalseCeiling` and `FHFFixture` carry one. Containment with a tolerance works on a clean orthogonal 2BHK and misfiles a wall Claude placed 4 cm off. Mitigations: a visible `not in any room (N)` chip, an exposed tolerance, and a wall belonging to every room it bounds. This is why chips are step 8 and the find list is step 3 â€” navigation must not depend on a guess.
+* **Bake asset creation lives in the editor module and is reached from a runtime actor through a static delegate.** That indirection is ugly. The alternative â€” the runtime module depending on `UnrealEd` â€” is worse.
+* **One `MeshRevision` per actor, not per part.** Editing a door leaf marks the frame stale and rebakes both. Wasted milliseconds, in exchange for a staleness rule one sentence long.
+* **`bAutoRebakeOnRegenerate` defaults on.** It makes parameter edits on baked elements slower. Off, the viewport lies about what the spec says, and `CaptureTopDown` â€” the tool Claude uses to check its own work â€” screenshots the lie.
+* **The sections stack vertically.** Right for four sections, wrong for seven. `FHFPanelSection` makes the eventual conversion to a mode strip one change in `Construct`; it does not make it free.
+* **Unresolved until ten minutes in the actual editor** (settle during step 5, all have stated fallbacks): whether `UToolTargetManager` filters candidates by registration as assumed in Â§4.4; whether `UStaticMesh` async compilation needs an explicit `FinishCompilation` before collision assertions in a `-nullrhi` run; and whether polygroups survive `CommitMeshDescription` into a readable form â€” if not, surface-role targeting on baked meshes must go through material sections, which the material library should do anyway.
 
-### Lens: workflow-clarity
+---
 
-A - Workflow spine (state-derived rail + permanent Workbench). Build it, with the eight amendments in mustGraft. Caveat: it is also the only design that arrived intact - the prompt's design array is truncated mid-object inside design A's deliberateOmissions field, so designs 2 and 3 were never delivered and no comparative judgement was possible. If those two exist, re-run this scoring before committing; the recommendation below is a critique-and-amend of a single design, not a contest result.
+## The contest, and why this document was rewritten
 
-### Lens: Scalability â€” will the panel survive ceilings, joinery, fixtures, materials, lighting and asset replacement without being rebuilt? Judged against the real source, not the design's claims about it. Secondary weight on cold-read clarity, capability coverage, bake-toggle safety, and one-developer Slate cost.
+The first run of this workflow serialised all three panel designs into one JSON blob and sliced
+it at 24,000 characters. Design 1 filled the whole budget, so designs 2 and 3 never reached the
+judges - and the cut landed mid-object, so even design 1 arrived as invalid JSON. The run still
+returned a confident winner. That winner was simply the only candidate anyone had seen.
 
-A â€” by default, not by contest. Designs B and C never arrived in my input (see warnings), so this is a single-candidate review. On its own merits A is worth building: the state-derived rail, the Details-panel delegation, the single subsystem code path and the 'Display: Live | Baked' framing are all correct calls that will still be correct after materials and lighting land. It must not be built as specified, though â€” the per-actor bake model and the fixed five-node spine are the two places it will need tearing up, and both are cheap to fix now and expensive to fix later.
+The judges caught it and said so unprompted; nothing in the workflow did. The fix budgets each
+design separately (see `.claude/workflows/_shared.md`), and the workflow was re-run with the
+audit and design phases replayed from cache.
 
-### Lens: implementation-cost
+**The verdict changed.** With all three designs actually visible, two of the three judges chose
+design 3, the artist-station - a design that had been invisible the first time. The specification
+above is the synthesis of the real contest, and it supersedes the earlier single-candidate one.
 
-A - Workflow spine (build it, but phased: ship the Workbench first and defer the rail)
+This is worth remembering when reading any other confident output from a fan-out: a winner is
+only meaningful if the judges could see the field.
+
+### Verdicts
+
+**Lens: workflow-clarity**
+
+Design 3 â€” artist-station
+
+**Lens: Scalability â€” will the panel and bake model still be the right shape after false ceilings, the joinery kit, ~40 fixture types, a material library, lighting and asset replacement land? Judged against the real source on the current feature/joinery-kit branch, not against each design's claims about it. Secondary weight on cold-read clarity, capability coverage, bake safety, and one-developer Slate cost.**
+
+Design 3 â€” artist-station. Build it, with the twelve grafts below. It is the only design whose cost is O(rooms) rather than O(elements), and the only one whose section structure maps 1:1 onto the remaining milestones instead of having to absorb them into a metaphor that does not fit.
+
+**Lens: implementation-cost**
+
+Design 1 â€” task-flow, with the workflow rail deleted and ten grafts applied
 
 ## Open questions on the bake, to settle in the editor
 
