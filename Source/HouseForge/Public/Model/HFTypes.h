@@ -123,7 +123,24 @@ enum class EHFFixtureType : uint8
 	CeilingFan,
 	LightFixture,
 	SwitchPlate,
-	Curtain
+	Curtain,
+
+	// Electrical services. Drawings carry these on their own layer, and they are what makes a
+	// generated flat usable rather than merely furnished.
+	PowerSocket,
+	DistributionBoard,
+	ACIndoorUnit,
+	ACOutdoorUnit,
+	Geyser,
+	ExhaustFan,
+
+	// Architectural fittings
+	ShoeRack,
+	Pelmet,
+	Mirror,
+	TowelRail,
+	Railing,
+	WallNiche
 };
 
 /** Handle treatment on joinery shutters and drawers. */
@@ -161,7 +178,9 @@ enum class EHFSurfaceRole : uint8
 	WindowFrame,
 	Sanitary,
 	Fabric,
-	Appliance
+	Appliance,
+	/** Exposed structure - beams and columns. */
+	Structure
 };
 
 /**
@@ -243,6 +262,79 @@ struct HOUSEFORGE_API FHFOpening
 
 	/** Top of the opening above the wall base. The figure headroom checks care about. */
 	double HeadHeight() const { return SillHeight + Height; }
+};
+
+/**
+ * An RCC downstand beam.
+ *
+ * These are the reason false ceilings exist in this domain: a beam hanging 450 below the slab has
+ * to be boxed in, and the ceiling drop is chosen to clear the deepest beam crossing the room.
+ * Modelled as a first-class element rather than a fixture because it is structural - it cannot be
+ * moved to suit the furniture, and the ceiling has to work around it.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFBeam
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FName Id;
+
+	/** Centreline, usually following a wall below or spanning between columns. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FVector2D Start = FVector2D::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FVector2D End = FVector2D::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.1"))
+	double Width = 230.0;
+
+	/** How far the beam hangs below the slab soffit. This is what a false ceiling must clear. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.1"))
+	double Depth = 450.0;
+
+	/** Slab soffit level this beam hangs from. Matches the storey's ceiling height. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double SoffitZ = 3000.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	EHFSurfaceRole SurfaceRole = EHFSurfaceRole::Structure;
+
+	double Length() const { return FVector2D::Distance(Start, End); }
+
+	/** Underside of the beam above the floor - the clear height beneath it. */
+	double ClearHeight() const { return SoffitZ - Depth; }
+};
+
+/** An RCC column. Usually at a corner or a wall junction, and often projecting into a room. */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFColumn
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FName Id;
+
+	/** Centre of the column in plan. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FVector2D Position = FVector2D::ZeroVector;
+
+	/** Plan size before rotation. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FVector2D Size = FVector2D(230.0, 450.0);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double RotationDegrees = 0.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.1"))
+	double Height = 3000.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double BaseZ = 0.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	EHFSurfaceRole SurfaceRole = EHFSurfaceRole::Structure;
 };
 
 /** An enclosed space. Its boundary drives the floor slab, skirting and false ceiling. */
@@ -510,6 +602,13 @@ struct HOUSEFORGE_API FHFHouseSpec
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	TArray<FHFOpening> Openings;
 
+	/** Downstand beams. False ceiling drops are chosen to clear these. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FHFBeam> Beams;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FHFColumn> Columns;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	TArray<FHFRoom> Rooms;
 
@@ -521,6 +620,14 @@ struct HOUSEFORGE_API FHFHouseSpec
 
 	const FHFWall* FindWall(const FName& WallId) const;
 	const FHFRoom* FindRoom(const FName& RoomId) const;
+
+	/**
+	 * The deepest beam crossing a room, or nullptr if none do.
+	 *
+	 * This is what a false ceiling has to clear, so it is the figure the ceiling drop is chosen
+	 * against rather than a free design choice.
+	 */
+	const FHFBeam* DeepestBeamOverRoom(const FName& RoomId) const;
 
 	/** Total floor area of all rooms, in spec units squared. */
 	double TotalFloorArea() const;

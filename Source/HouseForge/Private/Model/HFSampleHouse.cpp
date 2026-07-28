@@ -21,7 +21,10 @@ namespace
 	constexpr double X4 = 8700.0;		// master bath | utility
 	constexpr double X5 = 10800.0;		// east external
 
-	constexpr double YB = -1500.0;		// balcony parapet
+	constexpr double XE = 12300.0;		// east balcony (utility wash area) parapet
+
+	constexpr double YB = -1500.0;		// south balcony parapet
+	constexpr double YN = 9900.0;		// north balcony parapet
 	constexpr double Y0 = 0.0;			// south external
 	constexpr double Y1 = 3600.0;		// living/bedroom2 | service band
 	constexpr double Y2 = 5400.0;		// service band | kitchen/master bedroom
@@ -132,6 +135,29 @@ namespace
 			Spec.FalseCeilings.Add(Ceiling);
 		}
 
+		void AddBeam(const FName& Id, const FVector2D& Start, const FVector2D& End, double Depth = 450.0)
+		{
+			FHFBeam Beam;
+			Beam.Id = Id;
+			Beam.Start = Start;
+			Beam.End = End;
+			Beam.Width = 230.0;
+			Beam.Depth = Depth;
+			Beam.SoffitZ = WallHeight;
+			Spec.Beams.Add(Beam);
+		}
+
+		void AddColumn(const FName& Id, const FVector2D& Position, double Rotation = 0.0)
+		{
+			FHFColumn Column;
+			Column.Id = Id;
+			Column.Position = Position;
+			Column.Size = FVector2D(450.0, 230.0);
+			Column.RotationDegrees = Rotation;
+			Column.Height = WallHeight;
+			Spec.Columns.Add(Column);
+		}
+
 		FHFFixture& AddFixture(const FName& Id, const FName& RoomId, EHFFixtureType Type, const FString& Label,
 			const FVector2D& Position, const FVector2D& Footprint, double Height,
 			double Rotation = 0.0, double BaseZ = 0.0)
@@ -185,10 +211,46 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// Vertical internal partition, north band.
 	B.AddWall(TEXT("W_Kitchen_MBed"), FVector2D(X2, Y2), FVector2D(X2, Y3), false);
 
-	// Balcony parapets, south of the living room.
+	// Balcony parapets. Three balconies: living (south), master bedroom (north) and a wash area
+	// off the utility (east), which is the usual arrangement in a flat of this size.
 	B.AddParapet(TEXT("W_Balc_South"), FVector2D(X0, YB), FVector2D(X2, YB));
 	B.AddParapet(TEXT("W_Balc_West"),  FVector2D(X0, YB), FVector2D(X0, Y0));
 	B.AddParapet(TEXT("W_Balc_East"),  FVector2D(X2, YB), FVector2D(X2, Y0));
+
+	B.AddParapet(TEXT("W_BalcN_North"), FVector2D(X3, YN), FVector2D(X5, YN));
+	B.AddParapet(TEXT("W_BalcN_West"),  FVector2D(X3, Y3), FVector2D(X3, YN));
+	B.AddParapet(TEXT("W_BalcN_East"),  FVector2D(X5, Y3), FVector2D(X5, YN));
+
+	B.AddParapet(TEXT("W_BalcE_East"),  FVector2D(XE, Y1), FVector2D(XE, Y2));
+	B.AddParapet(TEXT("W_BalcE_South"), FVector2D(X5, Y1), FVector2D(XE, Y1));
+	B.AddParapet(TEXT("W_BalcE_North"), FVector2D(X5, Y2), FVector2D(XE, Y2));
+
+	// ----------------------------------------------------------------- structure
+	// Downstand beams follow the load-bearing lines, plus one crossing the living room, whose
+	// 6600 span is too wide to go unbeamed. That crossing beam is why the living room carries a
+	// bulkhead as well as its cove.
+	B.AddBeam(TEXT("BM_South"),      FVector2D(X0, Y0), FVector2D(X5, Y0));
+	B.AddBeam(TEXT("BM_North"),      FVector2D(X0, Y3), FVector2D(X5, Y3));
+	B.AddBeam(TEXT("BM_West"),       FVector2D(X0, Y0), FVector2D(X0, Y3));
+	B.AddBeam(TEXT("BM_East"),       FVector2D(X5, Y0), FVector2D(X5, Y3));
+	B.AddBeam(TEXT("BM_Mid_Lower"),  FVector2D(X0, Y1), FVector2D(X5, Y1));
+	B.AddBeam(TEXT("BM_Mid_Upper"),  FVector2D(X0, Y2), FVector2D(X5, Y2));
+	B.AddBeam(TEXT("BM_Living_Bed2"), FVector2D(X3, Y0), FVector2D(X3, Y1));
+	B.AddBeam(TEXT("BM_Kitchen_MBed"), FVector2D(X2, Y2), FVector2D(X2, Y3));
+	B.AddBeam(TEXT("BM_Living_Cross"), FVector2D(X0, 1800.0), FVector2D(X3, 1800.0), 400.0);
+
+	// Columns at the shell corners and the main wall junctions.
+	B.AddColumn(TEXT("COL_SW"), FVector2D(X0, Y0));
+	B.AddColumn(TEXT("COL_SE"), FVector2D(X5, Y0));
+	B.AddColumn(TEXT("COL_NE"), FVector2D(X5, Y3));
+	B.AddColumn(TEXT("COL_NW"), FVector2D(X0, Y3));
+	B.AddColumn(TEXT("COL_W1"), FVector2D(X0, Y1), 90.0);
+	B.AddColumn(TEXT("COL_W2"), FVector2D(X0, Y2), 90.0);
+	B.AddColumn(TEXT("COL_E1"), FVector2D(X5, Y1), 90.0);
+	B.AddColumn(TEXT("COL_E2"), FVector2D(X5, Y2), 90.0);
+	B.AddColumn(TEXT("COL_S1"), FVector2D(X3, Y0));
+	B.AddColumn(TEXT("COL_M1"), FVector2D(X3, Y1));
+	B.AddColumn(TEXT("COL_N1"), FVector2D(X2, Y3));
 
 	// ------------------------------------------------------------------------------ openings
 	// Main entrance, in the west wall at the foyer. W_West runs north to south from (X0,Y3), so
@@ -205,8 +267,14 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddWindow(TEXT("Win_Bed2_S"),  TEXT("W_South"), 8700.0, 1500.0);
 	B.AddWindow(TEXT("Win_Bed2_E"),  TEXT("W_East"),  1800.0, 1200.0);
 	// W_North runs east to west from (X5,Y3), so offsets count back from the north-east corner.
-	B.AddWindow(TEXT("Win_MBed_N"),  TEXT("W_North"), X5 - 7200.0, 1800.0);
+	// The master bedroom window opens onto the north balcony, alongside its sliding door.
+	B.AddWindow(TEXT("Win_MBed_N"),  TEXT("W_North"), X5 - 7500.0, 1800.0);
 	B.AddWindow(TEXT("Win_Kitchen"), TEXT("W_North"), X5 - 2100.0, 1200.0);
+
+	// Balcony access. Master bedroom to the north balcony; utility to the east wash area.
+	B.AddOpening(TEXT("D_BalcN"), TEXT("W_North"), X5 - 9300.0, 1800.0, 2100.0, 0.0,
+		EHFOpeningKind::SlidingDoor);
+	B.AddDoor(TEXT("D_BalcE"), TEXT("W_East"), 4500.0, EHFSwing::OutwardLeft);
 	// Ventilators sit directly on the head of each bathroom door, which is where they go when the
 	// bathroom has no external wall. Stacking them on the door rather than putting them in
 	// W_Mid_Upper also keeps them clear of the master bedroom doorway.
@@ -232,7 +300,9 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddRoom(TEXT("R_Utility"),  TEXT("Utility"),          EHFRoomType::Utility,       X4, Y1, X5, Y2, 0.0);
 	B.AddRoom(TEXT("R_Kitchen"),  TEXT("Kitchen"),          EHFRoomType::Kitchen,       X0, Y2, X2, Y3);
 	B.AddRoom(TEXT("R_MBed"),     TEXT("Master Bedroom"),   EHFRoomType::MasterBedroom, X2, Y2, X5, Y3);
-	B.AddRoom(TEXT("R_Balcony"),  TEXT("Balcony"),          EHFRoomType::Balcony,       X0, YB, X2, Y0, 0.0);
+	B.AddRoom(TEXT("R_Balcony"),   TEXT("Balcony"),           EHFRoomType::Balcony,      X0, YB, X2, Y0, 0.0);
+	B.AddRoom(TEXT("R_BalconyN"),  TEXT("Balcony 2"),         EHFRoomType::Balcony,      X3, Y3, X5, YN, 0.0);
+	B.AddRoom(TEXT("R_BalconyE"),  TEXT("Wash Area Balcony"), EHFRoomType::Balcony,      X5, Y1, XE, Y2, 0.0);
 
 	// ------------------------------------------------------------------------ false ceilings
 	// Living gets the full cove treatment; bedrooms a peripheral band; wet areas a full drop to
@@ -254,6 +324,22 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 400.0, 0.0,
 		{ FVector2D(7650.0, 4500.0) });
+
+	{
+		// The living room's cove leaves its centre at slab height, so the beam crossing at
+		// Y=1800 has to be boxed in separately. This is how it is detailed in practice, and the
+		// validator's CeilingDoesNotClearBeam rule is satisfied by exactly this pairing.
+		FHFFalseCeiling Bulkhead;
+		Bulkhead.Id = TEXT("FC_Living_Beam");
+		Bulkhead.RoomId = TEXT("R_Living");
+		Bulkhead.Style = EHFCeilingStyle::Bulkhead;
+		Bulkhead.Drop = 450.0;
+		Bulkhead.BandWidth = 0.0;
+		Bulkhead.ExplicitPolygon = {
+			FVector2D(X0, 1700.0), FVector2D(X3, 1700.0), FVector2D(X3, 1900.0), FVector2D(X0, 1900.0)
+		};
+		B.Spec.FalseCeilings.Add(Bulkhead);
+	}
 
 	{
 		// A bulkhead follows its own polygon rather than the room, so it needs one explicitly.
@@ -453,6 +539,157 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			TEXT("4-gang switch plate"), FVector2D(1000.0, 3700.0), FVector2D(160.0, 20.0), 120.0, 0.0, 1200.0);
 		Switches.AnchorWallId = TEXT("W_Mid_Lower");
 		Switches.Params.GangCount = 4;
+
+		FHFFixture& DB = B.AddFixture(TEXT("F_DB"), TEXT("R_Foyer"), EHFFixtureType::DistributionBoard,
+			TEXT("Distribution board"), FVector2D(1600.0, 4900.0), FVector2D(300.0, 60.0), 350.0, 90.0, 1800.0);
+		DB.AnchorWallId = TEXT("W_Foyer_Corr");
+
+		FHFFixture& Shoes = B.AddFixture(TEXT("F_ShoeRack"), TEXT("R_Foyer"), EHFFixtureType::ShoeRack,
+			TEXT("Shoe rack"), FVector2D(900.0, 5250.0), FVector2D(1200.0, 350.0), 900.0);
+		Shoes.AnchorWallId = TEXT("W_Mid_Upper");
+		Shoes.Params.ShutterCount = 2;
+		Shoes.Params.ShelfCount = 3;
+		Shoes.Params.PlinthHeight = 80.0;
+		Shoes.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
+	}
+
+	// ------------------------------------------------------------- electrical services
+	// Sockets, switch plates, AC points and the wet-area services. Drawings carry these on their
+	// own layer, and they are what makes a generated flat usable rather than merely furnished.
+	{
+		auto AddSocket = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
+			const FName& AnchorWall, double Rotation = 0.0)
+		{
+			FHFFixture& Socket = B.AddFixture(Id, RoomId, EHFFixtureType::PowerSocket,
+				TEXT("Power socket"), Position, FVector2D(160.0, 20.0), 120.0, Rotation, 300.0);
+			Socket.AnchorWallId = AnchorWall;
+			Socket.Params.GangCount = 2;
+			return &Socket;
+		};
+
+		auto AddSwitchPlate = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
+			const FName& AnchorWall, int32 Gangs, double Rotation = 0.0)
+		{
+			FHFFixture& Plate = B.AddFixture(Id, RoomId, EHFFixtureType::SwitchPlate,
+				FString::Printf(TEXT("%d-gang switch plate"), Gangs),
+				Position, FVector2D(40.0 * Gangs, 20.0), 150.0, Rotation, 1200.0);
+			Plate.AnchorWallId = AnchorWall;
+			Plate.Params.GangCount = Gangs;
+			return &Plate;
+		};
+
+		auto AddSplitAC = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
+			const FName& AnchorWall, double Rotation = 0.0)
+		{
+			FHFFixture& Unit = B.AddFixture(Id, RoomId, EHFFixtureType::ACIndoorUnit,
+				TEXT("Split AC indoor unit"), Position, FVector2D(900.0, 220.0), 300.0, Rotation, 2200.0);
+			Unit.AnchorWallId = AnchorWall;
+			return &Unit;
+		};
+
+		// Living / dining
+		AddSocket(TEXT("F_Soc_Living_TV"), TEXT("R_Living"), FVector2D(2100.0, 120.0), TEXT("W_South"));
+		AddSocket(TEXT("F_Soc_Living_1"),  TEXT("R_Living"), FVector2D(5900.0, 1800.0), TEXT("W_Living_Bed2"), 90.0);
+		AddSwitchPlate(TEXT("F_Sw_Living"), TEXT("R_Living"), FVector2D(3300.0, 3480.0), TEXT("W_Mid_Lower"), 8);
+		AddSplitAC(TEXT("F_AC_Living"), TEXT("R_Living"), FVector2D(4800.0, 3480.0), TEXT("W_Mid_Lower"));
+
+		// Master bedroom
+		AddSocket(TEXT("F_Soc_MBed_1"), TEXT("R_MBed"), FVector2D(5100.0, 8280.0), TEXT("W_North"));
+		AddSocket(TEXT("F_Soc_MBed_2"), TEXT("R_MBed"), FVector2D(7500.0, 8280.0), TEXT("W_North"));
+		AddSplitAC(TEXT("F_AC_MBed"), TEXT("R_MBed"), FVector2D(6300.0, 5520.0), TEXT("W_Mid_Upper"));
+
+		// Bedroom 2
+		AddSocket(TEXT("F_Soc_Bed2_1"), TEXT("R_Bed2"), FVector2D(7000.0, 120.0), TEXT("W_South"));
+		AddSwitchPlate(TEXT("F_Sw_Bed2"), TEXT("R_Bed2"), FVector2D(7100.0, 3480.0), TEXT("W_Mid_Lower"), 6);
+		AddSplitAC(TEXT("F_AC_Bed2"), TEXT("R_Bed2"), FVector2D(8700.0, 3480.0), TEXT("W_Mid_Lower"));
+
+		// Kitchen: counter-height sockets plus the exhaust over the hob.
+		AddSocket(TEXT("F_Soc_Kit_1"), TEXT("R_Kitchen"), FVector2D(1200.0, 8280.0), TEXT("W_North"))->BaseZ = 1100.0;
+		AddSocket(TEXT("F_Soc_Kit_2"), TEXT("R_Kitchen"), FVector2D(3000.0, 8280.0), TEXT("W_North"))->BaseZ = 1100.0;
+		AddSwitchPlate(TEXT("F_Sw_Kitchen"), TEXT("R_Kitchen"), FVector2D(3900.0, 5520.0), TEXT("W_Mid_Upper"), 6);
+
+		FHFFixture& KitchenExhaust = B.AddFixture(TEXT("F_Exh_Kitchen"), TEXT("R_Kitchen"),
+			EHFFixtureType::ExhaustFan, TEXT("Exhaust fan"),
+			FVector2D(3600.0, 8280.0), FVector2D(300.0, 100.0), 300.0, 0.0, 2200.0);
+		KitchenExhaust.AnchorWallId = TEXT("W_North");
+
+		// Bathrooms: geyser, exhaust, mirror and towel rail in each.
+		auto FitOutBathroom = [&B](const FName& Prefix, const FName& RoomId, double CentreX,
+			const FName& NorthWall, const FName& SouthWall)
+		{
+			FHFFixture& Geyser = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Geyser"))), RoomId,
+				EHFFixtureType::Geyser, TEXT("Storage water heater"),
+				FVector2D(CentreX, 5250.0), FVector2D(450.0, 400.0), 450.0, 0.0, 2100.0);
+			Geyser.AnchorWallId = NorthWall;
+
+			FHFFixture& Exhaust = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Exhaust"))), RoomId,
+				EHFFixtureType::ExhaustFan, TEXT("Exhaust fan"),
+				FVector2D(CentreX - 700.0, 5300.0), FVector2D(250.0, 100.0), 250.0, 0.0, 2400.0);
+			Exhaust.AnchorWallId = NorthWall;
+
+			FHFFixture& Mirror = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Mirror"))), RoomId,
+				EHFFixtureType::Mirror, TEXT("Mirror"),
+				FVector2D(CentreX - 500.0, 3720.0), FVector2D(600.0, 30.0), 800.0, 0.0, 1000.0);
+			Mirror.AnchorWallId = SouthWall;
+
+			FHFFixture& Towel = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Towel"))), RoomId,
+				EHFFixtureType::TowelRail, TEXT("Towel rail"),
+				FVector2D(CentreX + 500.0, 3700.0), FVector2D(500.0, 40.0), 60.0, 0.0, 1200.0);
+			Towel.AnchorWallId = SouthWall;
+		};
+
+		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 5400.0, TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
+		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 7650.0, TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
+
+		// Utility
+		AddSocket(TEXT("F_Soc_Util"), TEXT("R_Utility"), FVector2D(9100.0, 5300.0), TEXT("W_Mid_Upper"))->BaseZ = 1000.0;
+	}
+
+	// ------------------------------------------------------------------------- balconies
+	{
+		auto AddRailing = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
+			const FVector2D& Footprint, double Rotation, const FName& AnchorWall)
+		{
+			FHFFixture& Rail = B.AddFixture(Id, RoomId, EHFFixtureType::Railing,
+				TEXT("MS railing"), Position, Footprint, 800.0, Rotation, ParapetHeight);
+			Rail.AnchorWallId = AnchorWall;
+		};
+
+		AddRailing(TEXT("F_Rail_Balcony"),  TEXT("R_Balcony"),  FVector2D(2100.0, -1440.0), FVector2D(4200.0, 60.0), 0.0, TEXT("W_Balc_South"));
+		AddRailing(TEXT("F_Rail_BalconyN"), TEXT("R_BalconyN"), FVector2D(8700.0, 9840.0),  FVector2D(4200.0, 60.0), 0.0, TEXT("W_BalcN_North"));
+		AddRailing(TEXT("F_Rail_BalconyE"), TEXT("R_BalconyE"), FVector2D(12240.0, 4500.0), FVector2D(1800.0, 60.0), 90.0, TEXT("W_BalcE_East"));
+
+		// Condensing units live on the balconies, where they belong.
+		FHFFixture& OutdoorLiving = B.AddFixture(TEXT("F_ACOut_Living"), TEXT("R_Balcony"),
+			EHFFixtureType::ACOutdoorUnit, TEXT("AC outdoor unit"),
+			FVector2D(3700.0, -1000.0), FVector2D(800.0, 350.0), 600.0, 90.0);
+		OutdoorLiving.AnchorWallId = TEXT("W_Balc_East");
+
+		FHFFixture& OutdoorMBed = B.AddFixture(TEXT("F_ACOut_MBed"), TEXT("R_BalconyN"),
+			EHFFixtureType::ACOutdoorUnit, TEXT("AC outdoor unit"),
+			FVector2D(10200.0, 9400.0), FVector2D(800.0, 350.0), 600.0, 90.0);
+		OutdoorMBed.AnchorWallId = TEXT("W_BalcN_East");
+
+		// Wash area: the utility balcony's whole purpose.
+		FHFFixture& WashSink = B.AddFixture(TEXT("F_Wash_Sink"), TEXT("R_BalconyE"),
+			EHFFixtureType::Sink, TEXT("Utility sink"),
+			FVector2D(11500.0, 3800.0), FVector2D(600.0, 450.0), 250.0, 0.0, 600.0);
+		WashSink.AnchorWallId = TEXT("W_BalcE_South");
+	}
+
+	// ------------------------------------------------------- pelmets over the main windows
+	{
+		auto AddPelmet = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
+			const FVector2D& Footprint, double Rotation, const FName& AnchorWall)
+		{
+			FHFFixture& Pelmet = B.AddFixture(Id, RoomId, EHFFixtureType::Pelmet,
+				TEXT("Curtain pelmet"), Position, Footprint, 200.0, Rotation, 2350.0);
+			Pelmet.AnchorWallId = AnchorWall;
+		};
+
+		AddPelmet(TEXT("F_Pelmet_Living"), TEXT("R_Living"), FVector2D(5400.0, 180.0), FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
+		AddPelmet(TEXT("F_Pelmet_MBed"),   TEXT("R_MBed"),   FVector2D(7500.0, 8220.0), FVector2D(2200.0, 180.0), 0.0, TEXT("W_North"));
+		AddPelmet(TEXT("F_Pelmet_Bed2"),   TEXT("R_Bed2"),   FVector2D(8700.0, 180.0), FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
 	}
 
 	return B.Spec;

@@ -42,6 +42,8 @@ rejects it, because a zero-length edge breaks the polygon offset used for false 
 | `defaultWallHeight` | number | Fallback floor-to-slab height |
 | `walls` | array | see below |
 | `openings` | array | |
+| `beams` | array | downstand beams |
+| `columns` | array | |
 | `rooms` | array | |
 | `falseCeilings` | array | |
 | `fixtures` | array | |
@@ -75,6 +77,36 @@ without disturbing its neighbours' junctions.
 
 `offsetAlongWall` is measured from `start`, so direction matters. If a wall runs north-to-south,
 offsets count downward from its northern end.
+
+## `beams[]`
+
+RCC downstand beams. **These are the reason false ceilings exist in this domain** — a beam hanging
+450 below the slab has to be boxed in, and the ceiling drop is chosen to clear the deepest beam
+crossing the room. Modelled as first-class elements rather than fixtures because they are
+structural: they cannot be moved to suit the furniture, and the ceiling works around them.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | name | |
+| `start`, `end` | `{x, y}` | Centreline, usually following the wall below |
+| `width` | number | 230 typical in mm |
+| `depth` | number | How far the beam hangs **below the slab soffit** |
+| `soffitZ` | number | Slab level the beam hangs from; matches the storey's ceiling height |
+| `surfaceRole` | enum | Defaults to `Structure` |
+
+A beam whose centreline runs along a room's boundary is concealed by the wall itself and is **not**
+treated as crossing that room — only beams passing through the interior force a ceiling drop.
+
+## `columns[]`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | name | |
+| `position` | `{x, y}` | Centre in plan |
+| `size` | `{x, y}` | Plan size before rotation; 230 x 450 typical |
+| `rotationDegrees` | number | |
+| `height`, `baseZ` | number | |
+| `surfaceRole` | enum | Defaults to `Structure` |
 
 ## `rooms[]`
 
@@ -118,7 +150,7 @@ Joinery, furniture, sanitary ware and electrical fittings.
 | Field | Type | Notes |
 |---|---|---|
 | `id`, `roomId` | name | |
-| `type` | enum | see `EHFFixtureType` — wardrobes, kitchen units, beds, sanitary, fans, switch plates |
+| `type` | enum | see below |
 | `label` | string | The drawing's own label, if any |
 | `position` | `{x, y}` | Centre of the footprint |
 | `rotationDegrees` | number | Yaw about the centre; `0` means `footprint.x` runs along +X |
@@ -127,6 +159,19 @@ Joinery, furniture, sanitary ware and electrical fittings.
 | `baseZ` | number | Underside above the room floor. Non-zero for wall cabinets and counters |
 | `anchorWallId` | name | Wall this fixture backs onto. Optional but important — see below |
 | `params` | object | see below |
+
+### `type` — `EHFFixtureType`
+
+| Group | Values |
+|---|---|
+| Joinery | `Wardrobe`, `LoftUnit`, `KitchenBaseCabinet`, `KitchenWallCabinet`, `KitchenTallUnit`, `CounterTop`, `TVUnit`, `StudyTable`, `Bookshelf`, `Vanity` |
+| Appliances / sanitary | `Sink`, `Hob`, `Chimney`, `Refrigerator`, `WashingMachine`, `WC`, `Basin`, `Shower`, `ShowerPartition` |
+| Loose furniture | `Bed`, `Nightstand`, `Sofa`, `Chair`, `DiningTable`, `CoffeeTable` |
+| Electrical services | `PowerSocket`, `SwitchPlate`, `DistributionBoard`, `ACIndoorUnit`, `ACOutdoorUnit`, `Geyser`, `ExhaustFan`, `CeilingFan`, `LightFixture` |
+| Architectural fittings | `ShoeRack`, `Pelmet`, `Mirror`, `TowelRail`, `Railing`, `WallNiche`, `Curtain` |
+
+The electrical group is what the electrical layout sheet is drawn from, so tag those correctly —
+a socket typed as `Unknown` will not appear on that sheet.
 
 **Set `anchorWallId` whenever a fixture backs onto a wall.** Two things depend on it: asset
 replacement aligns anchored fixtures to the wall face rather than the floor plane, and the
@@ -166,9 +211,19 @@ is needlessly slow. Each issue carries a stable `code` and a message quoting the
 `NonPositiveCeilingHeight`, `CeilingDropExceedsRoom`, `NonPositiveCeilingDrop`,
 `MissingCeilingBand`, `BulkheadNeedsPolygon`, `FixtureOutsideRoom`, `NonPositiveFootprint`.
 
+Structural rules: `ZeroLengthBeam`, `NonPositiveBeamSize`, `BeamDepthExceedsStorey`,
+`NonPositiveColumnSize`, `NonPositiveColumnHeight`, `DuplicateBeamId`, `DuplicateColumnId`.
+Openings sharing a wall and a height range raise `OpeningsOverlap`.
+
 **Warnings** are worth reading but do not block: `DoorWithSill` (probably a mislabelled window),
-`LowHeadroom` (under 2100 clear), `CeilingBelowDoorHead`, `UnknownFixtureType`,
-`OverlappingFixtures`, `FixtureFootprintCrossesWall`.
+`LowHeadroom` (under 2100 clear), `CeilingBelowDoorHead`, `CeilingDoesNotClearBeam`,
+`BeamLowHeadroom`, `UnknownFixtureType`, `OverlappingFixtures`, `FixtureFootprintCrossesWall`.
+
+`CeilingDoesNotClearBeam` is the one worth understanding. A peripheral or cove ceiling leaves the
+centre of the room at slab height and so conceals nothing mid-span; it only escapes the warning
+when a `Bulkhead` in the same room, deep enough to cover the beam, boxes it in. That pairing —
+cove around the perimeter, bulkhead along the beam — is exactly how it is detailed in practice, and
+is what the reference 2BHK's living room does.
 
 Two overlap cases are deliberately **not** reported, because flagging them would make the rule
 noise: fixtures stacked vertically with no shared height range (a wall cabinet over a counter), and

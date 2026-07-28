@@ -200,6 +200,58 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 	CheckDuplicateIds(Spec.Openings, TEXT("opening"), TEXT("DuplicateOpeningId"), [](const FHFOpening& O) { return O.Id; }, Result);
 	CheckDuplicateIds(Spec.Fixtures, TEXT("fixture"), TEXT("DuplicateFixtureId"), [](const FHFFixture& F) { return F.Id; }, Result);
 	CheckDuplicateIds(Spec.FalseCeilings, TEXT("false ceiling"), TEXT("DuplicateCeilingId"), [](const FHFFalseCeiling& C) { return C.Id; }, Result);
+	CheckDuplicateIds(Spec.Beams, TEXT("beam"), TEXT("DuplicateBeamId"), [](const FHFBeam& B) { return B.Id; }, Result);
+	CheckDuplicateIds(Spec.Columns, TEXT("column"), TEXT("DuplicateColumnId"), [](const FHFColumn& C) { return C.Id; }, Result);
+
+	// -------------------------------------------------------------------------------- beams
+	for (const FHFBeam& Beam : Spec.Beams)
+	{
+		if (Beam.Length() <= UE_KINDA_SMALL_NUMBER)
+		{
+			Result.Add(EHFValidationSeverity::Error, TEXT("ZeroLengthBeam"), Beam.Id,
+				FString::Printf(TEXT("Beam '%s' has zero length: start and end are both (%.1f, %.1f)."),
+					*Describe(Beam.Id), Beam.Start.X, Beam.Start.Y));
+		}
+
+		if (Beam.Width <= 0.0 || Beam.Depth <= 0.0)
+		{
+			Result.Add(EHFValidationSeverity::Error, TEXT("NonPositiveBeamSize"), Beam.Id,
+				FString::Printf(TEXT("Beam '%s' is %.2f wide by %.2f deep; both must be greater than zero."),
+					*Describe(Beam.Id), Beam.Width, Beam.Depth));
+			continue;
+		}
+
+		if (Beam.Depth >= Beam.SoffitZ)
+		{
+			Result.Add(EHFValidationSeverity::Error, TEXT("BeamDepthExceedsStorey"), Beam.Id,
+				FString::Printf(TEXT("Beam '%s' hangs %.1f below a soffit at %.1f; it would reach the floor."),
+					*Describe(Beam.Id), Beam.Depth, Beam.SoffitZ));
+		}
+		else if (Beam.ClearHeight() < MinHeadroomCm)
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("BeamLowHeadroom"), Beam.Id,
+				FString::Printf(TEXT("Beam '%s' leaves %.1f clear beneath it, below the %.0f usually treated as minimum headroom."),
+					*Describe(Beam.Id), Beam.ClearHeight(), MinHeadroomCm));
+		}
+	}
+
+	// ------------------------------------------------------------------------------ columns
+	for (const FHFColumn& Column : Spec.Columns)
+	{
+		if (Column.Size.X <= 0.0 || Column.Size.Y <= 0.0)
+		{
+			Result.Add(EHFValidationSeverity::Error, TEXT("NonPositiveColumnSize"), Column.Id,
+				FString::Printf(TEXT("Column '%s' is %.2f x %.2f in plan; both dimensions must be greater than zero."),
+					*Describe(Column.Id), Column.Size.X, Column.Size.Y));
+		}
+
+		if (Column.Height <= 0.0)
+		{
+			Result.Add(EHFValidationSeverity::Error, TEXT("NonPositiveColumnHeight"), Column.Id,
+				FString::Printf(TEXT("Column '%s' has height %.2f; must be greater than zero."),
+					*Describe(Column.Id), Column.Height));
+		}
+	}
 
 	// -------------------------------------------------------------------------------- walls
 	for (const FHFWall& Wall : Spec.Walls)
@@ -403,6 +455,37 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 			Result.Add(EHFValidationSeverity::Error, TEXT("MissingCeilingBand"), Ceiling.Id,
 				FString::Printf(TEXT("False ceiling '%s' is a perimeter style but has band width %.2f; it would generate nothing."),
 					*Describe(Ceiling.Id), Ceiling.BandWidth));
+		}
+
+		// The whole point of a false ceiling here is to conceal the beams crossing the room. A
+		// ceiling shallower than the deepest beam would leave it hanging through the finished
+		// soffit, which is the single most common mistake when a ceiling drop is picked by eye.
+		if (const FHFBeam* Beam = Spec.DeepestBeamOverRoom(Ceiling.RoomId))
+		{
+			if (Ceiling.Drop + UE_KINDA_SMALL_NUMBER < Beam->Depth)
+			{
+				// A peripheral band leaves the centre of the room at slab height, so it conceals
+				// nothing mid-span. It is only excusable when a bulkhead in the same room boxes
+				// the beam in - which is exactly how this is detailed in practice.
+				const bool bIsPerimeterOnly =
+					Ceiling.Style == EHFCeilingStyle::Peripheral ||
+					Ceiling.Style == EHFCeilingStyle::Cove;
+
+				const bool bBulkheadCoversIt = Spec.FalseCeilings.ContainsByPredicate(
+					[&Ceiling, Beam](const FHFFalseCeiling& Other)
+					{
+						return Other.RoomId == Ceiling.RoomId
+							&& Other.Style == EHFCeilingStyle::Bulkhead
+							&& Other.Drop + UE_KINDA_SMALL_NUMBER >= Beam->Depth;
+					});
+
+				if (!(bIsPerimeterOnly && bBulkheadCoversIt))
+				{
+					Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingDoesNotClearBeam"), Ceiling.Id,
+						FString::Printf(TEXT("False ceiling '%s' drops %.1f but beam '%s' over room '%s' hangs %.1f; the beam would show through the soffit. Deepen the ceiling or add a bulkhead over the beam."),
+							*Describe(Ceiling.Id), Ceiling.Drop, *Describe(Beam->Id), *Describe(Room->Id), Beam->Depth));
+				}
+			}
 		}
 
 		if (Ceiling.Style == EHFCeilingStyle::Bulkhead && Ceiling.ExplicitPolygon.Num() < 3)

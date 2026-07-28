@@ -39,6 +39,14 @@ DASH_HIDDEN = "10 7"
 DASH_CEILING = "16 8"
 DASH_FINE = "5 5"
 
+# Ceiling-mounted items belong on the reflected ceiling plan, not the furniture layout.
+CEILING_MOUNTED = ("CeilingFan", "LightFixture")
+
+# Everything the electrical sheet is responsible for. Kept in one place so the furniture layout
+# and the electrical layout cannot disagree about which is which.
+ELECTRICAL_TYPES = ("PowerSocket", "SwitchPlate", "DistributionBoard", "ACIndoorUnit",
+                    "ACOutdoorUnit", "Geyser", "ExhaustFan", "CeilingFan", "LightFixture")
+
 
 # ------------------------------------------------------------------------------- spec accessors
 
@@ -313,6 +321,51 @@ def draw_openings(c, spec, view, show_swings=True):
                 c.arc(view(hinge), view.s(width), lo, hi, width=1.0, color=GREY, dash=DASH_FINE)
 
 
+def column_polygon(col):
+    cx, cy = col["position"]["x"], col["position"]["y"]
+    hw, hd = col["size"]["x"] / 2.0, col["size"]["y"] / 2.0
+    rot = col.get("rotationDegrees", 0.0)
+    return [_rot(cx + u * hw, cy + v * hd, cx, cy, rot)
+            for u, v in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+
+
+def draw_columns(c, spec, view):
+    """Columns are drawn over the walls and cross-hatched, the way a structural plan marks them."""
+    for col in spec.get("columns", []):
+        poly = [view(p) for p in column_polygon(col)]
+        c.polygon(poly, fill=(70, 70, 70), stroke=BLACK, width=1.4)
+        # Diagonal ticks read as concrete even at small scale.
+        c.line(poly[0], poly[2], width=0.9, color=WHITE)
+        c.line(poly[1], poly[3], width=0.9, color=WHITE)
+
+
+def draw_beams(c, spec, view, label=True):
+    """Beams are above the cut plane, so they are hidden line - long dash, as on a real RCP."""
+    for beam in spec.get("beams", []):
+        (x1, y1), (x2, y2) = pt(beam["start"]), pt(beam["end"])
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            continue
+        nx, ny = -dy / length, dx / length
+        h = beam["width"] / 2.0
+
+        for side in (-1.0, 1.0):
+            c.line(view((x1 + nx * h * side, y1 + ny * h * side)),
+                   view((x2 + nx * h * side, y2 + ny * h * side)),
+                   width=1.3, color=ACCENT, dash=DASH_CEILING)
+
+        if label:
+            mx, my = view(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+            angle = math.degrees(math.atan2(dy, dx))
+            if angle > 90:
+                angle -= 180
+            elif angle < -90:
+                angle += 180
+            c.text((mx, my), f"BEAM {int(round(beam['width']))}x{int(round(beam['depth']))}",
+                   size=10, anchor="mm", color=ACCENT, rotate=angle)
+
+
 def draw_room_labels(c, spec, view, with_area=True):
     for r in spec["rooms"]:
         x0, y0, x1, y1 = room_bounds(r)
@@ -518,6 +571,78 @@ def draw_fixture_plan(c, fx, view):
         c.polyline([f.p(-0.5 + i / 12.0, 0.4 * math.sin(i * 1.4)) for i in range(13)],
                    width=1.2, color=GREY)
 
+    # ------------------------------------------------------------------ electrical services
+    elif kind == "PowerSocket":
+        # Conventional plan symbol: a half-disc on the wall with a stem.
+        cp = f.p(0.0, 0.0)
+        r = max(4.0, view.s(150))
+        c.circle(cp, r, fill=WHITE, stroke=ACCENT, width=1.4)
+        c.line((cp[0] - r, cp[1]), (cp[0] + r, cp[1]), width=1.2, color=ACCENT)
+        c.line((cp[0], cp[1]), (cp[0], cp[1] - r * 1.9), width=1.2, color=ACCENT)
+        c.text((cp[0] + r * 1.4, cp[1] + r * 1.4), str(params.get("gangCount", 2)),
+               size=10, anchor="lm", color=ACCENT)
+
+    elif kind == "DistributionBoard":
+        c.polygon(outline, fill=WHITE, stroke=ACCENT, width=1.8)
+        cp = f.p(0.0, 0.0)
+        c.text((cp[0], cp[1]), "DB", size=12, anchor="mm", bold=True, color=ACCENT)
+
+    elif kind == "ACIndoorUnit":
+        box(w=1.6)
+        for v in (-0.15, 0.15):
+            c.line(f.p(-0.45, v), f.p(0.45, v), width=0.8, color=LIGHT)
+        c.text(f.p(0.0, -0.9), "AC", size=11, anchor="mm", color=ACCENT)
+
+    elif kind == "ACOutdoorUnit":
+        box(w=1.6)
+        c.circle(f.p(0.0, 0.0), max(4.0, view.s(min(f.w, f.d) * 0.35)), stroke=FURNITURE, width=1.2)
+        c.text(f.p(0.0, -0.85), "ODU", size=10, anchor="mm", color=GREY)
+
+    elif kind == "Geyser":
+        c.circle(f.p(0.0, 0.0), max(5.0, view.s(min(f.w, f.d) * 0.5)),
+                 fill=WHITE, stroke=FURNITURE, width=1.4)
+        c.text(f.p(0.0, 0.0), "G", size=11, anchor="mm", bold=True, color=FURNITURE)
+
+    elif kind == "ExhaustFan":
+        cp = f.p(0.0, 0.0)
+        r = max(4.0, view.s(180))
+        c.circle(cp, r, fill=WHITE, stroke=ACCENT, width=1.3)
+        for a in (45, 135, 225, 315):
+            t = math.radians(a)
+            c.line(cp, (cp[0] + r * math.cos(t), cp[1] - r * math.sin(t)), width=1.0, color=ACCENT)
+        c.text((cp[0] + r * 1.5, cp[1]), "EF", size=10, anchor="lm", color=ACCENT)
+
+    # ---------------------------------------------------------------- architectural fittings
+    elif kind == "ShoeRack":
+        box()
+        _divisions(c, f, max(params.get("shutterCount", 2), 2), along_width=f.w >= f.d)
+
+    elif kind == "Pelmet":
+        box(dash=DASH_HIDDEN, w=1.0)
+
+    elif kind == "Mirror":
+        c.polygon(outline, fill=(232, 240, 245), stroke=FURNITURE, width=1.2)
+        # Diagonal streaks are the usual mark for glass in plan.
+        for t in (-0.3, 0.0, 0.3):
+            c.line(f.p(t - 0.12, -0.5), f.p(t + 0.12, 0.5), width=0.7, color=LIGHT)
+
+    elif kind == "TowelRail":
+        c.line(f.p(-0.5, 0.0), f.p(0.5, 0.0), width=2.0, color=FURNITURE)
+        for u in (-0.5, 0.5):
+            c.line(f.p(u, -0.5), f.p(u, 0.5), width=1.2, color=FURNITURE)
+
+    elif kind == "Railing":
+        c.line(f.p(-0.5, 0.0), f.p(0.5, 0.0), width=1.6, color=FURNITURE)
+        n = max(4, int(f.w / 300.0))
+        for i in range(n + 1):
+            u = -0.5 + i / n
+            c.line(f.p(u, -0.4), f.p(u, 0.4), width=0.8, color=GREY)
+
+    elif kind == "WallNiche":
+        box(dash=DASH_HIDDEN, w=1.0)
+        _divisions(c, f, max(params.get("shelfCount", 2), 2),
+                   along_width=f.w >= f.d, dash=DASH_HIDDEN, color=GREY)
+
     else:
         box(dash=DASH_FINE)
 
@@ -531,11 +656,12 @@ def sheet_layout(spec, view, with_furniture, sheet_no, total):
 
     draw_walls(c, spec, view)
     draw_openings(c, spec, view)
+    draw_columns(c, spec, view)
 
     if with_furniture:
         for fx in spec["fixtures"]:
-            if fx["type"] in ("CeilingFan", "LightFixture"):
-                continue      # ceiling-mounted items belong on the reflected ceiling plan
+            if fx["type"] in CEILING_MOUNTED:
+                continue
             draw_fixture_plan(c, fx, view)
 
     draw_room_labels(c, spec, view, with_area=not with_furniture)
@@ -577,10 +703,14 @@ def opening_schedule(c, spec, x, y):
     c.line((x, row + 2), (x + 430, row + 2), width=1.2)
 
 
+def spaced(kind):
+    return "".join((" " + ch) if ch.isupper() else ch for ch in kind).strip().upper()
+
+
 def legend(c, spec, x, y):
     counts = {}
     for fx in spec["fixtures"]:
-        if fx["type"] in ("CeilingFan", "LightFixture"):
+        if fx["type"] in CEILING_MOUNTED:
             continue
         counts[fx["type"]] = counts.get(fx["type"], 0) + 1
 
@@ -589,10 +719,9 @@ def legend(c, spec, x, y):
 
     row = y + 36
     for kind, n in sorted(counts.items()):
-        label = "".join((" " + ch) if ch.isupper() else ch for ch in kind).strip().upper()
-        c.text((x, row), label, size=12, anchor="lt")
-        c.text((x + 320, row), f"x{n}", size=12, anchor="lt", color=DIM)
-        row += 22
+        c.text((x, row), spaced(kind), size=11, anchor="lt")
+        c.text((x + 320, row), f"x{n}", size=11, anchor="lt", color=DIM)
+        row += 19
 
 
 # ----------------------------------------------------------------------------------- sheet 3
@@ -605,6 +734,10 @@ def sheet_ceiling(spec, view, sheet_no, total):
     # Walls in outline only: on an RCP the ceiling is the subject, the shell is reference.
     draw_walls(c, spec, view, fill=(225, 225, 225))
     draw_openings(c, spec, view, show_swings=False)
+    draw_columns(c, spec, view)
+
+    # Beams first, so the ceiling regions that conceal them read as being in front.
+    draw_beams(c, spec, view)
 
     rooms = {r["id"]: r for r in spec["rooms"]}
     labelled: set[str] = set()
@@ -674,6 +807,111 @@ def sheet_ceiling(spec, view, sheet_no, total):
     return c
 
 
+def sheet_electrical(spec, view, sheet_no, total):
+    """Electrical layout: points, switching and services, on a deliberately faint shell."""
+    title = "Electrical Layout Plan"
+    c = Canvas(SHEET_W, SHEET_H, f"{spec.get('name')} - {title}")
+    sheet_frame(c, sheet_no, title, spec, total)
+
+    # The shell is reference here; the services are the subject.
+    draw_walls(c, spec, view, fill=(225, 225, 225))
+    draw_openings(c, spec, view, show_swings=False)
+    draw_columns(c, spec, view)
+
+    for fx in spec["fixtures"]:
+        if fx["type"] in ELECTRICAL_TYPES:
+            draw_fixture_plan(c, fx, view)
+
+    # Recessed lights are recorded on the ceilings, not as fixtures, but they are electrical
+    # points and belong on this sheet too.
+    for fc in spec.get("falseCeilings", []):
+        for lp in fc.get("lightPositions", []):
+            p = view(pt(lp))
+            r = max(4.0, view.s(110))
+            c.circle(p, r, fill=WHITE, stroke=CEILING, width=1.3)
+            c.line((p[0] - r, p[1]), (p[0] + r, p[1]), width=1.0, color=CEILING)
+            c.line((p[0], p[1] - r), (p[0], p[1] + r), width=1.0, color=CEILING)
+
+    for r in spec["rooms"]:
+        x0, y0, x1, y1 = room_bounds(r)
+        cx, cy = view(((x0 + x1) / 2.0, (y0 + y1) / 2.0))
+        c.text((cx, cy), r["name"].upper(), size=14, anchor="mm", bold=True, color=GREY)
+
+    north_arrow(c, PLAN_AREA[2] - 40, PLAN_AREA[1] + 46)
+    scale_bar(c, view, INNER + 40, SHEET_H - INNER - 66)
+    electrical_legend(c, spec, INNER + 40, PLAN_AREA[1] + 20)
+    return c
+
+
+def electrical_legend(c, spec, x, y):
+    c.text((x, y), "ELECTRICAL LEGEND", size=15, anchor="lt", bold=True)
+    c.line((x, y + 24), (x + 380, y + 24), width=1.2)
+
+    def socket(yy):
+        c.circle((x + 20, yy), 8, fill=WHITE, stroke=ACCENT, width=1.4)
+        c.line((x + 12, yy), (x + 28, yy), width=1.2, color=ACCENT)
+        c.line((x + 20, yy), (x + 20, yy - 15), width=1.2, color=ACCENT)
+
+    def exhaust(yy):
+        c.circle((x + 20, yy), 8, fill=WHITE, stroke=ACCENT, width=1.3)
+        for a in (45, 135, 225, 315):
+            t = math.radians(a)
+            c.line((x + 20, yy), (x + 20 + 8 * math.cos(t), yy - 8 * math.sin(t)),
+                   width=1.0, color=ACCENT)
+
+    def fan(yy):
+        c.circle((x + 20, yy), 11, stroke=CEILING, width=1.2, dash=DASH_CEILING)
+        for a in (90, 210, 330):
+            t = math.radians(a)
+            c.line((x + 20, yy), (x + 20 + 11 * math.cos(t), yy - 11 * math.sin(t)),
+                   width=1.6, color=CEILING)
+
+    def light(yy):
+        c.circle((x + 20, yy), 8, fill=WHITE, stroke=CEILING, width=1.3)
+        c.line((x + 12, yy), (x + 28, yy), width=1.0, color=CEILING)
+        c.line((x + 20, yy - 8), (x + 20, yy + 8), width=1.0, color=CEILING)
+
+    rows = [
+        ("Power socket (gang count noted)", socket),
+        ("Switch plate", lambda yy: c.circle((x + 20, yy), 8, fill=WHITE, stroke=ACCENT, width=1.4)),
+        ("Distribution board", lambda yy: (c.rect(x + 6, yy - 8, 28, 16, fill=WHITE, stroke=ACCENT, width=1.6),
+                                           c.text((x + 20, yy), "DB", size=9, anchor="mm", bold=True, color=ACCENT))),
+        ("Split AC indoor unit", lambda yy: c.rect(x + 4, yy - 6, 32, 12, stroke=FURNITURE, width=1.5)),
+        ("AC outdoor unit", lambda yy: (c.rect(x + 4, yy - 8, 32, 16, stroke=FURNITURE, width=1.5),
+                                        c.circle((x + 20, yy), 5, stroke=FURNITURE, width=1.0))),
+        ("Water heater", lambda yy: (c.circle((x + 20, yy), 9, fill=WHITE, stroke=FURNITURE, width=1.4),
+                                     c.text((x + 20, yy), "G", size=10, anchor="mm", bold=True, color=FURNITURE))),
+        ("Exhaust fan", exhaust),
+        ("Ceiling fan point", fan),
+        ("Recessed light point", light),
+    ]
+
+    row = y + 46
+    for label, draw_symbol in rows:
+        draw_symbol(row)
+        c.text((x + 46, row), label.upper(), size=11, anchor="lm")
+        row += 28
+
+    # Point count per room, which is what an electrician actually works from.
+    counts = {}
+    for fx in spec["fixtures"]:
+        if fx["type"] in ELECTRICAL_TYPES:
+            counts[fx["type"]] = counts.get(fx["type"], 0) + 1
+
+    light_points = sum(len(fc.get("lightPositions", [])) for fc in spec.get("falseCeilings", []))
+    if light_points:
+        counts["RecessedLight"] = light_points
+
+    row += 16
+    c.text((x, row), "POINT SCHEDULE", size=14, anchor="lt", bold=True)
+    c.line((x, row + 22), (x + 380, row + 22), width=1.2)
+    row += 34
+    for kind, n in sorted(counts.items()):
+        c.text((x, row), spaced(kind), size=11, anchor="lt")
+        c.text((x + 340, row), f"x{n}", size=11, anchor="lt", color=DIM)
+        row += 19
+
+
 def _inset_rect(poly, amount):
     """Insets an axis-aligned polygon by its bounding box. Enough for the rectangular rooms in
     this plan; true polygon offset lives in the C++ generator, where concave rooms matter."""
@@ -704,6 +942,11 @@ def ceiling_legend(c, x, y):
                                     c.line((x + 23, yy), (x + 13, yy + 6), width=1.6, color=CEILING),
                                     c.line((x + 23, yy), (x + 33, yy + 6), width=1.6, color=CEILING))),
         ("Switch plate", lambda yy: c.circle((x + 23, yy), 8, fill=WHITE, stroke=ACCENT, width=1.4)),
+        ("Beam over (width x depth)", lambda yy: (c.line((x, yy - 4), (x + 46, yy - 4), width=1.3, color=ACCENT, dash=DASH_CEILING),
+                                                  c.line((x, yy + 4), (x + 46, yy + 4), width=1.3, color=ACCENT, dash=DASH_CEILING))),
+        ("Column", lambda yy: (c.rect(x + 12, yy - 8, 22, 16, fill=(70, 70, 70), stroke=BLACK, width=1.2),
+                               c.line((x + 12, yy - 8), (x + 34, yy + 8), width=0.9, color=WHITE),
+                               c.line((x + 34, yy - 8), (x + 12, yy + 8), width=0.9, color=WHITE))),
     ]
 
     row = y + 46
@@ -765,7 +1008,7 @@ def fixtures_on_segment(spec, room, seg, depth=1400.0):
     found = []
 
     for fx in spec["fixtures"]:
-        if fx["roomId"] != room["id"] or fx["type"] in ("CeilingFan", "LightFixture"):
+        if fx["roomId"] != room["id"] or fx["type"] in CEILING_MOUNTED:
             continue
 
         px, py = fx["position"]["x"], fx["position"]["y"]
@@ -894,8 +1137,62 @@ def draw_fixture_elevation(c, fx, x0, x1, floor_y, px_per_mm):
             c.circle(((x0 + x1) / 2.0, (top + base) / 2.0), min(w, abs(base - top)) * 0.22,
                      stroke=FURNITURE, width=1.0)
 
-    elif kind == "SwitchPlate":
+    elif kind in ("SwitchPlate", "PowerSocket", "DistributionBoard"):
         panel(x0, x1, top, base, color=ACCENT, width=1.4)
+        gangs = params.get("gangCount", 0)
+        if gangs > 1 and (x1 - x0) > 12:
+            _divisions_px(c, x0, x1, top, base, gangs)
+
+    elif kind == "ACIndoorUnit":
+        panel(x0, x1, top, base, width=1.6)
+        for t in (0.35, 0.65):
+            yy = top + (base - top) * t
+            c.line((x0 + 4, yy), (x1 - 4, yy), width=0.9, color=LIGHT)
+
+    elif kind == "ACOutdoorUnit":
+        panel(x0, x1, top, base, width=1.5)
+        c.circle(((x0 + x1) / 2.0, (top + base) / 2.0),
+                 min(x1 - x0, abs(base - top)) * 0.3, stroke=FURNITURE, width=1.1)
+
+    elif kind == "Geyser":
+        panel(x0, x1, top, base, width=1.4)
+        c.text(((x0 + x1) / 2.0, (top + base) / 2.0), "G", size=11, anchor="mm",
+               bold=True, color=FURNITURE)
+
+    elif kind == "ExhaustFan":
+        c.circle(((x0 + x1) / 2.0, (top + base) / 2.0),
+                 min(x1 - x0, abs(base - top)) * 0.45, fill=WHITE, stroke=ACCENT, width=1.3)
+
+    elif kind == "Mirror":
+        c.polygon([(x0, top), (x1, top), (x1, base), (x0, base)],
+                  fill=(232, 240, 245), stroke=FURNITURE, width=1.3)
+        for t in (0.2, 0.5, 0.8):
+            xx = x0 + (x1 - x0) * t
+            c.line((xx - 10, base), (xx + 10, top), width=0.8, color=LIGHT)
+
+    elif kind == "TowelRail":
+        c.line((x0, (top + base) / 2.0), (x1, (top + base) / 2.0), width=2.2, color=FURNITURE)
+        for xx in (x0, x1):
+            c.line((xx, top), (xx, base), width=1.2, color=FURNITURE)
+
+    elif kind == "Railing":
+        # Balusters between a top rail and the parapet coping.
+        c.line((x0, top), (x1, top), width=2.0, color=FURNITURE)
+        n = max(4, int((x1 - x0) / 22))
+        for i in range(n + 1):
+            xx = x0 + (x1 - x0) * i / n
+            c.line((xx, top), (xx, base), width=1.0, color=GREY)
+
+    elif kind == "Pelmet":
+        panel(x0, x1, top, base, width=1.3)
+        c.line((x0, base), (x1, base), width=1.0, color=GREY)
+
+    elif kind in ("ShoeRack", "WallNiche"):
+        panel(x0, x1, top, base, width=1.3)
+        shelves = max(params.get("shelfCount", 2), 2)
+        for i in range(1, shelves + 1):
+            yy = top + (base - top) * i / (shelves + 1)
+            c.line((x0 + 4, yy), (x1 - 4, yy), width=0.9, color=LIGHT)
 
     else:
         panel(x0, x1, top, base, dash=DASH_FINE, color=LIGHT, width=1.0)
@@ -1056,16 +1353,17 @@ def main():
     elevation_rooms = [r for r in spec["rooms"]
                        if r["type"] in ("Living", "Dining", "Kitchen", "Bedroom", "MasterBedroom",
                                         "Bathroom", "Foyer")]
-    total = 3 + len(elevation_rooms)
+    total = 4 + len(elevation_rooms)
 
     sheets = [
         ("01-blank-layout", lambda n: sheet_layout(spec, view, False, n, total)),
         ("02-furniture-layout", lambda n: sheet_layout(spec, view, True, n, total)),
         ("03-reflected-ceiling-plan", lambda n: sheet_ceiling(spec, view, n, total)),
+        ("04-electrical-layout", lambda n: sheet_electrical(spec, view, n, total)),
     ]
     for i, room in enumerate(elevation_rooms):
         slug = room["name"].lower().replace(" / ", "-").replace(" ", "-")
-        sheets.append((f"{4 + i:02d}-elevations-{slug}",
+        sheets.append((f"{5 + i:02d}-elevations-{slug}",
                        (lambda r: (lambda n: sheet_elevations(spec, r, n, total)))(room)))
 
     for i, (name, build) in enumerate(sheets, start=1):

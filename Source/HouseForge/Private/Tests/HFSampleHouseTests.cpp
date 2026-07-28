@@ -48,12 +48,31 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 	FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 
 	TestEqual(TEXT("Spec is authored in millimetres"), Spec.Units, EHFUnits::Millimeters);
-	TestEqual(TEXT("Sample has 10 rooms"), Spec.Rooms.Num(), 10);
-	TestEqual(TEXT("Sample has 15 walls"), Spec.Walls.Num(), 15);
-	TestEqual(TEXT("Sample has 7 false ceilings"), Spec.FalseCeilings.Num(), 7);
+	TestEqual(TEXT("Sample has 12 rooms"), Spec.Rooms.Num(), 12);
+	TestEqual(TEXT("Sample has 21 walls"), Spec.Walls.Num(), 21);
+	TestEqual(TEXT("Sample has 8 false ceilings"), Spec.FalseCeilings.Num(), 8);
+	TestEqual(TEXT("Sample has 9 beams"), Spec.Beams.Num(), 9);
+	TestEqual(TEXT("Sample has 11 columns"), Spec.Columns.Num(), 11);
 
 	TestTrue(TEXT("Sample has a main entrance door"), Spec.Openings.ContainsByPredicate(
 		[](const FHFOpening& O) { return O.Id == FName(TEXT("D_Main")); }));
+
+	// Three balconies: living, master bedroom, and the utility wash area.
+	int32 Balconies = 0;
+	for (const FHFRoom& Room : Spec.Rooms)
+	{
+		Balconies += (Room.Type == EHFRoomType::Balcony) ? 1 : 0;
+	}
+	TestEqual(TEXT("Sample has 3 balconies"), Balconies, 3);
+
+	// Only the living room's cross beam actually spans a room interior; every other beam sits
+	// over a wall, where the wall itself conceals it.
+	const FHFBeam* LivingBeam = Spec.DeepestBeamOverRoom(TEXT("R_Living"));
+	TestNotNull(TEXT("The living room's cross beam is detected"), LivingBeam);
+	TestNull(TEXT("Perimeter beams are not reported as crossing the kitchen"),
+		Spec.DeepestBeamOverRoom(TEXT("R_Kitchen")));
+	TestNull(TEXT("Perimeter beams are not reported as crossing the common bathroom"),
+		Spec.DeepestBeamOverRoom(TEXT("R_CBath")));
 
 	// Every room must be reachable by the builder, and every opening must host on a real wall.
 	for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
