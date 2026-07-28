@@ -1,0 +1,2106 @@
+{
+	"schemaVersion": 1,
+	"name": "Sample 2BHK",
+	"sourceDrawing": "Reference/Drawings/Sample2BHK/01-blank-layout.png",
+	"units": "Millimeters",
+	"defaultWallThickness": 115,
+	"defaultWallHeight": 3000,
+	"walls": [
+		{
+			"id": "W_South",
+			"start":
+			{
+				"x": 0,
+				"y": 0
+			},
+			"end":
+			{
+				"x": 10800,
+				"y": 0
+			},
+			"thickness": 230,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": true,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_East",
+			"start":
+			{
+				"x": 10800,
+				"y": 0
+			},
+			"end":
+			{
+				"x": 10800,
+				"y": 8400
+			},
+			"thickness": 230,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": true,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_North",
+			"start":
+			{
+				"x": 10800,
+				"y": 8400
+			},
+			"end":
+			{
+				"x": 0,
+				"y": 8400
+			},
+			"thickness": 230,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": true,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_West",
+			"start":
+			{
+				"x": 0,
+				"y": 8400
+			},
+			"end":
+			{
+				"x": 0,
+				"y": 0
+			},
+			"thickness": 230,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": true,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Mid_Lower",
+			"start":
+			{
+				"x": 0,
+				"y": 3600
+			},
+			"end":
+			{
+				"x": 10800,
+				"y": 3600
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Mid_Upper",
+			"start":
+			{
+				"x": 0,
+				"y": 5400
+			},
+			"end":
+			{
+				"x": 10800,
+				"y": 5400
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Living_Bed2",
+			"start":
+			{
+				"x": 6600,
+				"y": 0
+			},
+			"end":
+			{
+				"x": 6600,
+				"y": 3600
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Foyer_Corr",
+			"start":
+			{
+				"x": 1800,
+				"y": 3600
+			},
+			"end":
+			{
+				"x": 1800,
+				"y": 5400
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Corr_CBath",
+			"start":
+			{
+				"x": 4200,
+				"y": 3600
+			},
+			"end":
+			{
+				"x": 4200,
+				"y": 5400
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_CBath_MBath",
+			"start":
+			{
+				"x": 6600,
+				"y": 3600
+			},
+			"end":
+			{
+				"x": 6600,
+				"y": 5400
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_MBath_Util",
+			"start":
+			{
+				"x": 8700,
+				"y": 3600
+			},
+			"end":
+			{
+				"x": 8700,
+				"y": 5400
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Kitchen_MBed",
+			"start":
+			{
+				"x": 4200,
+				"y": 5400
+			},
+			"end":
+			{
+				"x": 4200,
+				"y": 8400
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Balc_South",
+			"start":
+			{
+				"x": 0,
+				"y": -1500
+			},
+			"end":
+			{
+				"x": 4200,
+				"y": -1500
+			},
+			"thickness": 115,
+			"height": 1100,
+			"baseZ": 0,
+			"bIsExternal": true,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Balc_West",
+			"start":
+			{
+				"x": 0,
+				"y": -1500
+			},
+			"end":
+			{
+				"x": 0,
+				"y": 0
+			},
+			"thickness": 115,
+			"height": 1100,
+			"baseZ": 0,
+			"bIsExternal": true,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Balc_East",
+			"start":
+			{
+				"x": 4200,
+				"y": -1500
+			},
+			"end":
+			{
+				"x": 4200,
+				"y": 0
+			},
+			"thickness": 115,
+			"height": 1100,
+			"baseZ": 0,
+			"bIsExternal": true,
+			"surfaceRole": "WallPaint"
+		}
+	],
+	"openings": [
+		{
+			"id": "D_Main",
+			"wallId": "W_West",
+			"offsetAlongWall": 3900,
+			"width": 1050,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "InwardRight"
+		},
+		{
+			"id": "D_Balcony",
+			"wallId": "W_South",
+			"offsetAlongWall": 2100,
+			"width": 1800,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "SlidingDoor",
+			"swing": "None"
+		},
+		{
+			"id": "Win_Living",
+			"wallId": "W_South",
+			"offsetAlongWall": 5400,
+			"width": 1500,
+			"height": 1350,
+			"sillHeight": 900,
+			"kind": "Window",
+			"swing": "None"
+		},
+		{
+			"id": "Win_Bed2_S",
+			"wallId": "W_South",
+			"offsetAlongWall": 8700,
+			"width": 1500,
+			"height": 1350,
+			"sillHeight": 900,
+			"kind": "Window",
+			"swing": "None"
+		},
+		{
+			"id": "Win_Bed2_E",
+			"wallId": "W_East",
+			"offsetAlongWall": 1800,
+			"width": 1200,
+			"height": 1350,
+			"sillHeight": 900,
+			"kind": "Window",
+			"swing": "None"
+		},
+		{
+			"id": "Win_MBed_N",
+			"wallId": "W_North",
+			"offsetAlongWall": 3600,
+			"width": 1800,
+			"height": 1350,
+			"sillHeight": 900,
+			"kind": "Window",
+			"swing": "None"
+		},
+		{
+			"id": "Win_Kitchen",
+			"wallId": "W_North",
+			"offsetAlongWall": 8700,
+			"width": 1200,
+			"height": 1350,
+			"sillHeight": 900,
+			"kind": "Window",
+			"swing": "None"
+		},
+		{
+			"id": "Vent_CBath",
+			"wallId": "W_Mid_Upper",
+			"offsetAlongWall": 5400,
+			"width": 600,
+			"height": 450,
+			"sillHeight": 2100,
+			"kind": "Ventilator",
+			"swing": "None"
+		},
+		{
+			"id": "Vent_MBath",
+			"wallId": "W_Mid_Upper",
+			"offsetAlongWall": 7650,
+			"width": 600,
+			"height": 450,
+			"sillHeight": 2100,
+			"kind": "Ventilator",
+			"swing": "None"
+		},
+		{
+			"id": "D_Living",
+			"wallId": "W_Mid_Lower",
+			"offsetAlongWall": 3000,
+			"width": 900,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "InwardLeft"
+		},
+		{
+			"id": "D_Bed2",
+			"wallId": "W_Mid_Lower",
+			"offsetAlongWall": 7200,
+			"width": 900,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "InwardRight"
+		},
+		{
+			"id": "D_Kitchen",
+			"wallId": "W_Mid_Upper",
+			"offsetAlongWall": 3000,
+			"width": 900,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "InwardLeft"
+		},
+		{
+			"id": "D_MBed",
+			"wallId": "W_Mid_Upper",
+			"offsetAlongWall": 5100,
+			"width": 900,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "InwardRight"
+		},
+		{
+			"id": "D_CBath",
+			"wallId": "W_Corr_CBath",
+			"offsetAlongWall": 900,
+			"width": 750,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "InwardLeft"
+		},
+		{
+			"id": "D_MBath",
+			"wallId": "W_CBath_MBath",
+			"offsetAlongWall": 900,
+			"width": 750,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "InwardLeft"
+		},
+		{
+			"id": "D_Utility",
+			"wallId": "W_MBath_Util",
+			"offsetAlongWall": 900,
+			"width": 750,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "InwardLeft"
+		}
+	],
+	"rooms": [
+		{
+			"id": "R_Living",
+			"name": "Living / Dining",
+			"type": "Living",
+			"boundary": [
+				{
+					"x": 0,
+					"y": 0
+				},
+				{
+					"x": 6600,
+					"y": 0
+				},
+				{
+					"x": 6600,
+					"y": 3600
+				},
+				{
+					"x": 0,
+					"y": 3600
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 100
+		},
+		{
+			"id": "R_Bed2",
+			"name": "Bedroom 2",
+			"type": "Bedroom",
+			"boundary": [
+				{
+					"x": 6600,
+					"y": 0
+				},
+				{
+					"x": 10800,
+					"y": 0
+				},
+				{
+					"x": 10800,
+					"y": 3600
+				},
+				{
+					"x": 6600,
+					"y": 3600
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 100
+		},
+		{
+			"id": "R_Foyer",
+			"name": "Foyer",
+			"type": "Foyer",
+			"boundary": [
+				{
+					"x": 0,
+					"y": 3600
+				},
+				{
+					"x": 1800,
+					"y": 3600
+				},
+				{
+					"x": 1800,
+					"y": 5400
+				},
+				{
+					"x": 0,
+					"y": 5400
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 100
+		},
+		{
+			"id": "R_Corridor",
+			"name": "Corridor",
+			"type": "Corridor",
+			"boundary": [
+				{
+					"x": 1800,
+					"y": 3600
+				},
+				{
+					"x": 4200,
+					"y": 3600
+				},
+				{
+					"x": 4200,
+					"y": 5400
+				},
+				{
+					"x": 1800,
+					"y": 5400
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 100
+		},
+		{
+			"id": "R_CBath",
+			"name": "Common Bathroom",
+			"type": "Bathroom",
+			"boundary": [
+				{
+					"x": 4200,
+					"y": 3600
+				},
+				{
+					"x": 6600,
+					"y": 3600
+				},
+				{
+					"x": 6600,
+					"y": 5400
+				},
+				{
+					"x": 4200,
+					"y": 5400
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 0
+		},
+		{
+			"id": "R_MBath",
+			"name": "Master Bathroom",
+			"type": "Bathroom",
+			"boundary": [
+				{
+					"x": 6600,
+					"y": 3600
+				},
+				{
+					"x": 8700,
+					"y": 3600
+				},
+				{
+					"x": 8700,
+					"y": 5400
+				},
+				{
+					"x": 6600,
+					"y": 5400
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 0
+		},
+		{
+			"id": "R_Utility",
+			"name": "Utility",
+			"type": "Utility",
+			"boundary": [
+				{
+					"x": 8700,
+					"y": 3600
+				},
+				{
+					"x": 10800,
+					"y": 3600
+				},
+				{
+					"x": 10800,
+					"y": 5400
+				},
+				{
+					"x": 8700,
+					"y": 5400
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 0
+		},
+		{
+			"id": "R_Kitchen",
+			"name": "Kitchen",
+			"type": "Kitchen",
+			"boundary": [
+				{
+					"x": 0,
+					"y": 5400
+				},
+				{
+					"x": 4200,
+					"y": 5400
+				},
+				{
+					"x": 4200,
+					"y": 8400
+				},
+				{
+					"x": 0,
+					"y": 8400
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 100
+		},
+		{
+			"id": "R_MBed",
+			"name": "Master Bedroom",
+			"type": "MasterBedroom",
+			"boundary": [
+				{
+					"x": 4200,
+					"y": 5400
+				},
+				{
+					"x": 10800,
+					"y": 5400
+				},
+				{
+					"x": 10800,
+					"y": 8400
+				},
+				{
+					"x": 4200,
+					"y": 8400
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 100
+		},
+		{
+			"id": "R_Balcony",
+			"name": "Balcony",
+			"type": "Balcony",
+			"boundary": [
+				{
+					"x": 0,
+					"y": -1500
+				},
+				{
+					"x": 4200,
+					"y": -1500
+				},
+				{
+					"x": 4200,
+					"y": 0
+				},
+				{
+					"x": 0,
+					"y": 0
+				}
+			],
+			"floorZ": 0,
+			"ceilingHeight": 3000,
+			"floorRole": "FloorFinish",
+			"skirtingHeight": 0
+		}
+	],
+	"falseCeilings": [
+		{
+			"id": "FC_Living",
+			"roomId": "R_Living",
+			"style": "Cove",
+			"drop": 200,
+			"bandWidth": 600,
+			"cove":
+			{
+				"channelWidth": 80,
+				"lipHeight": 50,
+				"setback": 20,
+				"bHasLedStrip": true
+			},
+			"explicitPolygon": [],
+			"lightPositions": [
+				{
+					"x": 1200,
+					"y": 1200
+				},
+				{
+					"x": 1200,
+					"y": 2400
+				},
+				{
+					"x": 5400,
+					"y": 1200
+				},
+				{
+					"x": 5400,
+					"y": 2400
+				}
+			]
+		},
+		{
+			"id": "FC_MBed",
+			"roomId": "R_MBed",
+			"style": "Peripheral",
+			"drop": 200,
+			"bandWidth": 600,
+			"cove":
+			{
+				"channelWidth": 80,
+				"lipHeight": 50,
+				"setback": 20,
+				"bHasLedStrip": false
+			},
+			"explicitPolygon": [],
+			"lightPositions": [
+				{
+					"x": 5100,
+					"y": 6300
+				},
+				{
+					"x": 8100,
+					"y": 6300
+				}
+			]
+		},
+		{
+			"id": "FC_Bed2",
+			"roomId": "R_Bed2",
+			"style": "Peripheral",
+			"drop": 200,
+			"bandWidth": 500,
+			"cove":
+			{
+				"channelWidth": 80,
+				"lipHeight": 50,
+				"setback": 20,
+				"bHasLedStrip": false
+			},
+			"explicitPolygon": [],
+			"lightPositions": [
+				{
+					"x": 7500,
+					"y": 1200
+				},
+				{
+					"x": 9600,
+					"y": 1200
+				}
+			]
+		},
+		{
+			"id": "FC_Kitchen",
+			"roomId": "R_Kitchen",
+			"style": "FullDrop",
+			"drop": 300,
+			"bandWidth": 0,
+			"cove":
+			{
+				"channelWidth": 80,
+				"lipHeight": 50,
+				"setback": 20,
+				"bHasLedStrip": false
+			},
+			"explicitPolygon": [],
+			"lightPositions": [
+				{
+					"x": 900,
+					"y": 6300
+				},
+				{
+					"x": 2700,
+					"y": 6300
+				},
+				{
+					"x": 900,
+					"y": 7800
+				},
+				{
+					"x": 2700,
+					"y": 7800
+				}
+			]
+		},
+		{
+			"id": "FC_CBath",
+			"roomId": "R_CBath",
+			"style": "FullDrop",
+			"drop": 400,
+			"bandWidth": 0,
+			"cove":
+			{
+				"channelWidth": 80,
+				"lipHeight": 50,
+				"setback": 20,
+				"bHasLedStrip": false
+			},
+			"explicitPolygon": [],
+			"lightPositions": [
+				{
+					"x": 5400,
+					"y": 4500
+				}
+			]
+		},
+		{
+			"id": "FC_MBath",
+			"roomId": "R_MBath",
+			"style": "FullDrop",
+			"drop": 400,
+			"bandWidth": 0,
+			"cove":
+			{
+				"channelWidth": 80,
+				"lipHeight": 50,
+				"setback": 20,
+				"bHasLedStrip": false
+			},
+			"explicitPolygon": [],
+			"lightPositions": [
+				{
+					"x": 7650,
+					"y": 4500
+				}
+			]
+		},
+		{
+			"id": "FC_Corridor",
+			"roomId": "R_Corridor",
+			"style": "Bulkhead",
+			"drop": 300,
+			"bandWidth": 0,
+			"cove":
+			{
+				"channelWidth": 10,
+				"lipHeight": 5,
+				"setback": 2,
+				"bHasLedStrip": true
+			},
+			"explicitPolygon": [
+				{
+					"x": 1800,
+					"y": 3600
+				},
+				{
+					"x": 4200,
+					"y": 3600
+				},
+				{
+					"x": 4200,
+					"y": 5400
+				},
+				{
+					"x": 1800,
+					"y": 5400
+				}
+			],
+			"lightPositions": [
+				{
+					"x": 2400,
+					"y": 4500
+				},
+				{
+					"x": 3600,
+					"y": 4500
+				}
+			]
+		}
+	],
+	"fixtures": [
+		{
+			"id": "F_Sofa",
+			"roomId": "R_Living",
+			"type": "Sofa",
+			"label": "3-seater sofa",
+			"position":
+			{
+				"x": 2100,
+				"y": 2900
+			},
+			"rotationDegrees": 180,
+			"footprint":
+			{
+				"x": 2100,
+				"y": 900
+			},
+			"height": 800,
+			"baseZ": 0,
+			"anchorWallId": "W_Mid_Lower",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_CoffeeTable",
+			"roomId": "R_Living",
+			"type": "CoffeeTable",
+			"label": "Coffee table",
+			"position":
+			{
+				"x": 2100,
+				"y": 1800
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1100,
+				"y": 600
+			},
+			"height": 400,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_TVUnit",
+			"roomId": "R_Living",
+			"type": "TVUnit",
+			"label": "TV unit with drawers",
+			"position":
+			{
+				"x": 2100,
+				"y": 400
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1800,
+				"y": 450
+			},
+			"height": 600,
+			"baseZ": 0,
+			"anchorWallId": "W_South",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 3,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 80,
+				"handleStyle": "HandlelessGroove",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_DiningTable",
+			"roomId": "R_Living",
+			"type": "DiningTable",
+			"label": "4-seater dining",
+			"position":
+			{
+				"x": 5100,
+				"y": 1800
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1400,
+				"y": 800
+			},
+			"height": 750,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Fan_Living",
+			"roomId": "R_Living",
+			"type": "CeilingFan",
+			"label": "Ceiling fan",
+			"position":
+			{
+				"x": 3300,
+				"y": 1800
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1200,
+				"y": 1200
+			},
+			"height": 300,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 1200,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_BaseW",
+			"roomId": "R_Kitchen",
+			"type": "KitchenBaseCabinet",
+			"label": "Base units, west run",
+			"position":
+			{
+				"x": 300,
+				"y": 6900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 600,
+				"y": 2400
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "W_West",
+			"params":
+			{
+				"shutterCount": 2,
+				"drawerCount": 3,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 100,
+				"handleStyle": "JProfile",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_BaseN",
+			"roomId": "R_Kitchen",
+			"type": "KitchenBaseCabinet",
+			"label": "Base units, north run",
+			"position":
+			{
+				"x": 2100,
+				"y": 8100
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 3000,
+				"y": 600
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 3,
+				"drawerCount": 2,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 100,
+				"handleStyle": "JProfile",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_CounterW",
+			"roomId": "R_Kitchen",
+			"type": "CounterTop",
+			"label": "Granite counter, west",
+			"position":
+			{
+				"x": 300,
+				"y": 6900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 600,
+				"y": 2400
+			},
+			"height": 40,
+			"baseZ": 850,
+			"anchorWallId": "W_West",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 100,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_CounterN",
+			"roomId": "R_Kitchen",
+			"type": "CounterTop",
+			"label": "Granite counter, north",
+			"position":
+			{
+				"x": 2100,
+				"y": 8100
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 3000,
+				"y": 600
+			},
+			"height": 40,
+			"baseZ": 850,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 100,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_Wall",
+			"roomId": "R_Kitchen",
+			"type": "KitchenWallCabinet",
+			"label": "Wall units, north run",
+			"position":
+			{
+				"x": 2100,
+				"y": 8250
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 3000,
+				"y": 300
+			},
+			"height": 700,
+			"baseZ": 1400,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 4,
+				"drawerCount": 0,
+				"shelfCount": 2,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": true,
+				"upstandHeight": 0,
+				"corniceHeight": 60,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_Sink",
+			"roomId": "R_Kitchen",
+			"type": "Sink",
+			"label": "Double-bowl sink",
+			"position":
+			{
+				"x": 2100,
+				"y": 8100
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 800,
+				"y": 450
+			},
+			"height": 200,
+			"baseZ": 690,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_Hob",
+			"roomId": "R_Kitchen",
+			"type": "Hob",
+			"label": "4-burner hob",
+			"position":
+			{
+				"x": 300,
+				"y": 6300
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 580,
+				"y": 500
+			},
+			"height": 60,
+			"baseZ": 850,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_Chimney",
+			"roomId": "R_Kitchen",
+			"type": "Chimney",
+			"label": "Chimney",
+			"position":
+			{
+				"x": 300,
+				"y": 6300
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 600,
+				"y": 500
+			},
+			"height": 700,
+			"baseZ": 1500,
+			"anchorWallId": "W_West",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_Fridge",
+			"roomId": "R_Kitchen",
+			"type": "Refrigerator",
+			"label": "Refrigerator",
+			"position":
+			{
+				"x": 3800,
+				"y": 6000
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 700,
+				"y": 700
+			},
+			"height": 1800,
+			"baseZ": 0,
+			"anchorWallId": "W_Kitchen_MBed",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_MBed_Bed",
+			"roomId": "R_MBed",
+			"type": "Bed",
+			"label": "King bed",
+			"position":
+			{
+				"x": 6300,
+				"y": 7200
+			},
+			"rotationDegrees": 180,
+			"footprint":
+			{
+				"x": 1800,
+				"y": 2000
+			},
+			"height": 600,
+			"baseZ": 0,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_MBed_Night1",
+			"roomId": "R_MBed",
+			"type": "Nightstand",
+			"label": "Nightstand",
+			"position":
+			{
+				"x": 5100,
+				"y": 8000
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 450,
+				"y": 400
+			},
+			"height": 550,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_MBed_Night2",
+			"roomId": "R_MBed",
+			"type": "Nightstand",
+			"label": "Nightstand",
+			"position":
+			{
+				"x": 7500,
+				"y": 8000
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 450,
+				"y": 400
+			},
+			"height": 550,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_MBed_Wardrobe",
+			"roomId": "R_MBed",
+			"type": "Wardrobe",
+			"label": "4-door wardrobe with loft",
+			"position":
+			{
+				"x": 9900,
+				"y": 6900
+			},
+			"rotationDegrees": 90,
+			"footprint":
+			{
+				"x": 600,
+				"y": 2400
+			},
+			"height": 2400,
+			"baseZ": 0,
+			"anchorWallId": "W_East",
+			"params":
+			{
+				"shutterCount": 4,
+				"drawerCount": 0,
+				"shelfCount": 5,
+				"bHasLoft": true,
+				"loftHeight": 500,
+				"plinthHeight": 100,
+				"handleStyle": "JProfile",
+				"bHasHangingRail": true,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Fan_MBed",
+			"roomId": "R_MBed",
+			"type": "CeilingFan",
+			"label": "Ceiling fan",
+			"position":
+			{
+				"x": 6300,
+				"y": 6900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1200,
+				"y": 1200
+			},
+			"height": 300,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 1200,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Sw_MBed",
+			"roomId": "R_MBed",
+			"type": "SwitchPlate",
+			"label": "6-gang switch plate",
+			"position":
+			{
+				"x": 5200,
+				"y": 5500
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 220,
+				"y": 20
+			},
+			"height": 150,
+			"baseZ": 1200,
+			"anchorWallId": "W_Mid_Upper",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 6
+			}
+		},
+		{
+			"id": "F_Bed2_Bed",
+			"roomId": "R_Bed2",
+			"type": "Bed",
+			"label": "Queen bed",
+			"position":
+			{
+				"x": 8300,
+				"y": 1300
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1500,
+				"y": 2000
+			},
+			"height": 600,
+			"baseZ": 0,
+			"anchorWallId": "W_South",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Bed2_Wardrobe",
+			"roomId": "R_Bed2",
+			"type": "Wardrobe",
+			"label": "3-door wardrobe",
+			"position":
+			{
+				"x": 10400,
+				"y": 2400
+			},
+			"rotationDegrees": 90,
+			"footprint":
+			{
+				"x": 600,
+				"y": 1800
+			},
+			"height": 2400,
+			"baseZ": 0,
+			"anchorWallId": "W_East",
+			"params":
+			{
+				"shutterCount": 3,
+				"drawerCount": 0,
+				"shelfCount": 4,
+				"bHasLoft": true,
+				"loftHeight": 60,
+				"plinthHeight": 100,
+				"handleStyle": "Bar",
+				"bHasHangingRail": true,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Bed2_Study",
+			"roomId": "R_Bed2",
+			"type": "StudyTable",
+			"label": "Study table",
+			"position":
+			{
+				"x": 7000,
+				"y": 3300
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1200,
+				"y": 550
+			},
+			"height": 750,
+			"baseZ": 0,
+			"anchorWallId": "W_Mid_Lower",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 2,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Fan_Bed2",
+			"roomId": "R_Bed2",
+			"type": "CeilingFan",
+			"label": "Ceiling fan",
+			"position":
+			{
+				"x": 8700,
+				"y": 1800
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1200,
+				"y": 1200
+			},
+			"height": 300,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 1200,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_CBath_WC",
+			"roomId": "R_CBath",
+			"type": "WC",
+			"label": "Wall-hung WC",
+			"position":
+			{
+				"x": 6300,
+				"y": 3900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 380,
+				"y": 600
+			},
+			"height": 400,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_CBath_Basin",
+			"roomId": "R_CBath",
+			"type": "Basin",
+			"label": "Counter basin",
+			"position":
+			{
+				"x": 4600,
+				"y": 3900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 550,
+				"y": 450
+			},
+			"height": 200,
+			"baseZ": 800,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_CBath_Shower",
+			"roomId": "R_CBath",
+			"type": "Shower",
+			"label": "Shower area",
+			"position":
+			{
+				"x": 5400,
+				"y": 4900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 900,
+				"y": 900
+			},
+			"height": 2100,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_MBath_WC",
+			"roomId": "R_MBath",
+			"type": "WC",
+			"label": "Wall-hung WC",
+			"position":
+			{
+				"x": 8400,
+				"y": 3900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 380,
+				"y": 600
+			},
+			"height": 400,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_MBath_Vanity",
+			"roomId": "R_MBath",
+			"type": "Vanity",
+			"label": "Vanity unit",
+			"position":
+			{
+				"x": 7100,
+				"y": 3900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 900,
+				"y": 500
+			},
+			"height": 800,
+			"baseZ": 0,
+			"anchorWallId": "W_Mid_Lower",
+			"params":
+			{
+				"shutterCount": 2,
+				"drawerCount": 1,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Knob",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_MBath_Basin",
+			"roomId": "R_MBath",
+			"type": "Basin",
+			"label": "Counter basin",
+			"position":
+			{
+				"x": 7100,
+				"y": 3900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 500,
+				"y": 400
+			},
+			"height": 180,
+			"baseZ": 800,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_MBath_Shower",
+			"roomId": "R_MBath",
+			"type": "Shower",
+			"label": "Shower area",
+			"position":
+			{
+				"x": 7650,
+				"y": 4900
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 900,
+				"y": 900
+			},
+			"height": 2100,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Util_Washer",
+			"roomId": "R_Utility",
+			"type": "WashingMachine",
+			"label": "Washing machine",
+			"position":
+			{
+				"x": 9100,
+				"y": 3950
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 600,
+				"y": 600
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "W_Mid_Lower",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Sw_Foyer",
+			"roomId": "R_Foyer",
+			"type": "SwitchPlate",
+			"label": "4-gang switch plate",
+			"position":
+			{
+				"x": 1000,
+				"y": 3700
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 160,
+				"y": 20
+			},
+			"height": 120,
+			"baseZ": 1200,
+			"anchorWallId": "W_Mid_Lower",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 4
+			}
+		}
+	]
+}

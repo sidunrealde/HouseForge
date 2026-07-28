@@ -1,0 +1,493 @@
+// Copyright Siddartha G. All Rights Reserved.
+
+#include "Model/HFSampleHouse.h"
+
+#include "HouseForge.h"
+#include "Interfaces/IPluginManager.h"
+#include "Misc/Paths.h"
+#include "Model/HFSpecSerializer.h"
+
+namespace
+{
+	// ------------------------------------------------------------------- plan grid, millimetres
+	// Internal faces. Walls are placed on these lines, so a room's clear dimension is the grid
+	// span minus half a wall thickness at each end - close enough for a reference layout, and it
+	// keeps the numbers legible on the drawings.
+
+	constexpr double X0 = 0.0;			// west external
+	constexpr double X1 = 1800.0;		// foyer | corridor
+	constexpr double X2 = 4200.0;		// corridor | common bath, and kitchen | master bedroom
+	constexpr double X3 = 6600.0;		// living | bedroom 2, and common bath | master bath
+	constexpr double X4 = 8700.0;		// master bath | utility
+	constexpr double X5 = 10800.0;		// east external
+
+	constexpr double YB = -1500.0;		// balcony parapet
+	constexpr double Y0 = 0.0;			// south external
+	constexpr double Y1 = 3600.0;		// living/bedroom2 | service band
+	constexpr double Y2 = 5400.0;		// service band | kitchen/master bedroom
+	constexpr double Y3 = 8400.0;		// north external
+
+	constexpr double ExternalThickness = 230.0;
+	constexpr double InternalThickness = 115.0;
+	constexpr double ParapetThickness  = 115.0;
+
+	constexpr double WallHeight    = 3000.0;
+	constexpr double ParapetHeight = 1100.0;
+
+	constexpr double DoorWidth     = 900.0;
+	constexpr double DoorHeight    = 2100.0;
+	constexpr double MainDoorWidth = 1050.0;
+
+	constexpr double WindowHeight = 1350.0;
+	constexpr double WindowSill   = 900.0;
+
+	struct FSampleBuilder
+	{
+		FHFHouseSpec Spec;
+
+		void AddWall(const FName& Id, const FVector2D& Start, const FVector2D& End, bool bExternal, double Height = WallHeight)
+		{
+			FHFWall Wall;
+			Wall.Id = Id;
+			Wall.Start = Start;
+			Wall.End = End;
+			Wall.Thickness = bExternal ? ExternalThickness : InternalThickness;
+			Wall.Height = Height;
+			Wall.bIsExternal = bExternal;
+			Spec.Walls.Add(Wall);
+		}
+
+		void AddParapet(const FName& Id, const FVector2D& Start, const FVector2D& End)
+		{
+			FHFWall Wall;
+			Wall.Id = Id;
+			Wall.Start = Start;
+			Wall.End = End;
+			Wall.Thickness = ParapetThickness;
+			Wall.Height = ParapetHeight;
+			Wall.bIsExternal = true;
+			Spec.Walls.Add(Wall);
+		}
+
+		void AddOpening(const FName& Id, const FName& WallId, double Offset, double Width, double Height,
+			double Sill, EHFOpeningKind Kind, EHFSwing Swing = EHFSwing::None)
+		{
+			FHFOpening Opening;
+			Opening.Id = Id;
+			Opening.WallId = WallId;
+			Opening.OffsetAlongWall = Offset;
+			Opening.Width = Width;
+			Opening.Height = Height;
+			Opening.SillHeight = Sill;
+			Opening.Kind = Kind;
+			Opening.Swing = Swing;
+			Spec.Openings.Add(Opening);
+		}
+
+		void AddDoor(const FName& Id, const FName& WallId, double Offset, EHFSwing Swing, double Width = DoorWidth)
+		{
+			AddOpening(Id, WallId, Offset, Width, DoorHeight, 0.0, EHFOpeningKind::Door, Swing);
+		}
+
+		void AddWindow(const FName& Id, const FName& WallId, double Offset, double Width)
+		{
+			AddOpening(Id, WallId, Offset, Width, WindowHeight, WindowSill, EHFOpeningKind::Window);
+		}
+
+		/** Rooms in this plan are all rectangles, so a corner pair is enough to describe them. */
+		void AddRoom(const FName& Id, const FString& Name, EHFRoomType Type,
+			double MinX, double MinY, double MaxX, double MaxY,
+			double SkirtingHeight = 100.0)
+		{
+			FHFRoom Room;
+			Room.Id = Id;
+			Room.Name = Name;
+			Room.Type = Type;
+			// Counter-clockwise; the closing edge is implicit.
+			Room.Boundary = {
+				FVector2D(MinX, MinY),
+				FVector2D(MaxX, MinY),
+				FVector2D(MaxX, MaxY),
+				FVector2D(MinX, MaxY)
+			};
+			Room.CeilingHeight = WallHeight;
+			Room.SkirtingHeight = SkirtingHeight;
+			Spec.Rooms.Add(Room);
+		}
+
+		void AddCeiling(const FName& Id, const FName& RoomId, EHFCeilingStyle Style,
+			double Drop, double BandWidth, const TArray<FVector2D>& Lights = {})
+		{
+			FHFFalseCeiling Ceiling;
+			Ceiling.Id = Id;
+			Ceiling.RoomId = RoomId;
+			Ceiling.Style = Style;
+			Ceiling.Drop = Drop;
+			Ceiling.BandWidth = BandWidth;
+			Ceiling.Cove.ChannelWidth = 80.0;
+			Ceiling.Cove.LipHeight = 50.0;
+			Ceiling.Cove.Setback = 20.0;
+			Ceiling.Cove.bHasLedStrip = (Style == EHFCeilingStyle::Cove);
+			Ceiling.LightPositions = Lights;
+			Spec.FalseCeilings.Add(Ceiling);
+		}
+
+		FHFFixture& AddFixture(const FName& Id, const FName& RoomId, EHFFixtureType Type, const FString& Label,
+			const FVector2D& Position, const FVector2D& Footprint, double Height,
+			double Rotation = 0.0, double BaseZ = 0.0)
+		{
+			FHFFixture Fixture;
+			Fixture.Id = Id;
+			Fixture.RoomId = RoomId;
+			Fixture.Type = Type;
+			Fixture.Label = Label;
+			Fixture.Position = Position;
+			Fixture.Footprint = Footprint;
+			Fixture.Height = Height;
+			Fixture.RotationDegrees = Rotation;
+			Fixture.BaseZ = BaseZ;
+			return Spec.Fixtures.Add_GetRef(Fixture);
+		}
+	};
+}
+
+FHFHouseSpec FHFSampleHouse::Make2BHK()
+{
+	FSampleBuilder B;
+
+	B.Spec.SchemaVersion = 1;
+	B.Spec.Name = TEXT("Sample 2BHK");
+	B.Spec.SourceDrawing = TEXT("Reference/Drawings/Sample2BHK/01-blank-layout.png");
+	B.Spec.Units = EHFUnits::Millimeters;
+	B.Spec.DefaultWallThickness = InternalThickness;
+	B.Spec.DefaultWallHeight = WallHeight;
+
+	// --------------------------------------------------------------------------------- walls
+	// External shell.
+	B.AddWall(TEXT("W_South"), FVector2D(X0, Y0), FVector2D(X5, Y0), true);
+	B.AddWall(TEXT("W_East"),  FVector2D(X5, Y0), FVector2D(X5, Y3), true);
+	B.AddWall(TEXT("W_North"), FVector2D(X5, Y3), FVector2D(X0, Y3), true);
+	B.AddWall(TEXT("W_West"),  FVector2D(X0, Y3), FVector2D(X0, Y0), true);
+
+	// Horizontal internal partitions.
+	B.AddWall(TEXT("W_Mid_Lower"), FVector2D(X0, Y1), FVector2D(X5, Y1), false);
+	B.AddWall(TEXT("W_Mid_Upper"), FVector2D(X0, Y2), FVector2D(X5, Y2), false);
+
+	// Vertical internal partitions, south band.
+	B.AddWall(TEXT("W_Living_Bed2"), FVector2D(X3, Y0), FVector2D(X3, Y1), false);
+
+	// Vertical internal partitions, service band.
+	B.AddWall(TEXT("W_Foyer_Corr"),  FVector2D(X1, Y1), FVector2D(X1, Y2), false);
+	B.AddWall(TEXT("W_Corr_CBath"),  FVector2D(X2, Y1), FVector2D(X2, Y2), false);
+	B.AddWall(TEXT("W_CBath_MBath"), FVector2D(X3, Y1), FVector2D(X3, Y2), false);
+	B.AddWall(TEXT("W_MBath_Util"),  FVector2D(X4, Y1), FVector2D(X4, Y2), false);
+
+	// Vertical internal partition, north band.
+	B.AddWall(TEXT("W_Kitchen_MBed"), FVector2D(X2, Y2), FVector2D(X2, Y3), false);
+
+	// Balcony parapets, south of the living room.
+	B.AddParapet(TEXT("W_Balc_South"), FVector2D(X0, YB), FVector2D(X2, YB));
+	B.AddParapet(TEXT("W_Balc_West"),  FVector2D(X0, YB), FVector2D(X0, Y0));
+	B.AddParapet(TEXT("W_Balc_East"),  FVector2D(X2, YB), FVector2D(X2, Y0));
+
+	// ------------------------------------------------------------------------------ openings
+	// Main entrance, in the west wall at the foyer. W_West runs north to south from (X0,Y3), so
+	// offsets are measured down from the north-west corner.
+	B.AddOpening(TEXT("D_Main"), TEXT("W_West"), Y3 - 4500.0, MainDoorWidth, DoorHeight, 0.0,
+		EHFOpeningKind::Door, EHFSwing::InwardRight);
+
+	// Living to balcony: full-height sliding unit in the south wall.
+	B.AddOpening(TEXT("D_Balcony"), TEXT("W_South"), 2100.0, 1800.0, 2100.0, 0.0,
+		EHFOpeningKind::SlidingDoor);
+
+	// Windows in the external shell.
+	B.AddWindow(TEXT("Win_Living"),  TEXT("W_South"), 5400.0, 1500.0);
+	B.AddWindow(TEXT("Win_Bed2_S"),  TEXT("W_South"), 8700.0, 1500.0);
+	B.AddWindow(TEXT("Win_Bed2_E"),  TEXT("W_East"),  1800.0, 1200.0);
+	// W_North runs east to west from (X5,Y3), so offsets count back from the north-east corner.
+	B.AddWindow(TEXT("Win_MBed_N"),  TEXT("W_North"), X5 - 7200.0, 1800.0);
+	B.AddWindow(TEXT("Win_Kitchen"), TEXT("W_North"), X5 - 2100.0, 1200.0);
+	// Ventilators over the bathrooms, high in the service band's north partition.
+	B.AddOpening(TEXT("Vent_CBath"), TEXT("W_Mid_Upper"), 5400.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
+	B.AddOpening(TEXT("Vent_MBath"), TEXT("W_Mid_Upper"), 7650.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
+
+	// Internal doors. W_Mid_Lower and W_Mid_Upper both run west to east from X0.
+	B.AddDoor(TEXT("D_Living"),  TEXT("W_Mid_Lower"), 3000.0, EHFSwing::InwardLeft);
+	B.AddDoor(TEXT("D_Bed2"),    TEXT("W_Mid_Lower"), 7200.0, EHFSwing::InwardRight);
+	B.AddDoor(TEXT("D_Kitchen"), TEXT("W_Mid_Upper"), 3000.0, EHFSwing::InwardLeft);
+	B.AddDoor(TEXT("D_MBed"),    TEXT("W_Mid_Upper"), 5100.0, EHFSwing::InwardRight);
+	B.AddDoor(TEXT("D_CBath"),   TEXT("W_Corr_CBath"), 900.0, EHFSwing::InwardLeft, 750.0);
+	B.AddDoor(TEXT("D_MBath"),   TEXT("W_CBath_MBath"), 900.0, EHFSwing::InwardLeft, 750.0);
+	B.AddDoor(TEXT("D_Utility"), TEXT("W_MBath_Util"), 900.0, EHFSwing::InwardLeft, 750.0);
+
+	// --------------------------------------------------------------------------------- rooms
+	B.AddRoom(TEXT("R_Living"),   TEXT("Living / Dining"),  EHFRoomType::Living,        X0, Y0, X3, Y1);
+	B.AddRoom(TEXT("R_Bed2"),     TEXT("Bedroom 2"),        EHFRoomType::Bedroom,       X3, Y0, X5, Y1);
+	B.AddRoom(TEXT("R_Foyer"),    TEXT("Foyer"),            EHFRoomType::Foyer,         X0, Y1, X1, Y2);
+	B.AddRoom(TEXT("R_Corridor"), TEXT("Corridor"),         EHFRoomType::Corridor,      X1, Y1, X2, Y2);
+	B.AddRoom(TEXT("R_CBath"),    TEXT("Common Bathroom"),  EHFRoomType::Bathroom,      X2, Y1, X3, Y2, 0.0);
+	B.AddRoom(TEXT("R_MBath"),    TEXT("Master Bathroom"),  EHFRoomType::Bathroom,      X3, Y1, X4, Y2, 0.0);
+	B.AddRoom(TEXT("R_Utility"),  TEXT("Utility"),          EHFRoomType::Utility,       X4, Y1, X5, Y2, 0.0);
+	B.AddRoom(TEXT("R_Kitchen"),  TEXT("Kitchen"),          EHFRoomType::Kitchen,       X0, Y2, X2, Y3);
+	B.AddRoom(TEXT("R_MBed"),     TEXT("Master Bedroom"),   EHFRoomType::MasterBedroom, X2, Y2, X5, Y3);
+	B.AddRoom(TEXT("R_Balcony"),  TEXT("Balcony"),          EHFRoomType::Balcony,       X0, YB, X2, Y0, 0.0);
+
+	// ------------------------------------------------------------------------ false ceilings
+	// Living gets the full cove treatment; bedrooms a peripheral band; wet areas a full drop to
+	// conceal plumbing; the corridor a bulkhead over its length.
+	B.AddCeiling(TEXT("FC_Living"), TEXT("R_Living"), EHFCeilingStyle::Cove, 200.0, 600.0,
+		{ FVector2D(1200.0, 1200.0), FVector2D(1200.0, 2400.0), FVector2D(5400.0, 1200.0), FVector2D(5400.0, 2400.0) });
+
+	B.AddCeiling(TEXT("FC_MBed"), TEXT("R_MBed"), EHFCeilingStyle::Peripheral, 200.0, 600.0,
+		{ FVector2D(5100.0, 6300.0), FVector2D(8100.0, 6300.0) });
+
+	B.AddCeiling(TEXT("FC_Bed2"), TEXT("R_Bed2"), EHFCeilingStyle::Peripheral, 200.0, 500.0,
+		{ FVector2D(7500.0, 1200.0), FVector2D(9600.0, 1200.0) });
+
+	B.AddCeiling(TEXT("FC_Kitchen"), TEXT("R_Kitchen"), EHFCeilingStyle::FullDrop, 300.0, 0.0,
+		{ FVector2D(900.0, 6300.0), FVector2D(2700.0, 6300.0), FVector2D(900.0, 7800.0), FVector2D(2700.0, 7800.0) });
+
+	B.AddCeiling(TEXT("FC_CBath"), TEXT("R_CBath"), EHFCeilingStyle::FullDrop, 400.0, 0.0,
+		{ FVector2D(5400.0, 4500.0) });
+
+	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 400.0, 0.0,
+		{ FVector2D(7650.0, 4500.0) });
+
+	{
+		// A bulkhead follows its own polygon rather than the room, so it needs one explicitly.
+		FHFFalseCeiling Bulkhead;
+		Bulkhead.Id = TEXT("FC_Corridor");
+		Bulkhead.RoomId = TEXT("R_Corridor");
+		Bulkhead.Style = EHFCeilingStyle::Bulkhead;
+		Bulkhead.Drop = 300.0;
+		Bulkhead.BandWidth = 0.0;
+		Bulkhead.ExplicitPolygon = {
+			FVector2D(X1, Y1), FVector2D(X2, Y1), FVector2D(X2, Y2), FVector2D(X1, Y2)
+		};
+		Bulkhead.LightPositions = { FVector2D(2400.0, 4500.0), FVector2D(3600.0, 4500.0) };
+		B.Spec.FalseCeilings.Add(Bulkhead);
+	}
+
+	// ------------------------------------------------------------------------------ fixtures
+	// Living / dining
+	{
+		FHFFixture& Sofa = B.AddFixture(TEXT("F_Sofa"), TEXT("R_Living"), EHFFixtureType::Sofa,
+			TEXT("3-seater sofa"), FVector2D(2100.0, 2900.0), FVector2D(2100.0, 900.0), 800.0, 180.0);
+		Sofa.AnchorWallId = TEXT("W_Mid_Lower");
+
+		B.AddFixture(TEXT("F_CoffeeTable"), TEXT("R_Living"), EHFFixtureType::CoffeeTable,
+			TEXT("Coffee table"), FVector2D(2100.0, 1800.0), FVector2D(1100.0, 600.0), 400.0);
+
+		FHFFixture& TVUnit = B.AddFixture(TEXT("F_TVUnit"), TEXT("R_Living"), EHFFixtureType::TVUnit,
+			TEXT("TV unit with drawers"), FVector2D(2100.0, 400.0), FVector2D(1800.0, 450.0), 600.0);
+		TVUnit.AnchorWallId = TEXT("W_South");
+		TVUnit.Params.DrawerCount = 3;
+		TVUnit.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
+		TVUnit.Params.PlinthHeight = 80.0;
+
+		B.AddFixture(TEXT("F_DiningTable"), TEXT("R_Living"), EHFFixtureType::DiningTable,
+			TEXT("4-seater dining"), FVector2D(5100.0, 1800.0), FVector2D(1400.0, 800.0), 750.0);
+
+		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_Living"), TEXT("R_Living"), EHFFixtureType::CeilingFan,
+			TEXT("Ceiling fan"), FVector2D(3300.0, 1800.0), FVector2D(1200.0, 1200.0), 300.0);
+		Fan.Params.Diameter = 1200.0;
+	}
+
+	// Kitchen: an L-shaped modular run along the west and north walls.
+	{
+		FHFFixture& BaseWest = B.AddFixture(TEXT("F_Kitchen_BaseW"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
+			TEXT("Base units, west run"), FVector2D(300.0, 6900.0), FVector2D(600.0, 2400.0), 850.0);
+		BaseWest.AnchorWallId = TEXT("W_West");
+		BaseWest.Params.ShutterCount = 2;
+		BaseWest.Params.DrawerCount = 3;
+		BaseWest.Params.PlinthHeight = 100.0;
+		BaseWest.Params.HandleStyle = EHFHandleStyle::JProfile;
+
+		FHFFixture& BaseNorth = B.AddFixture(TEXT("F_Kitchen_BaseN"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
+			TEXT("Base units, north run"), FVector2D(2100.0, 8100.0), FVector2D(3000.0, 600.0), 850.0);
+		BaseNorth.AnchorWallId = TEXT("W_North");
+		BaseNorth.Params.ShutterCount = 3;
+		BaseNorth.Params.DrawerCount = 2;
+		BaseNorth.Params.PlinthHeight = 100.0;
+		BaseNorth.Params.HandleStyle = EHFHandleStyle::JProfile;
+
+		// Counters run along their walls, so they anchor to them like the cabinets beneath.
+		FHFFixture& CounterW = B.AddFixture(TEXT("F_Kitchen_CounterW"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
+			TEXT("Granite counter, west"), FVector2D(300.0, 6900.0), FVector2D(600.0, 2400.0), 40.0, 0.0, 850.0);
+		CounterW.AnchorWallId = TEXT("W_West");
+		CounterW.Params.UpstandHeight = 100.0;
+
+		FHFFixture& CounterN = B.AddFixture(TEXT("F_Kitchen_CounterN"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
+			TEXT("Granite counter, north"), FVector2D(2100.0, 8100.0), FVector2D(3000.0, 600.0), 40.0, 0.0, 850.0);
+		CounterN.AnchorWallId = TEXT("W_North");
+		CounterN.Params.UpstandHeight = 100.0;
+
+		FHFFixture& WallUnits = B.AddFixture(TEXT("F_Kitchen_Wall"), TEXT("R_Kitchen"), EHFFixtureType::KitchenWallCabinet,
+			TEXT("Wall units, north run"), FVector2D(2100.0, 8250.0), FVector2D(3000.0, 300.0), 700.0, 0.0, 1400.0);
+		WallUnits.AnchorWallId = TEXT("W_North");
+		WallUnits.Params.ShutterCount = 4;
+		WallUnits.Params.ShelfCount = 2;
+		WallUnits.Params.CorniceHeight = 60.0;
+		WallUnits.Params.bHasGlassInsert = true;
+		WallUnits.Params.HandleStyle = EHFHandleStyle::Bar;
+
+		B.AddFixture(TEXT("F_Kitchen_Sink"), TEXT("R_Kitchen"), EHFFixtureType::Sink,
+			TEXT("Double-bowl sink"), FVector2D(2100.0, 8100.0), FVector2D(800.0, 450.0), 200.0, 0.0, 690.0);
+
+		B.AddFixture(TEXT("F_Kitchen_Hob"), TEXT("R_Kitchen"), EHFFixtureType::Hob,
+			TEXT("4-burner hob"), FVector2D(300.0, 6300.0), FVector2D(580.0, 500.0), 60.0, 0.0, 850.0);
+
+		FHFFixture& Chimney = B.AddFixture(TEXT("F_Kitchen_Chimney"), TEXT("R_Kitchen"), EHFFixtureType::Chimney,
+			TEXT("Chimney"), FVector2D(300.0, 6300.0), FVector2D(600.0, 500.0), 700.0, 0.0, 1500.0);
+		Chimney.AnchorWallId = TEXT("W_West");
+
+		FHFFixture& Fridge = B.AddFixture(TEXT("F_Kitchen_Fridge"), TEXT("R_Kitchen"), EHFFixtureType::Refrigerator,
+			TEXT("Refrigerator"), FVector2D(3800.0, 6000.0), FVector2D(700.0, 700.0), 1800.0);
+		Fridge.AnchorWallId = TEXT("W_Kitchen_MBed");
+	}
+
+	// Master bedroom
+	{
+		FHFFixture& Bed = B.AddFixture(TEXT("F_MBed_Bed"), TEXT("R_MBed"), EHFFixtureType::Bed,
+			TEXT("King bed"), FVector2D(6300.0, 7200.0), FVector2D(1800.0, 2000.0), 600.0, 180.0);
+		Bed.AnchorWallId = TEXT("W_North");
+
+		// Clear of the bed's 5400..7200 span so they sit beside it, not clipping into it.
+		B.AddFixture(TEXT("F_MBed_Night1"), TEXT("R_MBed"), EHFFixtureType::Nightstand,
+			TEXT("Nightstand"), FVector2D(5100.0, 8000.0), FVector2D(450.0, 400.0), 550.0);
+		B.AddFixture(TEXT("F_MBed_Night2"), TEXT("R_MBed"), EHFFixtureType::Nightstand,
+			TEXT("Nightstand"), FVector2D(7500.0, 8000.0), FVector2D(450.0, 400.0), 550.0);
+
+		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_MBed_Wardrobe"), TEXT("R_MBed"), EHFFixtureType::Wardrobe,
+			TEXT("4-door wardrobe with loft"), FVector2D(9900.0, 6900.0), FVector2D(600.0, 2400.0), 2400.0, 90.0);
+		Wardrobe.AnchorWallId = TEXT("W_East");
+		Wardrobe.Params.ShutterCount = 4;
+		Wardrobe.Params.ShelfCount = 5;
+		Wardrobe.Params.bHasLoft = true;
+		Wardrobe.Params.LoftHeight = 500.0;
+		Wardrobe.Params.bHasHangingRail = true;
+		Wardrobe.Params.PlinthHeight = 100.0;
+		Wardrobe.Params.HandleStyle = EHFHandleStyle::JProfile;
+
+		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_MBed"), TEXT("R_MBed"), EHFFixtureType::CeilingFan,
+			TEXT("Ceiling fan"), FVector2D(6300.0, 6900.0), FVector2D(1200.0, 1200.0), 300.0);
+		Fan.Params.Diameter = 1200.0;
+
+		FHFFixture& Switches = B.AddFixture(TEXT("F_Sw_MBed"), TEXT("R_MBed"), EHFFixtureType::SwitchPlate,
+			TEXT("6-gang switch plate"), FVector2D(5200.0, 5500.0), FVector2D(220.0, 20.0), 150.0, 0.0, 1200.0);
+		Switches.AnchorWallId = TEXT("W_Mid_Upper");
+		Switches.Params.GangCount = 6;
+	}
+
+	// Bedroom 2
+	{
+		FHFFixture& Bed = B.AddFixture(TEXT("F_Bed2_Bed"), TEXT("R_Bed2"), EHFFixtureType::Bed,
+			TEXT("Queen bed"), FVector2D(8300.0, 1300.0), FVector2D(1500.0, 2000.0), 600.0);
+		Bed.AnchorWallId = TEXT("W_South");
+
+		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_Bed2_Wardrobe"), TEXT("R_Bed2"), EHFFixtureType::Wardrobe,
+			TEXT("3-door wardrobe"), FVector2D(10400.0, 2400.0), FVector2D(600.0, 1800.0), 2400.0, 90.0);
+		Wardrobe.AnchorWallId = TEXT("W_East");
+		Wardrobe.Params.ShutterCount = 3;
+		Wardrobe.Params.ShelfCount = 4;
+		Wardrobe.Params.bHasLoft = true;
+		Wardrobe.Params.bHasHangingRail = true;
+		Wardrobe.Params.PlinthHeight = 100.0;
+		Wardrobe.Params.HandleStyle = EHFHandleStyle::Bar;
+
+		FHFFixture& Study = B.AddFixture(TEXT("F_Bed2_Study"), TEXT("R_Bed2"), EHFFixtureType::StudyTable,
+			TEXT("Study table"), FVector2D(7000.0, 3300.0), FVector2D(1200.0, 550.0), 750.0);
+		Study.AnchorWallId = TEXT("W_Mid_Lower");
+		Study.Params.DrawerCount = 2;
+
+		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_Bed2"), TEXT("R_Bed2"), EHFFixtureType::CeilingFan,
+			TEXT("Ceiling fan"), FVector2D(8700.0, 1800.0), FVector2D(1200.0, 1200.0), 300.0);
+		Fan.Params.Diameter = 1200.0;
+	}
+
+	// Bathrooms
+	{
+		B.AddFixture(TEXT("F_CBath_WC"), TEXT("R_CBath"), EHFFixtureType::WC,
+			TEXT("Wall-hung WC"), FVector2D(6300.0, 3900.0), FVector2D(380.0, 600.0), 400.0);
+		B.AddFixture(TEXT("F_CBath_Basin"), TEXT("R_CBath"), EHFFixtureType::Basin,
+			TEXT("Counter basin"), FVector2D(4600.0, 3900.0), FVector2D(550.0, 450.0), 200.0, 0.0, 800.0);
+		// The service band runs Y 3600..5400, so a 900-deep shower must centre at 4900 to keep
+		// its far edge at 5350 rather than pushing through the partition.
+		B.AddFixture(TEXT("F_CBath_Shower"), TEXT("R_CBath"), EHFFixtureType::Shower,
+			TEXT("Shower area"), FVector2D(5400.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
+
+		B.AddFixture(TEXT("F_MBath_WC"), TEXT("R_MBath"), EHFFixtureType::WC,
+			TEXT("Wall-hung WC"), FVector2D(8400.0, 3900.0), FVector2D(380.0, 600.0), 400.0);
+
+		// Master bath spans X 6600..8700; a 900-wide vanity centres at 7100 to clear the
+		// partition it shares with the common bathroom.
+		FHFFixture& Vanity = B.AddFixture(TEXT("F_MBath_Vanity"), TEXT("R_MBath"), EHFFixtureType::Vanity,
+			TEXT("Vanity unit"), FVector2D(7100.0, 3900.0), FVector2D(900.0, 500.0), 800.0);
+		Vanity.AnchorWallId = TEXT("W_Mid_Lower");
+		Vanity.Params.ShutterCount = 2;
+		Vanity.Params.DrawerCount = 1;
+		Vanity.Params.HandleStyle = EHFHandleStyle::Knob;
+
+		B.AddFixture(TEXT("F_MBath_Basin"), TEXT("R_MBath"), EHFFixtureType::Basin,
+			TEXT("Counter basin"), FVector2D(7100.0, 3900.0), FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
+		B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"), EHFFixtureType::Shower,
+			TEXT("Shower area"), FVector2D(7650.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
+	}
+
+	// Utility
+	{
+		FHFFixture& Washer = B.AddFixture(TEXT("F_Util_Washer"), TEXT("R_Utility"), EHFFixtureType::WashingMachine,
+			TEXT("Washing machine"), FVector2D(9100.0, 3950.0), FVector2D(600.0, 600.0), 850.0);
+		Washer.AnchorWallId = TEXT("W_Mid_Lower");
+	}
+
+	// Foyer
+	{
+		FHFFixture& Switches = B.AddFixture(TEXT("F_Sw_Foyer"), TEXT("R_Foyer"), EHFFixtureType::SwitchPlate,
+			TEXT("4-gang switch plate"), FVector2D(1000.0, 3700.0), FVector2D(160.0, 20.0), 120.0, 0.0, 1200.0);
+		Switches.AnchorWallId = TEXT("W_Mid_Lower");
+		Switches.Params.GangCount = 4;
+	}
+
+	return B.Spec;
+}
+
+FString FHFSampleHouse::GetCommittedSpecPath()
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HouseForge"));
+	if (!Plugin.IsValid())
+	{
+		return FString();
+	}
+
+	return FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(Plugin->GetBaseDir(), TEXT("Reference"), TEXT("Specs"), TEXT("Sample2BHK.json")));
+}
+
+bool FHFSampleHouse::ExportCommittedSpec(FString& OutError)
+{
+	const FString Path = GetCommittedSpecPath();
+	if (Path.IsEmpty())
+	{
+		OutError = TEXT("Could not locate the HouseForge plugin directory.");
+		return false;
+	}
+
+	return FHFSpecSerializer::SaveToFile(Make2BHK(), Path, OutError);
+}
+
+static FAutoConsoleCommand GExportSampleSpecCommand(
+	TEXT("HouseForge.ExportSampleSpec"),
+	TEXT("Regenerates Reference/Specs/Sample2BHK.json from FHFSampleHouse::Make2BHK()."),
+	FConsoleCommandDelegate::CreateStatic([]()
+	{
+		FString Error;
+		if (FHFSampleHouse::ExportCommittedSpec(Error))
+		{
+			UE_LOG(LogHouseForge, Display, TEXT("Exported sample spec to %s"), *FHFSampleHouse::GetCommittedSpecPath());
+		}
+		else
+		{
+			UE_LOG(LogHouseForge, Error, TEXT("Failed to export sample spec: %s"), *Error);
+		}
+	}));
