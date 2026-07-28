@@ -58,6 +58,35 @@ flagged as hand-edited opts out of regeneration, and a house rebuild preserves t
 than destroying and respawning it. Overwriting modelling work is a silent, unrecoverable loss, and
 `RevertToGenerated` is the only thing allowed to discard it.
 
+## The end goal is photoreal renders and a walkthrough
+
+Everything generated is eventually lit, rendered and walked through. That sets a quality bar the
+geometry has to meet, not just the materials:
+
+- **No perfectly sharp edges.** A real edge has a small chamfer that catches light; a mathematically
+  sharp one reads as CG under any lighting. Generated geometry needs an edge bevel option.
+- **Normals must be controlled**, with hard and soft edges chosen deliberately rather than left to
+  a blanket recompute.
+- **A second UV channel** for lightmaps, so baked lighting stays an option alongside Lumen.
+- **Glass needs thickness**, not a plane, or refraction and reflection look wrong.
+- **Collision must match the visual mesh**, including on open doors, or a walkthrough passes
+  through things.
+
+Judge output by how it looks lit and in motion, not by how it reads in a wireframe screenshot.
+
+## Anything that moves must be able to move
+
+Doors swing, windows slide, drawers pull out, wardrobe shutters open. If a real one moves, the
+generated one moves too.
+
+That rules out merging a fixture into a single mesh. Every moving part is its own component with
+its own pivot, a motion type (hinge or slide), an axis, travel limits, and an open amount driven as
+a normalised 0..1 property. Baking a fixture bakes each part separately and keeps the articulation;
+a bake must not weld a chest of drawers into a block.
+
+Fixed parts of the same fixture may share one mesh. Only the moving parts need separating, so a
+carcass stays a carcass and only its shutters and drawers are split out.
+
 ## Baking is non-destructive and reversible
 
 Baking an element to a static mesh must **keep the dynamic mesh alongside it**. The whole workflow
