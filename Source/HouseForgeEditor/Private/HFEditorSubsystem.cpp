@@ -18,6 +18,7 @@
 #include "LevelEditorViewport.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Model/HFSpecSerializer.h"
 #include "Model/HFSpecValidator.h"
 #include "UnrealEdGlobals.h"
@@ -632,24 +633,31 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 		return FHFOperationResult::Fail(TEXT("No HouseForge house in the current level."));
 	}
 
+	// Take a viewport that is actually on screen. Looking for an existing orthographic one finds
+	// the hidden members of a four-pane layout, which have no size and cannot be read from - so
+	// pick whatever is visible and point it downward instead.
 	FLevelEditorViewportClient* Viewport = nullptr;
 	for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
 	{
-		if (Client && Client->IsPerspective() == false && Client->ViewportType == LVT_OrthoXY)
+		if (Client == nullptr || Client->Viewport == nullptr)
+		{
+			continue;
+		}
+
+		const FIntPoint ClientSize = Client->Viewport->GetSizeXY();
+		if (ClientSize.X > 0 && ClientSize.Y > 0)
 		{
 			Viewport = Client;
-			break;
+			if (Client->IsVisible())
+			{
+				break;
+			}
 		}
-	}
-	if (Viewport == nullptr)
-	{
-		// Fall back to the active perspective viewport and point it straight down; a headless run
-		// has no ortho viewport at all.
-		Viewport = GEditor->GetLevelViewportClients().Num() > 0 ? GEditor->GetLevelViewportClients()[0] : nullptr;
 	}
 	if (Viewport == nullptr || Viewport->Viewport == nullptr)
 	{
-		return FHFOperationResult::Fail(TEXT("No editor viewport is available to capture from."));
+		return FHFOperationResult::Fail(
+			TEXT("No editor viewport is available to capture from. A level editor viewport must be open and visible."));
 	}
 
 	// Frame the whole house.
@@ -665,13 +673,52 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 	}
 
 	const FVector Centre = Bounds.GetCenter();
-	const double Extent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
+
+	// Frame the plan. Deriving the zoom from FEditorViewportClient::GetOrthoUnitsPerPixel rather
+	// than guessing: units per pixel is (OrthoZoom / (SizeX * 15)) * ComputeOrthoZoomFactor(SizeX),
+	// and with r.Editor.AlignedOrthoZoom on - the default - that factor is SizeX / 500, so the
+	// viewport width cancels and the world width across the screen is OrthoZoom * SizeX / 7500.
+	const FIntPoint ViewSize = Viewport->Viewport->GetSizeXY();
+	const double AspectRatio = (ViewSize.Y > 0)
+		? static_cast<double>(ViewSize.X) / static_cast<double>(ViewSize.Y)
+		: 1.0;
+
+	constexpr double Padding = 1.12;
+
+	// Use the larger plan dimension for both axes: a top-down yaw can map world X or Y onto the
+	// screen's horizontal, and over-framing slightly is far better than cropping the house.
+	const double LargestSpan = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y) * 2.0 * Padding;
+	const double WorldWidth = LargestSpan * FMath::Max(1.0, AspectRatio);
+
+	static const IConsoleVariable* AlignedOrthoZoom =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.Editor.AlignedOrthoZoom"));
+	const bool bAligned = (AlignedOrthoZoom == nullptr) || (AlignedOrthoZoom->GetInt() != 0);
+
+	const double Zoom = bAligned
+		? (WorldWidth * 7500.0 / FMath::Max(1, ViewSize.X))
+		: (WorldWidth * 15.0);
+
+	// Borrow the viewport, then hand it back. Leaving the user staring at a top-down ortho view
+	// they did not ask for would make this tool obnoxious to use interactively.
+	const ELevelViewportType PreviousType = Viewport->ViewportType;
+	const FVector PreviousLocation = Viewport->GetViewLocation();
+	const FRotator PreviousRotation = Viewport->GetViewRotation();
+	const float PreviousZoom = Viewport->GetOrthoZoom();
 
 	Viewport->SetViewportType(LVT_OrthoXY);
 	Viewport->SetViewLocation(FVector(Centre.X, Centre.Y, Bounds.Max.Z + 1000.0));
 	Viewport->SetViewRotation(FRotator(-90.0f, -90.0f, 0.0f));
-	Viewport->SetOrthoZoom(FMath::Max(Extent * 2.4, 1000.0));
+	Viewport->SetOrthoZoom(static_cast<float>(FMath::Max(Zoom, 100.0)));
 	Viewport->Invalidate();
+
+	ON_SCOPE_EXIT
+	{
+		Viewport->SetViewportType(PreviousType);
+		Viewport->SetViewLocation(PreviousLocation);
+		Viewport->SetViewRotation(PreviousRotation);
+		Viewport->SetOrthoZoom(PreviousZoom);
+		Viewport->Invalidate();
+	};
 
 	const FString Directory = FPaths::Combine(PluginDir(), TEXT("Saved"), TEXT("Screenshots"));
 	FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*Directory);
@@ -686,26 +733,55 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 	const int32 Size = FMath::Clamp(Resolution <= 0 ? 2048 : Resolution, 256, 8192);
 
 	FViewport* RenderTarget = Viewport->Viewport;
+
+	// Invalidate only marks the view dirty. Without forcing a frame here the back buffer still
+	// holds whatever was on screen before the camera moved - or nothing at all - and ReadPixels
+	// fails outright. This is what made the first capture attempt return no pixels.
+	RenderTarget->Draw(/*bShouldPresent*/ false);
+
 	TArray<FColor> Pixels;
-	FIntRect Rect(0, 0, RenderTarget->GetSizeXY().X, RenderTarget->GetSizeXY().Y);
+	const FIntRect Rect(0, 0, RenderTarget->GetSizeXY().X, RenderTarget->GetSizeXY().Y);
+	if (Rect.Width() <= 0 || Rect.Height() <= 0)
+	{
+		return FHFOperationResult::Fail(TEXT("The editor viewport has no size to capture."));
+	}
+
 	if (!RenderTarget->ReadPixels(Pixels, FReadSurfaceDataFlags(), Rect))
 	{
 		return FHFOperationResult::Fail(TEXT("Could not read pixels from the viewport."));
 	}
 
+	// The viewport renders without alpha; leaving it at zero would save a fully transparent PNG.
 	for (FColor& Pixel : Pixels)
 	{
 		Pixel.A = 255;
 	}
 
-	FImageView Image(Pixels.GetData(), Rect.Width(), Rect.Height(), ERawImageFormat::BGRA8);
-	if (!FImageUtils::SaveImageByExtension(*OutPath, Image))
+	FImage Captured;
+	Captured.Init(Rect.Width(), Rect.Height(), ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+	FMemory::Memcpy(Captured.RawData.GetData(), Pixels.GetData(), Pixels.Num() * sizeof(FColor));
+
+	// The viewport is whatever size the user left it, so scale to the requested longest edge -
+	// otherwise the returned image resolution would depend on the editor's window layout.
+	FImage Scaled;
+	const FImage* ToSave = &Captured;
+	const int32 Longest = FMath::Max(Rect.Width(), Rect.Height());
+	if (Longest > 0 && Longest != Size)
+	{
+		const double Scale = static_cast<double>(Size) / static_cast<double>(Longest);
+		const int32 NewWidth = FMath::Max(1, FMath::RoundToInt(Rect.Width() * Scale));
+		const int32 NewHeight = FMath::Max(1, FMath::RoundToInt(Rect.Height() * Scale));
+		Captured.ResizeTo(Scaled, NewWidth, NewHeight, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+		ToSave = &Scaled;
+	}
+
+	if (!FImageUtils::SaveImageByExtension(*OutPath, *ToSave))
 	{
 		return FHFOperationResult::Fail(FString::Printf(TEXT("Could not write '%s'."), *OutPath));
 	}
 
 	return FHFOperationResult::Ok(FString::Printf(
-		TEXT("Captured %dx%d top-down view to %s"), Rect.Width(), Rect.Height(), *OutPath));
+		TEXT("Captured %dx%d top-down view to %s"), ToSave->SizeX, ToSave->SizeY, *OutPath));
 }
 
 #undef LOCTEXT_NAMESPACE
