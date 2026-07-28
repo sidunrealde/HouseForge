@@ -148,8 +148,129 @@ double FHFUnits::ToCentimeterScale(EHFUnits Units)
 	case EHFUnits::Millimeters:	return 0.1;
 	case EHFUnits::Centimeters:	return 1.0;
 	case EHFUnits::Meters:		return 100.0;
+	case EHFUnits::Feet:		return 30.48;
+	case EHFUnits::Inches:		return 2.54;
 	default:					return 1.0;
 	}
+}
+
+FString FHFUnits::ShortName(EHFUnits Units)
+{
+	switch (Units)
+	{
+	case EHFUnits::Millimeters:	return TEXT("mm");
+	case EHFUnits::Centimeters:	return TEXT("cm");
+	case EHFUnits::Meters:		return TEXT("m");
+	case EHFUnits::Feet:		return TEXT("ft");
+	case EHFUnits::Inches:		return TEXT("in");
+	default:					return TEXT("?");
+	}
+}
+
+bool FHFUnits::ParseLengthToCentimeters(const FString& Text, EHFUnits DefaultUnits, double& OutCentimeters)
+{
+	FString Working = Text.TrimStartAndEnd();
+	if (Working.IsEmpty())
+	{
+		return false;
+	}
+
+	// Normalise the typographic quotes drawings and PDFs are full of, so 12′-6″ parses the same
+	// as 12'-6".
+	Working.ReplaceInline(TEXT("′"), TEXT("'"));
+	Working.ReplaceInline(TEXT("″"), TEXT("\""));
+	Working.ReplaceInline(TEXT("’"), TEXT("'"));
+	Working.ReplaceInline(TEXT("”"), TEXT("\""));
+
+	auto ReadNumber = [](const FString& In, double& Out)
+	{
+		const FString Trimmed = In.TrimStartAndEnd();
+		if (Trimmed.IsEmpty() || !Trimmed.IsNumeric())
+		{
+			// IsNumeric rejects a leading '+' and decimals in some builds, so fall back to Atod
+			// but require the text to start like a number.
+			if (Trimmed.IsEmpty() || !(FChar::IsDigit(Trimmed[0]) || Trimmed[0] == TEXT('.') || Trimmed[0] == TEXT('-')))
+			{
+				return false;
+			}
+		}
+		Out = FCString::Atod(*Trimmed);
+		return true;
+	};
+
+	// Feet and inches combined: 12'-6", 12' 6", 12'6
+	if (Working.Contains(TEXT("'")))
+	{
+		FString FeetPart;
+		FString RemainderPart;
+		Working.Split(TEXT("'"), &FeetPart, &RemainderPart);
+
+		double FeetValue = 0.0;
+		if (!ReadNumber(FeetPart, FeetValue))
+		{
+			return false;
+		}
+
+		double InchesValue = 0.0;
+		FString Remainder = RemainderPart.TrimStartAndEnd();
+		Remainder.RemoveFromStart(TEXT("-"));
+		Remainder.ReplaceInline(TEXT("\""), TEXT(""));
+		Remainder.TrimStartAndEndInline();
+
+		if (!Remainder.IsEmpty() && !ReadNumber(Remainder, InchesValue))
+		{
+			return false;
+		}
+
+		OutCentimeters = (FeetValue * 30.48) + (InchesValue * 2.54);
+		return true;
+	}
+
+	// Inches alone: 78"
+	if (Working.EndsWith(TEXT("\"")))
+	{
+		double Inches = 0.0;
+		if (!ReadNumber(Working.LeftChop(1), Inches))
+		{
+			return false;
+		}
+		OutCentimeters = Inches * 2.54;
+		return true;
+	}
+
+	// Metric with an explicit suffix. Check mm before m so "3600mm" is not read as metres.
+	struct FSuffix { const TCHAR* Text; EHFUnits Units; };
+	static const FSuffix Suffixes[] = {
+		{ TEXT("mm"), EHFUnits::Millimeters },
+		{ TEXT("cm"), EHFUnits::Centimeters },
+		{ TEXT("in"), EHFUnits::Inches },
+		{ TEXT("ft"), EHFUnits::Feet },
+		{ TEXT("m"),  EHFUnits::Meters },
+	};
+
+	const FString Lower = Working.ToLower();
+	for (const FSuffix& Suffix : Suffixes)
+	{
+		if (Lower.EndsWith(Suffix.Text))
+		{
+			double Value = 0.0;
+			if (!ReadNumber(Working.LeftChop(FCString::Strlen(Suffix.Text)), Value))
+			{
+				return false;
+			}
+			OutCentimeters = Value * ToCentimeterScale(Suffix.Units);
+			return true;
+		}
+	}
+
+	// A bare number is in whatever the spec declared - which is exactly why it has to declare.
+	double Bare = 0.0;
+	if (!ReadNumber(Working, Bare))
+	{
+		return false;
+	}
+	OutCentimeters = Bare * ToCentimeterScale(DefaultUnits);
+	return true;
 }
 
 void FHFUnits::ConvertToCentimeters(FHFHouseSpec& Spec)

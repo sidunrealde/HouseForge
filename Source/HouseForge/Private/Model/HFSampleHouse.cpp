@@ -185,6 +185,7 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.Spec.Name = TEXT("Sample 2BHK");
 	B.Spec.SourceDrawing = TEXT("Reference/Drawings/Sample2BHK/01-blank-layout.png");
 	B.Spec.Units = EHFUnits::Millimeters;
+	B.Spec.UnitsSource = TEXT("Sheet header: ALL DIMENSIONS IN MILLIMETERS");
 	B.Spec.DefaultWallThickness = InternalThickness;
 	B.Spec.DefaultWallHeight = WallHeight;
 

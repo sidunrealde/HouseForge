@@ -18,7 +18,9 @@ enum class EHFUnits : uint8
 {
 	Millimeters	UMETA(DisplayName = "Millimeters"),
 	Centimeters	UMETA(DisplayName = "Centimeters"),
-	Meters		UMETA(DisplayName = "Meters")
+	Meters		UMETA(DisplayName = "Meters"),
+	Feet		UMETA(DisplayName = "Feet"),
+	Inches		UMETA(DisplayName = "Inches")
 };
 
 /** What a room is for. Drives defaults for finishes, fixtures and ceiling treatment. */
@@ -590,6 +592,18 @@ struct HOUSEFORGE_API FHFHouseSpec
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	EHFUnits Units = EHFUnits::Millimeters;
 
+	/**
+	 * Where the units were read from on the drawing - a title block note, a dimension string, a
+	 * scale bar.
+	 *
+	 * Units must be read, never assumed. A misread is uniquely dangerous because it leaves the
+	 * spec perfectly self-consistent: every wall still meets, every opening still fits, and the
+	 * house is simply built at the wrong scale. Recording the source makes declaring units a
+	 * deliberate act rather than a guess, and the validator complains when it is left blank.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FString UnitsSource;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.1"))
 	double DefaultWallThickness = 115.0;
 
@@ -633,16 +647,30 @@ struct HOUSEFORGE_API FHFHouseSpec
 	double TotalFloorArea() const;
 };
 
-/** Unit conversion. The single place millimetres become centimetres. */
+/** Unit conversion. The single place a drawing's units become Unreal centimetres. */
 class HOUSEFORGE_API FHFUnits
 {
 public:
 	/** Scale factor from the given units to Unreal centimetres. */
 	static double ToCentimeterScale(EHFUnits Units);
 
+	/** Short name for messages, e.g. "mm", "ft". */
+	static FString ShortName(EHFUnits Units);
+
 	/**
 	 * Rescales every length in the spec into centimetres in place and sets Units accordingly.
 	 * Idempotent: a spec already in centimetres is left untouched.
 	 */
 	static void ConvertToCentimeters(FHFHouseSpec& Spec);
+
+	/**
+	 * Parses a dimension the way it is written on a drawing, returning centimetres.
+	 *
+	 * Handles the imperial forms that make manual conversion error-prone - 12'-6", 12' 6",
+	 * 12.5', 78" - as well as metric with or without a suffix: 3600, 3600mm, 360cm, 3.6m.
+	 * A bare number is interpreted in DefaultUnits, which is why a spec must still declare them.
+	 *
+	 * @return false if the text could not be understood, leaving OutCentimeters untouched.
+	 */
+	static bool ParseLengthToCentimeters(const FString& Text, EHFUnits DefaultUnits, double& OutCentimeters);
 };

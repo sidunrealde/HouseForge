@@ -64,9 +64,21 @@ back to the spec and the drawing it came from.
 
 ## Units
 
-Drawings are in millimetres; Unreal is centimetres. The spec declares its own units and conversion
-happens exactly once, when the house actor takes the spec. Everything after that — tools, preview,
-geometry — is in centimetres and never has to ask.
+**Read the units off the drawing before anything else.** They may be millimetres, centimetres,
+metres, feet or inches — Indian residential sets are usually millimetres, but imperial sets exist
+and the plugin supports both.
+
+Look for a title block note, a dimension string's suffix, or a scale bar, and record where you
+found it in `unitsSource`. Use the `ConvertLength` tool for imperial dimensions rather than
+converting `12'-6"` in your head.
+
+This matters more than it looks. A unit misread leaves the spec perfectly self-consistent — walls
+meet, openings fit, areas are internally correct — and simply builds the house at the wrong scale.
+No structural rule can catch that, which is why `ImplausibleScale` checks the total floor area
+against what a dwelling actually measures, and names the unit that would have been right.
+
+Conversion to Unreal centimetres happens exactly once, when the house actor takes the spec.
+Everything after that — tools, preview, geometry — is in centimetres and never has to ask.
 
 ## Current state of the geometry
 

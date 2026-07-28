@@ -4,6 +4,7 @@
 
 #include "Editor.h"
 #include "HFEditorSubsystem.h"
+#include "Model/HFTypes.h"
 
 namespace
 {
@@ -71,6 +72,30 @@ FString UHFToolset::ImportDrawings(const FString& SourcePaths, const FString& Se
 
 	TArray<FString> Imported;
 	return Report(Editor->ImportDrawings(Paths, SetName, Imported));
+}
+
+FString UHFToolset::ConvertLength(const FString& Text, const FString& DefaultUnits)
+{
+	const FString Lower = DefaultUnits.TrimStartAndEnd().ToLower();
+
+	EHFUnits Units = EHFUnits::Millimeters;
+	if (Lower == TEXT("centimeters") || Lower == TEXT("centimetres") || Lower == TEXT("cm")) { Units = EHFUnits::Centimeters; }
+	else if (Lower == TEXT("meters") || Lower == TEXT("metres") || Lower == TEXT("m"))       { Units = EHFUnits::Meters; }
+	else if (Lower == TEXT("feet") || Lower == TEXT("ft"))                                   { Units = EHFUnits::Feet; }
+	else if (Lower == TEXT("inches") || Lower == TEXT("in"))                                 { Units = EHFUnits::Inches; }
+
+	double Centimeters = 0.0;
+	if (!FHFUnits::ParseLengthToCentimeters(Text, Units, Centimeters))
+	{
+		return FString::Printf(
+			TEXT("FAILED: could not read '%s' as a dimension. Accepted forms: 12'-6\", 12' 6\", 78\", 3600, 3600mm, 360cm, 3.6m."),
+			*Text);
+	}
+
+	// Report every unit at once: whichever the spec is written in, the number is right there.
+	return FString::Printf(TEXT("%s = %.2f cm = %.1f mm = %.4f m = %.4f ft = %.3f in"),
+		*Text, Centimeters, Centimeters * 10.0, Centimeters / 100.0,
+		Centimeters / 30.48, Centimeters / 2.54);
 }
 
 FString UHFToolset::ValidateSpec(const FString& SpecJson)

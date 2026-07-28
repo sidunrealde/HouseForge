@@ -14,9 +14,23 @@ Defined in [`HFTypes.h`](../Source/HouseForge/Public/Model/HFTypes.h). Field nam
 
 ## Conventions
 
-**Units.** The spec declares its own units in `units` — `Millimeters` (what AutoCAD drawings almost
-always use), `Centimeters`, or `Meters`. Every length in the file is in those units. Conversion to
-Unreal centimetres happens exactly once at ingest, so never mix units within one spec.
+**Units — read them, never assume them.** The spec declares its own units in `units`:
+`Millimeters`, `Centimeters`, `Meters`, `Feet`, `Inches`. Every length in the file is in those
+units, and conversion to Unreal centimetres happens exactly once at ingest — never mix units within
+one spec.
+
+A unit misread is the most dangerous mistake possible here, because it leaves the spec **perfectly
+self-consistent**: every wall still meets, every opening still fits, every room area is internally
+correct. The house is simply built at the wrong scale, and no structural rule can detect it. So:
+
+- **Find the units on the drawing** — a title block note ("ALL DIMENSIONS IN MILLIMETERS"), a
+  dimension string's suffix, or a scale bar — and record where you found it in **`unitsSource`**.
+  The validator warns when that field is blank, because a blank one means the units were guessed.
+- **Use `ConvertLength` for imperial.** Converting `12'-6"` by hand is exactly the arithmetic that
+  goes wrong quietly. The tool accepts `12'-6"`, `12' 6"`, `12.5'`, `78"`, and metric forms with or
+  without a suffix.
+- The `ImplausibleScale` rule is the backstop: it checks the total floor area is that of a real
+  dwelling, and when it isn't, it tells you which unit *would* have been right.
 
 **Coordinates.** Right-handed 2D plan, X to the east, Y to the north. Z is height above the floor.
 Put the origin at a convenient corner of the plan and stay consistent.
@@ -37,7 +51,8 @@ rejects it, because a zero-length edge breaks the polygon offset used for false 
 | `schemaVersion` | int | `1` |
 | `name` | string | Human name for the unit |
 | `sourceDrawing` | string | Path of the drawing this was read from, for traceability |
-| `units` | enum | `Millimeters` \| `Centimeters` \| `Meters` |
+| `units` | enum | `Millimeters` \| `Centimeters` \| `Meters` \| `Feet` \| `Inches` |
+| `unitsSource` | string | **Where the units were read from.** Warned about if blank |
 | `defaultWallThickness` | number | Fallback for walls that don't state one |
 | `defaultWallHeight` | number | Fallback floor-to-slab height |
 | `walls` | array | see below |
@@ -74,6 +89,13 @@ without disturbing its neighbours' junctions.
 | `sillHeight` | number | Bottom edge above the wall base. `0` for doors, ~900 for windows |
 | `kind` | enum | `Door` \| `SlidingDoor` \| `Window` \| `SlidingWindow` \| `Archway` \| `Ventilator` |
 | `swing` | enum | `None` \| `InwardLeft` \| `InwardRight` \| `OutwardLeft` \| `OutwardRight` |
+
+**Read the swing arc.** Every hinged door on a plan is drawn with a quarter-circle showing which
+side it is hinged and which way it opens. `Left`/`Right` picks the hinge end (the near or far end
+of the opening as measured from the host wall's `start`); `Inward`/`Outward` picks the side the
+leaf sweeps into. A hinged door with `swing: None` raises `MissingSwing`, and a leaf that sweeps
+into solid construction raises `SwingBlocked`. The preview draws the leaf and its arc, so a door
+hung on the wrong side is visible in a top-down capture rather than silently wrong.
 
 `offsetAlongWall` is measured from `start`, so direction matters. If a wall runs north-to-south,
 offsets count downward from its northern end.
@@ -215,7 +237,11 @@ Structural rules: `ZeroLengthBeam`, `NonPositiveBeamSize`, `BeamDepthExceedsStor
 `NonPositiveColumnSize`, `NonPositiveColumnHeight`, `DuplicateBeamId`, `DuplicateColumnId`.
 Openings sharing a wall and a height range raise `OpeningsOverlap`.
 
-**Warnings** are worth reading but do not block: `DoorWithSill` (probably a mislabelled window),
+`ImplausibleScale` is an error and is the guard against a unit misread — see the units note above.
+
+**Warnings** are worth reading but do not block: `MissingUnitsSource`, `ImplausibleCeilingHeight`,
+`ImplausibleWallThickness`, `ImplausibleDoorSize`, `MissingSwing`, `SwingBlocked`,
+`DoorWithSill` (probably a mislabelled window),
 `LowHeadroom` (under 2100 clear), `CeilingBelowDoorHead`, `CeilingDoesNotClearBeam`,
 `BeamLowHeadroom`, `UnknownFixtureType`, `OverlappingFixtures`, `FixtureFootprintCrossesWall`.
 
