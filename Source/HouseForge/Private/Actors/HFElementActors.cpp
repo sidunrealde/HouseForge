@@ -124,7 +124,19 @@ FDynamicMesh3 AHFWallActor::BuildMesh() const
 
 FDynamicMesh3 AHFRoomActor::BuildMesh() const
 {
-	return FHFGenerators::GenerateFloor(Room, SlabThickness, DoorwayCentres, DoorwayWidth);
+	FDynamicMesh3 Result = FHFGenerators::GenerateFloor(Room, SlabThickness, DoorwayCentres, DoorwayWidth);
+
+	if (bGenerateCeilingSlab)
+	{
+		Result.AppendWithOffsets(FHFGenerators::GenerateCeilingSlab(Room, SlabThickness));
+	}
+
+	return Result;
+}
+
+FDynamicMesh3 AHFCeilingActor::BuildMesh() const
+{
+	return FHFGenerators::GenerateCeiling(Ceiling, Room, FanDrops, FanDropRadius);
 }
 
 FDynamicMesh3 AHFBeamActor::BuildMesh() const

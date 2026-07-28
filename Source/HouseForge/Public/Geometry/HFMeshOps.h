@@ -50,6 +50,17 @@ public:
 		double BottomZ, double TopZ, EHFSurfaceRole Role);
 
 	/**
+	 * A prism with holes through it - the shape every perimeter ceiling band is.
+	 *
+	 * Triangulated directly rather than built by subtracting one prism from another. A mesh
+	 * boolean can resolve that case imperfectly and report failure while returning geometry that
+	 * merely looks right, which silently left ceiling bands solid. Triangulating the annulus is
+	 * exact, faster, and cannot half-succeed.
+	 */
+	static bool AppendPrismWithHoles(UE::Geometry::FDynamicMesh3& Mesh, const TArray<FVector2D>& Outer,
+		const TArray<TArray<FVector2D>>& Holes, double BottomZ, double TopZ, EHFSurfaceRole Role);
+
+	/**
 	 * Subtracts Tool from Target in place.
 	 *
 	 * @return false if the boolean failed, in which case Target is left untouched rather than
@@ -66,6 +77,19 @@ public:
 	 * what lets the material panel express tiling in millimetres rather than arbitrary numbers.
 	 */
 	static void ApplyWorldScaleUVs(UE::Geometry::FDynamicMesh3& Mesh, double TexelSizeCm = 100.0);
+
+	/**
+	 * Insets a closed polygon inward by Amount, returning the resulting loops.
+	 *
+	 * Uses a proper polygon offset rather than shifting each edge along its normal: on a concave
+	 * corner - and these layouts are full of L-shaped rooms - naive offsetting produces
+	 * self-intersecting garbage, and a deep enough inset legitimately splits one room into two
+	 * separate loops or collapses it to nothing. Both are returned honestly.
+	 *
+	 * @return Empty when the inset consumes the polygon entirely, which is a real answer, not a
+	 *         failure - it means the band is wider than the room.
+	 */
+	static TArray<TArray<FVector2D>> InsetPolygon(const TArray<FVector2D>& Polygon, double Amount);
 
 	/** True if the mesh is closed - every edge shared by exactly two triangles. */
 	static bool IsClosed(const UE::Geometry::FDynamicMesh3& Mesh);

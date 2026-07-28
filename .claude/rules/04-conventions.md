@@ -58,6 +58,15 @@ flagged as hand-edited opts out of regeneration, and a house rebuild preserves t
 than destroying and respawning it. Overwriting modelling work is a silent, unrecoverable loss, and
 `RevertToGenerated` is the only thing allowed to discard it.
 
+## Baking is non-destructive and reversible
+
+Baking an element to a static mesh must **keep the dynamic mesh alongside it**. The whole workflow
+lives in the editor, so baking is a rendering choice rather than a one-way door: an element can
+always be switched back to its dynamic mesh and carry on being edited.
+
+Bake state is a toggle, per element and in bulk — never a replacement. Do not discard the dynamic
+mesh on bake, and do not offer a bake the user cannot undo.
+
 ## Actors own their data
 
 Each generated element actor holds its own parameter struct as a `UPROPERTY(EditAnywhere)`.

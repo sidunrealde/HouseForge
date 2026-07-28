@@ -35,6 +35,23 @@ public:
 	static UE::Geometry::FDynamicMesh3 GenerateFloor(const FHFRoom& Room, double SlabThickness,
 		const TArray<FVector2D>& SkirtingGaps, double GapWidth);
 
+	/**
+	 * A false ceiling.
+	 *
+	 * All five styles hang below the structural soffit, which is what makes them read as a
+	 * suspended ceiling rather than a slab: a peripheral band leaves the centre open to the
+	 * structure above, a full drop covers everything, a tray steps between two levels, a cove adds
+	 * a shielded channel for an LED strip, and a bulkhead follows its own polygon.
+	 *
+	 * @param FanDrops Plan positions of ceiling fans, whose drop rods must pass through the
+	 *        ceiling. A fan hanging from a soffit it does not penetrate is an obvious tell.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateCeiling(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
+		const TArray<FVector2D>& FanDrops, double FanDropRadius);
+
+	/** The structural slab soffit over a room - what you see looking up where nothing conceals it. */
+	static UE::Geometry::FDynamicMesh3 GenerateCeilingSlab(const FHFRoom& Room, double SlabThickness);
+
 	/** A downstand beam, hanging below the slab soffit. */
 	static UE::Geometry::FDynamicMesh3 GenerateBeam(const FHFBeam& Beam);
 

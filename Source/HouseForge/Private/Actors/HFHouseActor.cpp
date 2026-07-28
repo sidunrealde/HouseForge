@@ -225,6 +225,36 @@ void AHFHouseActor::BuildGeometry()
 		RoomActor->Regenerate();
 	}
 
+	// False ceilings, with the fan positions they have to be cut for.
+	for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+	{
+		const FHFRoom* Room = Spec.FindRoom(Ceiling.RoomId);
+		if (Room == nullptr || Ceiling.Style == EHFCeilingStyle::None)
+		{
+			continue;
+		}
+
+		AHFCeilingActor* CeilingActor = Cast<AHFCeilingActor>(Spawn(AHFCeilingActor::StaticClass(), Ceiling.Id,
+			FString::Printf(TEXT("Ceiling_%s"), *Ceiling.Id.ToString())));
+		if (CeilingActor == nullptr)
+		{
+			continue;
+		}
+
+		CeilingActor->Ceiling = Ceiling;
+		CeilingActor->Room = *Room;
+
+		for (const FHFFixture& Fixture : Spec.Fixtures)
+		{
+			if (Fixture.Type == EHFFixtureType::CeilingFan && Fixture.RoomId == Ceiling.RoomId)
+			{
+				CeilingActor->FanDrops.Add(Fixture.Position);
+			}
+		}
+
+		CeilingActor->Regenerate();
+	}
+
 	for (const FHFBeam& Beam : Spec.Beams)
 	{
 		if (AHFBeamActor* BeamActor = Cast<AHFBeamActor>(Spawn(AHFBeamActor::StaticClass(), Beam.Id,

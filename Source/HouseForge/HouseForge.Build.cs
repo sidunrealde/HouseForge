@@ -22,6 +22,11 @@ public class HouseForge : ModuleRules
 				"GeometryFramework",
 				"DynamicMesh",
 				"GeometryScriptingCore",
+
+				// Clipper2-backed polygon offset, used to inset room boundaries for false
+				// ceilings. Naive per-edge offsetting collapses on the concave corners these
+				// layouts are full of.
+				"GeometryAlgorithms",
 			}
 			);
 
