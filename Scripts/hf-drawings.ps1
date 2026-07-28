@@ -49,12 +49,14 @@ if (-not $SvgOnly) {
         if ($LASTEXITCODE -ne 0) { Fail 'could not create the virtual environment. Is Python installed?' }
     }
 
-    & $VenvPy -c "import PIL" 2>$null
+    # Pillow renders the drawing set; PyMuPDF rasterises imported PDF sheet sets, which is what
+    # the editor's Import Drawings action shells out to.
+    & $VenvPy -c "import PIL, pymupdf" 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host 'Installing Pillow into the local environment...' -ForegroundColor Cyan
-        & $VenvPy -m pip install --quiet --disable-pip-version-check pillow
+        Write-Host 'Installing Pillow and PyMuPDF into the local environment...' -ForegroundColor Cyan
+        & $VenvPy -m pip install --quiet --disable-pip-version-check pillow pymupdf
         if ($LASTEXITCODE -ne 0) {
-            Fail 'could not install Pillow. Re-run with -SvgOnly to produce SVG without it.'
+            Fail 'could not install the Python packages. Re-run with -SvgOnly to produce SVG without them.'
         }
     }
 
