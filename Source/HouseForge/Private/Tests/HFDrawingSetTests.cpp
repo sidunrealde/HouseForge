@@ -46,7 +46,7 @@ bool FHFDrawingSetPresentTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// Three plans, plus one elevation sheet for each room worth drawing.
+	// Four plans, plus one elevation sheet for each room worth drawing.
 	const FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 	int32 ExpectedElevations = 0;
 	for (const FHFRoom& Room : Spec.Rooms)
@@ -66,15 +66,15 @@ bool FHFDrawingSetPresentTest::RunTest(const FString& Parameters)
 			break;
 		}
 	}
-	const int32 Expected = 3 + ExpectedElevations;
+	const int32 Expected = 4 + ExpectedElevations;
 
 	TestEqual(TEXT("Every sheet is present as PNG"), Pngs.Num(), Expected);
 	TestEqual(TEXT("Every sheet is present as SVG"), Svgs.Num(), Expected);
 
-	// The three plans are what the rebuild loop actually reads, so name them explicitly rather
+	// The plan sheets are what the rebuild loop actually reads, so name them explicitly rather
 	// than trusting the count alone.
 	for (const TCHAR* Required : { TEXT("01-blank-layout"), TEXT("02-furniture-layout"),
-								   TEXT("03-reflected-ceiling-plan") })
+								   TEXT("03-reflected-ceiling-plan"), TEXT("04-electrical-layout") })
 	{
 		const FString Png = FPaths::Combine(Dir, FString(Required) + TEXT(".png"));
 		TestTrue(*FString::Printf(TEXT("%s.png exists"), Required), FPaths::FileExists(Png));

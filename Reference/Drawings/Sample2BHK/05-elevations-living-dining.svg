@@ -13,7 +13,7 @@
 <text x="1730.00" y="1636.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#787878" text-anchor="start" dominant-baseline="central">DRAWING</text>
 <text x="1730.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">ELEVATIONS - LIVING / DINING</text>
 <text x="2200.00" y="1636.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#787878" text-anchor="start" dominant-baseline="central">SHEET</text>
-<text x="2200.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">04 / 10</text>
+<text x="2200.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">05 / 11</text>
 <text x="70.00" y="82.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="30.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">ELEVATIONS - LIVING / DINING</text>
 <text x="70.00" y="118.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#787878" text-anchor="start" dominant-baseline="central">ALL DIMENSIONS IN MILLIMETERS</text>
 <polygon points="297.24,320.20 1092.76,320.20 1092.76,681.80 297.24,681.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
@@ -30,6 +30,10 @@
 <line x1="541.36" y1="655.23" x2="559.36" y2="655.23" stroke="#787878" stroke-width="1.60" stroke-linecap="round"/>
 <polygon points="444.88,662.88 655.84,662.88 655.84,670.16 444.88,670.16" fill="none" stroke="#464646" stroke-width="1.00"/>
 <line x1="541.36" y1="666.52" x2="559.36" y2="666.52" stroke="#787878" stroke-width="1.60" stroke-linecap="round"/>
+<polygon points="833.61,374.44 1062.63,374.44 1062.63,398.55 833.61,398.55" fill="none" stroke="#464646" stroke-width="1.30"/>
+<line x1="833.61" y1="398.55" x2="1062.63" y2="398.55" stroke="#787878" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="540.72,631.18 560.00,631.18 560.00,645.64 540.72,645.64" fill="none" stroke="#005aaa" stroke-width="1.40"/>
+<line x1="550.36" y1="631.18" x2="550.36" y2="645.64" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
 <polygon points="441.88,428.68 658.84,428.68 658.84,681.80 441.88,681.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="448.88,435.68 651.84,435.68 651.84,674.80 448.88,674.80" fill="none" stroke="#787878" stroke-width="1.00"/>
 <circle cx="640.84" cy="555.24" r="3.40" fill="#464646" stroke="#464646" stroke-width="1.00"/>
@@ -52,6 +56,10 @@
 <line x1="1568.04" y1="344.31" x2="2001.96" y2="344.31" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
 <text x="2009.96" y="344.31" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2800</text>
 <polygon points="1568.04,669.75 2001.96,669.75 2001.96,681.80 1568.04,681.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1578.89,374.44 1600.58,374.44 1600.58,398.55 1578.89,398.55" fill="none" stroke="#464646" stroke-width="1.30"/>
+<line x1="1578.89" y1="398.55" x2="1600.58" y2="398.55" stroke="#787878" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="1775.36,631.18 1794.64,631.18 1794.64,645.64 1775.36,645.64" fill="none" stroke="#005aaa" stroke-width="1.40"/>
+<line x1="1785.00" y1="631.18" x2="1785.00" y2="645.64" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
 <line x1="1568.04" y1="721.80" x2="2001.96" y2="721.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1568.04" y1="681.80" x2="1568.04" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
 <line x1="2001.96" y1="681.80" x2="2001.96" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
@@ -67,6 +75,17 @@
 <text x="1100.76" y="966.31" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2800</text>
 <polygon points="297.24,1291.75 1092.76,1291.75 1092.76,1303.80 297.24,1303.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
 <polygon points="713.08,1207.37 966.20,1207.37 966.20,1303.80 713.08,1303.80" fill="none" stroke="#464646" stroke-width="1.30"/>
+<polygon points="675.71,1141.08 714.29,1141.08 714.29,1159.16 675.71,1159.16" fill="none" stroke="#005aaa" stroke-width="1.40"/>
+<line x1="680.54" y1="1141.08" x2="680.54" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="685.36" y1="1141.08" x2="685.36" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="690.18" y1="1141.08" x2="690.18" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="695.00" y1="1141.08" x2="695.00" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="699.82" y1="1141.08" x2="699.82" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="704.64" y1="1141.08" x2="704.64" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="709.46" y1="1141.08" x2="709.46" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<polygon points="459.96,1002.47 568.44,1002.47 568.44,1038.63 459.96,1038.63" fill="none" stroke="#464646" stroke-width="1.60"/>
+<line x1="463.96" y1="1015.12" x2="564.44" y2="1015.12" stroke="#b9b9b9" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="463.96" y1="1025.97" x2="564.44" y2="1025.97" stroke="#b9b9b9" stroke-width="0.90" stroke-linecap="round"/>
 <polygon points="676.92,1050.68 785.40,1050.68 785.40,1303.80 676.92,1303.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="683.92,1057.68 778.40,1057.68 778.40,1296.80 683.92,1296.80" fill="none" stroke="#787878" stroke-width="1.00"/>
 <circle cx="767.40" cy="1177.24" r="3.40" fill="#464646" stroke="#464646" stroke-width="1.00"/>

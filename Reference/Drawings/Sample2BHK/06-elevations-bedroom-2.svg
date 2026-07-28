@@ -13,7 +13,7 @@
 <text x="1730.00" y="1636.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#787878" text-anchor="start" dominant-baseline="central">DRAWING</text>
 <text x="1730.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">ELEVATIONS - BEDROOM 2</text>
 <text x="2200.00" y="1636.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#787878" text-anchor="start" dominant-baseline="central">SHEET</text>
-<text x="2200.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">05 / 10</text>
+<text x="2200.00" y="1668.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="19.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">06 / 11</text>
 <text x="70.00" y="82.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="30.00" fill="#000000" text-anchor="start" dominant-baseline="central" font-weight="bold">ELEVATIONS - BEDROOM 2</text>
 <text x="70.00" y="118.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#787878" text-anchor="start" dominant-baseline="central">ALL DIMENSIONS IN MILLIMETERS</text>
 <polygon points="441.88,320.20 948.12,320.20 948.12,681.80 441.88,681.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
@@ -25,6 +25,10 @@
 <polygon points="556.39,609.48 737.19,609.48 737.19,681.80 556.39,681.80" fill="none" stroke="#464646" stroke-width="1.40"/>
 <polygon points="567.23,569.70 726.34,569.70 726.34,609.48 567.23,609.48" fill="none" stroke="#464646" stroke-width="1.20"/>
 <line x1="556.39" y1="634.79" x2="737.19" y2="634.79" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="580.49,374.44 809.51,374.44 809.51,398.55 580.49,398.55" fill="none" stroke="#464646" stroke-width="1.30"/>
+<line x1="580.49" y1="398.55" x2="809.51" y2="398.55" stroke="#787878" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="480.45,631.18 499.74,631.18 499.74,645.64 480.45,645.64" fill="none" stroke="#005aaa" stroke-width="1.40"/>
+<line x1="490.09" y1="631.18" x2="490.09" y2="645.64" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
 <polygon points="604.60,410.60 785.40,410.60 785.40,573.32 604.60,573.32" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <line x1="695.00" y1="410.60" x2="695.00" y2="573.32" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="604.60" y1="491.96" x2="785.40" y2="491.96" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
@@ -91,6 +95,15 @@
 <line x1="869.77" y1="1278.51" x2="905.93" y2="1278.51" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
 <polygon points="830.59,1288.54 945.12,1288.54 945.12,1300.59 830.59,1300.59" fill="none" stroke="#464646" stroke-width="1.00"/>
 <line x1="869.77" y1="1294.57" x2="905.93" y2="1294.57" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="873.39,1141.08 902.32,1141.08 902.32,1159.16 873.39,1159.16" fill="none" stroke="#005aaa" stroke-width="1.40"/>
+<line x1="878.21" y1="1141.08" x2="878.21" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="883.03" y1="1141.08" x2="883.03" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="887.85" y1="1141.08" x2="887.85" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="892.67" y1="1141.08" x2="892.67" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="897.50" y1="1141.08" x2="897.50" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<polygon points="640.76,1002.47 749.24,1002.47 749.24,1038.63 640.76,1038.63" fill="none" stroke="#464646" stroke-width="1.60"/>
+<line x1="644.76" y1="1015.12" x2="745.24" y2="1015.12" stroke="#b9b9b9" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="644.76" y1="1025.97" x2="745.24" y2="1025.97" stroke="#b9b9b9" stroke-width="0.90" stroke-linecap="round"/>
 <polygon points="821.56,1050.68 930.04,1050.68 930.04,1303.80 821.56,1303.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="828.56,1057.68 923.04,1057.68 923.04,1296.80 828.56,1296.80" fill="none" stroke="#787878" stroke-width="1.00"/>
 <circle cx="912.04" cy="1177.24" r="3.40" fill="#464646" stroke="#464646" stroke-width="1.00"/>
@@ -109,12 +122,14 @@
 <line x1="1568.04" y1="966.31" x2="2001.96" y2="966.31" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
 <text x="2009.96" y="966.31" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2800</text>
 <polygon points="1568.04,1291.75 2001.96,1291.75 2001.96,1303.80 1568.04,1303.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1581.30,1141.08 1583.71,1141.08 1583.71,1159.16 1581.30,1159.16" fill="none" stroke="#005aaa" stroke-width="1.40"/>
 <polygon points="1575.05,1302.59 1633.35,1302.59 1633.35,1303.80 1575.05,1303.80" fill="#eeeeee" stroke="#787878" stroke-width="1.00"/>
 <polygon points="1571.05,1213.40 1637.35,1213.40 1637.35,1302.59 1571.05,1302.59" fill="none" stroke="#464646" stroke-width="1.60"/>
 <polygon points="1574.05,1272.48 1634.35,1272.48 1634.35,1284.54 1574.05,1284.54" fill="none" stroke="#464646" stroke-width="1.00"/>
 <line x1="1594.20" y1="1278.51" x2="1614.20" y2="1278.51" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
 <polygon points="1574.05,1288.54 1634.35,1288.54 1634.35,1300.59 1574.05,1300.59" fill="none" stroke="#464646" stroke-width="1.00"/>
 <line x1="1594.20" y1="1294.57" x2="1614.20" y2="1294.57" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
+<polygon points="1986.29,1253.18 1988.70,1253.18 1988.70,1267.64 1986.29,1267.64" fill="none" stroke="#005aaa" stroke-width="1.40"/>
 <line x1="1568.04" y1="1343.80" x2="2001.96" y2="1343.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1568.04" y1="1303.80" x2="1568.04" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
 <line x1="2001.96" y1="1303.80" x2="2001.96" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>

@@ -68,6 +68,69 @@ const FHFRoom* FHFHouseSpec::FindRoom(const FName& RoomId) const
 	return Rooms.FindByPredicate([&RoomId](const FHFRoom& R) { return R.Id == RoomId; });
 }
 
+const FHFBeam* FHFHouseSpec::DeepestBeamOverRoom(const FName& RoomId) const
+{
+	const FHFRoom* Room = FindRoom(RoomId);
+	if (Room == nullptr || Room->Boundary.Num() < 3)
+	{
+		return nullptr;
+	}
+
+	// Sample along the beam rather than doing a true polygon-segment intersection. A beam either
+	// spans a room or misses it entirely, so sampling is sufficient here.
+	constexpr int32 SampleCount = 24;
+
+	// Most beams sit directly over a wall, which means their centreline runs exactly along a room
+	// boundary. Those are concealed by the wall itself and are not what a ceiling has to clear, so
+	// a sample only counts when it is clear of every boundary edge - a plain inside/outside test
+	// would report every perimeter beam as crossing every room it borders.
+	auto DistanceToBoundary = [Room](const FVector2D& Point)
+	{
+		double Nearest = TNumericLimits<double>::Max();
+		const int32 Count = Room->Boundary.Num();
+		for (int32 i = 0, j = Count - 1; i < Count; j = i++)
+		{
+			const FVector2D& A = Room->Boundary[j];
+			const FVector2D& B = Room->Boundary[i];
+			const FVector2D Edge = B - A;
+			const double LengthSq = Edge.SizeSquared();
+
+			const double T = (LengthSq > UE_KINDA_SMALL_NUMBER)
+				? FMath::Clamp(FVector2D::DotProduct(Point - A, Edge) / LengthSq, 0.0, 1.0)
+				: 0.0;
+
+			Nearest = FMath::Min(Nearest, FVector2D::Distance(Point, A + Edge * T));
+		}
+		return Nearest;
+	};
+
+	const FHFBeam* Deepest = nullptr;
+	for (const FHFBeam& Beam : Beams)
+	{
+		if (Beam.Length() <= UE_KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const double Clearance = Beam.Width * 0.5;
+
+		bool bCrosses = false;
+		for (int32 i = 0; i <= SampleCount && !bCrosses; ++i)
+		{
+			const double T = static_cast<double>(i) / SampleCount;
+			const FVector2D Point = FMath::Lerp(Beam.Start, Beam.End, T);
+			bCrosses = Room->ContainsPoint(Point) && DistanceToBoundary(Point) > Clearance;
+		}
+
+		if (bCrosses && (Deepest == nullptr || Beam.Depth > Deepest->Depth))
+		{
+			Deepest = &Beam;
+		}
+	}
+
+	return Deepest;
+}
+
 double FHFHouseSpec::TotalFloorArea() const
 {
 	double Total = 0.0;
@@ -118,6 +181,24 @@ void FHFUnits::ConvertToCentimeters(FHFHouseSpec& Spec)
 		Opening.Width *= Scale;
 		Opening.Height *= Scale;
 		Opening.SillHeight *= Scale;
+	}
+
+	for (FHFBeam& Beam : Spec.Beams)
+	{
+		Beam.Start *= Scale;
+		Beam.End *= Scale;
+		Beam.Width *= Scale;
+		Beam.Depth *= Scale;
+		Beam.SoffitZ *= Scale;
+	}
+
+	for (FHFColumn& Column : Spec.Columns)
+	{
+		Column.Position *= Scale;
+		Column.Size *= Scale;
+		Column.Height *= Scale;
+		Column.BaseZ *= Scale;
+		// RotationDegrees is dimensionless.
 	}
 
 	for (FHFRoom& Room : Spec.Rooms)
