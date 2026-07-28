@@ -123,6 +123,40 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "1.0"))
 	double DoorwayWidth = 100.0;
 
+	/**
+	 * Also emit the structural slab soffit over this room.
+	 *
+	 * Without it, looking up in the middle of a room with a peripheral ceiling shows open sky
+	 * where the structure above should be.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	bool bGenerateCeilingSlab = true;
+
+protected:
+	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;
+};
+
+/** A false ceiling over one room. */
+UCLASS()
+class HOUSEFORGE_API AHFCeilingActor : public AHFElementActor
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ShowOnlyInnerProperties))
+	FHFFalseCeiling Ceiling;
+
+	/** The room this ceiling covers, needed for its boundary and structural height. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFRoom Room;
+
+	/** Ceiling fans whose drop rods must pass through this ceiling. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FVector2D> FanDrops;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double FanDropRadius = 8.0;
+
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;
 };

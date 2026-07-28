@@ -2,7 +2,12 @@
 
 #include "Geometry/HFMeshOps.h"
 
+#include "HouseForge.h"
+
 #include "CompGeom/PolygonTriangulation.h"
+#include "ConstrainedDelaunay2.h"
+#include "Curve/GeneralPolygon2.h"
+#include "Curve/PolygonOffsetUtils.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "DynamicMesh/MeshNormals.h"
 #include "Operations/MeshBoolean.h"
@@ -159,12 +164,138 @@ bool FHFMeshOps::AppendPrism(FDynamicMesh3& Mesh, const TArray<FVector2D>& Polyg
 	return true;
 }
 
+bool FHFMeshOps::AppendPrismWithHoles(FDynamicMesh3& Mesh, const TArray<FVector2D>& Outer,
+	const TArray<TArray<FVector2D>>& Holes, double BottomZ, double TopZ, EHFSurfaceRole Role)
+{
+	if (Outer.Num() < 3 || FMath::IsNearlyEqual(BottomZ, TopZ))
+	{
+		return false;
+	}
+
+	if (Holes.IsEmpty())
+	{
+		return AppendPrism(Mesh, Outer, BottomZ, TopZ, Role);
+	}
+
+	// Clipper and the triangulator both want the outer loop counter-clockwise and holes clockwise.
+	auto ToOriented = [](const TArray<FVector2D>& Loop, bool bWantCounterClockwise)
+	{
+		TArray<FVector2d> Points;
+		Points.Reserve(Loop.Num());
+		for (const FVector2D& Point : Loop)
+		{
+			Points.Add(FVector2d(Point.X, Point.Y));
+		}
+
+		FPolygon2d Polygon(Points);
+		const bool bIsCounterClockwise = Polygon.SignedArea() > 0.0;
+		if (bIsCounterClockwise != bWantCounterClockwise)
+		{
+			Polygon.Reverse();
+		}
+		return Polygon;
+	};
+
+	FGeneralPolygon2d General(ToOriented(Outer, true));
+	TArray<TArray<FVector2D>> UsedHoles;
+
+	for (const TArray<FVector2D>& Hole : Holes)
+	{
+		if (Hole.Num() < 3)
+		{
+			continue;
+		}
+
+		FPolygon2d HolePolygon = ToOriented(Hole, false);
+		// AddHole validates containment and non-overlap; a hole it rejects would corrupt the
+		// triangulation, so it is dropped rather than forced.
+		if (General.AddHole(HolePolygon, /*bCheckContainment*/ true, /*bCheckOrientation*/ true))
+		{
+			TArray<FVector2D>& Kept = UsedHoles.AddDefaulted_GetRef();
+			for (const FVector2d& Point : HolePolygon.GetVertices())
+			{
+				Kept.Add(FVector2D(Point.X, Point.Y));
+			}
+		}
+	}
+
+	if (UsedHoles.IsEmpty())
+	{
+		return AppendPrism(Mesh, Outer, BottomZ, TopZ, Role);
+	}
+
+	FConstrainedDelaunay2d Triangulator;
+	// Odd rather than Positive: it fills by nesting depth rather than winding direction, so the
+	// hole is excluded regardless of which way round the loops ended up. Relying on winding gave a
+	// band whose volume was outer plus inner instead of outer minus inner.
+	Triangulator.FillRule = FConstrainedDelaunay2d::EFillRule::Odd;
+	Triangulator.Add(General);
+
+	if (!Triangulator.Triangulate() || Triangulator.Triangles.IsEmpty())
+	{
+		return false;
+	}
+
+	const int32 Group = GroupForRole(Role);
+
+	// Caps share the triangulated vertex set; the side walls are built from the loops directly and
+	// reuse those same vertices, which is what keeps the prism watertight.
+	TArray<int32> BottomVerts;
+	TArray<int32> TopVerts;
+	BottomVerts.Reserve(Triangulator.Vertices.Num());
+	TopVerts.Reserve(Triangulator.Vertices.Num());
+
+	for (const FVector2d& Vertex : Triangulator.Vertices)
+	{
+		BottomVerts.Add(Mesh.AppendVertex(FVector3d(Vertex.X, Vertex.Y, BottomZ)));
+		TopVerts.Add(Mesh.AppendVertex(FVector3d(Vertex.X, Vertex.Y, TopZ)));
+	}
+
+	for (const FIndex3i& Tri : Triangulator.Triangles)
+	{
+		Mesh.AppendTriangle(BottomVerts[Tri.A], BottomVerts[Tri.B], BottomVerts[Tri.C], Group);
+		Mesh.AppendTriangle(TopVerts[Tri.C], TopVerts[Tri.B], TopVerts[Tri.A], Group);
+	}
+
+	// The triangulator keeps input points at the front of its vertex list, in the order added:
+	// the outer loop first, then each accepted hole.
+	// One winding rule for every loop. Holes are already stored wound opposite to the outer
+	// boundary, so walking them in order reverses the wall direction on its own - mirroring the
+	// formula as well flips them back, which made the hole's walls face outward and its volume
+	// count as solid instead of void.
+	auto AppendWall = [&](int32 StartIndex, int32 Count)
+	{
+		for (int32 i = 0; i < Count; ++i)
+		{
+			const int32 A = StartIndex + i;
+			const int32 B = StartIndex + ((i + 1) % Count);
+
+			Mesh.AppendTriangle(BottomVerts[A], TopVerts[B], BottomVerts[B], Group);
+			Mesh.AppendTriangle(BottomVerts[A], TopVerts[A], TopVerts[B], Group);
+		}
+	};
+
+	const int32 OuterCount = General.GetOuter().VertexCount();
+	AppendWall(0, OuterCount);
+
+	int32 Cursor = OuterCount;
+	for (const FPolygon2d& Hole : General.GetHoles())
+	{
+		AppendWall(Cursor, Hole.VertexCount());
+		Cursor += Hole.VertexCount();
+	}
+
+	return true;
+}
+
 bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Tool)
 {
 	if (Tool.TriangleCount() == 0 || Target.TriangleCount() == 0)
 	{
 		return false;
 	}
+
+	const bool bInputsClosed = IsClosed(Target) && IsClosed(Tool);
 
 	FDynamicMesh3 Result;
 	Result.EnableTriangleGroups();
@@ -175,10 +306,22 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 		&Result, FMeshBoolean::EBooleanOp::Difference);
 	Boolean.bPutResultInInputSpace = true;
 
-	if (!Boolean.Compute() || Result.TriangleCount() == 0)
+	// Compute() returns false whenever it could not resolve every intersection perfectly, which it
+	// reports even for cuts that came out clean - a through-hole in a box comes back "invalid"
+	// while being exactly right. Judging the result is therefore more reliable than trusting the
+	// return value, which was silently leaving ceilings and fan drops uncut.
+	const bool bComputed = Boolean.Compute();
+
+	const bool bResultUsable = Result.TriangleCount() > 0 && (!bInputsClosed || IsClosed(Result));
+
+	if (!bResultUsable)
 	{
 		// Leaving the target uncut is the safer failure: a half-subtracted wall still looks
-		// plausible in a screenshot, which is exactly how a bad cut would go unnoticed.
+		// plausible in a screenshot, which is exactly how a bad cut would go unnoticed. Log it,
+		// because a silent no-op is indistinguishable from a cut that was never requested.
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Mesh subtraction produced unusable geometry (computed=%d, result tris=%d, closed=%d); target left uncut."),
+			bComputed ? 1 : 0, Result.TriangleCount(), IsClosed(Result) ? 1 : 0);
 		return false;
 	}
 
@@ -238,6 +381,60 @@ void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 	}
 
 	FMeshNormals::QuickRecomputeOverlayNormals(Mesh);
+}
+
+TArray<TArray<FVector2D>> FHFMeshOps::InsetPolygon(const TArray<FVector2D>& Polygon, double Amount)
+{
+	TArray<TArray<FVector2D>> Out;
+	if (Polygon.Num() < 3 || Amount <= 0.0)
+	{
+		return Out;
+	}
+
+	TArray<FVector2d> Points;
+	Points.Reserve(Polygon.Num());
+	for (const FVector2D& Point : Polygon)
+	{
+		Points.Add(FVector2d(Point.X, Point.Y));
+	}
+
+	// Clipper expects a consistent winding; normalise to counter-clockwise so a negative offset
+	// reliably means "inward" rather than depending on how the boundary was authored.
+	FPolygon2d Outer(Points);
+	if (Outer.SignedArea() < 0.0)
+	{
+		Outer.Reverse();
+	}
+
+	TArray<FGeneralPolygon2d> Input;
+	Input.Add(FGeneralPolygon2d(Outer));
+
+	TArray<FGeneralPolygon2d> Offsetted;
+	// Miter joins keep the square corners a room actually has; rounding them would put a fillet on
+	// every wall junction.
+	if (!PolygonsOffset(-Amount, Input, Offsetted, /*bCopyInputOnFailure*/ false, /*MiterLimit*/ 2.0,
+		EPolygonOffsetJoinType::Miter, EPolygonOffsetEndType::Polygon))
+	{
+		return Out;
+	}
+
+	for (const FGeneralPolygon2d& Result : Offsetted)
+	{
+		const TArray<FVector2d>& Vertices = Result.GetOuter().GetVertices();
+		if (Vertices.Num() < 3)
+		{
+			continue;
+		}
+
+		TArray<FVector2D>& Loop = Out.AddDefaulted_GetRef();
+		Loop.Reserve(Vertices.Num());
+		for (const FVector2d& Vertex : Vertices)
+		{
+			Loop.Add(FVector2D(Vertex.X, Vertex.Y));
+		}
+	}
+
+	return Out;
 }
 
 bool FHFMeshOps::IsClosed(const FDynamicMesh3& Mesh)

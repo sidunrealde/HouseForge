@@ -177,6 +177,172 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 	return Mesh;
 }
 
+FDynamicMesh3 FHFGenerators::GenerateCeilingSlab(const FHFRoom& Room, double SlabThickness)
+{
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	if (Room.Boundary.Num() < 3 || SlabThickness <= 0.0)
+	{
+		return Mesh;
+	}
+
+	// The visible underside sits at the room's ceiling height; the slab thickens upward from there.
+	const double SoffitZ = Room.FloorZ + Room.CeilingHeight;
+	FHFMeshOps::AppendPrism(Mesh, Room.Boundary, SoffitZ, SoffitZ + SlabThickness, EHFSurfaceRole::CeilingSoffit);
+
+	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+	return Mesh;
+}
+
+FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
+	const TArray<FVector2D>& FanDrops, double FanDropRadius)
+{
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	if (Ceiling.Style == EHFCeilingStyle::None || Ceiling.Drop <= 0.0)
+	{
+		return Mesh;
+	}
+
+	// Bulkheads follow their own polygon; everything else follows the room.
+	const TArray<FVector2D>& Outline = (Ceiling.ExplicitPolygon.Num() >= 3)
+		? Ceiling.ExplicitPolygon
+		: Room.Boundary;
+
+	if (Outline.Num() < 3)
+	{
+		return Mesh;
+	}
+
+	const double StructuralZ = Room.FloorZ + Room.CeilingHeight;
+	const double SoffitZ = StructuralZ - Ceiling.Drop;
+
+	if (SoffitZ <= Room.FloorZ)
+	{
+		// Validated against elsewhere, but refusing here too keeps the generator honest when it is
+		// called directly.
+		return Mesh;
+	}
+
+	// Fan rods pass through the ceiling as holes in the panel rather than as boolean cuts. The
+	// boolean returned geometry that was not closed for a cut this simple, and a hole in a
+	// triangulation cannot half-succeed.
+	TArray<TArray<FVector2D>> FanHoles;
+	if (FanDropRadius > 0.0)
+	{
+		for (const FVector2D& Drop : FanDrops)
+		{
+			FanHoles.Add({
+				FVector2D(Drop.X - FanDropRadius, Drop.Y - FanDropRadius),
+				FVector2D(Drop.X + FanDropRadius, Drop.Y - FanDropRadius),
+				FVector2D(Drop.X + FanDropRadius, Drop.Y + FanDropRadius),
+				FVector2D(Drop.X - FanDropRadius, Drop.Y + FanDropRadius)
+			});
+		}
+	}
+
+	/**
+	 * Builds a band between an outer loop and its inset.
+	 *
+	 * Triangulated as a polygon with a hole rather than subtracted as one solid from another. A
+	 * mesh boolean resolves that case imperfectly - it returned geometry that was not closed and
+	 * reported failure, which silently left every ceiling band solid. The annulus is exact.
+	 * The hole also gives the inner fascia for free: the vertical face you actually see standing
+	 * under a peripheral ceiling.
+	 */
+	auto AppendBand = [&Mesh](const TArray<FVector2D>& OuterLoop, double BandWidth,
+		double BottomZ, double TopZ, EHFSurfaceRole Role) -> bool
+	{
+		const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(OuterLoop, BandWidth);
+		if (Inner.IsEmpty())
+		{
+			// The band is wider than the room, so it becomes a full drop. That is the honest
+			// result rather than an error - the geometry is still correct.
+			return FHFMeshOps::AppendPrism(Mesh, OuterLoop, BottomZ, TopZ, Role);
+		}
+
+		return FHFMeshOps::AppendPrismWithHoles(Mesh, OuterLoop, Inner, BottomZ, TopZ, Role);
+	};
+
+	constexpr double PanelThickness = 2.0;
+
+	switch (Ceiling.Style)
+	{
+	case EHFCeilingStyle::FullDrop:
+	case EHFCeilingStyle::Bulkhead:
+	{
+		// A flat panel across the whole outline, plus a fascia dropping from the structure to it
+		// so the edge reads as a boxed soffit rather than a floating sheet.
+		FHFMeshOps::AppendPrismWithHoles(Mesh, Outline, FanHoles, SoffitZ, SoffitZ + PanelThickness,
+			EHFSurfaceRole::CeilingSoffit);
+
+		if (Ceiling.Style == EHFCeilingStyle::Bulkhead)
+		{
+			// Hollow, so only the perimeter face remains - a bulkhead is a box, not a plug.
+			AppendBand(Outline, PanelThickness, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+		}
+		break;
+	}
+
+	case EHFCeilingStyle::Peripheral:
+	{
+		AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+		break;
+	}
+
+	case EHFCeilingStyle::Tray:
+	{
+		// Outer band at the full drop, inner region stepped back up to half of it.
+		AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+
+		const double InnerSoffitZ = StructuralZ - Ceiling.Drop * 0.5;
+		for (const TArray<FVector2D>& Loop : FHFMeshOps::InsetPolygon(Outline, Ceiling.BandWidth))
+		{
+			FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, InnerSoffitZ,
+				InnerSoffitZ + PanelThickness, EHFSurfaceRole::CeilingSoffit);
+		}
+		break;
+	}
+
+	case EHFCeilingStyle::Cove:
+	{
+		// The band, then a channel recessed behind a lip. The lip is what hides the LED strip from
+		// direct view, which is the entire point of a cove.
+		const double LipHeight = FMath::Max(Ceiling.Cove.LipHeight, 1.0);
+		const double ChannelWidth = FMath::Max(Ceiling.Cove.ChannelWidth, 1.0);
+		const double Setback = FMath::Max(Ceiling.Cove.Setback, 0.0);
+
+		const double BandInner = FMath::Max(Ceiling.BandWidth - ChannelWidth - Setback, 1.0);
+
+		AppendBand(Outline, BandInner, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+
+		// The channel floor sits above the band soffit, behind the lip.
+		for (const TArray<FVector2D>& Lip : FHFMeshOps::InsetPolygon(Outline, BandInner))
+		{
+			const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(Lip, ChannelWidth);
+			if (Inner.IsEmpty())
+			{
+				FHFMeshOps::AppendPrism(Mesh, Lip, SoffitZ + LipHeight, StructuralZ, EHFSurfaceRole::CoveInterior);
+			}
+			else
+			{
+				FHFMeshOps::AppendPrismWithHoles(Mesh, Lip, Inner, SoffitZ + LipHeight, StructuralZ,
+					EHFSurfaceRole::CoveInterior);
+			}
+		}
+		break;
+	}
+
+	default:
+		break;
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+	return Mesh;
+}
+
 FDynamicMesh3 FHFGenerators::GenerateBeam(const FHFBeam& Beam)
 {
 	FDynamicMesh3 Mesh;
