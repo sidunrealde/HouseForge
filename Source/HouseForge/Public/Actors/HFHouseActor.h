@@ -44,15 +44,43 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "HouseForge")
 	void SetSpec(const FHFHouseSpec& InSpec);
 
-	/** Redraws the preview from the current spec. */
+	/** Redraws the wireframe preview from the current spec. */
 	UFUNCTION(BlueprintCallable, Category = "HouseForge")
 	void Rebuild();
 
+	/**
+	 * Spawns or replaces the element actors that make up the house: walls with their openings cut
+	 * out, floors and skirting, beams, columns and opening infill.
+	 *
+	 * Called explicitly rather than from PostLoad. Spawning actors while the level is still
+	 * loading is asking for trouble, and once a level is saved its element actors are already in
+	 * it - rebuilding on load would duplicate them.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
+	void BuildGeometry();
+
+	/** Destroys every element actor this house owns. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
+	void ClearGeometry();
+
+	/** Element actors generated from the spec, owned by this house. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	TArray<TObjectPtr<AActor>> ElementActors;
+
+	/** Floor slab thickness used when generating rooms. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Geometry", meta = (ClampMin = "1.0"))
+	double SlabThickness = 15.0;
+
 	// -------------------------------------------------------------------- preview appearance
 
-	/** Wireframe preview of the spec. Replaced by real meshes in the geometry milestone. */
+	/**
+	 * Wireframe preview of the spec, drawn over the generated meshes.
+	 *
+	 * Off by default now that real geometry exists; still useful for seeing what the spec says
+	 * when the meshes look wrong, and it is the only thing that draws door swing arcs.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Preview")
-	bool bShowPreview = true;
+	bool bShowPreview = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Preview")
 	bool bShowRooms = true;

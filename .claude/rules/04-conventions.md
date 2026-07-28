@@ -47,6 +47,17 @@ This is load-bearing: the material panel targets faces by role, and untagged geo
 re-materialled by the user. Generators also emit real-world-scale planar/box UVs so tiling
 controls mean something.
 
+## Generated geometry stays artist-editable
+
+Elements are `UDynamicMeshComponent`s so Unreal's Modeling Tools can be taken to them after
+generation. That is a requirement, not an implementation detail — do not bake to static meshes as
+part of generation.
+
+Anything that regenerates geometry **must** respect `AHFElementActor::bArtistEdited`. An element
+flagged as hand-edited opts out of regeneration, and a house rebuild preserves the actor rather
+than destroying and respawning it. Overwriting modelling work is a silent, unrecoverable loss, and
+`RevertToGenerated` is the only thing allowed to discard it.
+
 ## Actors own their data
 
 Each generated element actor holds its own parameter struct as a `UPROPERTY(EditAnywhere)`.
