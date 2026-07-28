@@ -41,6 +41,11 @@ public class HouseForgeEditor : ModuleRules
 				"ContentBrowser",
 				"ContentBrowserData",
 
+				// Drawing intake: native file dialog, and viewport capture for the compare loop.
+				"DesktopPlatform",
+				"ImageCore",
+				"ImageWrapper",
+
 				// Geometry, for baking and level construction.
 				"GeometryCore",
 				"GeometryFramework",
