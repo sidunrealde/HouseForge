@@ -226,13 +226,14 @@ bool FHFPlinthRecessTest::RunTest(const FString& Parameters)
 	const FHFPlinthParams Base = MakeBaseRunPlinth();
 	const FDynamicMesh3 Recessed = FHFJoineryKit::GeneratePlinth(Base);
 
-	// Flush: the face lands on the shutter plane, and the frame gains exactly the board the recess
-	// was costing it - the two end rails, each 5 cm longer.
+	// Flush: the face lands on the carcass front plane, and the frame gains exactly the board the
+	// recess was costing it - the two end rails, each 5 cm longer.
 	FHFPlinthParams FlushParams = Base;
 	FlushParams.FrontRecess = 0.0;
 	const FDynamicMesh3 Flush = FHFJoineryKit::GeneratePlinth(FlushParams);
 
-	TestNearlyEqual(TEXT("A flush plinth reaches the shutter plane"), Flush.GetBounds().Min.Y, 0.0, 0.001);
+	TestNearlyEqual(TEXT("A flush plinth reaches the carcass front plane"),
+		Flush.GetBounds().Min.Y, 0.0, 0.001);
 	TestNearlyEqual(TEXT("A recessed plinth stands back from it by the toe kick"),
 		Recessed.GetBounds().Min.Y, 5.0, 0.001);
 	TestNearlyEqual(TEXT("The recess costs exactly the board it removes"),
@@ -252,6 +253,37 @@ bool FHFPlinthRecessTest::RunTest(const FString& Parameters)
 	DeepParams.FrontRecess = 9.0;
 	TestNearlyEqual(TEXT("A deeper toe kick sets the face further back"),
 		FHFJoineryKit::GeneratePlinth(DeepParams).GetBounds().Min.Y, 9.0, 0.001);
+
+	// The kick is measured from the SHUTTER face, and a run with shutters over it has to say how far
+	// in front of the carcass those hang - or the recess it gets is that much deeper than the one it
+	// asked for, silently. The frame is built off the carcass front plane either way; this is the one
+	// conversion between the two datums, and the whole reason both are named.
+	{
+		FHFPlinthParams Overlaid = Base;
+		Overlaid.ShutterOverlay = 2.0;
+		Overlaid.FrontRecess = 5.0;
+
+		const FDynamicMesh3 Mesh = FHFJoineryKit::GeneratePlinth(Overlaid);
+		const double ShutterFaceY = -Overlaid.ShutterOverlay;
+
+		TestNearlyEqual(TEXT("The kick measured from the shutter face is the kick that was asked for"),
+			Mesh.GetBounds().Min.Y - ShutterFaceY, 5.0, 0.001);
+		TestNearlyEqual(TEXT("Which puts the panel nearer the carcass front, not further from it"),
+			Mesh.GetBounds().Min.Y, 3.0, 0.001);
+		TestNearlyEqual(TEXT("And the back is untouched: an overlay is not a resize"),
+			Mesh.GetBounds().Max.Y, Recessed.GetBounds().Max.Y, 0.001);
+
+		// A kick shallower than the shutters stand proud would put the plinth out in front of them,
+		// which is not a toe kick. Clamped to flush with the carcass and reported as such.
+		FHFPlinthParams TooShallow = Overlaid;
+		TooShallow.FrontRecess = 0.5;
+		const FHFPlinthParams Fitted = FHFJoineryKit::SanitisePlinth(TooShallow);
+
+		TestNearlyEqual(TEXT("A kick shallower than the overlay is clamped to it"),
+			Fitted.FrontRecess, Fitted.ShutterOverlay, 1e-9);
+		TestNearlyEqual(TEXT("So the panel lands on the carcass front plane rather than in front of it"),
+			FHFJoineryKit::GeneratePlinth(TooShallow).GetBounds().Min.Y, 0.0, 0.001);
+	}
 
 	// An end on show is set back the same way, so the carcass reads as floating from the side too.
 	FHFPlinthParams LeftOpen = Base;

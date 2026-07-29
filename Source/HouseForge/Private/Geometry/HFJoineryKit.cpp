@@ -36,10 +36,17 @@ FHFPlinthParams FHFJoineryKit::SanitisePlinth(const FHFPlinthParams& Params)
 	Out.PanelThickness = FMath::Clamp(Out.PanelThickness, MinBoardThickness,
 		FMath::Max(MinBoardThickness, Smallest * 0.5));
 
-	// A recess deeper than the unit would put the front panel out behind its own back. Leave a
-	// board's worth of depth: asking for that is a mistake, but clamping leaves the caller with a
-	// plinth to look at and a bound to notice it by, rather than nothing at all.
-	Out.FrontRecess = FMath::Clamp(Out.FrontRecess, 0.0, FMath::Max(0.0, Out.Depth - Out.PanelThickness));
+	// The kick is measured from the shutter face and the frame is built off the carcass front plane,
+	// so what has to be clamped is where the panel actually lands - FrontRecess less the overlay -
+	// and not FrontRecess on its own.
+	//
+	// A recess deeper than the unit would put the front panel out behind its own back, and one
+	// shallower than the shutters stand proud would put it out in front of them. Clamping both ends
+	// leaves the caller with a plinth to look at and a bound to notice it by, rather than nothing.
+	Out.ShutterOverlay = FMath::Clamp(Out.ShutterOverlay, 0.0,
+		FMath::Max(0.0, Out.Depth - Out.PanelThickness));
+	Out.FrontRecess = FMath::Clamp(Out.FrontRecess, Out.ShutterOverlay,
+		FMath::Max(Out.ShutterOverlay, Out.Depth - Out.PanelThickness));
 
 	// End setbacks only exist where an end is on show, and together they cannot eat the run.
 	const int32 ExposedEnds = (Out.bLeftEndExposed ? 1 : 0) + (Out.bRightEndExposed ? 1 : 0);
@@ -65,7 +72,12 @@ FDynamicMesh3 FHFJoineryKit::GeneratePlinth(const FHFPlinthParams& Params)
 
 	const double X0 = LeftRecess;
 	const double X1 = P.Width - RightRecess;
-	const double Y0 = P.FrontRecess;
+
+	// The kick is asked for from the shutter face and built off the carcass front plane. Taking
+	// FrontRecess as the plane directly - which is what this used to do while the struct documented
+	// the opposite - makes the visible kick FrontRecess plus the shutter overlay: on the wardrobe
+	// composition, a 5 cm kick came out 7 cm and nothing measured it.
+	const double Y0 = P.FrontFaceY();
 	const double Y1 = P.Depth;
 
 	const double Span = X1 - X0;

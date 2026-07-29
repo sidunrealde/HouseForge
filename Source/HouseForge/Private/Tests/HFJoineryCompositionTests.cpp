@@ -46,6 +46,10 @@ namespace
 	/** 18 mm BWP ply. Every board in these test carcasses, as in every real one. */
 	constexpr double Board = 1.8;
 
+	/** A 19 mm finished leaf on a hinge that leaves 1 mm behind it: 20 mm of overlay in all. */
+	constexpr double ShutterThickness = 1.9;
+	constexpr double ShutterBackClearance = 0.1;
+
 	/**
 	 * Below this two surfaces are coincident as far as a depth buffer is concerned.
 	 *
@@ -337,6 +341,12 @@ namespace
 		W.PlinthParams.Width = WardrobeWidth;
 		W.PlinthParams.Depth = WardrobeDepth;
 		W.PlinthParams.Height = PlinthHeight;
+
+		// The kick is 50 mm measured from the SHUTTER face, which is where anyone looking at the
+		// wardrobe measures it from - so the plinth is told how far in front of the carcass those
+		// shutters hang. Leaving that at zero puts the panel 50 mm behind the carcass instead, and
+		// the kick you can actually see comes out 70.
+		W.PlinthParams.ShutterOverlay = ShutterThickness + ShutterBackClearance;
 		W.PlinthParams.FrontRecess = 5.0;
 		W.PlinthParams.PanelThickness = Board;
 		W.PlinthParams.bRightEndExposed = true;
@@ -375,9 +385,9 @@ namespace
 
 		W.Shutter.ModuleWidth = BayWidth;
 		W.Shutter.ModuleHeight = Z1 - Z0;
-		W.Shutter.Thickness = 1.9;
+		W.Shutter.Thickness = ShutterThickness;
 		W.Shutter.RevealGap = 0.3;
-		W.Shutter.BackClearance = 0.1;
+		W.Shutter.BackClearance = ShutterBackClearance;
 		W.Shutter.OpenAngleDegrees = 100.0;
 		W.ShutterFaceY = -(W.Shutter.BackClearance + W.Shutter.Thickness);
 
@@ -599,9 +609,25 @@ bool FHFWardrobeAssemblyTest::RunTest(const FString& Parameters)
 
 	// The toe kick is what makes the run read as furniture. Measured against the shutter face,
 	// which is the plane it is specified from, not against the carcass.
-	const FHFPlinthParams Pl = FHFJoineryKit::SanitisePlinth(W.PlinthParams);
-	TestNearlyEqual(TEXT("The plinth is recessed behind the shutter face"),
-		W.Plinth.GetBounds().Min.Y - W.ShutterFaceY, Pl.FrontRecess - W.ShutterFaceY, 1e-6);
+	//
+	// Stated as a figure rather than as an expression in the plinth's own parameters. The check this
+	// replaces subtracted ShutterFaceY from BOTH sides, which cancels: it reduced to
+	// "Plinth.Min.Y == FrontRecess", an identity that holds for any shutter position whatsoever -
+	// including a shutter that does not exist - while its comment described a check it did not
+	// perform. The plinth was in fact 70 mm behind the shutter face on a 50 mm kick, and this passed.
+	const double VisibleKick = W.Plinth.GetBounds().Min.Y - W.ShutterFaceY;
+	TestNearlyEqual(TEXT("The plinth is recessed 50 mm behind the shutter face, as asked"),
+		VisibleKick, 5.0, 1e-6);
+
+	// And a domain bound either side of it, so the assertion fails if the datum ever moves again
+	// rather than tracking it. A real Indian base unit or wardrobe kicks 50 to 80 mm.
+	TestTrue(*FString::Printf(TEXT("The kick is one a wardrobe actually has (%.2f cm)"), VisibleKick),
+		VisibleKick >= 5.0 - 1e-6 && VisibleKick <= 8.0);
+
+	// The half the wrong datum would break in the other direction: the plinth still has to land on
+	// the carcass back, not 20 mm past it and into the wall.
+	TestNearlyEqual(TEXT("The plinth's back lands exactly on the carcass back"),
+		W.Plinth.GetBounds().Max.Y, W.Carcass.GetBounds().Max.Y, 1e-6);
 	TestNearlyEqual(TEXT("The carcass sits on top of the plinth"),
 		W.Plinth.GetBounds().Max.Z, W.Carcass.GetBounds().Min.Z, 1e-6);
 

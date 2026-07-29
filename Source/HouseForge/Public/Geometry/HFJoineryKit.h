@@ -13,9 +13,14 @@
  *
  * Everything is centimetres, in the plinth's own local space: the origin lies on the floor at the
  * front-left corner of the CARCASS footprint, +X runs along the run, +Y runs back into the unit,
- * +Z is up. The origin is the carcass corner rather than the plinth's own front-left corner on
- * purpose - the recess is only meaningful measured from the plane the shutters hang in, so Y = 0 is
- * that plane and FrontRecess can be read straight off the geometry.
+ * +Z is up. Y = 0 is the CARCASS FRONT PLANE - the same datum every other frame in this kit uses,
+ * and the reason a carcass can mix them without re-basing anything.
+ *
+ * The shutters do NOT hang in that plane. Every shutter and drawer front this kit generates is
+ * full overlay and stands in front of it, at negative Y, while everything the carcass owns stays at
+ * Y >= 0. A toe kick, though, is a thing you see: it is the recess measured from the shutter FACE,
+ * not from the carcass behind it. So the two are stated separately - ShutterOverlay says how far in
+ * front of the carcass the shutters hang, and FrontRecess is read from there.
  *
  * The back is assumed to run into a wall, which is true of every base run, wardrobe and TV unit in
  * a 2BHK or 3BHK. An island would want its back panel finished too, and that is a parameter to add
@@ -30,7 +35,7 @@ struct HOUSEFORGE_API FHFPlinthParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double Width = 0.0;
 
-	/** Footprint depth, shutter face to back, along +Y. */
+	/** Footprint depth of the carcass, its front plane to its back, along +Y. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double Depth = 0.0;
 
@@ -39,11 +44,27 @@ struct HOUSEFORGE_API FHFPlinthParams
 	double Height = 10.0;
 
 	/**
+	 * How far the shutters hang in front of the carcass: their thickness plus the hinge clearance.
+	 *
+	 * Zero for a run with no doors over its base, and for a caller that genuinely wants the kick
+	 * measured off the carcass. Anything else, and it is the figure the shutter was generated with -
+	 * FHFShutterParams::Thickness plus BackClearance - because the toe kick is specified from the
+	 * face somebody looks at, and a plinth that took its recess off the carcass instead came out
+	 * that much deeper than asked for without saying so.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double ShutterOverlay = 0.0;
+
+	/**
 	 * The toe kick: how far the front panel sits behind the shutter face.
 	 *
 	 * This one number is what makes a run read as furniture rather than a box on the floor. It puts
 	 * the base in its own shadow so the carcass appears to float, and it is the difference between a
 	 * kitchen that looks built and one that looks like a wall of cubes.
+	 *
+	 * 5 to 8 is what a real Indian base unit or wardrobe has. Measured from the shutter face, so it
+	 * is read off the finished elevation rather than off the carcass hidden behind it; see
+	 * ShutterOverlay, and FrontFaceY for where that puts the panel.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double FrontRecess = 5.0;
@@ -63,6 +84,15 @@ struct HOUSEFORGE_API FHFPlinthParams
 	/** True when the +X end is on show. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	bool bRightEndExposed = false;
+
+	/**
+	 * Where the front panel's face lands, in the plinth's own local space.
+	 *
+	 * The kick is specified from the shutter face and the frame is measured from the carcass front
+	 * plane, so this is the one conversion between them - stated once, here, rather than at every
+	 * call site that wants to know where the panel went.
+	 */
+	double FrontFaceY() const { return FrontRecess - ShutterOverlay; }
 };
 
 /**
