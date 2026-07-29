@@ -11,6 +11,7 @@
 #include "Model/HFSampleHouse.h"
 #include "Model/HFSpecValidator.h"
 #include "Model/HFTypes.h"
+#include "Selections/MeshConnectedComponents.h"
 
 using namespace UE::Geometry;
 
@@ -231,11 +232,44 @@ namespace HouseForgeSweep
 	}
 
 	/**
+	 * The boxes one part is built from, in the part's own local space.
+	 *
+	 * A part is not one box any more. A door leaf still is, but a window sash is a picture frame
+	 * with a pane in it and a catch on its stile, and its bounding box is mostly the hole in the
+	 * middle. Sampling that box would put lattice points in fresh air and call them part of the sash.
+	 *
+	 * Every piece a generator emits is a closed box appended into the part's mesh, and appending
+	 * leaves them as separate connected components - so the components ARE the boxes. Their bounds
+	 * cover the solid exactly, with no void between them and nothing outside them.
+	 */
+	void ComponentBoxes(const FDynamicMesh3& Mesh, TArray<FAxisAlignedBox3d>& OutBoxes)
+	{
+		OutBoxes.Reset();
+
+		FMeshConnectedComponents Components(&Mesh);
+		Components.FindConnectedTriangles();
+
+		for (const FMeshConnectedComponents::FComponent& Component : Components)
+		{
+			FAxisAlignedBox3d Box = FAxisAlignedBox3d::Empty();
+			for (const int32 Tid : Component.Indices)
+			{
+				FVector3d A, B, C;
+				Mesh.GetTriVertices(Tid, A, B, C);
+				Box.Contain(A);
+				Box.Contain(B);
+				Box.Contain(C);
+			}
+			OutBoxes.Add(Box);
+		}
+	}
+
+	/**
 	 * Points covering a part's solid at a given open amount.
 	 *
-	 * Every part in this kit is a box, so its local bounding box is its solid and a lattice over
-	 * that box samples the inside of it as well as its corners. Sampling only the mesh vertices
-	 * would miss a leaf that straddles a thin partition without either end being inside it.
+	 * A lattice over each of the part's boxes, so the inside is sampled as well as the corners.
+	 * Sampling only the mesh vertices would miss a leaf that straddles a thin partition without
+	 * either end being inside it.
 	 */
 	void SamplePart(const FHFMeshPart& Part, double OpenAmount, TArray<FVector>& OutPoints)
 	{
@@ -245,23 +279,28 @@ namespace HouseForgeSweep
 		State.OpenAmount = OpenAmount;
 
 		const FTransform Pose = State.CurrentPose();
-		const FAxisAlignedBox3d Local = Part.Mesh.GetBounds();
+
+		TArray<FAxisAlignedBox3d> Boxes;
+		ComponentBoxes(Part.Mesh, Boxes);
 
 		constexpr int32 StepsAlong = 12;
 		constexpr int32 StepsAcross = 2;
 		constexpr int32 StepsUp = 4;
 
 		OutPoints.Reset();
-		for (int32 i = 0; i <= StepsAlong; ++i)
+		for (const FAxisAlignedBox3d& Local : Boxes)
 		{
-			const double X = FMath::Lerp(Local.Min.X, Local.Max.X, double(i) / StepsAlong);
-			for (int32 j = 0; j <= StepsAcross; ++j)
+			for (int32 i = 0; i <= StepsAlong; ++i)
 			{
-				const double Y = FMath::Lerp(Local.Min.Y, Local.Max.Y, double(j) / StepsAcross);
-				for (int32 k = 0; k <= StepsUp; ++k)
+				const double X = FMath::Lerp(Local.Min.X, Local.Max.X, double(i) / StepsAlong);
+				for (int32 j = 0; j <= StepsAcross; ++j)
 				{
-					const double Z = FMath::Lerp(Local.Min.Z, Local.Max.Z, double(k) / StepsUp);
-					OutPoints.Add(Pose.TransformPosition(FVector(X, Y, Z)));
+					const double Y = FMath::Lerp(Local.Min.Y, Local.Max.Y, double(j) / StepsAcross);
+					for (int32 k = 0; k <= StepsUp; ++k)
+					{
+						const double Z = FMath::Lerp(Local.Min.Z, Local.Max.Z, double(k) / StepsUp);
+						OutPoints.Add(Pose.TransformPosition(FVector(X, Y, Z)));
+					}
 				}
 			}
 		}
@@ -303,14 +342,22 @@ bool FHFSampleHouseSweepTest::RunTest(const FString& Parameters)
 		{
 			MovingParts += Part.Motion.Moves() ? 1 : 0;
 
-			// The sampling above is only equivalent to the solid while the parts are boxes. Say so
-			// out loud rather than let a later part be swept as a box it is not.
-			const FAxisAlignedBox3d Local = Part.Mesh.GetBounds();
+			// The sampling above is only equivalent to the solid while every one of the part's pieces
+			// is a box. Say so out loud rather than let a later piece be swept as a box it is not.
+			TArray<FAxisAlignedBox3d> Boxes;
+			ComponentBoxes(Part.Mesh, Boxes);
+
+			double BoxedVolume = 0.0;
+			for (const FAxisAlignedBox3d& Box : Boxes)
+			{
+				BoxedVolume += Box.Volume();
+			}
+
 			const double MeshVolume = TMeshQueries<FDynamicMesh3>::GetVolumeArea(Part.Mesh).X;
-			if (!FMath::IsNearlyEqual(MeshVolume, Local.Volume(), Local.Volume() * 0.05))
+			if (!FMath::IsNearlyEqual(MeshVolume, BoxedVolume, FMath::Max(BoxedVolume, 1.0) * 0.05))
 			{
 				AddWarning(FString::Printf(
-					TEXT("Part '%s' of opening '%s' is no longer a box; the sweep samples its bounding box, which is now only an approximation."),
+					TEXT("Part '%s' of opening '%s' has a piece that is not a box; the sweep samples that piece's bounding box, which is now only an approximation."),
 					*Part.PartId.ToString(), *Opening.Id.ToString()));
 			}
 

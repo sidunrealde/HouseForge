@@ -44,6 +44,22 @@ namespace
 		return Door;
 	}
 
+	/** A window in the same wall: 150 wide, 135 tall, on a 90 sill - the flat's living-room size. */
+	FHFOpening MakeWindowOpening(EHFOpeningKind Kind, double Width = 150.0, double Height = 135.0,
+		double Sill = 90.0, EHFSwing Swing = EHFSwing::None)
+	{
+		FHFOpening Window;
+		Window.Id = TEXT("Win1");
+		Window.WallId = TEXT("W1");
+		Window.OffsetAlongWall = 200.0;
+		Window.Width = Width;
+		Window.Height = Height;
+		Window.SillHeight = Sill;
+		Window.Kind = Kind;
+		Window.Swing = Swing;
+		return Window;
+	}
+
 	/** Bounds of a part's mesh once it has been posed at a given open amount. */
 	FAxisAlignedBox3d PosedBounds(const FHFMeshPart& Part, double OpenAmount)
 	{
@@ -55,6 +71,85 @@ namespace
 		FDynamicMesh3 Posed = Part.Mesh;
 		MeshTransforms::ApplyTransform(Posed, FTransformSRT3d(State.CurrentPose()), true);
 		return Posed.GetBounds();
+	}
+
+	/**
+	 * Volume of only the triangles carrying one surface role.
+	 *
+	 * The divergence theorem over a subset, which is exact as long as that subset is itself closed -
+	 * and every role in a sash is its own closed box or boxes. It is how "the glass is a solid and
+	 * not a plane" gets measured: a pane modelled as a plane has an area but no volume at all, and
+	 * every bounds and triangle-count check passes on one.
+	 *
+	 * Negated to match the winding these meshes actually carry. Not assumed: RoleVolumeSumsToTheMesh
+	 * below asserts that summing every role reproduces TMeshQueries' figure for the whole mesh, so a
+	 * convention change would fail loudly rather than silently flip every measurement's sign.
+	 */
+	double RoleVolume(const FDynamicMesh3& Mesh, EHFSurfaceRole Role)
+	{
+		double Volume = 0.0;
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			if (FHFMeshOps::RoleForGroup(Mesh.GetTriangleGroup(Tid)) != Role)
+			{
+				continue;
+			}
+
+			FVector3d A, B, C;
+			Mesh.GetTriVertices(Tid, A, B, C);
+			Volume -= A.Dot(B.Cross(C)) / 6.0;
+		}
+		return Volume;
+	}
+
+	/** Every role in the mesh, summed. Must come to what TMeshQueries says the whole mesh is. */
+	double RoleVolumeSumsToTheMesh(const FDynamicMesh3& Mesh)
+	{
+		double Volume = 0.0;
+		for (int32 Index = 0; Index <= int32(EHFSurfaceRole::Structure); ++Index)
+		{
+			Volume += RoleVolume(Mesh, EHFSurfaceRole(Index));
+		}
+		return Volume;
+	}
+
+	/** Bounds of only the triangles carrying one surface role. */
+	FAxisAlignedBox3d RoleBounds(const FDynamicMesh3& Mesh, EHFSurfaceRole Role)
+	{
+		FAxisAlignedBox3d Bounds = FAxisAlignedBox3d::Empty();
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			if (FHFMeshOps::RoleForGroup(Mesh.GetTriangleGroup(Tid)) != Role)
+			{
+				continue;
+			}
+
+			FVector3d A, B, C;
+			Mesh.GetTriVertices(Tid, A, B, C);
+			Bounds.Contain(A);
+			Bounds.Contain(B);
+			Bounds.Contain(C);
+		}
+		return Bounds;
+	}
+
+	/** Where a point given in a part's local space ends up, in the actor, at a given open amount. */
+	FVector PosedPoint(const FHFMeshPart& Part, const FVector& LocalPoint, double OpenAmount)
+	{
+		FHFPartState State;
+		State.PivotTransform = Part.PivotTransform;
+		State.Motion = Part.Motion;
+		State.OpenAmount = OpenAmount;
+
+		return State.CurrentPose().TransformPosition(LocalPoint);
+	}
+
+	/** True when two boxes share volume - not merely touch, which two things in a track do. */
+	bool BoxesOverlap(const FAxisAlignedBox3d& A, const FAxisAlignedBox3d& B, double Tolerance = 0.01)
+	{
+		return A.Min.X < B.Max.X - Tolerance && B.Min.X < A.Max.X - Tolerance
+			&& A.Min.Y < B.Max.Y - Tolerance && B.Min.Y < A.Max.Y - Tolerance
+			&& A.Min.Z < B.Max.Z - Tolerance && B.Min.Z < A.Max.Z - Tolerance;
 	}
 }
 
@@ -383,6 +478,309 @@ bool FHFSlidingDoorPartTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A sliding window is two sashes, and the one that runs has somewhere to run to.
+ *
+ * The same shape of answer as the sliding door, deliberately: each sash takes half the clear
+ * opening and the running one travels until its far edge meets the fixed one's. A single sash the
+ * width of the opening would slide into the masonry beside the jamb, which is exactly the failure
+ * the balcony doors were rebuilt to avoid.
+ *
+ * Two tracks, not three. The third track is the flyscreen option and deepens the frame from 65 to
+ * 92.5 mm; what is built here is the 27 mm two-track Domal section a flat of this class ships with.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSlidingWindowSashTest, "HouseForge.Articulation.SlidingWindowSashes", HF_TEST_FLAGS)
+
+bool FHFSlidingWindowSashTest::RunTest(const FString& Parameters)
+{
+	const FHFWall Wall = MakeHostWall();
+	const FHFOpening Window = MakeWindowOpening(EHFOpeningKind::SlidingWindow);
+
+	TArray<FHFMeshPart> Parts;
+	FHFGenerators::BuildOpeningParts(Window, Wall, Parts);
+
+	if (!TestEqual(TEXT("A sliding window is two sashes"), Parts.Num(), 2))
+	{
+		return false;
+	}
+
+	const FHFMeshPart* Fixed = Parts.FindByPredicate(
+		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("SashFixed")); });
+	const FHFMeshPart* Sash = Parts.FindByPredicate(
+		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("Sash")); });
+
+	if (!TestNotNull(TEXT("It has a fixed sash"), Fixed) || !TestNotNull(TEXT("It has a running sash"), Sash))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("The fixed sash does not move"), !Fixed->Motion.Moves());
+	TestTrue(TEXT("The operable sash slides"), Sash->Motion.Type == EHFMotionType::Slide);
+	TestTrue(TEXT("It slides along the wall, not through it"),
+		Sash->Motion.UnitAxis().Equals(FVector::XAxisVector, 0.0001));
+
+	// Each sash is a solid in its own right, because a bake treats every part as a mesh of its own.
+	TestTrue(TEXT("The fixed sash is watertight"), FHFMeshOps::IsClosed(Fixed->Mesh));
+	TestTrue(TEXT("The running sash is watertight"), FHFMeshOps::IsClosed(Sash->Mesh));
+
+	// Every triangle carries a role, and all three of the ones a window is made of are present. An
+	// untagged triangle can never be re-materialled, and the failure is invisible in a screenshot.
+	for (const FHFMeshPart* Part : { Fixed, Sash })
+	{
+		for (const int32 Tid : Part->Mesh.TriangleIndicesItr())
+		{
+			const EHFSurfaceRole Role = FHFMeshOps::RoleForGroup(Part->Mesh.GetTriangleGroup(Tid));
+			if (Role != EHFSurfaceRole::WindowFrame && Role != EHFSurfaceRole::Glass
+				&& Role != EHFSurfaceRole::MetalHardware)
+			{
+				AddError(FString::Printf(TEXT("Sash '%s' emitted a triangle with role %d, which is none of window frame, glass or metal hardware."),
+					*Part->PartId.ToString(), int32(Role)));
+				break;
+			}
+		}
+	}
+
+	TestTrue(TEXT("The operable sash carries its catch in metal"),
+		RoleVolume(Sash->Mesh, EHFSurfaceRole::MetalHardware) > 0.0);
+
+	// Pins the sign convention the per-role measurements below depend on.
+	TestNearlyEqual(TEXT("The roles account for the whole sash"),
+		RoleVolumeSumsToTheMesh(Sash->Mesh),
+		TMeshQueries<FDynamicMesh3>::GetVolumeArea(Sash->Mesh).X, 0.01);
+
+	// The glazing is a SOLID pane sitting in the sash's rebate, not a plane. Refraction and
+	// reflection are wrong without thickness, and a plane has none while passing every bounds check.
+	//
+	// 5 mm toughened, engaged 9 mm into an 18 mm groove all round: the pane is the sash's clear
+	// opening plus that engagement, which is 65.55 x 119.8 on this sash.
+	const double GlassVolume = RoleVolume(Sash->Mesh, EHFSurfaceRole::Glass);
+	const double ExpectedGlass = 65.55 * 119.8 * 0.5;
+	TestNearlyEqual(TEXT("The glass is a solid of the declared pane size"),
+		GlassVolume, ExpectedGlass, ExpectedGlass * 0.01);
+
+	const FAxisAlignedBox3d Glass = RoleBounds(Sash->Mesh, EHFSurfaceRole::Glass);
+	TestNearlyEqual(TEXT("The pane is 5 mm thick, not a plane"), Glass.Height(), 0.5, 0.001);
+
+	// The sash frame itself, as a volume rather than a triangle count: two stiles full height with
+	// the rails let in between them, in 40 x 27 mm section.
+	const double ExpectedFrame = 2.0 * (4.0 * 2.7 * 126.0) + 2.0 * (63.75 * 2.7 * 4.0);
+	TestNearlyEqual(TEXT("The sash is a real section, not a slab"),
+		RoleVolume(Sash->Mesh, EHFSurfaceRole::WindowFrame), ExpectedFrame, ExpectedFrame * 0.01);
+
+	// The opening spans 125..275 along this wall, and its clear opening 129.5..270.5 inside the
+	// outer frame. Every sash stays inside THAT at every open amount - not merely inside the reveal,
+	// because a sash overlapping the frame it runs in is a sash ploughing through its own jamb.
+	constexpr double ClearMin = 129.5;
+	constexpr double ClearMax = 270.5;
+	constexpr double ClearBottom = 94.5;
+	constexpr double ClearTop = 220.5;
+
+	const FAxisAlignedBox3d FixedBounds = PosedBounds(*Fixed, 0.0);
+	TestTrue(TEXT("The fixed sash sits inside the clear opening"),
+		FixedBounds.Min.X >= ClearMin - 0.01 && FixedBounds.Max.X <= ClearMax + 0.01);
+
+	for (double Alpha = 0.0; Alpha <= 1.0001; Alpha += 0.05)
+	{
+		const FAxisAlignedBox3d Posed = PosedBounds(*Sash, Alpha);
+
+		if (Posed.Min.X < ClearMin - 0.01 || Posed.Max.X > ClearMax + 0.01
+			|| Posed.Min.Z < ClearBottom - 0.01 || Posed.Max.Z > ClearTop + 0.01)
+		{
+			AddError(FString::Printf(
+				TEXT("At %.2f open, the running sash spans %.2f..%.2f along the wall and %.2f..%.2f up, and leaves the %.1f..%.1f x %.1f..%.1f clear opening; it is running into the frame."),
+				Alpha, Posed.Min.X, Posed.Max.X, Posed.Min.Z, Posed.Max.Z,
+				ClearMin, ClearMax, ClearBottom, ClearTop));
+			break;
+		}
+
+		if (BoxesOverlap(Posed, FixedBounds))
+		{
+			AddError(FString::Printf(
+				TEXT("At %.2f open, the running sash shares volume with the fixed one; they are not on separate tracks."),
+				Alpha));
+			break;
+		}
+	}
+
+	const FAxisAlignedBox3d Closed = PosedBounds(*Sash, 0.0);
+	const FAxisAlignedBox3d Open = PosedBounds(*Sash, 1.0);
+
+	// Closed, the two sashes interlock rather than merely abut: 25 mm of meeting stile, which is
+	// what stops daylight showing between them.
+	TestNearlyEqual(TEXT("Closed, the meeting stiles interlock by their declared overlap"),
+		Closed.Max.X - FixedBounds.Min.X, 2.5, 0.05);
+	TestTrue(TEXT("Closed, the pair fills the clear opening"),
+		Closed.Min.X <= ClearMin + 0.01 && FixedBounds.Max.X >= ClearMax - 0.01);
+
+	// Open, the running sash has come to rest exactly over its fixed partner - as far as it can go
+	// without leaving the reveal.
+	TestNearlyEqual(TEXT("Open, the running sash stacks on the fixed one"), Open.Max.X, FixedBounds.Max.X, 0.01);
+	TestTrue(TEXT("Open, roughly half the window is clear"),
+		Open.Min.X - ClearMin >= (ClearMax - ClearMin) * 0.4);
+
+	// It slides: the declared travel, along the wall, with nothing else disturbed.
+	TestNearlyEqual(TEXT("It travels its declared distance"),
+		Open.Center().X - Closed.Center().X, Sash->Motion.MaxTravelCm, 0.01);
+	TestNearlyEqual(TEXT("It does not drift off the wall"), Open.Center().Y, Closed.Center().Y, 0.01);
+	TestNearlyEqual(TEXT("It does not change height"), Open.Center().Z, Closed.Center().Z, 0.01);
+	TestNearlyEqual(TEXT("It stays the same size"), Open.Volume(), Closed.Volume(), 0.01);
+
+	// Two tracks: the sashes never share a plane, or they would pass through one another.
+	TestTrue(TEXT("The sashes are on separate tracks"),
+		Closed.Min.Y >= FixedBounds.Max.Y - 0.01 || Closed.Max.Y <= FixedBounds.Min.Y + 0.01);
+
+	// And the whole unit, catch included, still fits inside a 20 cm wall.
+	const double AcrossMin = FMath::Min(Closed.Min.Y, FixedBounds.Min.Y);
+	const double AcrossMax = FMath::Max(Closed.Max.Y, FixedBounds.Max.Y);
+	TestTrue(TEXT("The whole unit fits within the wall thickness"),
+		AcrossMin >= -Wall.Thickness * 0.5 && AcrossMax <= Wall.Thickness * 0.5);
+
+	// The glazing lives in the sashes and nowhere else. A fixed pane left behind the closed sash
+	// would double the glass and make an open window render exactly like a shut one.
+	const FDynamicMesh3 FixedInfill = FHFGenerators::GenerateOpeningFixedInfill(Window, Wall);
+	TestNearlyEqual(TEXT("The frame carries no glazing of its own"),
+		RoleVolume(FixedInfill, EHFSurfaceRole::Glass), 0.0, 0.01);
+	TestTrue(TEXT("The frame carries the tracks the sashes run on"),
+		RoleVolume(FixedInfill, EHFSurfaceRole::MetalHardware) > 0.0);
+
+	const FDynamicMesh3 Snapshot = FHFGenerators::GenerateOpeningInfill(Window, Wall);
+	TestNearlyEqual(TEXT("The closed snapshot glazes the window exactly once"),
+		RoleVolume(Snapshot, EHFSurfaceRole::Glass), GlassVolume * 2.0, GlassVolume * 0.02);
+
+	// An opening too small to divide is honestly fixed glazing, and the frame glazes it - the two
+	// answers must agree or the result is a framed hole that photographs as an open window.
+	const FHFOpening Tiny = MakeWindowOpening(EHFOpeningKind::SlidingWindow, 40.0, 40.0, 150.0);
+	TArray<FHFMeshPart> NoParts;
+	AddExpectedMessagePlain(TEXT("too small to divide into two sashes"), ELogVerbosity::Warning,
+		EAutomationExpectedMessageFlags::Contains, 1);
+	FHFGenerators::BuildOpeningParts(Tiny, Wall, NoParts);
+	TestEqual(TEXT("A sliding window too small for two sashes has none"), NoParts.Num(), 0);
+	TestTrue(TEXT("...and is glazed by its frame instead"),
+		RoleVolume(FHFGenerators::GenerateOpeningFixedInfill(Tiny, Wall), EHFSurfaceRole::Glass) > 0.0);
+
+	return true;
+}
+
+/**
+ * A ventilator's top-hung sash pivots on its head.
+ *
+ * A ventilator can be a fixed louvre, and a fixed louvre genuinely does not move - the rule is that
+ * anything which moves must be able to move, not that everything must. A top-hung pivot sash is the
+ * other half of the category and it does move, so this is the one that gets built.
+ *
+ * The property that matters is which way the hinge takes it. Rotating about the head, the corner
+ * nearest the axis sweeps a quarter circle of the sash's own thickness; hung on the wrong face that
+ * corner goes UP, and the sash disappears into the lintel as it opens - invisible in elevation, and
+ * exactly the failure the door leaf was rehung to avoid.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFVentilatorSashTest, "HouseForge.Articulation.VentilatorSash", HF_TEST_FLAGS)
+
+bool FHFVentilatorSashTest::RunTest(const FString& Parameters)
+{
+	const FHFWall Wall = MakeHostWall();
+
+	// The reference flat's ventilator: 60 x 45, sitting on a bathroom door head at 210.
+	const FHFOpening Vent = MakeWindowOpening(EHFOpeningKind::Ventilator, 60.0, 45.0, 210.0);
+
+	TArray<FHFMeshPart> Parts;
+	FHFGenerators::BuildOpeningParts(Vent, Wall, Parts);
+
+	if (!TestEqual(TEXT("A ventilator is one sash"), Parts.Num(), 1))
+	{
+		return false;
+	}
+
+	const FHFMeshPart& Sash = Parts[0];
+	TestEqual(TEXT("The sash carries a stable id"), Sash.PartId, FName(TEXT("Sash")));
+	TestTrue(TEXT("A ventilator sash hinges"), Sash.Motion.Type == EHFMotionType::Hinge);
+
+	// Top-hung: the axis is horizontal and runs ALONG the wall. A vertical axis here would be a
+	// casement, and a cross-wall axis would be geometry no ventilator has.
+	TestTrue(TEXT("It pivots about a horizontal axis along the wall"),
+		Sash.Motion.UnitAxis().Equals(FVector::XAxisVector, 0.0001));
+	TestNearlyEqual(TEXT("It opens the angle a stay allows"),
+		FMath::Abs(Sash.Motion.MaxAngleDegrees), 30.0, 0.01);
+
+	TestTrue(TEXT("The sash is watertight"), FHFMeshOps::IsClosed(Sash.Mesh));
+	TestTrue(TEXT("The sash faces outward"), TMeshQueries<FDynamicMesh3>::GetVolumeArea(Sash.Mesh).X > 0.0);
+
+	// Real glass again, in the sash rather than in the frame behind it.
+	const double GlassVolume = RoleVolume(Sash.Mesh, EHFSurfaceRole::Glass);
+	const double ExpectedGlass = 48.2 * 33.2 * 0.4;
+	TestNearlyEqual(TEXT("The ventilator's glass is a solid pane"), GlassVolume, ExpectedGlass, ExpectedGlass * 0.01);
+	TestNearlyEqual(TEXT("The pane is 4 mm thick, not a plane"),
+		RoleBounds(Sash.Mesh, EHFSurfaceRole::Glass).Height(), 0.4, 0.001);
+	TestTrue(TEXT("It has a pull to open it by"),
+		RoleVolume(Sash.Mesh, EHFSurfaceRole::MetalHardware) > 0.0);
+
+	TestNearlyEqual(TEXT("The frame carries no glazing of its own"),
+		RoleVolume(FHFGenerators::GenerateOpeningFixedInfill(Vent, Wall), EHFSurfaceRole::Glass), 0.0, 0.01);
+
+	// The hinge line is the head of the clear opening: 3.5 in from the near jamb at 170, and 3.5
+	// down from the head at 255.
+	const FVector HingeAtMidSpan = Sash.PivotTransform.TransformPosition(FVector(26.5, 0.0, 0.0));
+	TestTrue(TEXT("The hinge runs along the head of the clear opening"),
+		HingeAtMidSpan.Equals(FVector(200.0, 0.0, 251.5), 0.01));
+
+	// A point ON the axis cannot move, at any open amount. That is the difference between a pivot
+	// and a part that was merely translated into a convincing-looking pose.
+	for (double Alpha = 0.0; Alpha <= 1.0001; Alpha += 0.25)
+	{
+		TestTrue(TEXT("The hinge line itself never moves"),
+			Sash.Motion.SweptLocalPoint(FVector(26.5, 0.0, 0.0), Alpha).Equals(FVector(26.5, 0.0, 0.0), 0.001));
+	}
+
+	// The bottom edge, at the limit: 38 cm below a hinge turned 30 degrees is 19 out and 32.9 down.
+	const FVector BottomEdgeLocal(26.5, 0.0, -38.0);
+	const FVector BottomEdgeOpen = PosedPoint(Sash, BottomEdgeLocal, 1.0);
+
+	TestNearlyEqual(TEXT("Open, the bottom edge swings out along the wall normal"), BottomEdgeOpen.Y, 19.0, 0.05);
+	TestNearlyEqual(TEXT("Open, the bottom edge lifts as it swings"), BottomEdgeOpen.Z, 218.591, 0.05);
+	TestNearlyEqual(TEXT("It does not travel along the wall at all"), BottomEdgeOpen.X, 200.0, 0.001);
+
+	// And nothing on the sash ever rises above the hinge line, which is what says it is hung on the
+	// right face. Hung on the other one it would drive into the lintel as it opened.
+	for (double Alpha = 0.0; Alpha <= 1.0001; Alpha += 0.05)
+	{
+		const FAxisAlignedBox3d Posed = PosedBounds(Sash, Alpha);
+		if (Posed.Max.Z > 251.5 + 0.01)
+		{
+			AddError(FString::Printf(
+				TEXT("At %.2f open, the ventilator sash reaches Z %.2f, above its %.1f hinge line; it is swinging into the lintel."),
+				Alpha, Posed.Max.Z, 251.5));
+			break;
+		}
+		if (Posed.Min.X < 173.5 - 0.01 || Posed.Max.X > 226.5 + 0.01)
+		{
+			AddError(FString::Printf(
+				TEXT("At %.2f open, the ventilator sash spans %.2f..%.2f along the wall and leaves its 173.5..226.5 clear opening."),
+				Alpha, Posed.Min.X, Posed.Max.X));
+			break;
+		}
+	}
+
+	// Closed, it sits in the frame rather than in the room.
+	const FAxisAlignedBox3d Shut = PosedBounds(Sash, 0.0);
+	TestTrue(TEXT("Closed, the sash lies in the plane of the wall"), Shut.Height() < 6.0);
+	TestTrue(TEXT("Closed, the sash is inside the wall"),
+		Shut.Min.Y >= -Wall.Thickness * 0.5 && Shut.Max.Y <= Wall.Thickness * 0.5);
+
+	// The other hand: an outward swing turns it around, and the bottom edge goes the other way.
+	TArray<FHFMeshPart> Outward;
+	FHFGenerators::BuildOpeningParts(
+		MakeWindowOpening(EHFOpeningKind::Ventilator, 60.0, 45.0, 210.0, EHFSwing::OutwardLeft), Wall, Outward);
+
+	if (TestEqual(TEXT("The outward variant is one sash too"), Outward.Num(), 1))
+	{
+		const FVector OutwardEdge = PosedPoint(Outward[0], BottomEdgeLocal, 1.0);
+		TestNearlyEqual(TEXT("An outward ventilator swings against the wall normal"), OutwardEdge.Y, -19.0, 0.05);
+		TestTrue(TEXT("...and still never rises above its hinge"),
+			PosedBounds(Outward[0], 1.0).Max.Z <= 251.5 + 0.01);
+	}
+
+	return true;
+}
+
 /** Things that do not move must not pretend to. */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFixedOpeningPartsTest, "HouseForge.Articulation.FixedOpenings", HF_TEST_FLAGS)
 
@@ -390,14 +788,11 @@ bool FHFFixedOpeningPartsTest::RunTest(const FString& Parameters)
 {
 	const FHFWall Wall = MakeHostWall();
 
-	FHFOpening Window = MakeDoorOpening(EHFOpeningKind::Window, EHFSwing::None);
-	Window.SillHeight = 90.0;
-	Window.Height = 135.0;
-	Window.Width = 150.0;
+	const FHFOpening Window = MakeWindowOpening(EHFOpeningKind::Window);
 
 	TArray<FHFMeshPart> Parts;
 	FHFGenerators::BuildOpeningParts(Window, Wall, Parts);
-	TestEqual(TEXT("A window has no moving parts yet"), Parts.Num(), 0);
+	TestEqual(TEXT("A fixed window has nothing that moves"), Parts.Num(), 0);
 
 	// Its frame and glazing are fixed geometry, so they must all be in the fixed mesh.
 	const FDynamicMesh3 Fixed = FHFGenerators::GenerateOpeningFixedInfill(Window, Wall);
