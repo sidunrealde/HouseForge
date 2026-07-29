@@ -28,11 +28,38 @@ AHFElementActor::AHFElementActor()
 	Mesh->CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
 	Mesh->bEnableComplexCollision = true;
 	Mesh->SetGenerateOverlapEvents(false);
+
+	// Tangents derived from the mesh's own UVs and normals rather than taken from it.
+	//
+	// The default is "From Dynamic Mesh", and nothing here ever calls EnableTangents, so
+	// HasTangentSpace() is false and the component silently falls back to MakePerpVectors - an
+	// arbitrary basis with no relationship to the surface's UVs. Nothing fails and nothing logs;
+	// with the flat colours that exist today the output is indistinguishable from correct, and it
+	// only becomes visible when the materials milestone puts normal maps on top of it, at which
+	// point it reads as a material bug rather than a geometry-attribute one.
+	Mesh->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
 }
 
 void AHFElementActor::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
+	WatchForEdits();
+}
+
+void AHFElementActor::PostRegisterAllComponents()
+{
+	Super::PostRegisterAllComponents();
+
+	// Edit detection has to be armed here, not only in PostInitializeComponents.
+	//
+	// AActor::PostActorConstruction gates PostInitializeComponents on World->AreActorsInitialized(),
+	// which is false for an editor world - so that path runs in PIE only. Element actors are also
+	// deliberately not regenerated on load, so CommitMesh does not run either. Between the two,
+	// an element that came back from a saved level had no binding at all: take the Modeling Tools
+	// to a wall, press Build Geometry, and the modelling work is gone without a word. That is the
+	// silent, unrecoverable loss .claude/rules/04-conventions.md calls out.
+	//
+	// WatchForEdits is idempotent, so this sits safely alongside the CommitMesh path.
 	WatchForEdits();
 }
 

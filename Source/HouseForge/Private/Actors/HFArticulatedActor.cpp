@@ -334,6 +334,11 @@ UDynamicMeshComponent* AHFArticulatedActor::CreatePartComponent(FName PartId)
 	Component->bEnableComplexCollision = true;
 	Component->SetGenerateOverlapEvents(false);
 
+	// And the same tangent treatment, for the same reason: the default takes tangents from the
+	// FDynamicMesh3 attribute set, nothing here ever enables them, and the component then falls back
+	// to an arbitrary perpendicular basis. See AHFElementActor's constructor.
+	Component->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
+
 	Component->RegisterComponent();
 	AddInstanceComponent(Component);
 

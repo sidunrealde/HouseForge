@@ -535,6 +535,10 @@ void FHFMeshOps::AppendPreservingRoles(FDynamicMesh3& Target, const FDynamicMesh
 	{
 		Target.EnableAttributes();
 	}
+
+	// Target is somebody else's mesh and may have been relocated by the array holding it.
+	AdoptAttributes(Target);
+
 	Target.EnableMatchingAttributes(Source, /*bClearExisting*/ false, /*bDiscardExtraAttributes*/ false);
 
 	FDynamicMesh3::FAppendInfo Info;
@@ -563,6 +567,10 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 	{
 		return false;
 	}
+
+	// Same reason as AppendPreservingRoles: Target arrives from the caller, and a part mesh living
+	// in a TArray has had its attribute back-pointer left behind by the array's last reallocation.
+	AdoptAttributes(Target);
 
 	const bool bInputsClosed = IsClosed(Target) && IsClosed(Tool);
 
@@ -625,6 +633,21 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 	return true;
 }
 
+void FHFMeshOps::AdoptAttributes(FDynamicMesh3& Mesh)
+{
+	if (!Mesh.HasAttributes() || Mesh.Attributes()->GetParentMesh() == &Mesh)
+	{
+		return;
+	}
+
+	// FDynamicMeshAttributeSet::Reparent is private to FDynamicMesh3, and the two places it runs are
+	// the move constructor and the move assignment - neither of which dereferences the stale pointer
+	// on the way past, which is what makes this round trip safe on a mesh that has been relocated.
+	// It is a handful of container moves, and it only runs when the back-pointer is actually wrong.
+	FDynamicMesh3 Rehomed(MoveTemp(Mesh));
+	Mesh = MoveTemp(Rehomed);
+}
+
 void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 {
 	if (Mesh.TriangleCount() == 0 || TexelSizeCm <= 0.0)
@@ -636,6 +659,10 @@ void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 	{
 		Mesh.EnableAttributes();
 	}
+
+	// Every generator funnels through here, which is the only reason this is cheap enough to be a
+	// guarantee rather than a rule somebody has to remember. See AdoptAttributes for what it repairs.
+	AdoptAttributes(Mesh);
 
 	FDynamicMeshUVOverlay* UVs = Mesh.Attributes()->PrimaryUV();
 	if (UVs == nullptr)
@@ -676,6 +703,56 @@ void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 		UVs->SetTriangle(Tid, FIndex3i(Elements[0], Elements[1], Elements[2]));
 	}
 
+	ComputeShadingNormals(Mesh);
+}
+
+void FHFMeshOps::ComputeShadingNormals(FDynamicMesh3& Mesh, double HardEdgeAngleDegrees)
+{
+	if (Mesh.TriangleCount() == 0)
+	{
+		return;
+	}
+
+	if (!Mesh.HasAttributes())
+	{
+		Mesh.EnableAttributes();
+	}
+
+	FDynamicMeshNormalOverlay* Normals = Mesh.Attributes()->PrimaryNormals();
+	if (Normals == nullptr)
+	{
+		return;
+	}
+
+	// The split has to happen FIRST, and calling the recompute on its own is a silent no-op.
+	//
+	// EnableAttributes creates the normal overlay empty, and every AppendTriangle routes through
+	// TDynamicMeshOverlay::InitializeNewTriangle, which writes InvalidID into all three of that
+	// triangle's normal slots. So on a mesh built purely from AppendVertex/AppendTriangle - which is
+	// every mesh this plugin generates - the overlay has zero elements. QuickRecomputeOverlayNormals
+	// only RE-computes elements that already exist: it sizes its accumulator from MaxElementID and
+	// skips any triangle whose first element is InvalidID, so it touches nothing and returns true.
+	//
+	// The cost is total and invisible. FMeshRenderBufferSetConversionUtil falls back to
+	// FDynamicMesh3::GetVertexNormal when a triangle has no normal elements, and that returns the
+	// constant FVector3f::UnitY() when per-vertex normals are not enabled - which they never are.
+	// Every wall, floor, shutter, drawer and handle then shades as though it faced +Y. Nothing in the
+	// gate can see it: volume, bounds, watertightness, roles and UVs are all exactly right, and an
+	// unlit or wireframe capture is pixel-identical to correct output.
+	//
+	// Split by opening angle rather than by polygroup, and the choice is deliberate both ways:
+	//
+	//   - by polygroup would smooth a box, whose six faces all share one surface role, into a blob,
+	//     and would smooth straight across a cornice's springing arris, where the arc and the front
+	//     face are both ShutterLaminate;
+	//   - per-triangle everywhere would facet the rail tube, the knob dome and the cove arc, which
+	//     exist precisely to read as curved.
+	//
+	// At 40 degrees the kit's real geometry lands the right way round: box arrises (90) and chamfer
+	// facets (45) stay hard, while a 12-facet rail tube (30), a 16-sided knob (22.5) and a cove at
+	// its default 8 segments (11.25) all weld smooth. See .claude/rules/04-conventions.md, which asks
+	// for hard and soft edges chosen deliberately rather than left to a blanket recompute.
+	FMeshNormals::InitializeOverlayTopologyFromOpeningAngle(&Mesh, Normals, HardEdgeAngleDegrees);
 	FMeshNormals::QuickRecomputeOverlayNormals(Mesh);
 }
 

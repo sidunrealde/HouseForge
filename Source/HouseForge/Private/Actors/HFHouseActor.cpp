@@ -99,6 +99,12 @@ void AHFHouseActor::SetSpec(const FHFHouseSpec& InSpec)
 	BuildGeometry();
 }
 
+void AHFHouseActor::Destroyed()
+{
+	ClearGeometry();
+	Super::Destroyed();
+}
+
 void AHFHouseActor::ClearGeometry()
 {
 	for (AActor* Element : ElementActors)

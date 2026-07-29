@@ -69,6 +69,14 @@ public:
 
 	virtual void PostInitializeComponents() override;
 
+	/**
+	 * Arms hand-edit detection on an element that came back from a saved level.
+	 *
+	 * PostInitializeComponents never runs in an editor world, so without this the protection
+	 * bArtistEdited exists to give is inactive in exactly the case that matters.
+	 */
+	virtual void PostRegisterAllComponents() override;
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif

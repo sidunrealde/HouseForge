@@ -114,6 +114,78 @@ bool FHFArtistEditSurvivesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * Edit detection has to be live on an element that never went through generation in this session.
+ *
+ * That is the case for every element in a saved level, and it is the case this protection exists
+ * for. AActor::PostActorConstruction gates PostInitializeComponents on World->AreActorsInitialized(),
+ * which is false for an editor world, so that path runs in PIE only; and element actors are
+ * deliberately not regenerated on load, so CommitMesh does not run either. Between the two, a wall
+ * that came back from disk had no binding at all: take the Modeling Tools to it, press Build
+ * Geometry, and the work is gone with no log and no way back.
+ *
+ * Spawning without calling Regenerate reproduces exactly that state - a live actor whose mesh was
+ * never written by us.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFEditDetectionArmedWithoutGenerationTest,
+	"HouseForge.Editor.EditDetectionArmedWithoutGeneration", HF_TEST_FLAGS)
+
+bool FHFEditDetectionArmedWithoutGenerationTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFWallActor* Wall = World->SpawnActor<AHFWallActor>();
+	if (!TestNotNull(TEXT("A wall actor spawns"), Wall))
+	{
+		return false;
+	}
+
+	ON_SCOPE_EXIT{ if (IsValid(Wall)) { Wall->Destroy(); } };
+
+	Wall->Wall.Id = TEXT("W_Loaded");
+	Wall->Wall.Start = FVector2D(0.0, 0.0);
+	Wall->Wall.End = FVector2D(400.0, 0.0);
+	Wall->Wall.Thickness = 20.0;
+	Wall->Wall.Height = 300.0;
+
+	// Deliberately NOT Regenerate(): CommitMesh is the other path that arms detection, and using it
+	// here would make this test pass whether the load path works or not. Calling the registration
+	// hook a second time stands in for the level reload, and must be harmless.
+	Wall->PostRegisterAllComponents();
+
+	UDynamicMeshComponent* Component = Wall->GetMeshComponent();
+	if (!TestNotNull(TEXT("The wall has a dynamic mesh component"), Component))
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("A wall that has not been touched is not marked as hand-edited"), Wall->bArtistEdited);
+
+	// Stand in for the Modeling Tools, exactly as the regeneration test does.
+	Component->GetDynamicMesh()->EditMesh([](FDynamicMesh3& EditMesh)
+	{
+		const int32 A = EditMesh.AppendVertex(FVector3d(0, 0, 3000));
+		const int32 B = EditMesh.AppendVertex(FVector3d(50, 0, 3000));
+		const int32 C = EditMesh.AppendVertex(FVector3d(0, 50, 3000));
+		EditMesh.AppendTriangle(A, B, C, 1);
+	});
+	Component->NotifyMeshUpdated();
+
+	TestTrue(TEXT("Editing an element that was never generated in this session still marks it"),
+		Wall->bArtistEdited);
+
+	const int32 EditedTriangles = Component->GetDynamicMesh()->GetMeshRef().TriangleCount();
+	Wall->Regenerate();
+	TestEqual(TEXT("And regeneration then leaves that work alone"),
+		Component->GetDynamicMesh()->GetMeshRef().TriangleCount(), EditedTriangles);
+
+	return true;
+}
+
 /** A house-level rebuild must respect the per-element flag, or the flag protects nothing. */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFHouseRebuildPreservesEditsTest,
 	"HouseForge.Editor.HouseRebuildPreservesArtistEdits", HF_TEST_FLAGS)

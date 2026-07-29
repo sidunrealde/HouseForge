@@ -29,6 +29,27 @@ public:
 	static void InitialiseMesh(UE::Geometry::FDynamicMesh3& Mesh);
 
 	/**
+	 * Points a mesh's attribute set back at the mesh it belongs to.
+	 *
+	 * An FDynamicMesh3 is self-referential: its attribute set holds a raw back-pointer to the mesh,
+	 * and every overlay reaches through it - ClearElements sizes itself from
+	 * ParentMesh->MaxTriangleID(), CreateFromPredicate walks ParentMesh's vertices. The copy and
+	 * move constructors reparent, so ordinary use is safe.
+	 *
+	 * TArray is not ordinary use. UE relocates same-type elements with a raw Memmove
+	 * (TCanBitwiseRelocate_V is unconditionally true when source and destination types match), so
+	 * growing a TArray<FHFMeshPart> moves every mesh's bytes to a new address WITHOUT running a
+	 * constructor - and the back-pointer is left aimed at the freed buffer. Nothing crashes at the
+	 * time and nothing logs; the next overlay operation reads whatever is now at that address, which
+	 * is usually plausible enough to carry on with. It is the exact shape of failure this plugin
+	 * keeps finding: correct-looking output over undefined behaviour.
+	 *
+	 * Cheap and idempotent, so it is applied at the funnel every generator already goes through
+	 * rather than left as a rule to remember at each array append.
+	 */
+	static void AdoptAttributes(UE::Geometry::FDynamicMesh3& Mesh);
+
+	/**
 	 * Appends an axis-aligned box, rotated about Z.
 	 *
 	 * @param Centre   Centre of the box in world centimetres.
@@ -138,8 +159,27 @@ public:
 	 * Box projection per group rather than per mesh, so a wall's faces and its reveals do not
 	 * share a stretched projection. TexelSizeCm is the world size one UV tile covers, which is
 	 * what lets the material panel express tiling in millimetres rather than arbitrary numbers.
+	 *
+	 * Also computes shading normals, and that is not a naming accident: a generator that unwrapped
+	 * its mesh and forgot the normals would produce geometry that is right in every measurable way
+	 * and shades as a flat blob under the first light put on it. Doing both in the one call every
+	 * generator already ends with is what makes that impossible to forget.
 	 */
 	static void ApplyWorldScaleUVs(UE::Geometry::FDynamicMesh3& Mesh, double TexelSizeCm = 100.0);
+
+	/**
+	 * Fills the primary normal overlay, splitting it hard at any edge sharper than the threshold.
+	 *
+	 * Public so it can be asserted on. A mesh with no normal elements renders with the constant
+	 * normal (0, 1, 0) and passes every geometric check there is, so the only way to know this ran
+	 * is to read the overlay back.
+	 *
+	 * @param HardEdgeAngleDegrees Dihedral angle above which an edge stays hard. The default keeps a
+	 *        box's arrises and a chamfer's facets crisp while welding a tube, a dome and a cove arc
+	 *        smooth; see the implementation for why those particular numbers.
+	 */
+	static void ComputeShadingNormals(UE::Geometry::FDynamicMesh3& Mesh,
+		double HardEdgeAngleDegrees = 40.0);
 
 	/**
 	 * Insets a closed polygon inward by Amount, returning the resulting loops.

@@ -324,8 +324,14 @@ FHFOperationResult UHFEditorSubsystem::SpawnHouse(const FHFHouseSpec& Spec)
 	}
 
 	// One house per level. Replacing rather than adding keeps GetSpecJson unambiguous.
+	//
+	// The elements go first, explicitly. AHFHouseActor::Destroyed does this too, but saying it here
+	// as well is what makes the central workflow - read drawing, build, screenshot, correct, rebuild
+	// - safe to read: without it the level ends up holding the wrong house and the right one,
+	// superimposed, while the log line reports the new house's element count and reads correct.
 	for (TActorIterator<AHFHouseActor> It(World); It; ++It)
 	{
+		It->ClearGeometry();
 		World->DestroyActor(*It);
 	}
 
