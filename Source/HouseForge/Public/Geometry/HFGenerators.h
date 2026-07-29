@@ -70,14 +70,26 @@ public:
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateOpeningInfill(const FHFOpening& Opening, const FHFWall& Wall);
 
-	/** The part of an opening's infill that never moves: a window's frame and glazing. */
+	/**
+	 * The part of an opening's infill that never moves.
+	 *
+	 * A fixed window's frame and its glazing; a sliding window's outer frame and the tracks its
+	 * sashes run on; a ventilator's frame. Where an opening has sashes, the glazing rides in THEM
+	 * and is deliberately absent here - a fixed pane behind a closed sash is invisible, doubles the
+	 * glass, and would make a closed window and an open one render identically.
+	 */
 	static UE::Geometry::FDynamicMesh3 GenerateOpeningFixedInfill(const FHFOpening& Opening, const FHFWall& Wall);
 
 	/**
-	 * The moving parts of an opening: a hinged leaf for a door, a sliding one for a sliding door.
+	 * The moving parts of an opening.
+	 *
+	 * A hinged leaf for a door; two panels on two tracks for a sliding door; two sashes on two
+	 * tracks for a sliding window, one of them running; a top-hung sash for a ventilator. A fixed
+	 * window and an archway have none, which is the honest answer rather than an omission.
 	 *
 	 * Pure, like every other generator: each part's mesh comes back in the part's own local space
-	 * with the origin on its pivot - the hinge jamb for a swing door - and the caller places it.
+	 * with the origin on its pivot - the hinge jamb for a swing door, the near jamb at the sill for
+	 * a sliding unit, the hinge line at the head for a top-hung sash - and the caller places it.
 	 * The leaf runs along local +X from the pivot, its thickness on local Y and its height on
 	 * local Z from zero at the sill.
 	 */

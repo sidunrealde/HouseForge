@@ -8,6 +8,8 @@ using namespace UE::Geometry;
 
 const FName AHFOpeningActor::LeafPartId(TEXT("Leaf"));
 const FName AHFOpeningActor::FixedPanelPartId(TEXT("PanelFixed"));
+const FName AHFOpeningActor::SashPartId(TEXT("Sash"));
+const FName AHFOpeningActor::FixedSashPartId(TEXT("SashFixed"));
 
 FDynamicMesh3 AHFOpeningActor::BuildMesh() const
 {

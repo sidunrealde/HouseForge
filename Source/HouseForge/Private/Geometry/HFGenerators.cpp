@@ -25,6 +25,105 @@ namespace
 	constexpr double WindowFrameWidth = 5.0;
 	constexpr double GlassThickness = 0.8;
 
+	// ------------------------------------------------------- aluminium sliding window, two-track
+	//
+	// Modelled on the 27 mm Domal series, which is THE commodity window of the flats this plugin
+	// exists for: a two-track outer frame 65 mm deep carrying two 27 mm sashes. TWO-track rather
+	// than three - the third track is the flyscreen option, it deepens the frame to 92.5 mm, and it
+	// is an upgrade rather than what a flat of this class ships with. The arithmetic is the check
+	// that these are a real section rather than plausible numbers: two 27 mm sashes plus running
+	// clearance is exactly the published 65 mm frame.
+
+	/** Outer frame depth, front to back. Sits inside the wall reveal. */
+	constexpr double SlidingFrameDepth = 6.5;
+
+	/** How far the outer frame eats into the clear opening on each side. Fabricators quote 40-50. */
+	constexpr double SlidingFrameFace = 4.5;
+
+	/** Sash section depth, measured along the wall normal. The series is named for it. */
+	constexpr double SashDepth = 2.7;
+
+	/** Track pitch, centre to centre. 27.5-30 is the band; 30 leaves 3 mm between the sashes. */
+	constexpr double SashTrackPitch = 3.0;
+
+	/** Sight line of the sash stiles and rails around the glass. */
+	constexpr double SashFaceWidth = 4.0;
+
+	/**
+	 * Total overlap of the two meeting stiles when closed.
+	 *
+	 * No manufacturer publishes this figure; 15-25 mm is what the section geometry allows and 25 is
+	 * the top of that band. It is what stops daylight showing between the two sashes, so it is the
+	 * one number here that is visible in a render rather than only in a section.
+	 */
+	constexpr double SashInterlockOverlap = 2.5;
+
+	/** 5 mm clear toughened - the near-universal included spec. A solid, never a plane. */
+	constexpr double SashGlassThickness = 0.5;
+
+	/** How far the pane sits into the sash's glazing groove. The groove itself is 18 mm. */
+	constexpr double SashGlassRebate = 0.9;
+
+	/** The upstand a sash's rollers ride on, standing proud of the frame's sill member. */
+	constexpr double SashTrackUpstand = 1.5;
+	constexpr double SashTrackWidth = 0.6;
+
+	/** The catch on the meeting stile: the only part of a sliding window anybody touches. */
+	constexpr double SashHandleProjection = 1.2;
+	constexpr double SashHandleWidth = 1.6;
+	constexpr double SashHandleHeight = 8.0;
+
+	// ------------------------------------------------------------------ top-hung ventilator sash
+	//
+	// A ventilator can be a fixed louvre, in which case nothing about it moves and the rule that
+	// anything which moves must be able to move is already satisfied. A top-hung pivot sash is the
+	// other half of the category and it DOES move: it hangs on hinges at its head and its bottom
+	// edge swings out. That is what is built here, because a ventilator that cannot be opened is a
+	// hole with glass in it.
+
+	constexpr double VentilatorFrameDepth = 6.0;
+	constexpr double VentilatorFrameFace = 3.5;
+
+	/** Shutter thickness. IS practice is 20/25/30 by opening size; these are all the small ones. */
+	constexpr double VentilatorSashThickness = 2.5;
+	constexpr double VentilatorSashFaceWidth = 3.0;
+
+	/** 4 mm, as a ventilator pane or a louvre blade is. */
+	constexpr double VentilatorGlassThickness = 0.4;
+	constexpr double VentilatorGlassRebate = 0.6;
+
+	/** How far a top-hung sash comes open. Past this the stay fouls the reveal. */
+	constexpr double VentilatorOpenAngleDegrees = 30.0;
+
+	/** The pull on the bottom rail, which is how a ventilator this high up is reached at all. */
+	constexpr double VentilatorPullProjection = 1.5;
+	constexpr double VentilatorPullWidth = 6.0;
+	constexpr double VentilatorPullHeight = 1.4;
+
+	/** Below these an opening is too small to divide into sashes and is left as fixed glazing. */
+	constexpr double MinSashWidth = 20.0;
+	constexpr double MinSashHeight = 25.0;
+
+	/**
+	 * True when a sliding window is big enough to be built as a real two-sash unit.
+	 *
+	 * Shared with the fixed infill rather than checked twice. The two answers have to agree: if the
+	 * sashes decline and the frame still leaves out its glazing, the result is a framed hole - which
+	 * looks exactly like a correctly generated open window in any still image.
+	 */
+	bool SlidingWindowHasSashes(const FHFOpening& Opening)
+	{
+		return Opening.Width - SlidingFrameFace * 2.0 >= MinSashWidth * 2.0
+			&& Opening.Height - SlidingFrameFace * 2.0 >= MinSashHeight;
+	}
+
+	/** The same question for a ventilator, whose one sash fills the whole clear opening. */
+	bool VentilatorHasSash(const FHFOpening& Opening)
+	{
+		return Opening.Width - VentilatorFrameFace * 2.0 >= MinSashWidth
+			&& Opening.Height - VentilatorFrameFace * 2.0 >= MinSashHeight;
+	}
+
 	struct FWallFrame
 	{
 		FVector2D Direction = FVector2D(1.0, 0.0);
@@ -485,6 +584,203 @@ namespace
 		FHFMeshOps::ApplyWorldScaleUVs(Mesh);
 		return Mesh;
 	}
+
+	/**
+	 * One sash of a sliding window, in the unit's local space.
+	 *
+	 * X is measured from the near jamb, Y is the track the sash rides in and Z runs up from the
+	 * sill. Like the sliding door's panels, both sashes are generated where they sit rather than
+	 * each about its own origin, so they share the unit's pivot and the only difference between
+	 * them is that one of them moves.
+	 *
+	 * Built as a picture frame - two stiles full height with the rails let in between them - so no
+	 * two members share a volume and the sash measures exactly its section times its perimeter. The
+	 * pane then engages into the glazing groove of all four, which is where a real one sits and why
+	 * it is a solid rather than a plane.
+	 */
+	FDynamicMesh3 MakeSlidingSash(double XMin, double XMax, double TrackY, double ZMin, double ZMax,
+		bool bWithHandle)
+	{
+		FDynamicMesh3 Mesh;
+		FHFMeshOps::InitialiseMesh(Mesh);
+
+		const double Width = XMax - XMin;
+		const double Height = ZMax - ZMin;
+		if (Width <= SashFaceWidth * 2.0 || Height <= SashFaceWidth * 2.0)
+		{
+			return Mesh;
+		}
+
+		auto AppendMember = [&Mesh, TrackY](double MemberXMin, double MemberXMax,
+			double MemberZMin, double MemberZMax)
+		{
+			FHFMeshOps::AppendBox(Mesh,
+				FVector3d((MemberXMin + MemberXMax) * 0.5, TrackY, (MemberZMin + MemberZMax) * 0.5),
+				FVector3d((MemberXMax - MemberXMin) * 0.5, SashDepth * 0.5, (MemberZMax - MemberZMin) * 0.5),
+				0.0, EHFSurfaceRole::WindowFrame);
+		};
+
+		AppendMember(XMin, XMin + SashFaceWidth, ZMin, ZMax);            // stile
+		AppendMember(XMax - SashFaceWidth, XMax, ZMin, ZMax);            // stile
+		AppendMember(XMin + SashFaceWidth, XMax - SashFaceWidth, ZMin, ZMin + SashFaceWidth);  // bottom rail
+		AppendMember(XMin + SashFaceWidth, XMax - SashFaceWidth, ZMax - SashFaceWidth, ZMax);  // top rail
+
+		// The bottom rail is deliberately deeper than the track upstand it sits over: a real one is
+		// hollow and the upstand runs up inside it. The two interpenetrate, which is exactly what
+		// happens in the section and is hidden inside the rail.
+		const double GlassInset = SashFaceWidth - SashGlassRebate;
+		FHFMeshOps::AppendBox(Mesh,
+			FVector3d((XMin + XMax) * 0.5, TrackY, (ZMin + ZMax) * 0.5),
+			FVector3d(Width * 0.5 - GlassInset, SashGlassThickness * 0.5, Height * 0.5 - GlassInset),
+			0.0, EHFSurfaceRole::Glass);
+
+		if (bWithHandle)
+		{
+			// On the meeting stile, projecting away from the other sash's track - which is the face
+			// a hand can reach and the side the catch is fitted on.
+			const double Side = TrackY >= 0.0 ? 1.0 : -1.0;
+
+			FHFMeshOps::AppendBox(Mesh,
+				FVector3d(XMax - SashFaceWidth * 0.5,
+					TrackY + Side * (SashDepth + SashHandleProjection) * 0.5,
+					(ZMin + ZMax) * 0.5),
+				FVector3d(SashHandleWidth * 0.5, SashHandleProjection * 0.5, SashHandleHeight * 0.5),
+				0.0, EHFSurfaceRole::MetalHardware);
+		}
+
+		FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+		return Mesh;
+	}
+
+	/**
+	 * A top-hung ventilator sash, in the part's own local space.
+	 *
+	 * The origin is on the hinge line at the near jamb: +X runs along the hinge, the sash hangs down
+	 * in -Z and its thickness lies on Y.
+	 *
+	 * The body hangs on the side AWAY from the direction it opens, for the same reason a door leaf
+	 * hangs on its swing face rather than on the wall centreline. Rotating about the hinge, the
+	 * corner nearest the axis sweeps a quarter circle of the sash's own thickness; put the body on
+	 * the opening side and that corner sweeps UP into the head masonry, and the sash disappears into
+	 * the lintel as it opens. Hung this way it sweeps down into the opening instead, and no point of
+	 * the sash ever rises above the hinge line.
+	 *
+	 * @param OpenSign  +1 to open along the wall normal, -1 to open against it.
+	 */
+	FDynamicMesh3 MakeVentilatorSash(double Width, double Height, double OpenSign)
+	{
+		FDynamicMesh3 Mesh;
+		FHFMeshOps::InitialiseMesh(Mesh);
+
+		if (Width <= VentilatorSashFaceWidth * 2.0 || Height <= VentilatorSashFaceWidth * 2.0)
+		{
+			return Mesh;
+		}
+
+		const double Side = OpenSign >= 0.0 ? 1.0 : -1.0;
+		const double SashY = -Side * VentilatorSashThickness * 0.5;
+
+		auto AppendMember = [&Mesh, SashY](double MemberXMin, double MemberXMax,
+			double MemberZMin, double MemberZMax)
+		{
+			FHFMeshOps::AppendBox(Mesh,
+				FVector3d((MemberXMin + MemberXMax) * 0.5, SashY, (MemberZMin + MemberZMax) * 0.5),
+				FVector3d((MemberXMax - MemberXMin) * 0.5, VentilatorSashThickness * 0.5,
+					(MemberZMax - MemberZMin) * 0.5),
+				0.0, EHFSurfaceRole::WindowFrame);
+		};
+
+		const double F = VentilatorSashFaceWidth;
+
+		AppendMember(0.0, F, -Height, 0.0);              // stile
+		AppendMember(Width - F, Width, -Height, 0.0);    // stile
+		AppendMember(F, Width - F, -Height, -Height + F);// bottom rail
+		AppendMember(F, Width - F, -F, 0.0);             // top rail
+
+		const double GlassInset = F - VentilatorGlassRebate;
+		FHFMeshOps::AppendBox(Mesh,
+			FVector3d(Width * 0.5, SashY, -Height * 0.5),
+			FVector3d(Width * 0.5 - GlassInset, VentilatorGlassThickness * 0.5, Height * 0.5 - GlassInset),
+			0.0, EHFSurfaceRole::Glass);
+
+		// The pull, on the face somebody stands in front of - which is the face it opens towards.
+		FHFMeshOps::AppendBox(Mesh,
+			FVector3d(Width * 0.5, Side * VentilatorPullProjection * 0.5, -Height + F * 0.5),
+			FVector3d(VentilatorPullWidth * 0.5, VentilatorPullProjection * 0.5, VentilatorPullHeight * 0.5),
+			0.0, EHFSurfaceRole::MetalHardware);
+
+		FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+		return Mesh;
+	}
+
+	/**
+	 * Two sashes on two tracks: one fixed, one running.
+	 *
+	 * The same shape of answer the sliding DOOR arrived at the hard way, and for the same reason. A
+	 * single sash the width of the opening has nowhere to go - sliding it its own width buries it in
+	 * the masonry beside the jamb - so each sash takes half the clear opening, and the running one
+	 * travels until its far edge meets the fixed one's. That keeps every sash wholly inside the
+	 * reveal at every open amount, and it is also what a sliding window is.
+	 */
+	void BuildSlidingWindowSashes(const FHFOpening& Opening, const FTransform& UnitPivot,
+		TArray<FHFMeshPart>& OutParts)
+	{
+		// The clear opening between the outer frame's members - what the sashes actually fill.
+		const double ClearWidth = Opening.Width - SlidingFrameFace * 2.0;
+		const double Near = SlidingFrameFace;
+		const double ZMin = SlidingFrameFace;
+		const double ZMax = Opening.Height - SlidingFrameFace;
+
+		const double Half = ClearWidth * 0.5;
+		const double HalfOverlap = SashInterlockOverlap * 0.5;
+		const double TrackY = SashTrackPitch * 0.5;
+
+		FHFMeshPart Fixed;
+		Fixed.PartId = TEXT("SashFixed");
+		Fixed.Mesh = MakeSlidingSash(Near + Half - HalfOverlap, Near + ClearWidth, -TrackY, ZMin, ZMax,
+			/*bWithHandle*/ false);
+		Fixed.PivotTransform = UnitPivot;
+		OutParts.Add(MoveTemp(Fixed));
+
+		FHFMeshPart Sash;
+		Sash.PartId = TEXT("Sash");
+		Sash.Mesh = MakeSlidingSash(Near, Near + Half + HalfOverlap, TrackY, ZMin, ZMax,
+			/*bWithHandle*/ true);
+		Sash.PivotTransform = UnitPivot;
+		Sash.Motion.Type = EHFMotionType::Slide;
+		Sash.Motion.Axis = FVector::XAxisVector;
+
+		// Far edge to far edge: the running sash comes to rest exactly over its fixed partner, so it
+		// is still wholly inside the reveal at full travel.
+		Sash.Motion.MaxTravelCm = FMath::Max(0.0, Half - HalfOverlap);
+		OutParts.Add(MoveTemp(Sash));
+	}
+
+	/** One top-hung sash, hinged along the head of the clear opening. */
+	void BuildVentilatorSash(const FHFOpening& Opening, const FTransform& UnitPivot,
+		TArray<FHFMeshPart>& OutParts)
+	{
+		const double ClearWidth = Opening.Width - VentilatorFrameFace * 2.0;
+		const double ClearHeight = Opening.Height - VentilatorFrameFace * 2.0;
+
+		// Which way it opens. A ventilator carries no swing arc on a plan, so the wall normal is the
+		// default and an explicitly outward swing turns it around.
+		const double OpenSign =
+			(Opening.Swing == EHFSwing::OutwardLeft || Opening.Swing == EHFSwing::OutwardRight) ? -1.0 : 1.0;
+
+		FHFMeshPart Sash;
+		Sash.PartId = TEXT("Sash");
+		Sash.Mesh = MakeVentilatorSash(ClearWidth, ClearHeight, OpenSign);
+
+		// The hinge line: along the head of the clear opening, starting at the near jamb.
+		Sash.PivotTransform =
+			FTransform(FVector(VentilatorFrameFace, 0.0, Opening.Height - VentilatorFrameFace)) * UnitPivot;
+
+		Sash.Motion.Type = EHFMotionType::Hinge;
+		Sash.Motion.Axis = FVector::XAxisVector;
+		Sash.Motion.MaxAngleDegrees = VentilatorOpenAngleDegrees * OpenSign;
+		OutParts.Add(MoveTemp(Sash));
+	}
 }
 
 void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& Wall, TArray<FHFMeshPart>& OutParts)
@@ -496,30 +792,58 @@ void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& 
 	}
 
 	const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
-	if (!bIsDoor)
+	const bool bHasSash =
+		Opening.Kind == EHFOpeningKind::SlidingWindow || Opening.Kind == EHFOpeningKind::Ventilator;
+
+	// A fixed window and an archway have nothing that moves, and saying so is the whole answer -
+	// the rule is that anything which moves must be able to move, not that everything must move.
+	if (!bIsDoor && !bHasSash)
 	{
-		// Window sashes are still fixed. They articulate in the retrofit that follows the joinery
-		// kit; claiming they move before they do would be worse than saying they do not.
-		//
-		// Said out loud, though, because "does not move yet" and "has nothing to move" are
-		// indistinguishable from the outside: AHFOpeningActor reports zero parts without complaint,
-		// GenerateOpeningFixedInfill composes a perfectly correct closed pose, and a closed sash is
-		// identical to a fixed pane in any still image. A SlidingWindow is the standard window of
-		// the flats this plugin exists for and a Ventilator is a louvre or a pivot sash; both come
-		// out here as fixed glazing, and nothing in the build says so.
-		if (Opening.Kind == EHFOpeningKind::SlidingWindow || Opening.Kind == EHFOpeningKind::Ventilator)
-		{
-			UE_LOG(LogHouseForge, Warning,
-				TEXT("Opening '%s' is a %s, which is generated as FIXED glazing: its sash does not move yet."),
-				*Opening.Id.ToString(),
-				Opening.Kind == EHFOpeningKind::SlidingWindow ? TEXT("sliding window") : TEXT("ventilator"));
-		}
 		return;
 	}
 
 	const FVector2D Centre = Wall.Start + Frame.Direction * Opening.OffsetAlongWall;
 	const double SillZ = Wall.BaseZ + Opening.SillHeight;
 	const double HalfWidth = Opening.Width * 0.5;
+
+	if (bHasSash)
+	{
+		// Sashes all measure from the near jamb along the wall, so they share one frame: local +X
+		// runs to the far jamb, +Y is the wall normal and +Z runs up from the sill.
+		const FVector2D NearJamb = Centre - Frame.Direction * HalfWidth;
+		const FTransform UnitPivot(FRotator(0.0, Frame.YawDegrees, 0.0),
+			FVector(NearJamb.X, NearJamb.Y, SillZ));
+
+		if (Opening.Kind == EHFOpeningKind::SlidingWindow)
+		{
+			if (SlidingWindowHasSashes(Opening))
+			{
+				BuildSlidingWindowSashes(Opening, UnitPivot, OutParts);
+			}
+			else
+			{
+				// Too small to divide, so it is honestly fixed glazing rather than a unit with sashes
+				// too narrow to be anything. GenerateOpeningFixedInfill asks the same question and
+				// glazes it, so the pair cannot disagree and leave a framed hole.
+				UE_LOG(LogHouseForge, Warning,
+					TEXT("Sliding window '%s' is %.0f x %.0f cm, too small to divide into two sashes; it is built as fixed glazing."),
+					*Opening.Id.ToString(), Opening.Width, Opening.Height);
+			}
+			return;
+		}
+
+		if (VentilatorHasSash(Opening))
+		{
+			BuildVentilatorSash(Opening, UnitPivot, OutParts);
+		}
+		else
+		{
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("Ventilator '%s' is %.0f x %.0f cm, too small to carry an opening sash; it is built as fixed glazing."),
+				*Opening.Id.ToString(), Opening.Width, Opening.Height);
+		}
+		return;
+	}
 
 	// Which jamb the leaf hangs on, matching the swing arc the plan preview draws. A door hung on
 	// the wrong jamb is invisible in elevation and wrong in every walkthrough.
@@ -632,34 +956,68 @@ FDynamicMesh3 FHFGenerators::GenerateOpeningFixedInfill(const FHFOpening& Openin
 	const double CentreZ = SillZ + Opening.Height * 0.5;
 
 	{
-		// Window: a frame around the reveal, with glazing inside it.
+		// Window: a frame around the reveal. What goes inside it depends on whether the opening has
+		// sashes of its own - a sliding window's glazing rides in them, so putting glazing here too
+		// would double it, and a closed sash in front of a fixed pane is invisible.
+		const bool bSliding = Opening.Kind == EHFOpeningKind::SlidingWindow;
+		const bool bVentilator = Opening.Kind == EHFOpeningKind::Ventilator;
+
+		const bool bSashesCarryTheGlass =
+			(bSliding && SlidingWindowHasSashes(Opening)) || (bVentilator && VentilatorHasSash(Opening));
+
+		const double FaceWidth = bSliding ? SlidingFrameFace : (bVentilator ? VentilatorFrameFace : WindowFrameWidth);
+		const double FrameDepth = bSliding ? SlidingFrameDepth : (bVentilator ? VentilatorFrameDepth : WindowFrameDepth);
+
 		const double HalfWidth = Opening.Width * 0.5;
 		const double HalfHeight = Opening.Height * 0.5;
 
-		auto AppendFrameMember = [&](double OffsetAlong, double OffsetUp, double HalfAlong, double HalfUp)
+		auto AppendMember = [&](double OffsetAlong, double OffsetAcross, double OffsetUp,
+			double HalfAlong, double HalfAcross, double HalfUp, EHFSurfaceRole Role)
 		{
-			const FVector2D MemberPlan = Plan + Frame.Direction * OffsetAlong;
+			const FVector2D MemberPlan = Plan + Frame.Direction * OffsetAlong + Frame.Normal * OffsetAcross;
 			FHFMeshOps::AppendBox(Mesh,
 				FVector3d(MemberPlan.X, MemberPlan.Y, CentreZ + OffsetUp),
-				FVector3d(HalfAlong, WindowFrameDepth * 0.5, HalfUp),
-				Frame.YawDegrees, EHFSurfaceRole::WindowFrame);
+				FVector3d(HalfAlong, HalfAcross, HalfUp),
+				Frame.YawDegrees, Role);
 		};
 
-		AppendFrameMember(0.0, HalfHeight - WindowFrameWidth * 0.5, HalfWidth, WindowFrameWidth * 0.5);   // head
-		AppendFrameMember(0.0, -HalfHeight + WindowFrameWidth * 0.5, HalfWidth, WindowFrameWidth * 0.5);  // sill
-		AppendFrameMember(-HalfWidth + WindowFrameWidth * 0.5, 0.0, WindowFrameWidth * 0.5, HalfHeight);  // jamb
-		AppendFrameMember(HalfWidth - WindowFrameWidth * 0.5, 0.0, WindowFrameWidth * 0.5, HalfHeight);   // jamb
-
-		// A central mullion, once the opening is wide enough to need one.
-		if (Opening.Width > 120.0)
+		auto AppendFrameMember = [&](double OffsetAlong, double OffsetUp, double HalfAlong, double HalfUp)
 		{
-			AppendFrameMember(0.0, 0.0, WindowFrameWidth * 0.5, HalfHeight - WindowFrameWidth);
+			AppendMember(OffsetAlong, 0.0, OffsetUp, HalfAlong, FrameDepth * 0.5, HalfUp,
+				EHFSurfaceRole::WindowFrame);
+		};
+
+		AppendFrameMember(0.0, HalfHeight - FaceWidth * 0.5, HalfWidth, FaceWidth * 0.5);   // head
+		AppendFrameMember(0.0, -HalfHeight + FaceWidth * 0.5, HalfWidth, FaceWidth * 0.5);  // sill
+		AppendFrameMember(-HalfWidth + FaceWidth * 0.5, 0.0, FaceWidth * 0.5, HalfHeight);  // jamb
+		AppendFrameMember(HalfWidth - FaceWidth * 0.5, 0.0, FaceWidth * 0.5, HalfHeight);   // jamb
+
+		if (bSliding && bSashesCarryTheGlass)
+		{
+			// The two tracks, standing proud of the sill member. They are what makes a sliding
+			// window read as one at rest, and they are fixed - only the sash on them moves.
+			for (const double Side : { -1.0, 1.0 })
+			{
+				AppendMember(0.0, Side * SashTrackPitch * 0.5,
+					-HalfHeight + FaceWidth + SashTrackUpstand * 0.5,
+					HalfWidth - FaceWidth, SashTrackWidth * 0.5, SashTrackUpstand * 0.5,
+					EHFSurfaceRole::MetalHardware);
+			}
 		}
 
-		FHFMeshOps::AppendBox(Mesh,
-			FVector3d(Plan.X, Plan.Y, CentreZ),
-			FVector3d(HalfWidth - WindowFrameWidth, GlassThickness * 0.5, HalfHeight - WindowFrameWidth),
-			Frame.YawDegrees, EHFSurfaceRole::Glass);
+		if (!bSashesCarryTheGlass)
+		{
+			// A central mullion, once the opening is wide enough to need one. A sliding unit never
+			// gets one: its meeting stiles ARE the mullion, and a second one down the middle would
+			// sit in the running sash's way.
+			if (Opening.Width > 120.0 && !bSliding)
+			{
+				AppendFrameMember(0.0, 0.0, FaceWidth * 0.5, HalfHeight - FaceWidth);
+			}
+
+			AppendMember(0.0, 0.0, 0.0, HalfWidth - FaceWidth, GlassThickness * 0.5,
+				HalfHeight - FaceWidth, EHFSurfaceRole::Glass);
+		}
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
