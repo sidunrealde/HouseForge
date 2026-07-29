@@ -839,6 +839,37 @@ bool FHFDrawerBankAssemblyTest::RunTest(const FString& Parameters)
 		TestNearlyEqual(TEXT("The handle stands proud of the drawer front, so it travels with it"),
 			Front.GetBounds().Min.Y - Part.Mesh.GetBounds().Min.Y, Handle.Projection, 1e-3);
 
+		// And the swept transform, which is the assertion that "so it travels with it" actually
+		// rests on. Bounds moving is not enough on its own: a handle left in the carcass mesh would
+		// leave the drawer's own bounds moving exactly as they should, and the drawer would run out
+		// from under its handle. Followed on the point that reaches furthest out of the cabinet,
+		// which on a drawer - as on a leaf - is the handle's own tip and nothing else.
+		FVector3d LocalTip = FVector3d::Zero();
+		double Furthest = TNumericLimits<double>::Max();
+		for (const int32 Vid : Part.Mesh.VertexIndicesItr())
+		{
+			const FVector3d V = Part.Mesh.GetVertex(Vid);
+			if (V.Y < Furthest)
+			{
+				Furthest = V.Y;
+				LocalTip = V;
+			}
+		}
+		TestNearlyEqual(TEXT("The furthest point out of the bank is the handle's own tip"),
+			LocalTip.Y, Front.GetBounds().Min.Y - Handle.Projection, 1e-3);
+
+		FHFPartState Slide;
+		Slide.PivotTransform = Part.PivotTransform;
+		Slide.Motion = Part.Motion;
+
+		const FVector Shut = Slide.PoseAt(0.0).TransformPosition(FVector(LocalTip));
+		const FVector Pulled = Slide.PoseAt(1.0).TransformPosition(FVector(LocalTip));
+
+		TestNearlyEqual(TEXT("The handle rides the drawer out by exactly its travel"),
+			Shut.Y - Pulled.Y, Part.Motion.MaxTravelCm, 1e-6);
+		TestTrue(TEXT("And straight out, without wandering across the front of the cabinet"),
+			FMath::IsNearlyEqual(Shut.X, Pulled.X, 1e-9) && FMath::IsNearlyEqual(Shut.Z, Pulled.Z, 1e-9));
+
 		Closed.Add(MakeShared<FSolid>(Posed(Part, 0.0)));
 	}
 

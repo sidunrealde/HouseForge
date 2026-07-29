@@ -82,6 +82,76 @@ namespace
 		return Mesh.HasAttributes() && Mesh.Attributes()->PrimaryUV() != nullptr
 			&& Mesh.Attributes()->PrimaryUV()->ElementCount() > 0;
 	}
+
+	int32 CountRole(const FDynamicMesh3& Mesh, EHFSurfaceRole Role)
+	{
+		const int32 Group = FHFMeshOps::GroupForRole(Role);
+		int32 Count = 0;
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			if (Mesh.GetTriangleGroup(Tid) == Group)
+			{
+				++Count;
+			}
+		}
+		return Count;
+	}
+
+	/** Bounds of just the triangles carrying one surface role, which is how a cut is located. */
+	FAxisAlignedBox3d BoundsOfRole(const FDynamicMesh3& Mesh, EHFSurfaceRole Role)
+	{
+		const int32 Group = FHFMeshOps::GroupForRole(Role);
+		FAxisAlignedBox3d Box = FAxisAlignedBox3d::Empty();
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			if (Mesh.GetTriangleGroup(Tid) != Group)
+			{
+				continue;
+			}
+			const FIndex3i Tri = Mesh.GetTriangle(Tid);
+			for (int32 Corner = 0; Corner < 3; ++Corner)
+			{
+				Box.Contain(Mesh.GetVertex(Tri[Corner]));
+			}
+		}
+		return Box;
+	}
+
+	/**
+	 * A vertex of the faces carrying one role, the furthest from the part's own origin in plan.
+	 *
+	 * A point to follow round a swing. Taken off the role rather than off a coordinate so it is
+	 * unambiguously ON the thing being followed - the leaf's own back corner sits at the same depth
+	 * as a channel floor and would otherwise be just as good a match, and a leaf corner rides the
+	 * leaf whether or not the handle does.
+	 */
+	bool FindRoleVertexFurthestFromPivot(const FDynamicMesh3& Mesh, EHFSurfaceRole Role, FVector3d& Out)
+	{
+		const int32 Group = FHFMeshOps::GroupForRole(Role);
+		double Best = -1.0;
+		bool bFound = false;
+
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			if (Mesh.GetTriangleGroup(Tid) != Group)
+			{
+				continue;
+			}
+			const FIndex3i Tri = Mesh.GetTriangle(Tid);
+			for (int32 Corner = 0; Corner < 3; ++Corner)
+			{
+				const FVector3d V = Mesh.GetVertex(Tri[Corner]);
+				const double Radius = FVector2D(V.X, V.Y).Size();
+				if (Radius > Best)
+				{
+					Best = Radius;
+					Out = V;
+					bFound = true;
+				}
+			}
+		}
+		return bFound;
+	}
 }
 
 /**
@@ -458,6 +528,216 @@ bool FHFHandleRidesWithPartTest::RunTest(const FString& Parameters)
 	TestNearlyEqual(TEXT("Half open carries the handle halfway round"),
 		FMath::UnwindDegrees(AngleAboutHinge(Half) - AngleAboutHinge(Closed)),
 		Part.Motion.MaxAngleDegrees * 0.5, 0.01);
+
+	return true;
+}
+
+/**
+ * The same handle, described once, fitted to a leaf of either hand - applied and routed.
+ *
+ * HandleRidesWithPart proves a bar screwed to a LEFT-hung leaf swings with it. That is half the
+ * problem, and it is the half that was already right. The other half is that a caller writes one
+ * piece of code for a run of shutters, so whatever it says has to be true of the right-hung leaves
+ * in that run too - and a leaf whose local space was mirrored hand to hand would take the handle
+ * with it. Nothing below is conditional on Hinge except what the kit itself answers.
+ *
+ * Both directions are measured, because they fail differently and neither is visible in a still:
+ *
+ *   applied   a bar built onto the wrong face stands proud INSIDE the cupboard, where it fouls the
+ *             shelves and vanishes the moment the leaf is closed.
+ *   routed    a J-profile cut into the wrong face routs a channel down the BACK of the leaf. The
+ *             volume removed is identical, the leaf is still watertight, and the front face is
+ *             perfect - it is only wrong from inside the wardrobe.
+ *
+ * So the assertions are on WHICH FACE the material lands on or comes off, in the part's own space,
+ * and then on the swept arc that carries it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFHandleOnEitherHandTest, "HouseForge.Joinery.HandleOnEitherHand", HF_TEST_FLAGS)
+
+bool FHFHandleOnEitherHandTest::RunTest(const FString& Parameters)
+{
+	const EHFShutterHinge Hands[] = { EHFShutterHinge::Left, EHFShutterHinge::Right };
+
+	for (const EHFShutterHinge Hand : Hands)
+	{
+		const bool bLeft = Hand == EHFShutterHinge::Left;
+		const TCHAR* Which = bLeft ? TEXT("left-hung") : TEXT("right-hung");
+
+		FHFShutterParams Shutter;
+		Shutter.ModuleWidth = 45.0;
+		Shutter.ModuleHeight = 210.0;
+		Shutter.Hinge = Hand;
+
+		const FHFMeshPart Bare = FHFJoineryKit::BuildShutterPart(Shutter, TEXT("Shutter"));
+		if (!TestTrue(TEXT("The shutter produces a leaf"), Bare.Mesh.TriangleCount() > 0))
+		{
+			return false;
+		}
+
+		const double BareVolume = Volume(Bare.Mesh);
+		const FAxisAlignedBox3d BareBounds = Bare.Mesh.GetBounds();
+
+		// The leading edge and the box, from the kit rather than from Hinge. This is the whole of
+		// what a caller has to know, and it is why none of the rest of this is conditional.
+		const FBox Panel = FHFJoineryKit::ShutterPanelBox(Shutter);
+		const EHFHandleEdge Leading = FHFJoineryKit::ShutterLeadingEdge(Shutter);
+		const double LeadingX = bLeft ? Panel.Max.X : Panel.Min.X;
+		const double EdgeSign = bLeft ? 1.0 : -1.0;
+
+		// The swept arc, applied to whichever point on the part is being followed.
+		const FVector Axis = Bare.PivotTransform.GetTranslation();
+		FHFPartState State;
+		State.PivotTransform = Bare.PivotTransform;
+		State.Motion = Bare.Motion;
+
+		auto RadiusFromHinge = [&Axis](const FVector& Point)
+		{
+			return FVector2D(Point.X - Axis.X, Point.Y - Axis.Y).Size();
+		};
+
+		auto CheckRidesWithLeaf = [this, &State, &RadiusFromHinge, Which](const FVector& LocalPoint, const TCHAR* What)
+		{
+			const FVector Closed = State.PoseAt(0.0).TransformPosition(LocalPoint);
+			const FVector Open = State.PoseAt(1.0).TransformPosition(LocalPoint);
+
+			TestTrue(*FString::Printf(TEXT("Opening a %s leaf carries its %s with it"), Which, What),
+				FVector::Dist(Closed, Open) > 10.0);
+			TestNearlyEqual(*FString::Printf(TEXT("The %s on a %s leaf keeps its distance from the hinge"), What, Which),
+				RadiusFromHinge(Open), RadiusFromHinge(Closed), 0.001);
+			TestNearlyEqual(*FString::Printf(TEXT("And its height, on a %s leaf"), Which), Open.Z, Closed.Z, 0.001);
+		};
+
+		// ------------------------------------------------------------------------ applied: a bar
+
+		{
+			FHFHandleParams Handle = MakeHandleParams(EHFHandleStyle::Bar, Leading);
+			Handle.PanelBox = Panel;
+			Handle.Facing = EHFPanelFacing::NegativeY;
+			Handle.EdgeInset = 5.0;
+
+			const FHFHandleParams P = FHFJoineryKit::SanitiseHandle(Handle);
+
+			FDynamicMesh3 Leaf = Bare.Mesh;
+			if (!TestTrue(*FString::Printf(TEXT("A bar fits a %s leaf"), Which),
+				FHFJoineryKit::ApplyHandle(Leaf, Handle)))
+			{
+				return false;
+			}
+
+			TestTrue(*FString::Printf(TEXT("A %s leaf with a bar on it is watertight"), Which),
+				FHFMeshOps::IsClosed(Leaf));
+			TestTrue(*FString::Printf(TEXT("No triangle on the %s leaf lost its role"), Which),
+				EveryTriangleTagged(Leaf));
+			TestNearlyEqual(*FString::Printf(TEXT("The %s leaf gained exactly the handle"), Which),
+				Volume(Leaf) - BareVolume, Volume(FHFJoineryKit::GenerateHandle(Handle)),
+				FMath::Abs(BareVolume) * 0.001);
+
+			// On the OUTSIDE. Both hands look out of the cupboard along their own -Y, so the bar
+			// stands proud in front of the face at Y = 0 and the leaf's board is untouched behind it.
+			TestNearlyEqual(*FString::Printf(TEXT("The bar stands proud of the %s leaf's outward face"), Which),
+				Leaf.GetBounds().Min.Y, -P.Projection, 0.001);
+			TestNearlyEqual(*FString::Printf(TEXT("It does not reach through the %s leaf's back"), Which),
+				Leaf.GetBounds().Max.Y, BareBounds.Max.Y, 0.001);
+
+			// And on the leading edge rather than over the hinge, which is the other half of what
+			// handedness decides.
+			const FAxisAlignedBox3d Metal = BoundsOfRole(Leaf, EHFSurfaceRole::MetalHardware);
+			TestNearlyEqual(*FString::Printf(TEXT("The bar sits its inset in from the %s leaf's leading edge"), Which),
+				Metal.Center().X, LeadingX - EdgeSign * P.EdgeInset, 0.001);
+
+			// The furthest point out of the cabinet is the handle's own tip, on either hand - which is
+			// what makes "the outermost point rides the arc" a statement about the handle at all.
+			FVector3d LocalTip = FVector3d::Zero();
+			double Furthest = TNumericLimits<double>::Max();
+			for (const int32 Vid : Leaf.VertexIndicesItr())
+			{
+				const FVector3d V = Leaf.GetVertex(Vid);
+				if (V.Y < Furthest)
+				{
+					Furthest = V.Y;
+					LocalTip = V;
+				}
+			}
+			TestNearlyEqual(*FString::Printf(TEXT("The furthest point out of a %s leaf is the bar's tip"), Which),
+				LocalTip.Y, -P.Projection, 0.001);
+
+			CheckRidesWithLeaf(FVector(LocalTip), TEXT("bar"));
+		}
+
+		// --------------------------------------------------------------------- routed: a J-profile
+		//
+		// A recess is not a part, so "travels with the leaf" cannot mean "is in the part's mesh" the
+		// way a bar is - it means the material came out of the part's own board. Measured as the
+		// volume the leaf lost, where the faces that exposes ended up, and then the same arc.
+
+		{
+			FHFHandleParams Handle = MakeHandleParams(EHFHandleStyle::JProfile, Leading);
+			Handle.PanelBox = Panel;
+			Handle.Facing = EHFPanelFacing::NegativeY;
+
+			// Its own role, so the routed faces can be found and measured. A gola channel lined in
+			// aluminium is what this is on site, and it is also what makes the cut assertable.
+			Handle.RecessRole = EHFSurfaceRole::MetalHardware;
+
+			const FHFHandleParams P = FHFJoineryKit::SanitiseHandle(Handle);
+
+			FDynamicMesh3 Leaf = Bare.Mesh;
+			if (!TestTrue(*FString::Printf(TEXT("A J-profile routs a %s leaf"), Which),
+				FHFJoineryKit::ApplyHandle(Leaf, Handle)))
+			{
+				return false;
+			}
+
+			TestTrue(*FString::Printf(TEXT("A routed %s leaf is still watertight"), Which),
+				FHFMeshOps::IsClosed(Leaf));
+			TestTrue(*FString::Printf(TEXT("A routed %s leaf still faces outward"), Which), Volume(Leaf) > 0.0);
+			TestTrue(*FString::Printf(TEXT("No routed face on the %s leaf lost its role"), Which),
+				EveryTriangleTagged(Leaf));
+			TestTrue(*FString::Printf(TEXT("The routed %s leaf is unwrapped"), Which), HasUVs(Leaf));
+
+			// The material really came off this leaf, and exactly the notch that was described.
+			const double Removed = Shutter.LeafHeight()
+				* (P.ProfileHeight * P.RecessDepth + P.LipChamfer * P.LipChamfer * 0.5);
+			TestNearlyEqual(*FString::Printf(TEXT("A J-profile takes exactly its notch off a %s leaf"), Which),
+				BareVolume - Volume(Leaf), Removed, FMath::Abs(Removed) * 0.01);
+			TestTrue(*FString::Printf(TEXT("Routing does not shrink the %s leaf"), Which),
+				Leaf.GetBounds().Max.Equals(BareBounds.Max, 0.01)
+					&& Leaf.GetBounds().Min.Equals(BareBounds.Min, 0.01));
+
+			// THE fault this test exists for. The channel is cut into the face that looks out of the
+			// cupboard: it breaks out at Y = 0 and stops its declared depth into the board. Cut into
+			// the back instead and this same recess would measure [Thickness - RecessDepth, Thickness]
+			// while every other assertion here still passed.
+			if (!TestTrue(*FString::Printf(TEXT("A routed %s leaf has routed faces to find"), Which),
+				CountRole(Leaf, EHFSurfaceRole::MetalHardware) > 0))
+			{
+				return false;
+			}
+
+			const FAxisAlignedBox3d Cut = BoundsOfRole(Leaf, EHFSurfaceRole::MetalHardware);
+			TestNearlyEqual(*FString::Printf(TEXT("The channel breaks out of the %s leaf's outward face"), Which),
+				Cut.Min.Y, 0.0, 0.001);
+			TestNearlyEqual(*FString::Printf(TEXT("It cuts its declared depth into the %s leaf and no further"), Which),
+				Cut.Max.Y, P.RecessDepth, 0.001);
+
+			// And down the leading edge, not the hinge edge: it breaks out through that edge, and
+			// reaches back exactly its profile height and chamfer, leaving the rest of the face.
+			const double NearEdge = bLeft ? Cut.Max.X : Cut.Min.X;
+			const double FarEdge = bLeft ? Cut.Min.X : Cut.Max.X;
+			TestNearlyEqual(*FString::Printf(TEXT("The channel breaks out through the %s leaf's leading edge"), Which),
+				NearEdge, LeadingX, 0.001);
+			TestNearlyEqual(*FString::Printf(TEXT("It reaches its profile height back across the %s leaf"), Which),
+				EdgeSign * (LeadingX - FarEdge), P.ProfileHeight + P.LipChamfer, 0.001);
+
+			// It rides the leaf because it is a hole in the leaf: follow a corner of the cut itself.
+			FVector3d Routed = FVector3d::Zero();
+			if (TestTrue(*FString::Printf(TEXT("The cut on a %s leaf has a corner to follow"), Which),
+				FindRoleVertexFurthestFromPivot(Leaf, EHFSurfaceRole::MetalHardware, Routed)))
+			{
+				CheckRidesWithLeaf(FVector(Routed), TEXT("routed channel"));
+			}
+		}
+	}
 
 	return true;
 }

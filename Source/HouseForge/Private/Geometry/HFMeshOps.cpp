@@ -575,6 +575,11 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 		&Result, FMeshBoolean::EBooleanOp::Difference);
 	Boolean.bPutResultInInputSpace = true;
 
+	// The one thing standing between a cut face and the material panel. The tool's triangles are
+	// appended into the result with freshly allocated group ids, so ask for the map back and undo
+	// the renumbering below - the group IS the surface role here, not an arbitrary partition.
+	Boolean.bPopulateSecondMeshGroupMap = true;
+
 	// Compute() returns false whenever it could not resolve every intersection perfectly, which it
 	// reports even for cuts that came out clean - a through-hole in a box comes back "invalid"
 	// while being exactly right. Judging the result is therefore more reliable than trusting the
@@ -592,6 +597,28 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 			TEXT("Mesh subtraction produced unusable geometry (computed=%d, result tris=%d, closed=%d); target left uncut."),
 			bComputed ? 1 : 0, Result.TriangleCount(), IsClosed(Result) ? 1 : 0);
 		return false;
+	}
+
+	// Put the tool's own groups back on the faces it left behind. The map runs tool group -> result
+	// group, and every face the cut exposed has to come back the other way; anything that came from
+	// the target kept its group and is not in the map at all.
+	const TMap<int32, int32>& ToolToResult = Boolean.SecondMeshGroupMap.GetForwardMap();
+	if (Result.HasTriangleGroups() && ToolToResult.Num() > 0)
+	{
+		TMap<int32, int32> ResultToTool;
+		ResultToTool.Reserve(ToolToResult.Num());
+		for (const TPair<int32, int32>& Renumbered : ToolToResult)
+		{
+			ResultToTool.Add(Renumbered.Value, Renumbered.Key);
+		}
+
+		for (const int32 Tid : Result.TriangleIndicesItr())
+		{
+			if (const int32* ToolGroup = ResultToTool.Find(Result.GetTriangleGroup(Tid)))
+			{
+				Result.SetTriangleGroup(Tid, *ToolGroup);
+			}
+		}
 	}
 
 	Target = MoveTemp(Result);

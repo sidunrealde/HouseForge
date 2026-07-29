@@ -114,7 +114,17 @@ public:
 		const UE::Geometry::FDynamicMesh3& Source);
 
 	/**
-	 * Subtracts Tool from Target in place.
+	 * Subtracts Tool from Target in place, with the roles on both sides of the cut intact.
+	 *
+	 * The faces a subtraction exposes come from the TOOL, not from the target: the reveal of a
+	 * window opening is the cutter's own side wall, and the inside of a gola channel is the cutter's
+	 * profile. So the tool is tagged with the role those faces should end up carrying, and the cut
+	 * has to preserve it - for the same reason AppendPreservingRoles exists, and against the same
+	 * failure. FMeshBoolean appends the tool's surviving triangles through FDynamicMeshEditor,
+	 * which allocates each of their groups a fresh id, so a routed recess comes out tagged with a
+	 * group no role maps to and the material panel can never reach the inside of it again.
+	 *
+	 * Invisible, once more: the geometry is exactly right and every screenshot of it is correct.
 	 *
 	 * @return false if the boolean failed, in which case Target is left untouched rather than
 	 *         half-cut - a partially subtracted wall is worse than an uncut one, because it looks
