@@ -135,7 +135,7 @@ bool FHFBarHandleTest::RunTest(const FString& Parameters)
 	const double Expected = Section * P.BarLength + 2.0 * Section * (P.Projection - Radius + P.Embed);
 
 	TestTrue(TEXT("The bar has the volume of a bar on two posts"),
-		FMath::Abs(Volume(Bar) - Expected) < Expected * 0.1);
+		FMath::Abs(Volume(Bar) - Expected) < FMath::Abs(Expected) * 0.1);
 	TestTrue(TEXT("A bar is mostly air within its own bounds"),
 		Volume(Bar) < Local.Width() * Local.Depth() * Local.Height());
 
@@ -175,8 +175,11 @@ bool FHFKnobHandleTest::RunTest(const FString& Parameters)
 
 	// A knob is its head diameter across, both ways: it is a solid of revolution, so anything else
 	// would mean the section is not actually round.
+	// Depth(), not Height(). FAxisAlignedBox3d spells its extents Width/Height/Depth for X/Y/Z, so
+	// Height() is the projection axis - the one direction across which a knob is emphatically NOT its
+	// head diameter. The BarHandle test above measures the same stock with Depth() for the same reason.
 	TestNearlyEqual(TEXT("A knob is its head diameter across the run"), Local.Width(), P.KnobDiameter, 0.001);
-	TestNearlyEqual(TEXT("And the same across the other way"), Local.Height(), P.KnobDiameter, 0.001);
+	TestNearlyEqual(TEXT("And the same across the other way"), Local.Depth(), P.KnobDiameter, 0.001);
 	TestNearlyEqual(TEXT("It is centred on its own origin"), Local.Center().X, 0.0, 0.001);
 	TestNearlyEqual(TEXT("Squarely so"), Local.Center().Z, 0.0, 0.001);
 
@@ -274,7 +277,7 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 	// The corner notch, plus the little wedge the chamfer takes off the lip. Measured, not counted.
 	const double JRemoved = RunSpan * (J.ProfileHeight * J.RecessDepth + J.LipChamfer * J.LipChamfer * 0.5);
 	TestNearlyEqual(TEXT("A J-profile removes exactly the corner it describes"),
-		PanelVolume - Volume(JPanel), JRemoved, JRemoved * 0.01);
+		PanelVolume - Volume(JPanel), JRemoved, FMath::Abs(JRemoved) * 0.01);
 
 	// A notch off one corner leaves the panel's overall extents alone: board survives behind the
 	// recess and below it, so nothing has actually got smaller.
@@ -319,7 +322,7 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 	// The channel, plus a chamfer wedge on each of its two lips - one more than the J-profile gets.
 	const double GRemoved = RunSpan * (G.ProfileHeight * G.RecessDepth + G.LipChamfer * G.LipChamfer);
 	TestNearlyEqual(TEXT("A groove removes exactly the channel it describes"),
-		PanelVolume - Volume(GPanel), GRemoved, GRemoved * 0.01);
+		PanelVolume - Volume(GPanel), GRemoved, FMath::Abs(GRemoved) * 0.01);
 
 	TestTrue(TEXT("Routing a groove does not shrink the panel"),
 		GPanel.GetBounds().Max.Equals(FVector3d(Box.Max), 0.01)
@@ -396,7 +399,7 @@ bool FHFHandleRidesWithPartTest::RunTest(const FString& Parameters)
 	const double HandleVolume = Volume(FHFJoineryKit::GenerateHandle(Handle));
 	TestTrue(TEXT("A handle is a solid in its own right"), HandleVolume > 0.0);
 	TestNearlyEqual(TEXT("The leaf gained exactly the handle"),
-		Volume(Part.Mesh) - BareVolume, HandleVolume, HandleVolume * 0.001);
+		Volume(Part.Mesh) - BareVolume, HandleVolume, FMath::Abs(HandleVolume) * 0.001);
 	TestNearlyEqual(TEXT("The handle stands proud of the leaf's front face"),
 		Part.Mesh.GetBounds().Min.Y, -P.Projection, 0.001);
 
@@ -566,14 +569,20 @@ bool FHFHandleParametersTest::RunTest(const FString& Parameters)
 		};
 
 		const FHFHandleParams J = MakeHandleParams(EHFHandleStyle::JProfile, EHFHandleEdge::Top);
-		FHFHandleParams Deeper = J;
-		Deeper.RecessDepth = J.RecessDepth * 1.5;
 		FHFHandleParams Taller = J;
 		Taller.ProfileHeight = J.ProfileHeight * 1.5;
 
+		// Depth is measured DOWNWARDS from the default rather than upwards from it, because there is no
+		// room upwards: on a 19 mm board reserving a 5 mm web, the deepest legal recess is 14 mm and the
+		// 12 mm default is already all but against that stop. Asking for 18 mm gets 14 mm back - which is
+		// the clamp doing its job, asserted as such in HouseForge.Joinery.HandleRecess - so an assertion
+		// that 1.5x the depth removes 1.4x the board could never be satisfied by any correct generator.
+		FHFHandleParams Shallower = J;
+		Shallower.RecessDepth = J.RecessDepth / 1.5;
+
 		const double BaseLoss = RoutedLoss(J);
 		TestTrue(TEXT("A routed profile removes something"), BaseLoss > 0.0);
-		TestTrue(TEXT("A deeper recess removes more"), RoutedLoss(Deeper) > BaseLoss * 1.4);
+		TestTrue(TEXT("A deeper recess removes more"), BaseLoss > RoutedLoss(Shallower) * 1.4);
 		TestTrue(TEXT("A taller profile removes more"), RoutedLoss(Taller) > BaseLoss * 1.4);
 
 		// The margin belongs to the groove alone: it is what stops the cut short of the edge, and a

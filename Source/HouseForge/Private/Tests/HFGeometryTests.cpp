@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
+#include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFGenerators.h"
 #include "Geometry/HFMeshOps.h"
 #include "MeshQueries.h"
@@ -119,6 +120,21 @@ bool FHFMeshOpsPrismTest::RunTest(const FString& Parameters)
 	const FAxisAlignedBox3d Bounds = Mesh.GetBounds();
 	TestTrue(TEXT("Prism bounds match the boundary"),
 		Bounds.Min.Equals(FVector3d(0, 0, 0), 0.01) && Bounds.Max.Equals(FVector3d(400, 300, 20), 0.01));
+
+	// The caps, specifically. GetVolumeArea integrates along X alone, so a Z-extruded prism's two flat
+	// caps contribute exactly nothing to the figure asserted above - they can be wound inside out and
+	// every volume, bounds and watertightness check here still passes. Rotating the solid onto its side
+	// is what makes them count: a rigid rotation cannot change a consistently-wound solid's volume, and
+	// changes the sign of the part of it the caps carry if they disagree with the walls.
+	//
+	// This is not hypothetical. PolygonTriangulation::TriangulateSimplePolygon defaults
+	// bOrientAsHoleFill to TRUE, which winds its output opposite to the input polygon, and taking that
+	// default gave exactly this mesh - correct walls, inverted caps - across every generator that caps
+	// a triangulated section.
+	FDynamicMesh3 OnItsSide = Mesh;
+	MeshTransforms::Rotate(OnItsSide, FRotator(90.0, 0.0, 0.0), FVector3d::Zero());
+	TestNearlyEqual(TEXT("Turning the prism on its side does not change its volume"),
+		TMeshQueries<FDynamicMesh3>::GetVolumeArea(OnItsSide).X, ExpectedVolume, ExpectedVolume * 0.01);
 
 	// Clockwise input must produce the same solid: drawings are read in both directions.
 	TArray<FVector2D> Reversed = LShape;

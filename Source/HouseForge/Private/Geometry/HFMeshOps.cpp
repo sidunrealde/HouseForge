@@ -126,8 +126,14 @@ bool FHFMeshOps::AppendPrism(FDynamicMesh3& Mesh, const TArray<FVector2D>& Polyg
 	}
 
 	// Handles concave boundaries, which is the whole reason for not fanning from a centroid.
+	//
+	// bOrientAsHoleFill=false, and it is not optional: the default is TRUE, which winds the output
+	// triangles OPPOSITE to the input polygon because the usual caller is patching a hole and wants
+	// the patch facing back the other way. Taking that default gives caps facing into the solid while
+	// the side walls below face out of it, and nothing catches it - GetVolumeArea integrates along X
+	// only, so a Z-extruded prism's caps contribute exactly zero to the volume it reports.
 	TArray<FIndex3i> Triangles;
-	PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles);
+	PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles, /*bOrientAsHoleFill*/ false);
 	if (Triangles.IsEmpty())
 	{
 		return false;
@@ -336,8 +342,11 @@ bool FHFMeshOps::AppendExtrudedSection(FDynamicMesh3& Mesh, const TArray<FVector
 	}
 
 	// Concave sections are the norm here - a J-profile cutter is an L with a chamfer taken off it.
+	// bOrientAsHoleFill=false for the reason spelled out in AppendPrism: the default reverses the
+	// winding. A swept section is where that bites hardest, because its caps are the faces that carry
+	// the whole of the volume integral.
 	TArray<FIndex3i> Triangles;
-	PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles);
+	PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles, /*bOrientAsHoleFill*/ false);
 	if (Triangles.IsEmpty())
 	{
 		return false;

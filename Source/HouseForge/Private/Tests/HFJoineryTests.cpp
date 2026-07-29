@@ -168,7 +168,7 @@ bool FHFPlinthTest::RunTest(const FString& Parameters)
 	// The board it is really made of: two rails the length of the run and two closing the ends.
 	const double Expected = ExpectedFrameVolume(Params);
 	TestNearlyEqual(TEXT("The plinth contains the board a ladder frame is made of"),
-		Volume(Mesh), Expected, Expected * 0.001);
+		Volume(Mesh), Expected, FMath::Abs(Expected) * 0.001);
 
 	// A solid block of the same envelope would be more than ten times the material. That is the
 	// mistake this pins down: it would look identical from the only angle anybody sees it from.
@@ -311,7 +311,7 @@ bool FHFPlinthParametersTest::RunTest(const FString& Parameters)
 	const FDynamicMesh3 ShorterMesh = FHFJoineryKit::GeneratePlinth(Shorter);
 	TestNearlyEqual(TEXT("A shorter plinth stands lower"), ShorterMesh.GetBounds().Max.Z, 8.0, 0.001);
 	TestNearlyEqual(TEXT("Height scales the board linearly"),
-		Volume(ShorterMesh), BaseVolume * 0.8, BaseVolume * 0.001);
+		Volume(ShorterMesh), BaseVolume * 0.8, FMath::Abs(BaseVolume) * 0.001);
 
 	// Width: a longer run, gaining board on the two rails that run its length.
 	FHFPlinthParams Wider = Base;
@@ -559,7 +559,7 @@ bool FHFCorniceTest::RunTest(const FString& Parameters)
 	// right angle giving up a triangle of half the bevel squared.
 	const double ExpectedVolume = (4.5 * 6.0 - 0.2 * 0.2) * 180.0;
 	TestNearlyEqual(TEXT("It contains the moulding its section describes"),
-		Volume(Mesh), ExpectedVolume, ExpectedVolume * 0.0001);
+		Volume(Mesh), ExpectedVolume, FMath::Abs(ExpectedVolume) * 0.0001);
 
 	// Untagged geometry cannot be re-materialled by the user, so an untagged triangle is a defect
 	// even though it renders perfectly well.
@@ -643,7 +643,7 @@ bool FHFCorniceProfileTest::RunTest(const FString& Parameters)
 
 		const double Expected = CorniceSectionArea(Params) * Params.Width;
 		TestNearlyEqual(*FString::Printf(TEXT("%s cuts away exactly what it describes"), Names[i]),
-			Volumes[i], Expected, Expected * 0.0001);
+			Volumes[i], Expected, FMath::Abs(Expected) * 0.0001);
 	}
 
 	// And they are genuinely four different mouldings, in the order their sections say. The cove
@@ -670,7 +670,7 @@ bool FHFCorniceProfileTest::RunTest(const FString& Parameters)
 
 	const double TrueQuarterCircle = (4.5 * 6.0 - UE_DOUBLE_PI * 2.0 * 2.0 * 0.25) * 180.0;
 	TestNearlyEqual(TEXT("And a 32-segment cove is the quarter circle it was drawn from"),
-		FineVolume, TrueQuarterCircle, TrueQuarterCircle * 0.001);
+		FineVolume, TrueQuarterCircle, FMath::Abs(TrueQuarterCircle) * 0.001);
 
 	return true;
 }
@@ -694,7 +694,7 @@ bool FHFCorniceParametersTest::RunTest(const FString& Parameters)
 	const FDynamicMesh3 LongerMesh = FHFJoineryKit::GenerateCornice(Longer);
 	TestNearlyEqual(TEXT("A longer run is longer"), LongerMesh.GetBounds().Max.X, 360.0, 0.001);
 	TestNearlyEqual(TEXT("Length scales the moulding linearly"),
-		Volume(LongerMesh), BaseVolume * 2.0, BaseVolume * 0.0001);
+		Volume(LongerMesh), BaseVolume * 2.0, FMath::Abs(BaseVolume) * 0.0001);
 	TestNearlyEqual(TEXT("Length leaves the section alone"), LongerMesh.GetBounds().Min.Y, -2.5, 0.001);
 
 	// Height: the 75 mm moulding that tops a wardrobe rather than a wall unit.
@@ -836,7 +836,7 @@ bool FHFCorniceMountingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The mounted cornice is watertight"), FHFMeshOps::IsClosed(Mounted));
 	TestTrue(TEXT("The mounted cornice faces outward"), Volume(Mounted) > 0.0);
 	TestNearlyEqual(TEXT("Anchoring moves the moulding without resizing it"),
-		Volume(Mounted), LocalVolume, LocalVolume * 0.0001);
+		Volume(Mounted), LocalVolume, FMath::Abs(LocalVolume) * 0.0001);
 	TestTrue(TEXT("It lands exactly where the anchor puts it"),
 		CorniceBoundsMatch(Mounted.GetBounds(), CorniceBoundsUnderAnchor(Local.GetBounds(), Anchor), 0.001));
 
@@ -849,7 +849,7 @@ bool FHFCorniceMountingTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Two runs in one mesh are still watertight"), FHFMeshOps::IsClosed(Pair));
 	TestNearlyEqual(TEXT("And hold exactly twice the moulding"),
-		Volume(Pair), LocalVolume * 2.0, LocalVolume * 0.0001);
+		Volume(Pair), LocalVolume * 2.0, FMath::Abs(LocalVolume) * 0.0001);
 
 	// Appended into a mesh that was never set up for roles, the roles must survive - otherwise the
 	// moulding renders perfectly and cannot be re-materialled, which is a defect nobody sees.

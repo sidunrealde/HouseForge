@@ -1118,8 +1118,15 @@ namespace
 		}
 
 		// Handles the concave sections - a stepped profile has a genuine inside corner.
+		//
+		// bOrientAsHoleFill=false. The default is TRUE and winds the output OPPOSITE to the input
+		// polygon, which is what a hole patch wants and the exact opposite of what a cap wants. The
+		// section frame below is right-handed and the side walls are wound correctly, so taking the
+		// default produced a solid whose two end caps alone were inside out - and since a sweep along
+		// local +X puts the entire volume integral on those caps, the whole moulding came back with
+		// its volume negated.
 		TArray<FIndex3i> Triangles;
-		PolygonTriangulation::TriangulateSimplePolygon(Points, Triangles);
+		PolygonTriangulation::TriangulateSimplePolygon(Points, Triangles, /*bOrientAsHoleFill*/ false);
 		if (Triangles.IsEmpty())
 		{
 			return false;
