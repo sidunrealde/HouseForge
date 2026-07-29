@@ -5,9 +5,11 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Actors/HFArticulatedActor.h"
+#include "Actors/HFHouseActor.h"
 #include "Actors/HFOpeningActor.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Editor.h"
+#include "Engine/World.h"
 #include "MeshQueries.h"
 #include "Misc/AutomationTest.h"
 #include "Model/HFTypes.h"
@@ -175,28 +177,55 @@ bool FHFArticulatedSlideTest::RunTest(const FString& Parameters)
 	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
 
 	UDynamicMeshComponent* Leaf = Door->GetPartComponent(AHFOpeningActor::LeafPartId);
-	if (!TestNotNull(TEXT("The sliding leaf has its own component"), Leaf))
+	UDynamicMeshComponent* Fixed = Door->GetPartComponent(AHFOpeningActor::FixedPanelPartId);
+	if (!TestNotNull(TEXT("The running panel has its own component"), Leaf) ||
+		!TestNotNull(TEXT("The fixed panel has its own component"), Fixed))
 	{
 		return false;
 	}
 
-	const FVector LocalCentre(45.0, 0.0, 105.0);
-	const FVector Closed = Leaf->GetComponentTransform().TransformPosition(LocalCentre);
+	const double Travel = Door->FindPart(AHFOpeningActor::LeafPartId)->Motion.MaxTravelCm;
+	TestTrue(TEXT("The running panel actually travels"), Travel > 1.0);
 
-	Door->SetPartOpenAmount(AHFOpeningActor::LeafPartId, 1.0);
+	const FVector LocalCentre(24.0, 2.5, 105.0);
+	const FVector Closed = Leaf->GetComponentTransform().TransformPosition(LocalCentre);
+	const FVector FixedClosed = Fixed->GetComponentTransform().TransformPosition(LocalCentre);
+
+	Door->OpenAllParts();
 	const FVector Open = Leaf->GetComponentTransform().TransformPosition(LocalCentre);
 
-	// 90 cm of travel, along the wall, with nothing else disturbed.
-	TestNearlyEqual(TEXT("The leaf travels its declared distance"), FVector::Distance(Open, Closed), 90.0, 0.01);
+	// Travel along the wall, with nothing else disturbed.
+	TestNearlyEqual(TEXT("The panel travels its declared distance"), FVector::Distance(Open, Closed), Travel, 0.01);
 	TestTrue(TEXT("It travels along the wall and nowhere else"),
-		Open.Equals(Closed + FVector(90.0, 0.0, 0.0), 0.01));
+		Open.Equals(Closed + FVector(Travel, 0.0, 0.0), 0.01));
 	TestTrue(TEXT("A slide does not rotate the part"),
 		Leaf->GetComponentTransform().GetRotation().Equals(FQuat::Identity, 0.0001));
+
+	// The fixed panel is a part in its own right, and "open everything" leaves it exactly alone.
+	TestTrue(TEXT("Opening the unit does not move its fixed panel"),
+		Fixed->GetComponentTransform().TransformPosition(LocalCentre).Equals(FixedClosed, 0.0001));
+
+	// The whole unit stays inside the 155..245 opening; a panel that left it would be in the wall.
+	{
+		const FTransform& ToWorld = Leaf->GetComponentTransform();
+		double MinX = TNumericLimits<double>::Max();
+		double MaxX = -TNumericLimits<double>::Max();
+
+		for (const FVector3d& Vertex : Leaf->GetDynamicMesh()->GetMeshRef().VerticesItr())
+		{
+			const double X = ToWorld.TransformPosition(FVector(Vertex)).X;
+			MinX = FMath::Min(MinX, X);
+			MaxX = FMath::Max(MaxX, X);
+		}
+
+		TestTrue(TEXT("Open, the running panel is still inside the opening"),
+			MinX >= 154.99 && MaxX <= 245.01);
+	}
 
 	// Half the open amount is half the travel.
 	Door->SetPartOpenAmount(AHFOpeningActor::LeafPartId, 0.5);
 	TestNearlyEqual(TEXT("Travel is linear in the open amount"),
-		FVector::Distance(Leaf->GetComponentTransform().TransformPosition(LocalCentre), Closed), 45.0, 0.01);
+		FVector::Distance(Leaf->GetComponentTransform().TransformPosition(LocalCentre), Closed), Travel * 0.5, 0.01);
 
 	return true;
 }
@@ -340,6 +369,196 @@ bool FHFArticulatedPartEditTest::RunTest(const FString& Parameters)
 	}
 
 	TestFalse(TEXT("A reverted element no longer needs preserving"), Door->ShouldPreserveOnRebuild());
+
+	return true;
+}
+
+/**
+ * Collision follows the leaf, so a walkthrough cannot walk through an open door.
+ *
+ * The requirement in .claude/rules/04-conventions.md is explicit about open doors, and it is easy
+ * to fail without noticing: the leaf renders where it swung to while its collision stays behind in
+ * the doorway, and every screenshot looks right while the flat is unwalkable. Asserted by tracing
+ * against the part's own body rather than by reading its settings back, because settings that look
+ * correct and a body that never moved is exactly the failure.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFOpenDoorCollisionTest,
+	"HouseForge.Editor.OpenDoorBlocksAWalkthrough", HF_TEST_FLAGS)
+
+bool FHFOpenDoorCollisionTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFOpeningActor* Door = SpawnTestDoor(World);
+	if (!TestNotNull(TEXT("A door actor spawns"), Door))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
+
+	UDynamicMeshComponent* Leaf = Door->GetPartComponent(AHFOpeningActor::LeafPartId);
+	if (!TestNotNull(TEXT("The leaf has a component"), Leaf))
+	{
+		return false;
+	}
+
+	// Complex-as-simple is what makes collision the visual mesh rather than a hull approximating it.
+	TestTrue(TEXT("The leaf collides with its own triangles"),
+		Leaf->CollisionType == ECollisionTraceFlag::CTF_UseComplexAsSimple);
+	TestTrue(TEXT("The leaf blocks queries and physics"),
+		Leaf->GetCollisionEnabled() == ECollisionEnabled::QueryAndPhysics);
+
+	// Movable, or moving it would leave its body behind - and it is only ever moved.
+	TestTrue(TEXT("A part that moves is not static"), Leaf->Mobility == EComponentMobility::Movable);
+
+	const FCollisionQueryParams TraceParams(TEXT("HFDoorCollision"), /*bTraceComplex*/ true);
+
+	// The doorway spans 155..245 along the wall; the leaf hangs at 155 and swings to +Y.
+	const FVector ThroughDoorwayStart(200.0, -60.0, 100.0);
+	const FVector ThroughDoorwayEnd(200.0, 60.0, 100.0);
+
+	// Where the leaf stands once it is open: across the room, 45 cm off the wall.
+	const FVector AcrossSwingStart(100.0, 45.0, 100.0);
+	const FVector AcrossSwingEnd(260.0, 45.0, 100.0);
+
+	FHitResult Hit;
+	TestTrue(TEXT("Closed, the leaf blocks the doorway"),
+		Leaf->LineTraceComponent(Hit, ThroughDoorwayStart, ThroughDoorwayEnd, TraceParams));
+	TestFalse(TEXT("Closed, nothing is standing out in the room"),
+		Leaf->LineTraceComponent(Hit, AcrossSwingStart, AcrossSwingEnd, TraceParams));
+
+	Door->OpenAllParts();
+
+	// The load-bearing pair: collision left the doorway and arrived where the leaf now is. Either
+	// half on its own passes with a body that never moved or with one that vanished.
+	TestFalse(TEXT("Open, the doorway is walkable"),
+		Leaf->LineTraceComponent(Hit, ThroughDoorwayStart, ThroughDoorwayEnd, TraceParams));
+
+	if (TestTrue(TEXT("Open, the leaf blocks where it now stands"),
+		Leaf->LineTraceComponent(Hit, AcrossSwingStart, AcrossSwingEnd, TraceParams)))
+	{
+		// And it blocks at the hinge jamb, not somewhere a stale body happens to overlap.
+		TestNearlyEqual(TEXT("It blocks at the leaf's real position"), Hit.ImpactPoint.X, 155.0, 5.0);
+	}
+
+	// Halfway is blocked too: a walkthrough must not slip past a door that is merely ajar.
+	Door->SetPartOpenAmount(AHFOpeningActor::LeafPartId, 0.5);
+	TestTrue(TEXT("Half open, the leaf still blocks the doorway"),
+		Leaf->LineTraceComponent(Hit, ThroughDoorwayStart, ThroughDoorwayEnd, TraceParams));
+
+	return true;
+}
+
+/**
+ * Open amounts survive a house rebuild.
+ *
+ * A rebuild destroys and respawns every element that is not hand-edited, so a pose held only on the
+ * actor dies with it: every door in the flat slams shut the moment anything about the spec changes.
+ * Posing is user state in the same way a hand edit is - someone opened those doors deliberately -
+ * and this is the test that says so.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFRebuildKeepsOpenAmountsTest,
+	"HouseForge.Editor.OpenAmountsSurviveAHouseRebuild", HF_TEST_FLAGS)
+
+bool FHFRebuildKeepsOpenAmountsTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	FHFHouseSpec Spec;
+	Spec.SchemaVersion = 1;
+	Spec.Name = TEXT("Rebuild Pose Test");
+	Spec.Units = EHFUnits::Centimeters;
+	Spec.UnitsSource = TEXT("test fixture");
+
+	FHFWall Wall;
+	Wall.Id = TEXT("W_S");
+	Wall.Start = FVector2D(0.0, 0.0);
+	Wall.End = FVector2D(400.0, 0.0);
+	Wall.Thickness = 20.0;
+	Wall.Height = 300.0;
+	Spec.Walls.Add(Wall);
+
+	FHFOpening Door;
+	Door.Id = TEXT("D1");
+	Door.WallId = TEXT("W_S");
+	Door.OffsetAlongWall = 200.0;
+	Door.Width = 90.0;
+	Door.Height = 210.0;
+	Door.Kind = EHFOpeningKind::Door;
+	Door.Swing = EHFSwing::InwardLeft;
+	Spec.Openings.Add(Door);
+
+	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+	if (!TestNotNull(TEXT("A house actor spawns"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); } };
+
+	House->SetSpec(Spec);
+	House->BuildGeometry();
+
+	auto FindDoorActor = [House]() -> AHFOpeningActor*
+	{
+		for (AActor* Element : House->ElementActors)
+		{
+			if (AHFOpeningActor* Opening = Cast<AHFOpeningActor>(Element))
+			{
+				if (Opening->ElementId == FName(TEXT("D1")))
+				{
+					return Opening;
+				}
+			}
+		}
+		return nullptr;
+	};
+
+	AHFOpeningActor* Posed = FindDoorActor();
+	if (!TestNotNull(TEXT("The house built a door"), Posed))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("The door can be posed"), Posed->SetPartOpenAmount(AHFOpeningActor::LeafPartId, 0.7));
+
+	UDynamicMeshComponent* PosedLeaf = Posed->GetPartComponent(AHFOpeningActor::LeafPartId);
+	if (!TestNotNull(TEXT("The posed door has a leaf"), PosedLeaf))
+	{
+		return false;
+	}
+	const FVector PosedTip = PosedLeaf->GetComponentTransform().TransformPosition(FVector(89.5, 0.0, 105.0));
+
+	House->BuildGeometry();
+
+	AHFOpeningActor* Rebuilt = FindDoorActor();
+	if (!TestNotNull(TEXT("The door is still there after a rebuild"), Rebuilt))
+	{
+		return false;
+	}
+
+	// The point of the test: this is a different actor. An untouched element is respawned, so the
+	// pose had to be carried across rather than merely left alone.
+	TestTrue(TEXT("An untouched element really is respawned by a rebuild"), Rebuilt != Posed);
+
+	TestNearlyEqual(TEXT("The door is still 70% open after a house rebuild"),
+		Rebuilt->GetPartOpenAmount(AHFOpeningActor::LeafPartId), 0.7, 0.0001);
+
+	// Asserted on where the leaf actually is, not only on the number: a restored open amount that
+	// was never pushed into the component leaves the door drawn shut.
+	UDynamicMeshComponent* RebuiltLeaf = Rebuilt->GetPartComponent(AHFOpeningActor::LeafPartId);
+	if (TestNotNull(TEXT("The rebuilt door has a leaf"), RebuiltLeaf))
+	{
+		TestTrue(TEXT("The rebuilt leaf is standing where the posed one was"),
+			RebuiltLeaf->GetComponentTransform().TransformPosition(FVector(89.5, 0.0, 105.0)).Equals(PosedTip, 0.01));
+	}
 
 	return true;
 }

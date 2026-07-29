@@ -110,6 +110,37 @@ void AHFArticulatedActor::CloseAllParts()
 	SetAllPartsOpenAmount(0.0);
 }
 
+FHFPartPoses AHFArticulatedActor::CapturePartPoses() const
+{
+	FHFPartPoses Poses;
+	Poses.MasterOpenAmount = MasterOpenAmount;
+
+	for (const FHFPartState& Part : Parts)
+	{
+		if (Part.OpenAmount > 0.0)
+		{
+			Poses.OpenAmountsByPartId.Add(Part.PartId, Part.OpenAmount);
+		}
+	}
+
+	return Poses;
+}
+
+void AHFArticulatedActor::RestorePartPoses(const FHFPartPoses& Poses)
+{
+	MasterOpenAmount = FMath::Clamp(Poses.MasterOpenAmount, 0.0, 1.0);
+
+	for (FHFPartState& Part : Parts)
+	{
+		if (const double* OpenAmount = Poses.OpenAmountsByPartId.Find(Part.PartId))
+		{
+			Part.OpenAmount = FMath::Clamp(*OpenAmount, 0.0, 1.0);
+		}
+	}
+
+	ApplyOpenAmounts();
+}
+
 void AHFArticulatedActor::ApplyOpenAmounts()
 {
 	for (int32 Index = 0; Index < Parts.Num(); ++Index)
@@ -294,10 +325,13 @@ UDynamicMeshComponent* AHFArticulatedActor::CreatePartComponent(FName PartId)
 	Component->SetupAttachment(Mesh);
 
 	// Same collision treatment as the fixed shell: complex-as-simple, so an open door leaf blocks
-	// where it actually is rather than where a convex hull says it is.
+	// where it actually is rather than where a convex hull says it is. bEnableComplexCollision is
+	// what actually builds that collision - see AHFElementActor's constructor; without it the leaf
+	// swings and a walkthrough walks straight through it.
 	Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Component->SetCollisionProfileName(TEXT("BlockAll"));
 	Component->CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
+	Component->bEnableComplexCollision = true;
 	Component->SetGenerateOverlapEvents(false);
 
 	Component->RegisterComponent();

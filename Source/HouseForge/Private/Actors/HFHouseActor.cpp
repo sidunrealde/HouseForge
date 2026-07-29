@@ -2,6 +2,7 @@
 
 #include "Actors/HFHouseActor.h"
 
+#include "Actors/HFArticulatedActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFOpeningActor.h"
 #include "Components/LineBatchComponent.h"
@@ -124,8 +125,23 @@ void AHFHouseActor::BuildGeometry()
 	TMap<TPair<UClass*, FName>, AHFElementActor*> Preserved;
 	TArray<TObjectPtr<AActor>> Survivors;
 
+	// Open amounts are user state, exactly as a hand edit is. The elements themselves are respawned
+	// here, so a pose held only on the actor would die with it and every door in the flat would slam
+	// shut on a rebuild. Poses are carried across by element id and put back once the parts exist.
+	TMap<TPair<UClass*, FName>, FHFPartPoses> PosedElements;
+
 	for (AActor* Element : ElementActors)
 	{
+		const AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Element);
+		if (IsValid(Articulated))
+		{
+			FHFPartPoses Poses = Articulated->CapturePartPoses();
+			if (!Poses.IsEmpty())
+			{
+				PosedElements.Add({ Articulated->GetClass(), Articulated->ElementId }, MoveTemp(Poses));
+			}
+		}
+
 		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
 		if (IsValid(Typed) && Typed->ShouldPreserveOnRebuild())
 		{
@@ -290,6 +306,23 @@ void AHFHouseActor::BuildGeometry()
 			OpeningActor->Opening = Opening;
 			OpeningActor->HostWall = *Wall;
 			OpeningActor->Regenerate();
+		}
+	}
+
+	// Once every element has been regenerated its parts exist again, so the poses captured above can
+	// go back on. Done in one pass at the end rather than per element type, so any future articulated
+	// element gets it without having to remember to ask.
+	for (AActor* Element : ElementActors)
+	{
+		AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Element);
+		if (Articulated == nullptr)
+		{
+			continue;
+		}
+
+		if (const FHFPartPoses* Poses = PosedElements.Find({ Articulated->GetClass(), Articulated->ElementId }))
+		{
+			Articulated->RestorePartPoses(*Poses);
 		}
 	}
 

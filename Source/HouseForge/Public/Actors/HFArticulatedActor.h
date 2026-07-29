@@ -82,6 +82,22 @@ public:
 	void CloseAllParts();
 
 	/**
+	 * Every open amount worth carrying, keyed by part id.
+	 *
+	 * Closed parts are left out, so an untouched element captures nothing and a rebuild has nothing
+	 * to put back for it.
+	 */
+	FHFPartPoses CapturePartPoses() const;
+
+	/**
+	 * Restores open amounts captured before a rebuild, matched by part id.
+	 *
+	 * Ids the current build no longer produces are ignored rather than resurrected: the pose of a
+	 * part that no longer exists is not state, it is a stale number.
+	 */
+	void RestorePartPoses(const FHFPartPoses& Poses);
+
+	/**
 	 * The component carrying a part's mesh, or null.
 	 *
 	 * Its transform is the part's live articulated pose, which is what makes baking simple: a

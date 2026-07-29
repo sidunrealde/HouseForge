@@ -121,6 +121,24 @@ struct HOUSEFORGE_API FHFPartState
 };
 
 /**
+ * How an articulated element was posed, lifted clear of the actor holding it.
+ *
+ * A house rebuild respawns its elements, so a pose held only on the actor dies with it and every
+ * door in the flat slams shut. Posing is user state in exactly the way a hand edit is - someone
+ * opened those doors on purpose, usually to photograph them - so it is captured by part id before
+ * the rebuild and put back after it.
+ */
+struct HOUSEFORGE_API FHFPartPoses
+{
+	/** Only parts posed away from closed; a closed part has nothing worth carrying. */
+	TMap<FName, double> OpenAmountsByPartId;
+
+	double MasterOpenAmount = 0.0;
+
+	bool IsEmpty() const { return OpenAmountsByPartId.IsEmpty() && MasterOpenAmount <= 0.0; }
+};
+
+/**
  * One moving part as produced by generation: a mesh plus where it hangs and how it moves.
  *
  * A plain struct rather than a USTRUCT because it carries an FDynamicMesh3 by value. It is still
