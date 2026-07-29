@@ -89,9 +89,11 @@
 <line x1="984.28" y1="1253.18" x2="984.28" y2="1267.64" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
 <polygon points="685.36,1253.18 704.64,1253.18 704.64,1267.64 685.36,1267.64" fill="none" stroke="#005aaa" stroke-width="1.40"/>
 <line x1="695.00" y1="1253.18" x2="695.00" y2="1267.64" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
-<polygon points="586.52,1032.60 803.48,1032.60 803.48,1195.32 586.52,1195.32" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
-<line x1="695.00" y1="1032.60" x2="695.00" y2="1195.32" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="586.52" y1="1113.96" x2="803.48" y2="1113.96" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="604.60,1032.60 785.40,1032.60 785.40,1195.32 604.60,1195.32" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
+<line x1="695.00" y1="1032.60" x2="695.00" y2="1195.32" stroke="#000000" stroke-width="1.80" stroke-linecap="round"/>
+<line x1="616.60" y1="1113.96" x2="683.00" y2="1113.96" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="683.00" y1="1113.96" x2="673.00" y2="1107.96" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="683.00" y1="1113.96" x2="673.00" y2="1119.96" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
 <text x="695.00" y="1018.60" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">Win_MBed_N</text>
 <polygon points="369.56,1050.68 586.52,1050.68 586.52,1303.80 369.56,1303.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="376.56,1057.68 579.52,1057.68 579.52,1296.80 376.56,1296.80" fill="none" stroke="#787878" stroke-width="1.00"/>

@@ -92,9 +92,18 @@ namespace
 			AddOpening(Id, WallId, Offset, Width, DoorHeight, 0.0, EHFOpeningKind::Door, Swing);
 		}
 
-		void AddWindow(const FName& Id, const FName& WallId, double Offset, double Width)
+		/**
+		 * A window in an external wall.
+		 *
+		 * Sliding by default, because that is what every habitable-room window in a flat of this
+		 * class is: a two-track aluminium unit with one fixed sash and one that runs. Casements and
+		 * fixed lights do appear in Indian flats, but not in this layout - there is no picture window
+		 * and no top-hung casement in it - so nothing here is fixed just to have one of each.
+		 */
+		void AddWindow(const FName& Id, const FName& WallId, double Offset, double Width,
+			EHFOpeningKind Kind = EHFOpeningKind::SlidingWindow)
 		{
-			AddOpening(Id, WallId, Offset, Width, WindowHeight, WindowSill, EHFOpeningKind::Window);
+			AddOpening(Id, WallId, Offset, Width, WindowHeight, WindowSill, Kind);
 		}
 
 		/** Rooms in this plan are all rectangles, so a corner pair is enough to describe them. */
@@ -263,13 +272,19 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddOpening(TEXT("D_Balcony"), TEXT("W_South"), 2100.0, 1800.0, 2100.0, 0.0,
 		EHFOpeningKind::SlidingDoor);
 
-	// Windows in the external shell.
+	// Windows in the external shell. All five are two-track sliding units, which is what a flat of
+	// this class is built with; the kitchen's is the same unit at a smaller size.
 	B.AddWindow(TEXT("Win_Living"),  TEXT("W_South"), 5400.0, 1500.0);
 	B.AddWindow(TEXT("Win_Bed2_S"),  TEXT("W_South"), 8700.0, 1500.0);
 	B.AddWindow(TEXT("Win_Bed2_E"),  TEXT("W_East"),  1800.0, 1200.0);
 	// W_North runs east to west from (X5,Y3), so offsets count back from the north-east corner.
 	// The master bedroom window opens onto the north balcony, alongside its sliding door.
-	B.AddWindow(TEXT("Win_MBed_N"),  TEXT("W_North"), X5 - 7500.0, 1800.0);
+	//
+	// 1500 rather than 1800: at 1800 its western jamb landed on the centreline of the balcony
+	// parapet at X3, so the parapet stood 57 mm in front of the glazing and the sash overlapped it.
+	// Invisible while windows were fixed geometry nothing swept; the moment they became sashes the
+	// house sweep found it. 1500 is also the size a master bedroom window is.
+	B.AddWindow(TEXT("Win_MBed_N"),  TEXT("W_North"), X5 - 7500.0, 1500.0);
 	B.AddWindow(TEXT("Win_Kitchen"), TEXT("W_North"), X5 - 2100.0, 1200.0);
 
 	// Balcony access. Master bedroom to the north balcony; utility to the east wash area.
@@ -279,6 +294,9 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// Ventilators sit directly on the head of each bathroom door, which is where they go when the
 	// bathroom has no external wall. Stacking them on the door rather than putting them in
 	// W_Mid_Upper also keeps them clear of the master bedroom doorway.
+	//
+	// Top-hung pivot sashes rather than fixed louvres: a bathroom with no external wall and no
+	// exhaust running needs a ventilator somebody can actually open.
 	B.AddOpening(TEXT("Vent_CBath"), TEXT("W_Corr_CBath"), 900.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
 	B.AddOpening(TEXT("Vent_MBath"), TEXT("W_CBath_MBath"), 900.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
 

@@ -90,6 +90,24 @@ without disturbing its neighbours' junctions.
 | `kind` | enum | `Door` \| `SlidingDoor` \| `Window` \| `SlidingWindow` \| `Archway` \| `Ventilator` |
 | `swing` | enum | `None` \| `InwardLeft` \| `InwardRight` \| `OutwardLeft` \| `OutwardRight` |
 
+**`kind` decides what moves**, so it is not cosmetic:
+
+| Kind | What is built | What moves |
+|---|---|---|
+| `Door` | One leaf | Hinged on the jamb the `swing` names |
+| `SlidingDoor` | Two panels on two tracks | One panel, until its far edge meets the fixed one's |
+| `Window` | Frame, mullion if wide, fixed glazing | Nothing |
+| `SlidingWindow` | Two-track frame with sill tracks, two glazed sashes | One sash, the same way a sliding door's panel does |
+| `Archway` | A hole, and nothing else | Nothing |
+| `Ventilator` | Frame and one top-hung sash | The sash, pivoting on its head |
+
+A `SlidingWindow` is the default for a habitable-room window in these flats — a 27 mm two-track
+aluminium unit. Use `Window` only where the glazing genuinely is fixed. A `Ventilator` is built as
+a top-hung pivot sash; where one is genuinely a fixed louvre, `Window` describes it honestly.
+
+An opening too small to divide falls back to fixed glazing and says so in the log, rather than
+producing sashes too narrow to be anything.
+
 **Read the swing arc.** Every hinged door on a plan is drawn with a quarter-circle showing which
 side it is hinged and which way it opens. `Left`/`Right` picks the hinge end (the near or far end
 of the opening as measured from the host wall's `start`); `Inward`/`Outward` picks the side the

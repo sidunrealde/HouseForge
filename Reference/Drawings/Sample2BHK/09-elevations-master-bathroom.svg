@@ -123,8 +123,8 @@
 <line x1="1833.21" y1="1196.53" x2="1881.43" y2="1196.53" stroke="#b9b9b9" stroke-width="0.90" stroke-linecap="round"/>
 <circle cx="1688.57" cy="999.45" r="5.42" fill="#ffffff" stroke="#005aaa" stroke-width="1.30"/>
 <polygon points="1748.84,996.44 1821.16,996.44 1821.16,1050.68 1748.84,1050.68" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
-<line x1="1785.00" y1="996.44" x2="1785.00" y2="1050.68" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="1748.84" y1="1023.56" x2="1821.16" y2="1023.56" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1748.84" y1="1050.68" x2="1785.00" y2="996.44" stroke="#5a5a5a" stroke-width="1.00" stroke-dasharray="5 5" stroke-linecap="round"/>
+<line x1="1821.16" y1="1050.68" x2="1785.00" y2="996.44" stroke="#5a5a5a" stroke-width="1.00" stroke-dasharray="5 5" stroke-linecap="round"/>
 <text x="1785.00" y="982.44" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">Vent_MBath</text>
 <polygon points="1739.80,1050.68 1830.20,1050.68 1830.20,1303.80 1739.80,1303.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="1746.80,1057.68 1823.20,1057.68 1823.20,1296.80 1746.80,1296.80" fill="none" stroke="#787878" stroke-width="1.00"/>

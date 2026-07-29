@@ -57,8 +57,8 @@
 <polygon points="1690.98,633.59 1734.38,633.59 1734.38,681.80 1690.98,681.80" fill="none" stroke="#464646" stroke-width="1.30"/>
 <polygon points="1676.52,590.19 1748.84,590.19 1748.84,633.59 1676.52,633.59" fill="none" stroke="#787878" stroke-width="1.00"/>
 <polygon points="1748.84,374.44 1821.16,374.44 1821.16,428.68 1748.84,428.68" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
-<line x1="1785.00" y1="374.44" x2="1785.00" y2="428.68" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="1748.84" y1="401.56" x2="1821.16" y2="401.56" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1748.84" y1="428.68" x2="1785.00" y2="374.44" stroke="#5a5a5a" stroke-width="1.00" stroke-dasharray="5 5" stroke-linecap="round"/>
+<line x1="1821.16" y1="428.68" x2="1785.00" y2="374.44" stroke="#5a5a5a" stroke-width="1.00" stroke-dasharray="5 5" stroke-linecap="round"/>
 <text x="1785.00" y="360.44" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">Vent_MBath</text>
 <polygon points="1739.80,428.68 1830.20,428.68 1830.20,681.80 1739.80,681.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="1746.80,435.68 1823.20,435.68 1823.20,674.80 1746.80,674.80" fill="none" stroke="#787878" stroke-width="1.00"/>
@@ -111,8 +111,8 @@
 <polygon points="1830.20,1183.27 1884.44,1183.27 1884.44,1207.37 1830.20,1207.37" fill="none" stroke="#464646" stroke-width="1.30"/>
 <line x1="1830.20" y1="1195.32" x2="1884.44" y2="1195.32" stroke="#b9b9b9" stroke-width="0.90" stroke-linecap="round"/>
 <polygon points="1748.84,996.44 1821.16,996.44 1821.16,1050.68 1748.84,1050.68" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
-<line x1="1785.00" y1="996.44" x2="1785.00" y2="1050.68" stroke="#000000" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="1748.84" y1="1023.56" x2="1821.16" y2="1023.56" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1748.84" y1="1050.68" x2="1785.00" y2="996.44" stroke="#5a5a5a" stroke-width="1.00" stroke-dasharray="5 5" stroke-linecap="round"/>
+<line x1="1821.16" y1="1050.68" x2="1785.00" y2="996.44" stroke="#5a5a5a" stroke-width="1.00" stroke-dasharray="5 5" stroke-linecap="round"/>
 <text x="1785.00" y="982.44" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">Vent_CBath</text>
 <polygon points="1739.80,1050.68 1830.20,1050.68 1830.20,1303.80 1739.80,1303.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="1746.80,1057.68 1823.20,1057.68 1823.20,1296.80 1746.80,1296.80" fill="none" stroke="#787878" stroke-width="1.00"/>

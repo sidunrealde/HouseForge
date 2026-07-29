@@ -622,12 +622,14 @@ namespace
 
 		AppendMember(XMin, XMin + SashFaceWidth, ZMin, ZMax);            // stile
 		AppendMember(XMax - SashFaceWidth, XMax, ZMin, ZMax);            // stile
-		AppendMember(XMin + SashFaceWidth, XMax - SashFaceWidth, ZMin, ZMin + SashFaceWidth);  // bottom rail
-		AppendMember(XMin + SashFaceWidth, XMax - SashFaceWidth, ZMax - SashFaceWidth, ZMax);  // top rail
 
-		// The bottom rail is deliberately deeper than the track upstand it sits over: a real one is
-		// hollow and the upstand runs up inside it. The two interpenetrate, which is exactly what
-		// happens in the section and is hidden inside the rail.
+		// The bottom rail is deeper than the track upstand it comes to rest over, and the two
+		// interpenetrate. A real bottom rail is hollow and the upstand runs up inside it, so that is
+		// the section rather than a clash - and it is hidden inside the rail either way.
+		AppendMember(XMin + SashFaceWidth, XMax - SashFaceWidth, ZMin, ZMin + SashFaceWidth);
+		AppendMember(XMin + SashFaceWidth, XMax - SashFaceWidth, ZMax - SashFaceWidth, ZMax);
+
+		// The pane, engaged into the glazing groove of all four members.
 		const double GlassInset = SashFaceWidth - SashGlassRebate;
 		FHFMeshOps::AppendBox(Mesh,
 			FVector3d((XMin + XMax) * 0.5, TrackY, (ZMin + ZMax) * 0.5),

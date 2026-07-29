@@ -282,7 +282,20 @@ def draw_openings(c, spec, view, show_swings=True):
             c.line(view((endpoint[0] + nx * ht, endpoint[1] + ny * ht)),
                    view((endpoint[0] - nx * ht, endpoint[1] - ny * ht)), width=1.4)
 
-        if kind in ("Window", "SlidingWindow"):
+        if kind == "SlidingWindow":
+            # Two sashes on two tracks, each running half the opening and crossing at the meeting
+            # stile - the sliding door's symbol one size down, which is what the unit is. Drawn
+            # over a light line down the frame centre so the opening still reads as glazed.
+            c.line(view(a), view(b), width=0.9, color=GREY)
+
+            q = wall["thickness"] * 0.16
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            c.line(view((a[0] + nx * q, a[1] + ny * q)),
+                   view((mid[0] + ux * 40 + nx * q, mid[1] + uy * 40 + ny * q)), width=2.0)
+            c.line(view((b[0] - nx * q, b[1] - ny * q)),
+                   view((mid[0] - ux * 40 - nx * q, mid[1] - uy * 40 - ny * q)), width=2.0)
+
+        elif kind == "Window":
             for f in (0.28, 0.5, 0.72):
                 off = (f - 0.5) * wall["thickness"]
                 c.line(view((a[0] + nx * off, a[1] + ny * off)),
@@ -1294,7 +1307,20 @@ def sheet_elevations(spec, room, sheet_no, total):
             oy1 = floor_y - sill * px_per_mm
             oy0 = oy1 - o["height"] * px_per_mm
             c.rect(a, oy0, b - a, oy1 - oy0, fill=WHITE, stroke=BLACK, width=1.8)
-            if o["kind"] in ("Window", "SlidingWindow", "Ventilator"):
+            if o["kind"] == "SlidingWindow":
+                # The meeting stile, and an arrow on the operable sash showing which way it runs.
+                mid = (a + b) / 2.0
+                c.line((mid, oy0), (mid, oy1), width=1.8)
+                arrow_y = (oy0 + oy1) / 2.0
+                c.line((a + 12, arrow_y), (mid - 12, arrow_y), width=1.0, color=DIM)
+                c.line((mid - 12, arrow_y), (mid - 22, arrow_y - 6), width=1.0, color=DIM)
+                c.line((mid - 12, arrow_y), (mid - 22, arrow_y + 6), width=1.0, color=DIM)
+            elif o["kind"] == "Ventilator":
+                # Top-hung: the dashed V points at the hinged edge, which is the head.
+                mid = (a + b) / 2.0
+                c.line((a, oy1), (mid, oy0), width=1.0, color=DIM, dash=DASH_FINE)
+                c.line((b, oy1), (mid, oy0), width=1.0, color=DIM, dash=DASH_FINE)
+            elif o["kind"] == "Window":
                 c.line(((a + b) / 2.0, oy0), ((a + b) / 2.0, oy1), width=1.2)
                 c.line((a, (oy0 + oy1) / 2.0), (b, (oy0 + oy1) / 2.0), width=1.0, color=LIGHT)
             else:

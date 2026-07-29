@@ -414,7 +414,7 @@
 			"width": 1500,
 			"height": 1350,
 			"sillHeight": 900,
-			"kind": "Window",
+			"kind": "SlidingWindow",
 			"swing": "None"
 		},
 		{
@@ -424,7 +424,7 @@
 			"width": 1500,
 			"height": 1350,
 			"sillHeight": 900,
-			"kind": "Window",
+			"kind": "SlidingWindow",
 			"swing": "None"
 		},
 		{
@@ -434,17 +434,17 @@
 			"width": 1200,
 			"height": 1350,
 			"sillHeight": 900,
-			"kind": "Window",
+			"kind": "SlidingWindow",
 			"swing": "None"
 		},
 		{
 			"id": "Win_MBed_N",
 			"wallId": "W_North",
 			"offsetAlongWall": 3300,
-			"width": 1800,
+			"width": 1500,
 			"height": 1350,
 			"sillHeight": 900,
-			"kind": "Window",
+			"kind": "SlidingWindow",
 			"swing": "None"
 		},
 		{
@@ -454,7 +454,7 @@
 			"width": 1200,
 			"height": 1350,
 			"sillHeight": 900,
-			"kind": "Window",
+			"kind": "SlidingWindow",
 			"swing": "None"
 		},
 		{
