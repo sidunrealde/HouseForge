@@ -107,6 +107,12 @@ bool FHFMeshOps::AppendPrism(FDynamicMesh3& Mesh, const TArray<FVector2D>& Polyg
 {
 	if (Polygon.Num() < 3 || FMath::IsNearlyEqual(BottomZ, TopZ))
 	{
+		// Logged, because a silent no-op is indistinguishable from geometry that was never asked
+		// for: the caller gets an empty mesh, the actor still exists, and the element count in the
+		// build log is right. See the triangulation failure below for how ordinary input gets here.
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Prism not built: %d boundary points over a height of %.4f; no geometry emitted."),
+			Polygon.Num(), TopZ - BottomZ);
 		return false;
 	}
 
@@ -136,6 +142,14 @@ bool FHFMeshOps::AppendPrism(FDynamicMesh3& Mesh, const TArray<FVector2D>& Polyg
 	PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles, /*bOrientAsHoleFill*/ false);
 	if (Triangles.IsEmpty())
 	{
+		// The reachable case, and it is reachable from ordinary user input rather than from abuse:
+		// the triangulator produces nothing for a polygon that is not simple, and a bow-tie room
+		// boundary is an everyday mis-read of a plan. The floor then comes back empty while the
+		// walls around it generate perfectly, so a top-down view still shows the room outline and
+		// the hole reads as an unfinished floor rather than as a failure.
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Prism not built: a %d-point boundary could not be triangulated - it is probably self-intersecting."),
+			Boundary.Num());
 		return false;
 	}
 
@@ -175,6 +189,9 @@ bool FHFMeshOps::AppendPrismWithHoles(FDynamicMesh3& Mesh, const TArray<FVector2
 {
 	if (Outer.Num() < 3 || FMath::IsNearlyEqual(BottomZ, TopZ))
 	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Prism with holes not built: %d outer points over a height of %.4f; no geometry emitted."),
+			Outer.Num(), TopZ - BottomZ);
 		return false;
 	}
 
@@ -239,6 +256,9 @@ bool FHFMeshOps::AppendPrismWithHoles(FDynamicMesh3& Mesh, const TArray<FVector2
 
 	if (!Triangulator.Triangulate() || Triangulator.Triangles.IsEmpty())
 	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Prism with holes not built: a %d-point outer boundary with %d holes could not be triangulated."),
+			Outer.Num(), UsedHoles.Num());
 		return false;
 	}
 

@@ -15,6 +15,74 @@ namespace
 		return Id.IsNone() ? FString(TEXT("<unnamed>")) : Id.ToString();
 	}
 
+	/**
+	 * Where a closed boundary crosses itself, if it does.
+	 *
+	 * A plain sweep over every pair of non-adjacent edges. A room has a dozen corners at most, so
+	 * the quadratic cost is nothing, and the alternative - trusting the boundary and finding out
+	 * downstream - is a floor with no triangles in it and no message anywhere.
+	 *
+	 * Edges that merely share an endpoint are skipped: consecutive edges of any polygon touch by
+	 * construction, and the closing edge touches the first.
+	 */
+	bool FindSelfIntersection(const TArray<FVector2D>& Boundary, FVector2D& OutWhere)
+	{
+		const int32 Count = Boundary.Num();
+		if (Count < 4)
+		{
+			// Three edges cannot cross without two of them being collinear, which the zero-area
+			// check already reports.
+			return false;
+		}
+
+		// Sign of the area of the triangle ABC: which side of AB the point C lies on.
+		auto Side = [](const FVector2D& A, const FVector2D& B, const FVector2D& C)
+		{
+			const double Cross = (B.X - A.X) * (C.Y - A.Y) - (B.Y - A.Y) * (C.X - A.X);
+			return FMath::IsNearlyZero(Cross, UE_KINDA_SMALL_NUMBER) ? 0.0 : FMath::Sign(Cross);
+		};
+
+		for (int32 i = 0; i < Count; ++i)
+		{
+			const FVector2D& A0 = Boundary[i];
+			const FVector2D& A1 = Boundary[(i + 1) % Count];
+
+			for (int32 j = i + 1; j < Count; ++j)
+			{
+				// Adjacent edges, and the closing edge against the first, share an endpoint.
+				if (j == i + 1 || (i == 0 && j == Count - 1))
+				{
+					continue;
+				}
+
+				const FVector2D& B0 = Boundary[j];
+				const FVector2D& B1 = Boundary[(j + 1) % Count];
+
+				// Proper crossing only: each segment strictly straddles the other's line. Touching
+				// at a point is reported by the zero-area and repeated-point checks instead, and
+				// treating it as a crossing here would flag every polygon with a collinear corner.
+				const double D0 = Side(A0, A1, B0);
+				const double D1 = Side(A0, A1, B1);
+				const double D2 = Side(B0, B1, A0);
+				const double D3 = Side(B0, B1, A1);
+
+				if (D0 * D1 < 0.0 && D2 * D3 < 0.0)
+				{
+					// The crossing point, for a message somebody can act on.
+					const double Denominator = (A1.X - A0.X) * (B1.Y - B0.Y) - (A1.Y - A0.Y) * (B1.X - B0.X);
+					const double T = FMath::IsNearlyZero(Denominator)
+						? 0.5
+						: ((B0.X - A0.X) * (B1.Y - B0.Y) - (B0.Y - A0.Y) * (B1.X - B0.X)) / Denominator;
+
+					OutWhere = A0 + (A1 - A0) * T;
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	/** Appliances and sanitary ware that are set into, or mounted over, a cabinet run. */
 	bool IsInsetFitting(EHFFixtureType Type)
 	{
@@ -537,6 +605,21 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 		{
 			Result.Add(EHFValidationSeverity::Error, TEXT("DegenerateRoom"), Room.Id,
 				FString::Printf(TEXT("Room '%s' encloses zero area; its boundary points are collinear or coincident."), *Describe(Room.Id)));
+		}
+
+		// A boundary that crosses itself - a bow-tie or a figure-eight - is an ordinary mis-read of
+		// a plan, not abuse: it passes every check above, since it has enough points, no repeated
+		// closing point and a perfectly good area. Everything downstream then quietly declines it.
+		// The triangulator produces nothing for a polygon that is not simple, so the room comes back
+		// with a floor of no triangles while its skirting, emitted per edge, generates perfectly -
+		// and a top-down view still shows the room outline, so the hole reads as an unfinished floor
+		// rather than as a failure. Polygon offset, which every false ceiling depends on, is no
+		// better defined on one.
+		if (FVector2D Crossing; FindSelfIntersection(Room.Boundary, Crossing))
+		{
+			Result.Add(EHFValidationSeverity::Error, TEXT("SelfIntersectingRoom"), Room.Id,
+				FString::Printf(TEXT("Room '%s' has a boundary that crosses itself near (%.1f, %.1f). Every triangulation, offset and inset downstream needs a simple polygon; check the order the corners are listed in."),
+					*Describe(Room.Id), Crossing.X, Crossing.Y));
 		}
 
 		if (Room.CeilingHeight <= 0.0)

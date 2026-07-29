@@ -253,6 +253,38 @@ bool FHFValidatorRoomRulesTest::RunTest(const FString& Parameters)
 		Spec.Rooms[0].CeilingHeight = 0.0;
 		ExpectIssue(*this, Spec, TEXT("NonPositiveCeilingHeight"), EHFValidationSeverity::Error);
 	}
+	{
+		// A bow-tie: the same four corners listed in the wrong order, which is an ordinary mis-read
+		// of a plan rather than abuse. It has enough points, no repeated closing point and a
+		// perfectly good area, so every other rule here passes it - and then the triangulator
+		// declines it and the room comes back with no floor at all while its skirting, emitted per
+		// edge, generates perfectly. From above that reads as an unfinished floor, not a failure.
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Rooms[0].Boundary = {
+			FVector2D(0, 0), FVector2D(400, 0), FVector2D(0, 300), FVector2D(400, 300) };
+		ExpectIssue(*this, Spec, TEXT("SelfIntersectingRoom"), EHFValidationSeverity::Error);
+	}
+	{
+		// A figure-eight, to prove the sweep is not just spotting the one crossing shape.
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Rooms[0].Boundary = {
+			FVector2D(0, 0), FVector2D(200, 200), FVector2D(400, 0),
+			FVector2D(400, 200), FVector2D(200, 0), FVector2D(0, 200) };
+		ExpectIssue(*this, Spec, TEXT("SelfIntersectingRoom"), EHFValidationSeverity::Error);
+	}
+	{
+		// And an L-shaped room, which is what half these layouts are, must NOT be flagged: a
+		// concave polygon is still a simple one, and a check that could not tell the difference
+		// would reject most of the flats this plugin exists for.
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Rooms[0].Boundary = {
+			FVector2D(0, 0), FVector2D(400, 0), FVector2D(400, 150),
+			FVector2D(200, 150), FVector2D(200, 300), FVector2D(0, 300) };
+
+		const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
+		TestFalse(TEXT("A concave L-shaped room is a simple polygon and is accepted"),
+			Result.Contains(TEXT("SelfIntersectingRoom")));
+	}
 
 	return true;
 }

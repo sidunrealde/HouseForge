@@ -4,6 +4,7 @@
 
 #include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFMeshOps.h"
+#include "HouseForge.h"
 
 using namespace UE::Geometry;
 
@@ -117,7 +118,18 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 	}
 
 	// The slab sits below the finished floor level, so FloorZ stays the walkable surface.
-	FHFMeshOps::AppendPrism(Mesh, Room.Boundary, Room.FloorZ - SlabThickness, Room.FloorZ, Room.FloorRole);
+	//
+	// Checked, not dropped. A boundary the triangulator refuses - a bow-tie, which is an everyday
+	// mis-read of a plan and which the validator does now reject - would otherwise leave a room
+	// whose floor has no triangles at all while its skirting, emitted per edge below, generates
+	// perfectly. The room outline still reads correctly from above and the missing floor looks like
+	// an unfinished one.
+	if (!FHFMeshOps::AppendPrism(Mesh, Room.Boundary, Room.FloorZ - SlabThickness, Room.FloorZ, Room.FloorRole))
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Room '%s' has no floor slab: its boundary could not be triangulated."), *Room.Id.ToString());
+		return Mesh;
+	}
 
 	if (Room.SkirtingHeight > 0.0)
 	{
@@ -196,7 +208,11 @@ FDynamicMesh3 FHFGenerators::GenerateCeilingSlab(const FHFRoom& Room, double Sla
 
 	// The visible underside sits at the room's ceiling height; the slab thickens upward from there.
 	const double SoffitZ = Room.FloorZ + Room.CeilingHeight;
-	FHFMeshOps::AppendPrism(Mesh, Room.Boundary, SoffitZ, SoffitZ + SlabThickness, EHFSurfaceRole::CeilingSoffit);
+	if (!FHFMeshOps::AppendPrism(Mesh, Room.Boundary, SoffitZ, SoffitZ + SlabThickness, EHFSurfaceRole::CeilingSoffit))
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Room '%s' has no ceiling slab: its boundary could not be triangulated."), *Room.Id.ToString());
+	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
 	return Mesh;
@@ -250,6 +266,16 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 		}
 	}
 
+	// Every piece of a false ceiling is a triangulation that can decline, and a ceiling missing one
+	// of its pieces is still an actor with a plausible element count and a correct outline from
+	// above. Counted rather than dropped, and reported once at the end.
+	int32 Refused = 0;
+	auto Checked = [&Refused](bool bBuilt)
+	{
+		Refused += bBuilt ? 0 : 1;
+		return bBuilt;
+	};
+
 	/**
 	 * Builds a band between an outer loop and its inset.
 	 *
@@ -282,33 +308,33 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 	{
 		// A flat panel across the whole outline, plus a fascia dropping from the structure to it
 		// so the edge reads as a boxed soffit rather than a floating sheet.
-		FHFMeshOps::AppendPrismWithHoles(Mesh, Outline, FanHoles, SoffitZ, SoffitZ + PanelThickness,
-			EHFSurfaceRole::CeilingSoffit);
+		Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Outline, FanHoles, SoffitZ, SoffitZ + PanelThickness,
+			EHFSurfaceRole::CeilingSoffit));
 
 		if (Ceiling.Style == EHFCeilingStyle::Bulkhead)
 		{
 			// Hollow, so only the perimeter face remains - a bulkhead is a box, not a plug.
-			AppendBand(Outline, PanelThickness, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+			Checked(AppendBand(Outline, PanelThickness, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 		}
 		break;
 	}
 
 	case EHFCeilingStyle::Peripheral:
 	{
-		AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+		Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 		break;
 	}
 
 	case EHFCeilingStyle::Tray:
 	{
 		// Outer band at the full drop, inner region stepped back up to half of it.
-		AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+		Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 
 		const double InnerSoffitZ = StructuralZ - Ceiling.Drop * 0.5;
 		for (const TArray<FVector2D>& Loop : FHFMeshOps::InsetPolygon(Outline, Ceiling.BandWidth))
 		{
-			FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, InnerSoffitZ,
-				InnerSoffitZ + PanelThickness, EHFSurfaceRole::CeilingSoffit);
+			Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, InnerSoffitZ,
+				InnerSoffitZ + PanelThickness, EHFSurfaceRole::CeilingSoffit));
 		}
 		break;
 	}
@@ -323,7 +349,7 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 
 		const double BandInner = FMath::Max(Ceiling.BandWidth - ChannelWidth - Setback, 1.0);
 
-		AppendBand(Outline, BandInner, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+		Checked(AppendBand(Outline, BandInner, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 
 		// The channel floor sits above the band soffit, behind the lip.
 		for (const TArray<FVector2D>& Lip : FHFMeshOps::InsetPolygon(Outline, BandInner))
@@ -331,12 +357,12 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 			const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(Lip, ChannelWidth);
 			if (Inner.IsEmpty())
 			{
-				FHFMeshOps::AppendPrism(Mesh, Lip, SoffitZ + LipHeight, StructuralZ, EHFSurfaceRole::CoveInterior);
+				Checked(FHFMeshOps::AppendPrism(Mesh, Lip, SoffitZ + LipHeight, StructuralZ, EHFSurfaceRole::CoveInterior));
 			}
 			else
 			{
-				FHFMeshOps::AppendPrismWithHoles(Mesh, Lip, Inner, SoffitZ + LipHeight, StructuralZ,
-					EHFSurfaceRole::CoveInterior);
+				Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Lip, Inner, SoffitZ + LipHeight, StructuralZ,
+					EHFSurfaceRole::CoveInterior));
 			}
 		}
 		break;
@@ -344,6 +370,13 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 
 	default:
 		break;
+	}
+
+	if (Refused > 0)
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("False ceiling '%s' is missing %d of its pieces: their outlines could not be triangulated."),
+			*Ceiling.Id.ToString(), Refused);
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
@@ -467,6 +500,20 @@ void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& 
 	{
 		// Window sashes are still fixed. They articulate in the retrofit that follows the joinery
 		// kit; claiming they move before they do would be worse than saying they do not.
+		//
+		// Said out loud, though, because "does not move yet" and "has nothing to move" are
+		// indistinguishable from the outside: AHFOpeningActor reports zero parts without complaint,
+		// GenerateOpeningFixedInfill composes a perfectly correct closed pose, and a closed sash is
+		// identical to a fixed pane in any still image. A SlidingWindow is the standard window of
+		// the flats this plugin exists for and a Ventilator is a louvre or a pivot sash; both come
+		// out here as fixed glazing, and nothing in the build says so.
+		if (Opening.Kind == EHFOpeningKind::SlidingWindow || Opening.Kind == EHFOpeningKind::Ventilator)
+		{
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("Opening '%s' is a %s, which is generated as FIXED glazing: its sash does not move yet."),
+				*Opening.Id.ToString(),
+				Opening.Kind == EHFOpeningKind::SlidingWindow ? TEXT("sliding window") : TEXT("ventilator"));
+		}
 		return;
 	}
 
