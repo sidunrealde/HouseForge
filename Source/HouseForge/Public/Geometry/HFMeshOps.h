@@ -61,6 +61,44 @@ public:
 		const TArray<TArray<FVector2D>>& Holes, double BottomZ, double TopZ, EHFSurfaceRole Role);
 
 	/**
+	 * Sweeps a closed 2D cross-section along a direction and appends the resulting solid.
+	 *
+	 * The workhorse for extruded joinery profiles - a gola channel, a cornice, a plinth, the cutter
+	 * that routs a finger recess into a shutter edge. AppendPrism is the special case of this where
+	 * the section lies in XY and the sweep runs up Z; this one takes its frame as an argument, so a
+	 * profile can be swept along a shutter's top edge without the caller building a scratch mesh
+	 * and transforming it into place.
+	 *
+	 * Only the section's first in-plane axis is taken; the second is derived as SweepDir x SectionU.
+	 * Accepting both would let a caller hand over a mirrored frame and get a solid wound inside out,
+	 * which still looks right in the viewport while subtracting nothing at all.
+	 *
+	 * @param Section      Closed cross-section in (u, v), closing edge implicit. Winding normalised.
+	 * @param Origin       Where the section's (0, 0) sits at the start of the sweep.
+	 * @param SectionU     The section's u axis. Orthogonalised against SweepDir; need not be unit.
+	 * @param SweepLength  Distance swept. A negative length sweeps the other way rather than failing.
+	 */
+	static bool AppendExtrudedSection(UE::Geometry::FDynamicMesh3& Mesh, const TArray<FVector2D>& Section,
+		const FVector3d& Origin, const FVector3d& SectionU, const FVector3d& SweepDir,
+		double SweepLength, EHFSurfaceRole Role);
+
+	/**
+	 * Revolves a profile about an axis and appends the resulting solid.
+	 *
+	 * Profile points are (distance along the axis from Origin, radius). A zero radius at either end
+	 * is an apex rather than a flat cap, which is what lets a knob be domed instead of reading as a
+	 * disc on a stick - see the edge-quality bar in .claude/rules/04-conventions.md. An interior
+	 * point must have a radius, because a zero one pinches the solid rather than closing it.
+	 *
+	 * SideCount is rounded up to a multiple of four, so the result carries vertices on both in-plane
+	 * axes and its bounds are exactly its diameter rather than a chord short of it. A bar handle
+	 * whose bounds are quietly 2% under its declared stock size is a bar handle nothing can be
+	 * dimensioned against.
+	 */
+	static bool AppendRevolvedProfile(UE::Geometry::FDynamicMesh3& Mesh, const TArray<FVector2D>& Profile,
+		const FVector3d& Origin, const FVector3d& Axis, int32 SideCount, EHFSurfaceRole Role);
+
+	/**
 	 * Subtracts Tool from Target in place.
 	 *
 	 * @return false if the boolean failed, in which case Target is left untouched rather than
