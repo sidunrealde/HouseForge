@@ -830,8 +830,8 @@ void UHFEditorSubsystem::HandleSettingsChanged(UObject* Settings, FPropertyChang
 
 int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 {
-	AHFHouseActor* House = FindHouseActor();
-	if (House == nullptr)
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
 	{
 		return 0;
 	}
@@ -839,7 +839,16 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 	int32 Rebuilt = 0;
 	int32 Preserved = 0;
 
-	for (AActor* Element : House->ElementActors)
+	// Every house in the level, not just the first. FindHouseActor answers "the house" for the tools,
+	// which is the right answer there; a project-wide setting change is different - a level holding
+	// two houses would otherwise leave the second one built to the old figures with nothing saying so.
+	TArray<AActor*> Elements;
+	for (TActorIterator<AHFHouseActor> It(World); It; ++It)
+	{
+		Elements.Append(It->ElementActors);
+	}
+
+	for (AActor* Element : Elements)
 	{
 		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
 		if (!IsValid(Typed))

@@ -1,0 +1,411 @@
+// Copyright Siddartha G. All Rights Reserved.
+
+#include "HouseForge.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "DynamicMesh/DynamicMesh3.h"
+#include "Geometry/HFGenerators.h"
+#include "Geometry/HFJoineryKit.h"
+#include "MeshQueries.h"
+#include "Misc/AutomationTest.h"
+#include "Model/HFBuildDefaults.h"
+#include "Model/HFSettings.h"
+#include "Model/HFSpecValidator.h"
+
+using namespace UE::Geometry;
+
+#define HF_TEST_FLAGS (EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+namespace
+{
+	/** An opening big enough to be built as a real two-sash sliding window. */
+	FHFOpening MakeSlidingWindow()
+	{
+		FHFOpening Opening;
+		Opening.Id = TEXT("Win_Test");
+		Opening.WallId = TEXT("W_Test");
+		Opening.Kind = EHFOpeningKind::SlidingWindow;
+		Opening.Width = 150.0;
+		Opening.Height = 120.0;
+		Opening.SillHeight = 90.0;
+		Opening.OffsetAlongWall = 200.0;
+		return Opening;
+	}
+
+	FHFWall MakeWall()
+	{
+		FHFWall Wall;
+		Wall.Id = TEXT("W_Test");
+		Wall.Start = FVector2D(0.0, 0.0);
+		Wall.End = FVector2D(400.0, 0.0);
+		Wall.Thickness = 20.0;
+		Wall.Height = 300.0;
+		return Wall;
+	}
+
+	FHFOpening MakeDoor()
+	{
+		FHFOpening Opening;
+		Opening.Id = TEXT("D_Test");
+		Opening.WallId = TEXT("W_Test");
+		Opening.Kind = EHFOpeningKind::Door;
+		Opening.Width = 90.0;
+		Opening.Height = 210.0;
+		Opening.SillHeight = 0.0;
+		Opening.OffsetAlongWall = 200.0;
+		Opening.Swing = EHFSwing::InwardLeft;
+		return Opening;
+	}
+
+	double VolumeOf(const FDynamicMesh3& Mesh)
+	{
+		return TMeshQueries<FDynamicMesh3>::GetVolumeArea(Mesh).X;
+	}
+}
+
+/**
+ * The whole change is a no-op until somebody edits something.
+ *
+ * Every default on the settings page is the figure that used to be compiled in. If one of them
+ * drifts, geometry silently changes for every project that never opened the page - and it would
+ * change in a way no other test would attribute to the settings work. Asserted against the named
+ * constants that still exist rather than against literals, so a constant and its setting cannot
+ * diverge without this failing.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsDefaultsMatchConstantsTest,
+	"HouseForge.Settings.DefaultsMatchTheConstantsTheyReplaced", HF_TEST_FLAGS)
+
+bool FHFSettingsDefaultsMatchConstantsTest::RunTest(const FString& Parameters)
+{
+	const FHFBuildDefaults Defaults;
+
+	// ------------------------------------------------------------------------------ openings
+	//
+	// Literals here, deliberately: these constants no longer exist anywhere else to compare against,
+	// which is the point of the test. They are the figures HFGenerators.cpp carried.
+
+	TestEqual(TEXT("Door leaf thickness"), Defaults.Opening.Door.LeafThickness, 4.0);
+	TestEqual(TEXT("Door leaf frame gap"), Defaults.Opening.Door.LeafFrameGap, 0.5);
+	TestEqual(TEXT("Sliding panel overlap"), Defaults.Opening.Door.SlidingPanelOverlap, 2.5);
+	TestEqual(TEXT("Sliding track gap"), Defaults.Opening.Door.SlidingTrackGap, 1.0);
+
+	TestEqual(TEXT("Sliding window frame depth"), Defaults.Opening.SlidingWindow.FrameDepth, 6.5);
+	TestEqual(TEXT("Sliding window frame face"), Defaults.Opening.SlidingWindow.FrameFace, 4.5);
+	TestEqual(TEXT("Sash depth"), Defaults.Opening.SlidingWindow.SashDepth, 2.7);
+	TestEqual(TEXT("Sash track pitch"), Defaults.Opening.SlidingWindow.TrackPitch, 3.0);
+	TestEqual(TEXT("Sash face width"), Defaults.Opening.SlidingWindow.SashFaceWidth, 4.0);
+	TestEqual(TEXT("Sash interlock overlap"), Defaults.Opening.SlidingWindow.InterlockOverlap, 2.5);
+	TestEqual(TEXT("Sash glass thickness"), Defaults.Opening.SlidingWindow.GlassThickness, 0.5);
+
+	TestEqual(TEXT("Ventilator frame face"), Defaults.Opening.Ventilator.FrameFace, 3.5);
+	TestEqual(TEXT("Ventilator open angle"), Defaults.Opening.Ventilator.OpenAngleDegrees, 30.0);
+
+	TestEqual(TEXT("Fixed window frame depth"), Defaults.Opening.FixedWindow.FrameDepth, 6.0);
+	TestEqual(TEXT("Fixed window frame face"), Defaults.Opening.FixedWindow.FrameFace, 5.0);
+	TestEqual(TEXT("Fixed window glass thickness"), Defaults.Opening.FixedWindow.GlassThickness, 0.8);
+	TestEqual(TEXT("Mullion threshold"), Defaults.Opening.FixedWindow.MullionAboveWidth, 120.0);
+
+	// ------------------------------------------------------------------------------- joinery
+	//
+	// These constants DO still exist, so compare against them rather than against literals. That way
+	// the test fails if either side moves, which is the only way the two can be kept honest.
+
+	TestEqual(TEXT("Target shelf spacing"),
+		Defaults.Joinery.TargetShelfSpacing, FHFJoineryKit::DefaultTargetShelfSpacing);
+	TestEqual(TEXT("Minimum useful compartment"),
+		Defaults.Joinery.MinUsefulCompartment, FHFJoineryKit::MinUsefulCompartment);
+	TestEqual(TEXT("Minimum hanging clearance"),
+		Defaults.Joinery.MinHangingClearance, FHFJoineryKit::MinHangingClearance);
+	TestEqual(TEXT("Ply shelf thickness"),
+		Defaults.Joinery.ShelfThicknessPly, FHFJoineryKit::PlyShelfThickness);
+	TestEqual(TEXT("Glass shelf thickness"),
+		Defaults.Joinery.ShelfThicknessGlass, FHFJoineryKit::GlassShelfThickness);
+	TestEqual(TEXT("Ply max span"), Defaults.Joinery.MaxShelfSpanPly, FHFJoineryKit::PlyMaxSpan);
+	TestEqual(TEXT("Glass max span"), Defaults.Joinery.MaxShelfSpanGlass, FHFJoineryKit::GlassMaxSpan);
+
+	// The parameter structs' own inline defaults are the other half of the same contract: a struct
+	// built by hand and a struct stamped from the defaults have to describe the same joinery.
+	TestEqual(TEXT("Shutter reveal gap"),
+		Defaults.Joinery.ShutterRevealGap, FHFShutterParams().RevealGap);
+	TestEqual(TEXT("Shutter leaf thickness"),
+		Defaults.Joinery.ShutterLeafThickness, FHFShutterParams().Thickness);
+	TestEqual(TEXT("Shutter open angle"),
+		Defaults.Joinery.ShutterOpenAngleDegrees, FHFShutterParams().OpenAngleDegrees);
+	TestEqual(TEXT("Plinth height"), Defaults.Joinery.PlinthHeight, FHFPlinthParams().Height);
+	TestEqual(TEXT("Plinth front recess"),
+		Defaults.Joinery.PlinthFrontRecess, FHFPlinthParams().FrontRecess);
+	TestEqual(TEXT("Cornice projection"),
+		Defaults.Joinery.CorniceProjection, FHFCorniceParams().Projection);
+	TestEqual(TEXT("Cornice edge bevel"), Defaults.Joinery.CorniceEdgeBevel, FHFCorniceParams().EdgeBevel);
+	TestEqual(TEXT("Hanging rail drop"), Defaults.Joinery.HangingRailDrop, FHFShelfStackParams().RailDrop);
+
+	// The one the user named. The params field and the domain floor must agree, or a shelf stack
+	// built by hand would silently use a different threshold from one the settings resolved.
+	TestEqual(TEXT("Shelf stack's own hanging clearance matches the domain floor"),
+		FHFShelfStackParams().MinHangingClearance, FHFJoineryKit::MinHangingClearance);
+
+	// ---------------------------------------------------------------------------- validation
+
+	TestEqual(TEXT("Minimum headroom"), Defaults.Validation.MinHeadroomCm, 210.0);
+	TestEqual(TEXT("Fixture overlap tolerance"), Defaults.Validation.FixtureOverlapToleranceRatio, 0.05);
+
+	// And the settings object itself must resolve to exactly the same thing, or the page would
+	// present one set of figures and the build would use another.
+	const FHFBuildDefaults Resolved = GetDefault<UHFSettings>()->Resolve();
+
+	TestEqual(TEXT("Resolved door leaf matches the struct default"),
+		Resolved.Opening.Door.LeafThickness, Defaults.Opening.Door.LeafThickness);
+	TestEqual(TEXT("Resolved hanging clearance matches the struct default"),
+		Resolved.Joinery.MinHangingClearance, Defaults.Joinery.MinHangingClearance);
+	TestEqual(TEXT("Resolved headroom matches the struct default"),
+		Resolved.Validation.MinHeadroomCm, Defaults.Validation.MinHeadroomCm);
+
+	return true;
+}
+
+/**
+ * An overridden setting has to reach the parameter struct, and reach it by the documented route.
+ *
+ * The measurable consequence rather than a field comparison: a thicker leaf is more material, and a
+ * bigger frame face is less glass. Asserting on volume proves the figure travelled all the way into
+ * the geometry, which comparing two doubles would not.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsOverrideReachesGeometryTest,
+	"HouseForge.Settings.AnOverriddenValueReachesTheGeometry", HF_TEST_FLAGS)
+
+bool FHFSettingsOverrideReachesGeometryTest::RunTest(const FString& Parameters)
+{
+	const FHFWall Wall = MakeWall();
+	const FHFOpening Door = MakeDoor();
+
+	// A door leaf at the shipped 40 mm, and the same leaf at 60.
+	const FHFBuildDefaults Shipped;
+
+	FHFBuildDefaults Thicker;
+	Thicker.Joinery = Shipped.Joinery;
+	Thicker.Opening.Door.LeafThickness = 6.0;
+
+	const double ShippedVolume = VolumeOf(FHFGenerators::GenerateDoorLeaf(Door, 1.0, Shipped.Opening.Door));
+	const double ThickerVolume = VolumeOf(FHFGenerators::GenerateDoorLeaf(Door, 1.0, Thicker.Opening.Door));
+
+	TestTrue(TEXT("Both leaves have volume"), ShippedVolume > 0.0);
+
+	// A 60 mm leaf is exactly half as much material again as a 40 mm one of the same face size.
+	TestEqual(TEXT("A 50% thicker leaf is 50% more material"),
+		ThickerVolume, ShippedVolume * 1.5, ShippedVolume * 0.001);
+
+	// The same for a sliding window's frame face, which eats into the clear opening on all four
+	// sides: widen it and the sashes get less glass.
+	FHFBuildDefaults FatFrame;
+	FatFrame.Opening.SlidingWindow.FrameFace = 9.0;
+
+	TArray<FHFMeshPart> ShippedParts;
+	FHFGenerators::BuildOpeningParts(MakeSlidingWindow(), Wall, ShippedParts, Shipped.Opening);
+
+	TArray<FHFMeshPart> FatParts;
+	FHFGenerators::BuildOpeningParts(MakeSlidingWindow(), Wall, FatParts, FatFrame.Opening);
+
+	if (!TestEqual(TEXT("Both windows built two sashes"), ShippedParts.Num(), 2)
+		|| !TestEqual(TEXT("The wider frame also built two sashes"), FatParts.Num(), 2))
+	{
+		return false;
+	}
+
+	// The running sash travels half the clear opening less half the interlock. A wider frame face
+	// leaves less clear opening, so the sash has less distance to run.
+	const FHFMeshPart* ShippedSash = ShippedParts.FindByPredicate(
+		[](const FHFMeshPart& P) { return P.Motion.Type == EHFMotionType::Slide; });
+	const FHFMeshPart* FatSash = FatParts.FindByPredicate(
+		[](const FHFMeshPart& P) { return P.Motion.Type == EHFMotionType::Slide; });
+
+	if (!TestNotNull(TEXT("The shipped window has a running sash"), ShippedSash)
+		|| !TestNotNull(TEXT("The wide-framed window has a running sash"), FatSash))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("A wider frame face leaves the sash less travel"),
+		FatSash->Motion.MaxTravelCm < ShippedSash->Motion.MaxTravelCm);
+
+	// And the arithmetic, so this is a measurement rather than an inequality: clear width is the
+	// opening less a frame face each side, the sash takes half of it, and travel is that half less
+	// half the interlock.
+	const FHFSlidingWindowParams& Wide = FatFrame.Opening.SlidingWindow;
+	const double ExpectedTravel =
+		Wide.ClearWidth(MakeSlidingWindow().Width) * 0.5 - Wide.InterlockOverlap * 0.5;
+
+	TestEqual(TEXT("The running sash travels far edge to far edge of the clear opening"),
+		FatSash->Motion.MaxTravelCm, ExpectedTravel, 0.001);
+
+	return true;
+}
+
+/**
+ * A parameter struct built by hand is not touched by settings, and a generator never consults them.
+ *
+ * The architectural guarantee, stated as a test. Whatever the project's settings say, a struct a
+ * test filled in itself produces the geometry that struct describes - which is what makes any of
+ * this testable headlessly, and is why generators may not read a settings singleton.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsDoNotLeakIntoHandBuiltParamsTest,
+	"HouseForge.Settings.HandBuiltParamsAreUnaffectedBySettings", HF_TEST_FLAGS)
+
+bool FHFSettingsDoNotLeakIntoHandBuiltParamsTest::RunTest(const FString& Parameters)
+{
+	const FHFWall Wall = MakeWall();
+	const FHFOpening Door = MakeDoor();
+
+	// Change the project's settings to something absurd, and leave them changed for the duration of
+	// the test. Nothing below asks for them, so nothing below may notice.
+	UHFSettings* Settings = GetMutableDefault<UHFSettings>();
+	if (!TestNotNull(TEXT("The settings CDO exists"), Settings))
+	{
+		return false;
+	}
+
+	const double SavedLeaf = Settings->Door.LeafThickness;
+	const double SavedClearance = Settings->MinHangingClearance;
+
+	ON_SCOPE_EXIT
+	{
+		Settings->Door.LeafThickness = SavedLeaf;
+		Settings->MinHangingClearance = SavedClearance;
+	};
+
+	Settings->Door.LeafThickness = 25.0;
+	Settings->MinHangingClearance = 300.0;
+
+	// A hand-built params struct. It says 4 cm, so the leaf is 4 cm, whatever the page says.
+	FHFDoorParams ByHand;
+	ByHand.LeafThickness = 4.0;
+	ByHand.LeafFrameGap = 0.5;
+
+	const double ByHandVolume = VolumeOf(FHFGenerators::GenerateDoorLeaf(Door, 1.0, ByHand));
+	const double Expected = (Door.Width - 1.0) * 4.0 * (Door.Height - 1.0);
+
+	TestEqual(TEXT("A hand-built leaf measures what its own params say"),
+		ByHandVolume, Expected, Expected * 0.001);
+
+	// The defaulted argument is the same guarantee for a caller that passes nothing at all: it gets
+	// the compiled-in figures, NOT whatever the project's settings currently hold.
+	const double DefaultedVolume = VolumeOf(FHFGenerators::GenerateDoorLeaf(Door, 1.0));
+
+	TestEqual(TEXT("A generator called with no params at all still uses the compiled-in figures"),
+		DefaultedVolume, Expected, Expected * 0.001);
+
+	// Same for the joinery: a shelf stack built by hand keeps its own hanging clearance, so the
+	// 300 cm on the settings page cannot reach in and refuse its rail.
+	FHFShelfStackParams Bay;
+	Bay.Width = 75.0;
+	Bay.Depth = 56.3;
+	Bay.Height = 200.0;
+	Bay.ShelfCount = 0;
+	Bay.bHangingRail = true;
+
+	const FHFShelfStackParams Sanitised = FHFJoineryKit::SanitiseShelfStack(Bay);
+	TestTrue(TEXT("A hand-built bay keeps the rail its own params asked for"), Sanitised.bHangingRail);
+
+	// And the validator: its limits are an argument, not a lookup.
+	FHFValidationLimits Strict;
+	Strict.MinHeadroomCm = 260.0;
+	TestEqual(TEXT("Validation limits are whatever the caller passes"), Strict.MinHeadroomCm, 260.0);
+
+	return true;
+}
+
+/**
+ * Raising the hanging clearance is the case the user actually raised.
+ *
+ * The composed wardrobe's hanging bay clears 90 by 8 mm. Asking for full-length hanging must
+ * therefore refuse the rail rather than fit one nothing hangs under - and refusing has to be
+ * legible, which is why SanitiseShelfStack reports it by clearing the flag.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsHangingClearanceIsHonouredTest,
+	"HouseForge.Settings.RaisingHangingClearanceRefusesAShortBay", HF_TEST_FLAGS)
+
+bool FHFSettingsHangingClearanceIsHonouredTest::RunTest(const FString& Parameters)
+{
+	// One shelf in a 2 m bay leaves compartments of about 99 cm, so a rail clears the shipped 90.
+	FHFShelfStackParams Bay;
+	Bay.Width = 75.0;
+	Bay.Depth = 56.3;
+	Bay.Height = 200.0;
+	Bay.ShelfCount = 1;
+	Bay.bHangingRail = true;
+
+	const FHFShelfStackParams AtDefault = FHFJoineryKit::SanitiseShelfStack(Bay);
+	TestTrue(TEXT("At the shipped 90 the bay takes a rail"), AtDefault.bHangingRail);
+
+	// Now a project that wants full-length garments to hang. The same bay is no longer good enough,
+	// and saying so is the correct answer - not a rail with 99 cm under it.
+	FHFJoineryDefaults FullLength;
+	FullLength.MinHangingClearance = 150.0;
+
+	FHFShelfStackParams Raised = Bay;
+	FullLength.ApplyTo(Raised);
+
+	TestEqual(TEXT("ApplyTo stamped the raised clearance onto the params"),
+		Raised.MinHangingClearance, 150.0);
+
+	const FHFShelfStackParams AtFullLength = FHFJoineryKit::SanitiseShelfStack(Raised);
+	TestFalse(TEXT("At 150 the same bay honestly reports it has no room to hang"),
+		AtFullLength.bHangingRail);
+
+	// ApplyTo must not have destroyed the dimensions the composing layer worked out.
+	TestEqual(TEXT("ApplyTo left the bay's width alone"), Raised.Width, Bay.Width);
+	TestEqual(TEXT("ApplyTo left the bay's height alone"), Raised.Height, Bay.Height);
+	TestEqual(TEXT("ApplyTo left the shelf count alone"), Raised.ShelfCount, Bay.ShelfCount);
+
+	// And the sentinel that means "whatever this material is" must survive, or a glass shelf would
+	// come out 18 mm thick.
+	TestEqual(TEXT("ApplyTo leaves the shelf thickness sentinel alone"), Raised.ShelfThickness, 0.0);
+	TestEqual(TEXT("ApplyTo leaves the max span sentinel alone"), Raised.MaxSpan, 0.0);
+
+	return true;
+}
+
+/**
+ * A raised headroom limit has to change what the validator says, and the defaulted argument has to
+ * leave every existing caller alone.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsValidationLimitsTest,
+	"HouseForge.Settings.ValidationLimitsAreOverridable", HF_TEST_FLAGS)
+
+bool FHFSettingsValidationLimitsTest::RunTest(const FString& Parameters)
+{
+	FHFHouseSpec Spec;
+	Spec.Name = TEXT("Headroom");
+	Spec.Units = EHFUnits::Centimeters;
+	Spec.UnitsSource = TEXT("test");
+
+	FHFRoom& Room = Spec.Rooms.AddDefaulted_GetRef();
+	Room.Id = TEXT("R1");
+	Room.Type = EHFRoomType::Bedroom;
+	Room.CeilingHeight = 300.0;
+	Room.FloorZ = 0.0;
+	Room.Boundary = { FVector2D(0, 0), FVector2D(400, 0), FVector2D(400, 350), FVector2D(0, 350) };
+
+	FHFFalseCeiling& Ceiling = Spec.FalseCeilings.AddDefaulted_GetRef();
+	Ceiling.Id = TEXT("FC1");
+	Ceiling.RoomId = TEXT("R1");
+
+	// 300 - 60 = 240 clear: comfortably above the shipped 210 floor.
+	Ceiling.Drop = 60.0;
+
+	TestFalse(TEXT("240 of headroom passes at the shipped limit"),
+		FHFSpecValidator::Validate(Spec).Contains(TEXT("LowHeadroom")));
+
+	// A project building to a taller slab wants more than that, and saying so must change the answer.
+	FHFValidationLimits Tall;
+	Tall.MinHeadroomCm = 250.0;
+
+	TestTrue(TEXT("The same house fails a 250 headroom limit"),
+		FHFSpecValidator::Validate(Spec, Tall).Contains(TEXT("LowHeadroom")));
+
+	return true;
+}
+
+#undef HF_TEST_FLAGS
+
+#endif // WITH_DEV_AUTOMATION_TESTS
