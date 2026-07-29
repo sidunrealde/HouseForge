@@ -563,6 +563,107 @@ bool FHFRebuildKeepsOpenAmountsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A geared part follows its driver, whichever way the driver was moved.
+ *
+ * This is what makes a three-member drawer runner work in the editor rather than only in a test
+ * that poses both by hand. The intermediate member travels half as far as the drawer it carries,
+ * and it must travel that half whenever the drawer moves at all - a drawer pulled out while its
+ * intermediate stayed behind is a drawer hanging on nothing, and nothing about it would log.
+ *
+ * Set up here on a sliding door rather than on a drawer, because the gearing lives in the actor and
+ * not in the kit: what is being tested is that every route into a pose honours it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFGearedPartFollowsDriverTest,
+	"HouseForge.Editor.GearedPartFollowsItsDriver", HF_TEST_FLAGS)
+
+bool FHFGearedPartFollowsDriverTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFOpeningActor* Door = SpawnTestDoor(World, EHFOpeningKind::SlidingDoor);
+	if (!TestNotNull(TEXT("A sliding door spawns"), Door))
+	{
+		return false;
+	}
+
+	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
+
+	if (!TestEqual(TEXT("A sliding door has two parts"), Door->Parts.Num(), 2))
+	{
+		return false;
+	}
+
+	// Find the panel that actually slides, and gear the other one to it at half its travel.
+	int32 Driver = INDEX_NONE;
+	for (int32 Index = 0; Index < Door->Parts.Num(); ++Index)
+	{
+		if (Door->Parts[Index].Motion.Type == EHFMotionType::Slide)
+		{
+			Driver = Index;
+			break;
+		}
+	}
+	if (!TestTrue(TEXT("One of them slides"), Driver != INDEX_NONE))
+	{
+		return false;
+	}
+
+	const int32 Geared = 1 - Driver;
+	const double DriverTravel = Door->Parts[Driver].Motion.MaxTravelCm;
+	const double GearedTravel = DriverTravel * 0.5;
+
+	Door->Parts[Geared].Motion = Door->Parts[Driver].Motion;
+	Door->Parts[Geared].Motion.MaxTravelCm = GearedTravel;
+	Door->Parts[Geared].Motion.DrivenByPartId = Door->Parts[Driver].PartId;
+
+	const FName DriverId = Door->Parts[Driver].PartId;
+	const FName GearedId = Door->Parts[Geared].PartId;
+
+	UDynamicMeshComponent* GearedComponent = Door->GetPartComponent(GearedId);
+	if (!TestNotNull(TEXT("The geared part has a component"), GearedComponent))
+	{
+		return false;
+	}
+
+	Door->SetPartOpenAmount(DriverId, 0.0);
+	const FVector Shut = GearedComponent->GetRelativeLocation();
+
+	// Moving the DRIVER, and reading the geared part's component - not its number.
+	Door->SetPartOpenAmount(DriverId, 1.0);
+	TestNearlyEqual(TEXT("Opening the driver carries the geared part with it"),
+		Door->GetPartOpenAmount(GearedId), 1.0, 1e-9);
+	TestNearlyEqual(TEXT("And it travels exactly its own share of the way, not the driver's"),
+		FVector::Distance(GearedComponent->GetRelativeLocation(), Shut), GearedTravel, 1e-3);
+
+	// Halfway, so this cannot pass on the two endpoints alone.
+	Door->SetPartOpenAmount(DriverId, 0.5);
+	TestNearlyEqual(TEXT("It follows the driver partway too"),
+		FVector::Distance(GearedComponent->GetRelativeLocation(), Shut), GearedTravel * 0.5, 1e-3);
+
+	// A geared part must not be posable on its own: whatever is written to it, the driver wins.
+	Door->SetPartOpenAmount(GearedId, 1.0);
+	TestNearlyEqual(TEXT("A geared part cannot be posed away from its driver"),
+		Door->GetPartOpenAmount(GearedId), 0.5, 1e-9);
+
+	// And the other routes into a pose honour it as well, or a rebuild would leave it behind.
+	Door->SetAllPartsOpenAmount(0.0);
+	TestNearlyEqual(TEXT("A master close takes the geared part home"),
+		FVector::Distance(GearedComponent->GetRelativeLocation(), Shut), 0.0, 1e-3);
+
+	FHFPartPoses Poses;
+	Poses.OpenAmountsByPartId.Add(DriverId, 1.0);
+	Door->RestorePartPoses(Poses);
+	TestNearlyEqual(TEXT("Restoring a pose after a rebuild carries the geared part too"),
+		FVector::Distance(GearedComponent->GetRelativeLocation(), Shut), GearedTravel, 1e-3);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

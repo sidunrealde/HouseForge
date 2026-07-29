@@ -1429,20 +1429,48 @@ namespace
 	/** Box side to carcass side: 12.5 mm a side, which is what a side-mounted runner needs. */
 	constexpr double DrawerRunnerSideClearance = 1.25;
 
-	/** The drawer half of the runner, on the outside of the box side. */
-	constexpr double DrawerRailThickness = 0.55;
-	constexpr double DrawerRailHeight = 2.0;
+	/**
+	 * The three members of the runner, across the 12.5 mm the carcass leaves it.
+	 *
+	 * THREE, not two, and that is what makes full extension possible at all. A two-member slide is a
+	 * three-quarter-extension slide by construction: the drawer member and the cabinet member are
+	 * both the runner's length, so pulling out by the whole of it leaves them overlapping by exactly
+	 * nothing, and the drawer, its front and its rails are cantilevered on air with a zero-thickness
+	 * sliver of rail still in the cabinet. That is unmissable the moment a drawer is opened on
+	 * camera and invisible in every closed still.
+	 *
+	 * A real full-extension slide carries the drawer member on an intermediate that itself stays
+	 * half-engaged with the cabinet member. Geared to travel half as far, it keeps both joints
+	 * overlapped by half the runner at any extension. It moves, so it is its own part with its own
+	 * pivot and travel - see FHFPartMotion::DrivenByPartId, and .claude/rules/04-conventions.md.
+	 *
+	 * The five figures sum to DrawerRunnerSideClearance exactly: 0.45 + 0.05 + 0.25 + 0.05 + 0.45.
+	 */
+	constexpr double DrawerRailThickness = 0.45;
+	constexpr double DrawerIntermediateThickness = 0.25;
+	constexpr double DrawerChannelThickness = 0.45;
 
 	/**
-	 * Running clearance between the drawer's rail and the cabinet's channel.
+	 * Running clearance between one runner member and the next.
 	 *
 	 * Half a millimetre, and not decoration: two members sharing a face would z-fight down the whole
 	 * length of the runner every time a drawer is opened on camera.
 	 */
 	constexpr double DrawerRunnerAirGap = 0.05;
 
-	/** The cabinet half of the runner. Taller than the drawer's rail, as a channel carrying one is. */
+	/** Section heights, nested: the channel carries the intermediate, which carries the rail. */
+	constexpr double DrawerRailHeight = 2.0;
+	constexpr double DrawerIntermediateHeight = 2.5;
 	constexpr double DrawerChannelHeight = 3.0;
+
+	/** How much of a full-extension drawer's travel the intermediate member takes. */
+	constexpr double DrawerIntermediateTravelShare = 0.5;
+
+	/** Part id of the intermediate carrying a drawer, formed from the drawer's own. */
+	FName DrawerRunnerPartId(FName DrawerPartId)
+	{
+		return FName(*FString::Printf(TEXT("%sRunner"), *DrawerPartId.ToString()));
+	}
 
 	/** Box front face behind the carcass front plane. With a 19 mm front that is the trade's 20 mm. */
 	constexpr double DrawerBoxFrontClearance = 0.1;
@@ -1478,7 +1506,7 @@ namespace
 		double BoxY0 = 0.0, BoxY1 = 0.0;
 		double BoxZ0 = 0.0, BoxZ1 = 0.0;
 
-		/** The runner members, shared by the drawer's rail and the cabinet's channel. */
+		/** The runner members, shared by the drawer's rail, the intermediate and the channel. */
 		double RailY0 = 0.0, RailY1 = 0.0;
 		double RailZ0 = 0.0, RailZ1 = 0.0;
 
@@ -1566,6 +1594,39 @@ namespace
 		return L;
 	}
 
+	/**
+	 * X span of one runner member on one side of the box, counted out from the box side.
+	 *
+	 * Derived here rather than at each of the four places that need it, for the same reason the
+	 * layout exists at all: a rail generated from one set of numbers and a channel from another is
+	 * the defect that shows up as a drawer binding halfway out, on camera, months later.
+	 *
+	 * @param Member 0 the drawer's own rail, 1 the intermediate, 2 the cabinet's channel.
+	 */
+	void DrawerRunnerMemberX(const FDrawerLayout& L, int32 Member, bool bLeftSide,
+		double& OutX0, double& OutX1)
+	{
+		constexpr double Thicknesses[] = {
+			DrawerRailThickness, DrawerIntermediateThickness, DrawerChannelThickness };
+
+		// Distance from the box side out to this member's near face: everything nearer, plus a
+		// running clearance for each joint crossed.
+		double Offset = 0.0;
+		for (int32 Nearer = 0; Nearer < Member; ++Nearer)
+		{
+			Offset += Thicknesses[Nearer] + DrawerRunnerAirGap;
+		}
+
+		const double BoxFace = bLeftSide ? L.BoxX0 : L.BoxX1;
+		const double Outward = bLeftSide ? -1.0 : 1.0;
+
+		const double Near = BoxFace + Outward * Offset;
+		const double Far = Near + Outward * Thicknesses[Member];
+
+		OutX0 = FMath::Min(Near, Far);
+		OutX1 = FMath::Max(Near, Far);
+	}
+
 	/** Nearest height on the ladder. */
 	double NearestDrawerFrontHeight(double Target)
 	{
@@ -1645,13 +1706,18 @@ namespace
 				FVector3d(L.BoxX1 - T, L.BoxY1 - T, BottomZ1), EHFSurfaceRole::JoineryCarcass);
 		}
 
-		// The drawer half of each runner, screwed to the outside of the box side and travelling with
-		// it. The cabinet half stays behind - see GenerateDrawerRunnerMounts - which is the whole
-		// reason a runner cannot be one piece of geometry.
-		AppendRail(Mesh, FVector3d(L.BoxX0 - DrawerRailThickness, L.RailY0, L.RailZ0),
-			FVector3d(L.BoxX0, L.RailY1, L.RailZ1), EHFSurfaceRole::MetalHardware);
-		AppendRail(Mesh, FVector3d(L.BoxX1, L.RailY0, L.RailZ0),
-			FVector3d(L.BoxX1 + DrawerRailThickness, L.RailY1, L.RailZ1), EHFSurfaceRole::MetalHardware);
+		// The drawer's own member of each runner, screwed to the outside of the box side and
+		// travelling with it. The intermediate travels half as far and the cabinet's channel stays
+		// put - see GenerateDrawerRunnerIntermediate and GenerateDrawerRunnerMounts - which is the
+		// whole reason a runner cannot be one piece of geometry.
+		static constexpr bool Sides[] = { true, false };
+		for (const bool bLeftSide : Sides)
+		{
+			double X0 = 0.0, X1 = 0.0;
+			DrawerRunnerMemberX(L, /*Member*/ 0, bLeftSide, X0, X1);
+			AppendRail(Mesh, FVector3d(X0, L.RailY0, L.RailZ0), FVector3d(X1, L.RailY1, L.RailZ1),
+				EHFSurfaceRole::MetalHardware);
+		}
 	}
 }
 
@@ -1791,32 +1857,116 @@ FDynamicMesh3 FHFJoineryKit::GenerateDrawerRunnerMounts(const FHFDrawerParams& P
 		return Mesh;
 	}
 
-	// Taller than the rail it carries, and on the same centre line, which is what a channel section
-	// looks like from the front.
+	// Taller than the members it carries, and on the same centre line, which is what a channel
+	// section looks like from the front.
 	const double ChannelHeight = FMath::Min(DrawerChannelHeight, L.BoxZ1 - L.BoxZ0);
 	const double CentreZ = (L.RailZ0 + L.RailZ1) * 0.5;
 	const double Z0 = CentreZ - ChannelHeight * 0.5;
 	const double Z1 = CentreZ + ChannelHeight * 0.5;
 
-	// Between the carcass side and the drawer's own rail, with the running clearance kept clear of
-	// the rail rather than of the panel: the panel is somebody else's geometry, and a channel that
-	// shared a plane with it would z-fight whether the drawer moved or not.
-	const double LeftInner = L.BoxX0 - DrawerRailThickness - DrawerRunnerAirGap;
-	const double RightInner = L.BoxX1 + DrawerRailThickness + DrawerRunnerAirGap;
+	// Outermost of the three members, against the carcass side, with a running clearance to the
+	// intermediate inside it rather than to the panel outside: the panel is somebody else's
+	// geometry, and a channel that shared a plane with it would z-fight whether the drawer moved
+	// or not.
+	static constexpr bool Sides[] = { true, false };
+	for (const bool bLeftSide : Sides)
+	{
+		double X0 = 0.0, X1 = 0.0;
+		DrawerRunnerMemberX(L, /*Member*/ 2, bLeftSide, X0, X1);
 
-	if (LeftInner > L.InternalX0)
-	{
-		AppendRail(Mesh, FVector3d(L.InternalX0, L.RailY0, Z0), FVector3d(LeftInner, L.RailY1, Z1),
-			EHFSurfaceRole::MetalHardware);
+		// Only where the carcass actually leaves room for it. An inset module - an internal drawer
+		// in a wardrobe bay - lands short of the carcass sides and the composer owes it packers.
+		if (X0 >= L.InternalX0 - UE_KINDA_SMALL_NUMBER && X1 <= L.InternalX1 + UE_KINDA_SMALL_NUMBER)
+		{
+			AppendRail(Mesh, FVector3d(X0, L.RailY0, Z0), FVector3d(X1, L.RailY1, Z1),
+				EHFSurfaceRole::MetalHardware);
+		}
 	}
-	if (L.InternalX1 > RightInner)
+
+	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+	return Mesh;
+}
+
+FDynamicMesh3 FHFJoineryKit::GenerateDrawerRunnerIntermediate(const FHFDrawerParams& Params)
+{
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	const FDrawerLayout L = MakeDrawerLayout(Params);
+	if (!L.bValid)
 	{
-		AppendRail(Mesh, FVector3d(RightInner, L.RailY0, Z0), FVector3d(L.InternalX1, L.RailY1, Z1),
+		return Mesh;
+	}
+
+	// Between the drawer's rail and the cabinet's channel, and sectioned between them too.
+	const double IntermediateHeight = FMath::Min(DrawerIntermediateHeight, L.BoxZ1 - L.BoxZ0);
+	const double CentreZ = (L.RailZ0 + L.RailZ1) * 0.5;
+	const double Z0 = CentreZ - IntermediateHeight * 0.5;
+	const double Z1 = CentreZ + IntermediateHeight * 0.5;
+
+	static constexpr bool Sides[] = { true, false };
+	for (const bool bLeftSide : Sides)
+	{
+		double X0 = 0.0, X1 = 0.0;
+		DrawerRunnerMemberX(L, /*Member*/ 1, bLeftSide, X0, X1);
+		AppendRail(Mesh, FVector3d(X0, L.RailY0, Z0), FVector3d(X1, L.RailY1, Z1),
 			EHFSurfaceRole::MetalHardware);
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
 	return Mesh;
+}
+
+FHFPartMotion FHFJoineryKit::DrawerRunnerIntermediateMotion(const FHFDrawerParams& Params, FName DrawerPartId)
+{
+	FHFPartMotion Motion;
+
+	const FDrawerLayout L = MakeDrawerLayout(Params);
+	if (!L.bValid)
+	{
+		return Motion;
+	}
+
+	Motion.Type = EHFMotionType::Slide;
+	Motion.Axis = -FVector::YAxisVector;
+	Motion.MaxTravelCm = L.Travel * DrawerIntermediateTravelShare;
+
+	// Geared to the drawer rather than posed on its own. Half the travel is the whole mechanism:
+	// it keeps the drawer's rail overlapping this member, and this member overlapping the cabinet's
+	// channel, by half the runner's length at any extension.
+	Motion.DrivenByPartId = DrawerPartId;
+	return Motion;
+}
+
+FHFMeshPart FHFJoineryKit::BuildDrawerRunnerPart(const FHFDrawerParams& Params, FName DrawerPartId)
+{
+	FHFMeshPart Part;
+	Part.PartId = DrawerRunnerPartId(DrawerPartId);
+	Part.Mesh = GenerateDrawerRunnerIntermediate(Params);
+	Part.PivotTransform = FTransform::Identity;
+	Part.Motion = DrawerRunnerIntermediateMotion(Params, DrawerPartId);
+	Part.DefaultOpenAmount = 0.0;
+	return Part;
+}
+
+bool FHFJoineryKit::BuildDrawerParts(const FHFDrawerParams& Params, FName PartId,
+	TArray<FHFMeshPart>& OutParts)
+{
+	FHFMeshPart Drawer = BuildDrawerPart(Params, PartId);
+	if (Drawer.Mesh.TriangleCount() == 0)
+	{
+		return false;
+	}
+
+	FHFMeshPart Runner = BuildDrawerRunnerPart(Params, PartId);
+	if (Runner.Mesh.TriangleCount() == 0)
+	{
+		return false;
+	}
+
+	OutParts.Add(MoveTemp(Drawer));
+	OutParts.Add(MoveTemp(Runner));
+	return true;
 }
 
 FHFPartMotion FHFJoineryKit::DrawerMotion(const FHFDrawerParams& Params)
@@ -2066,18 +2216,22 @@ bool FHFJoineryKit::BuildDrawerBank(const FHFDrawerBankParams& Bank, TArray<FHFM
 		const double ModuleZ = ModuleTop - DrawerParams.ModuleHeight;
 		ModuleTop = ModuleZ;
 
-		FHFMeshPart Part = BuildDrawerPart(DrawerParams,
-			FName(*FString::Printf(TEXT("%s%d"), *Prefix, Index)));
+		const FName PartId(*FString::Printf(TEXT("%s%d"), *Prefix, Index));
 
-		if (Part.Mesh.TriangleCount() == 0)
+		// The drawer AND the intermediate member of its runner. Emitting the drawer alone would hang
+		// it on nothing at full extension, and would do it silently.
+		const int32 FirstOfThisDrawer = Built.Num();
+		if (!BuildDrawerParts(DrawerParams, PartId, Built))
 		{
 			return false;
 		}
 
 		// Stacked by translation alone, which is the point of drawer-local space being the module
 		// frame: nothing about the drawer changes because of where in the bank it ended up.
-		Part.PivotTransform = FTransform(FVector(0.0, 0.0, ModuleZ));
-		Built.Add(MoveTemp(Part));
+		for (int32 Moved = FirstOfThisDrawer; Moved < Built.Num(); ++Moved)
+		{
+			Built[Moved].PivotTransform = FTransform(FVector(0.0, 0.0, ModuleZ));
+		}
 
 		if (OutFixedMounts != nullptr)
 		{

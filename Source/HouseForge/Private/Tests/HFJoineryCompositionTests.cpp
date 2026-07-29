@@ -454,9 +454,21 @@ namespace
 	{
 		FDynamicMesh3 Shell;
 		FDynamicMesh3 Carcass;
-		/** The cabinet halves of the runners, which stay behind when the drawers come out. */
+		/** The cabinet members of the runners, which stay behind when the drawers come out. */
 		FDynamicMesh3 Mounts;
+
+		/** The drawers themselves, one per module. */
 		TArray<FHFMeshPart> Parts;
+
+		/**
+		 * The intermediate runner member carrying each drawer, in the same order.
+		 *
+		 * Kept apart from the drawers on purpose. They are parts in exactly the same sense - they
+		 * slide, they have a pivot and a travel limit - but they are not drawers, and a test that
+		 * walked one list would measure reveals between a drawer and a runner.
+		 */
+		TArray<FHFMeshPart> RunnerParts;
+
 		FHFDrawerBankParams Params;
 		TArray<double> FrontHeights;
 	};
@@ -500,9 +512,25 @@ namespace
 		B.Params.GradationRatio = 2.0;
 
 		FHFMeshOps::InitialiseMesh(B.Mounts);
-		if (!FHFJoineryKit::BuildDrawerBank(B.Params, B.Parts, &B.Mounts))
+
+		TArray<FHFMeshPart> All;
+		if (!FHFJoineryKit::BuildDrawerBank(B.Params, All, &B.Mounts))
 		{
 			return B;
+		}
+
+		// Two parts per drawer: the drawer, then the intermediate member it rides on. Split by what
+		// the part IS - a geared part is a runner member - rather than by position in the list.
+		for (FHFMeshPart& Part : All)
+		{
+			if (Part.Motion.DrivenByPartId.IsNone())
+			{
+				B.Parts.Add(MoveTemp(Part));
+			}
+			else
+			{
+				B.RunnerParts.Add(MoveTemp(Part));
+			}
 		}
 		FHFJoineryKit::GraduateDrawerFronts(B.Params, B.FrontHeights);
 
@@ -811,6 +839,11 @@ bool FHFDrawerBankAssemblyTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	if (!TestEqual(TEXT("And an intermediate runner member to carry each one"),
+		B.RunnerParts.Num(), B.Params.DrawerCount))
+	{
+		return false;
+	}
 	if (!TestTrue(TEXT("The bank produced runner mounts for the carcass"), B.Mounts.TriangleCount() > 0))
 	{
 		return false;
@@ -967,6 +1000,113 @@ bool FHFDrawerBankAssemblyTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	// ------------------------------------------------------------------- still ON the runner
+
+	// The assertion that was missing, and the one the SurfaceGap check above cannot make.
+	//
+	// That check measures the 0.35 cm the members are apart ACROSS the runner, which is the same at
+	// every extension whether the two are still overlapping or have slid completely past each other.
+	// What matters is the overlap ALONG it: how much of the moving member is still inside the one
+	// carrying it. A two-member runner asked to travel its own full length ends up overlapping by
+	// exactly nothing - the drawer, its front and its rails cantilevered on air with a
+	// zero-thickness sliver of rail left in the cabinet - and the gap stays 0.35 throughout.
+	//
+	// Measured on the metal, in Y, which is what engagement physically is.
+	{
+		auto MetalSpanY = [](const FDynamicMesh3& Mesh)
+		{
+			const int32 Group = FHFMeshOps::GroupForRole(EHFSurfaceRole::MetalHardware);
+			FVector2D Span(TNumericLimits<double>::Max(), -TNumericLimits<double>::Max());
+
+			for (const int32 Tid : Mesh.TriangleIndicesItr())
+			{
+				if (Mesh.GetTriangleGroup(Tid) != Group)
+				{
+					continue;
+				}
+				const FIndex3i Tri = Mesh.GetTriangle(Tid);
+				for (int32 Corner = 0; Corner < 3; ++Corner)
+				{
+					const double Y = Mesh.GetVertex(Tri[Corner]).Y;
+					Span.X = FMath::Min(Span.X, Y);
+					Span.Y = FMath::Max(Span.Y, Y);
+				}
+			}
+			return Span;
+		};
+
+		auto Overlap = [](const FVector2D& A, const FVector2D& C)
+		{
+			return FMath::Max(0.0, FMath::Min(A.Y, C.Y) - FMath::Max(A.X, C.X));
+		};
+
+		const double RunnerLength = FHFJoineryKit::SanitiseDrawer(B.Params.Drawer).RunnerLength;
+		TestTrue(TEXT("The bank fitted a real runner"), RunnerLength > 0.0);
+
+		// Exactly half the runner is what a three-member slide keeps engaged at its stop.
+		const double MinEngagement = RunnerLength * 0.5 - 1e-6;
+		const FVector2D Channel = MetalSpanY(B.Mounts);
+
+		for (const double Amount : SweepSamples())
+		{
+			for (int32 Index = 0; Index < B.Parts.Num(); ++Index)
+			{
+				// The drawer's rail measured off the BOX rather than off the assembled part. The
+				// part also carries a handle, which is metal too and reaches out in front of the
+				// front - it would stretch this span forward and hide a rail that had slid right out
+				// of its intermediate.
+				FHFDrawerParams Drawer = B.Params.Drawer;
+				Drawer.ModuleHeight = B.FrontHeights[Index] + B.Params.Drawer.RevealGap;
+
+				FHFMeshPart RailOnly;
+				RailOnly.Mesh = FHFJoineryKit::GenerateDrawerBox(Drawer);
+				RailOnly.PivotTransform = B.Parts[Index].PivotTransform;
+				RailOnly.Motion = B.Parts[Index].Motion;
+
+				const FVector2D Rail = MetalSpanY(Posed(RailOnly, Amount));
+				const FVector2D Intermediate = MetalSpanY(Posed(B.RunnerParts[Index], Amount));
+
+				const double OnIntermediate = Overlap(Rail, Intermediate);
+				const double InCabinet = Overlap(Intermediate, Channel);
+
+				TestTrue(*FString::Printf(
+						TEXT("At %.3f out, drawer %d is still carried by its intermediate (%.2f cm of %.2f)"),
+						Amount, Index, OnIntermediate, RunnerLength),
+					OnIntermediate >= MinEngagement);
+				TestTrue(*FString::Printf(
+						TEXT("At %.3f out, drawer %d's intermediate is still in the cabinet (%.2f cm of %.2f)"),
+						Amount, Index, InCabinet, RunnerLength),
+					InCabinet >= MinEngagement);
+			}
+		}
+
+		// The gearing itself: the intermediate covers exactly half the drawer's travel, which is what
+		// makes both of those hold at once.
+		TestNearlyEqual(TEXT("The intermediate travels exactly half as far as the drawer it carries"),
+			B.RunnerParts[0].Motion.MaxTravelCm, B.Parts[0].Motion.MaxTravelCm * 0.5, 1e-9);
+		TestEqual(TEXT("And is geared to that drawer rather than posed on its own"),
+			B.RunnerParts[0].Motion.DrivenByPartId, B.Parts[0].PartId);
+		TestTrue(TEXT("The intermediate slides"),
+			B.RunnerParts[0].Motion.Type == EHFMotionType::Slide);
+
+		// And it stays out of everything else while doing it.
+		for (const double Amount : SweepSamples())
+		{
+			for (int32 Index = 0; Index < B.RunnerParts.Num(); ++Index)
+			{
+				FSolid Member(Posed(B.RunnerParts[Index], Amount));
+				FSolid Drawer(Posed(B.Parts[Index], Amount));
+
+				TestTrue(*FString::Printf(TEXT("At %.3f out, runner member %d is clear of the carcass"),
+						Amount, Index),
+					Penetration(Shell, Member) < PenetrationTolerance);
+				TestTrue(*FString::Printf(TEXT("At %.3f out, runner member %d is clear of its drawer"),
+						Amount, Index),
+					AreClear(Member, Drawer));
+			}
+		}
+	}
+
 	// Fully out, the front stands a full travel in front of where it started, and the box has not
 	// been driven out through the back panel on the way.
 	const FAxisAlignedBox3d ClosedBox = Closed[0]->Mesh.GetBounds();
@@ -1057,6 +1197,10 @@ bool FHFInternalDrawerInterlockTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	// Two moving parts per drawer: the drawer, and the intermediate runner member carrying it. Both
+	// are measured against the leaf below, because both are inside the bay and both move.
+	TestEqual(TEXT("The bank is a drawer and a runner member each"), Drawers.Num(), 2 * Bank.DrawerCount);
+
 	const FTransform BankAnchor(FVector(BankX0, BankY, Z0 + Board));
 	for (FHFMeshPart& Drawer : Drawers)
 	{
@@ -1113,12 +1257,12 @@ bool FHFInternalDrawerInterlockTest::RunTest(const FString& Parameters)
 			const double BehindLeaf = SurfaceGap(ClosedLeaf, Drawer);
 			const double InBay = SurfaceGap(Shell, Drawer);
 
-			TestTrue(*FString::Printf(TEXT("Closed, internal drawer %d is clear of the carcass and packers"), Index),
+			TestTrue(*FString::Printf(TEXT("Closed, internal drawer part %d is clear of the carcass and packers"), Index),
 				AreClear(Shell, Drawer));
-			TestTrue(*FString::Printf(TEXT("Closed, internal drawer %d sits behind the closed leaf (%.4f cm)"),
+			TestTrue(*FString::Printf(TEXT("Closed, internal drawer part %d sits behind the closed leaf (%.4f cm)"),
 					Index, BehindLeaf),
 				AreClear(ClosedLeaf, Drawer));
-			TestTrue(*FString::Printf(TEXT("Closed, internal drawer %d is fitted in the bay (%.4f cm)"), Index, InBay),
+			TestTrue(*FString::Printf(TEXT("Closed, internal drawer part %d is fitted in the bay (%.4f cm)"), Index, InBay),
 				InBay < MaxMountGap);
 		}
 	}

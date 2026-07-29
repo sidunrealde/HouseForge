@@ -1041,9 +1041,13 @@ public:
 	//
 	// A drawer moves, so like a shutter it is never merged into the carcass: it comes back as an
 	// FHFMeshPart and the actor hangs it on a component of its own. What it is NOT is one solid that
-	// slides - a drawer is a front, a box and the drawer half of its runners, and all three travel
-	// together, while the cabinet half of the runners stays behind. GenerateDrawerRunnerMounts is
-	// that half, and it is the only piece of a drawer that belongs in the carcass mesh.
+	// slides - a drawer is a front, a box and its own member of the runners, and all three travel
+	// together.
+	//
+	// A runner has THREE members, and only the outermost stays still. The drawer's own member rides
+	// on an intermediate that itself travels half as far, which is the only way a drawer can come
+	// out its whole depth and still be carried; GenerateDrawerRunnerMounts is the fixed member and
+	// the only piece of a drawer that belongs in the carcass mesh.
 	//
 	// Drawer-local space IS the module frame the shutter's pivot is expressed in - origin at the
 	// bay's bottom-left corner on the carcass front plane, +X right across the bay, +Y back into the
@@ -1119,16 +1123,35 @@ public:
 	static UE::Geometry::FDynamicMesh3 GenerateDrawer(const FHFDrawerParams& Params);
 
 	/**
-	 * The cabinet half of the runners: fixed geometry, in the drawer's own local space.
+	 * The cabinet member of the runners: fixed geometry, in the drawer's own local space.
 	 *
-	 * Separate because it does not move. A carcass appends this at the same transform it gives the
-	 * drawer part, and it stays where it is while the drawer runs out of it. It is set 0.5 mm clear
-	 * of the drawer's own runner member across the whole stroke, so the two never share a face.
+	 * Outermost of the three, against the carcass side. Separate because it does not move: a carcass
+	 * appends this at the same transform it gives the drawer part, and it stays where it is while
+	 * the drawer runs out of it. It is set 0.5 mm clear of the intermediate inside it across the
+	 * whole stroke, so no two members ever share a face.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateDrawerRunnerMounts(const FHFDrawerParams& Params);
 
+	/**
+	 * The intermediate member of the runners, which is what makes full extension possible.
+	 *
+	 * A two-member slide IS a three-quarter-extension slide: drawer member and cabinet member are
+	 * both the runner's length, so travelling the whole of it leaves them overlapping by exactly
+	 * nothing. This member sits between them and travels half as far, so both joints stay engaged
+	 * over half the runner at any extension.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateDrawerRunnerIntermediate(const FHFDrawerParams& Params);
+
 	/** The slide the drawer runs on, expressed in the drawer's own local space. */
 	static FHFPartMotion DrawerMotion(const FHFDrawerParams& Params);
+
+	/**
+	 * The intermediate's slide: half the drawer's travel, geared to the drawer's open amount.
+	 *
+	 * Geared rather than posed independently, because a drawer pulled out while its intermediate
+	 * stayed behind is a drawer hanging on nothing. See FHFPartMotion::DrivenByPartId.
+	 */
+	static FHFPartMotion DrawerRunnerIntermediateMotion(const FHFDrawerParams& Params, FName DrawerPartId);
 
 	/**
 	 * One drawer as a moving part: mesh, pivot and slide.
@@ -1136,8 +1159,25 @@ public:
 	 * The pivot is the identity, because drawer-local space is already the module frame. A bank sets
 	 * it to the module's own place in the bank; a single drawer in a carcass is placed by the caller
 	 * the same way it would place a shutter.
+	 *
+	 * This is the drawer ALONE. A drawer also needs the intermediate member of its runner, or it
+	 * comes off that runner at full extension - use BuildDrawerParts unless there is a reason not to.
 	 */
 	static FHFMeshPart BuildDrawerPart(const FHFDrawerParams& Params, FName PartId);
+
+	/** The intermediate runner member as a moving part, its id derived from the drawer's. */
+	static FHFMeshPart BuildDrawerRunnerPart(const FHFDrawerParams& Params, FName DrawerPartId);
+
+	/**
+	 * Everything about one drawer that moves: the drawer, and the intermediate carrying it.
+	 *
+	 * Appended to, not replaced, so a carcass can gather a whole fixture's parts in one list.
+	 *
+	 * @return false if the drawer cannot be built, in which case nothing is appended - a half-built
+	 *         drawer is worse than none, because it looks right until it is opened.
+	 */
+	static bool BuildDrawerParts(const FHFDrawerParams& Params, FName PartId,
+		TArray<FHFMeshPart>& OutParts);
 
 	/**
 	 * Front heights for a bank, top to bottom, in centimetres.
@@ -1164,7 +1204,11 @@ public:
 	 * corner on the carcass front plane - the same frame one drawer uses, so a bank drops into a
 	 * carcass exactly where a single drawer would.
 	 *
-	 * @param OutFixedMounts Optional: the cabinet halves of every runner, already placed in bank
+	 * TWO parts per drawer, in order: the drawer itself as "<Prefix><N>", then the intermediate
+	 * member carrying it as "<Prefix><N>Runner", geared to it. A caller walking the list as though
+	 * every entry were a drawer will find one that is not.
+	 *
+	 * @param OutFixedMounts Optional: the cabinet members of every runner, already placed in bank
 	 *        space, ready for the carcass to append into its fixed mesh. Appended to, not replaced.
 	 * @return false if the bank cannot be graduated or its drawers cannot be built.
 	 */

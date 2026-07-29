@@ -143,6 +143,25 @@ void AHFArticulatedActor::RestorePartPoses(const FHFPartPoses& Poses)
 
 void AHFArticulatedActor::ApplyOpenAmounts()
 {
+	// Geared parts take their driver's open amount before anything is posed.
+	//
+	// The gearing itself lives in the driven part's own travel - an intermediate runner member is
+	// half the drawer's - so all that is carried across is how far open the driver is. Done here
+	// rather than in the setters because every route into a pose ends up here: a details-panel edit,
+	// a master open, a rebuild, and a restore after one.
+	for (FHFPartState& Part : Parts)
+	{
+		if (Part.Motion.DrivenByPartId.IsNone())
+		{
+			continue;
+		}
+
+		if (const FHFPartState* Driver = FindPart(Part.Motion.DrivenByPartId))
+		{
+			Part.OpenAmount = Driver->OpenAmount;
+		}
+	}
+
 	for (int32 Index = 0; Index < Parts.Num(); ++Index)
 	{
 		UDynamicMeshComponent* Component = PartComponents.IsValidIndex(Index) ? PartComponents[Index].Get() : nullptr;

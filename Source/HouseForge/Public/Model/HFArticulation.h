@@ -58,6 +58,21 @@ struct HOUSEFORGE_API FHFPartMotion
 		meta = (EditCondition = "Type == EHFMotionType::Slide"))
 	double MaxTravelCm = 0.0;
 
+	/**
+	 * The part this one is geared to, if any. Empty for a part that moves on its own.
+	 *
+	 * A driven part takes the driver's open amount rather than carrying one of its own; the gearing
+	 * is already expressed by its own travel. The case this exists for is the intermediate member of
+	 * a full-extension drawer runner, which travels exactly half as far as the drawer it carries -
+	 * and which cannot be left to a separate open amount, because a drawer pulled out while its
+	 * intermediate stayed behind is a drawer hanging on nothing.
+	 *
+	 * It is a real motion, not a bookkeeping trick: the member slides, so it is its own component
+	 * with its own pivot and travel limit, per .claude/rules/04-conventions.md.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	FName DrivenByPartId;
+
 	bool Moves() const { return Type != EHFMotionType::None; }
 
 	/** Unit axis, falling back to +Z rather than producing a degenerate rotation. */
