@@ -528,6 +528,83 @@ bool FHFValidatorReportsAllIssuesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A column standing inside a doorway is reported.
+ *
+ * Nothing else catches this: OpeningsOverlap compares openings with each other, and SwingBlocked
+ * asks where the leaf ends up rather than whether the hole it swings out of is clear. It reached
+ * the reference 2BHK - D_Bed2 overlaps COL_M1 by 75 mm - and survived to geometry as a door leaf
+ * embedded in a column, visible only as a warning buried in a sweep test's report.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorColumnInOpeningTest,
+	"HouseForge.Validation.ColumnStandingInAnOpening", HF_TEST_FLAGS)
+
+bool FHFValidatorColumnInOpeningTest::RunTest(const FString& Parameters)
+{
+	// W_South runs from (0,0) to (400,0) and D1 is 90 wide at offset 200, so the clear opening
+	// spans 155..245 along the wall.
+	auto SpecWithColumnAt = [](const FVector2D& Position, double Height = 300.0)
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		FHFColumn Column;
+		Column.Id = TEXT("COL_1");
+		Column.Position = Position;
+		Column.Size = FVector2D(45.0, 23.0);
+		Column.Height = Height;
+		Spec.Columns.Add(Column);
+
+		return Spec;
+	};
+
+	// Biting 37.5 cm out of a 90 cm doorway.
+	ExpectIssue(*this, SpecWithColumnAt(FVector2D(170.0, 0.0)),
+		TEXT("OpeningBlockedByColumn"), EHFValidationSeverity::Warning);
+
+	// The message has to be actionable: which opening, which column, and how much.
+	{
+		const FHFValidationResult Result = FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(170.0, 0.0)));
+		const FHFValidationIssue* Issue = Result.Issues.FindByPredicate(
+			[](const FHFValidationIssue& I) { return I.Code == TEXT("OpeningBlockedByColumn"); });
+
+		if (TestNotNull(TEXT("The clash is reported"), Issue))
+		{
+			TestTrue(TEXT("The message names the column"), Issue->Message.Contains(TEXT("COL_1")));
+			TestTrue(TEXT("The message quantifies the overlap"), Issue->Message.Contains(TEXT("37.5")));
+		}
+	}
+
+	// A column whose face lands exactly on the jamb is normal construction, not a clash: its far
+	// edge is at 155, which is where the opening starts.
+	TestFalse(TEXT("A column abutting the jamb is not reported"),
+		FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(132.5, 0.0)))
+			.Contains(TEXT("OpeningBlockedByColumn")));
+
+	// In the same wall but nowhere near the opening.
+	TestFalse(TEXT("A column elsewhere in the wall is not reported"),
+		FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(50.0, 0.0)))
+			.Contains(TEXT("OpeningBlockedByColumn")));
+
+	// Lined up with the opening in plan but standing well off the wall.
+	TestFalse(TEXT("A column clear of the wall's thickness is not reported"),
+		FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(170.0, 100.0)))
+			.Contains(TEXT("OpeningBlockedByColumn")));
+
+	// Overlapping in plan but stopping below the sill: a window over a low plinth is not blocked.
+	{
+		FHFHouseSpec Spec = SpecWithColumnAt(FVector2D(170.0, 0.0), /*Height*/ 40.0);
+		Spec.Openings[0].Kind = EHFOpeningKind::Window;
+		Spec.Openings[0].Swing = EHFSwing::None;
+		Spec.Openings[0].SillHeight = 90.0;
+		Spec.Openings[0].Height = 135.0;
+
+		TestFalse(TEXT("A column that stops below the sill is not reported"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("OpeningBlockedByColumn")));
+	}
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

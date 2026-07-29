@@ -464,6 +464,102 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 		}
 	}
 
+	// ------------------------------------------------------------- columns inside openings
+	//
+	// A doorway cut partly through a column cannot be built and cannot be walked through, and
+	// nothing else here catches it: OpeningsOverlap compares openings only, and SwingBlocked asks
+	// where the leaf ENDS UP rather than whether the hole is clear. It is exactly the misread a
+	// drawing invites, because a column on a grid line and a door beside it are drawn as separate
+	// things and read as separate things.
+	//
+	// The reference 2BHK has one: D_Bed2's doorway overlaps COL_M1 by 75 mm, which reached the
+	// geometry as a leaf embedded in a column and was visible only in a sweep test's warning.
+	{
+		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+
+		// A column whose face lands exactly on a jamb is normal construction, so only a real bite
+		// out of the clear opening is reported.
+		const double TouchTolerance = (ScaleToCm > 0.0) ? 1.0 / ScaleToCm : 0.0;
+
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+			if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER ||
+				Opening.Width <= 0.0 || Opening.Height <= 0.0)
+			{
+				continue;
+			}
+
+			const FVector2D Direction = (Wall->End - Wall->Start) / Wall->Length();
+			const FVector2D Normal(-Direction.Y, Direction.X);
+
+			const double OpeningMin = Opening.OffsetAlongWall - Opening.Width * 0.5;
+			const double OpeningMax = Opening.OffsetAlongWall + Opening.Width * 0.5;
+			const double SillZ = Wall->BaseZ + Opening.SillHeight;
+			const double HeadZ = SillZ + Opening.Height;
+
+			for (const FHFColumn& Column : Spec.Columns)
+			{
+				if (Column.Size.X <= 0.0 || Column.Size.Y <= 0.0 || Column.Height <= 0.0)
+				{
+					continue;
+				}
+
+				// The column's four corners, projected onto the wall's own axes.
+				const double Radians = FMath::DegreesToRadians(Column.RotationDegrees);
+				const FVector2D AxisX(FMath::Cos(Radians), FMath::Sin(Radians));
+				const FVector2D AxisY(-AxisX.Y, AxisX.X);
+
+				double AlongMin = TNumericLimits<double>::Max();
+				double AlongMax = -TNumericLimits<double>::Max();
+				double AcrossMin = TNumericLimits<double>::Max();
+				double AcrossMax = -TNumericLimits<double>::Max();
+
+				for (const double SignX : { -0.5, 0.5 })
+				{
+					for (const double SignY : { -0.5, 0.5 })
+					{
+						const FVector2D Corner = Column.Position
+							+ AxisX * (Column.Size.X * SignX)
+							+ AxisY * (Column.Size.Y * SignY);
+						const FVector2D Relative = Corner - Wall->Start;
+
+						const double Along = FVector2D::DotProduct(Relative, Direction);
+						const double Across = FVector2D::DotProduct(Relative, Normal);
+
+						AlongMin = FMath::Min(AlongMin, Along);
+						AlongMax = FMath::Max(AlongMax, Along);
+						AcrossMin = FMath::Min(AcrossMin, Across);
+						AcrossMax = FMath::Max(AcrossMax, Across);
+					}
+				}
+
+				// It has to be in this wall's thickness, in the opening's span, and at its height.
+				const double HalfThickness = Wall->Thickness * 0.5;
+				if (AcrossMax <= -HalfThickness || AcrossMin >= HalfThickness)
+				{
+					continue;
+				}
+
+				if (Column.BaseZ >= HeadZ || Column.BaseZ + Column.Height <= SillZ)
+				{
+					continue;
+				}
+
+				const double Overlap =
+					FMath::Min(AlongMax, OpeningMax) - FMath::Max(AlongMin, OpeningMin);
+
+				if (Overlap > TouchTolerance)
+				{
+					Result.Add(EHFValidationSeverity::Warning, TEXT("OpeningBlockedByColumn"), Opening.Id,
+						FString::Printf(TEXT("Opening '%s' overlaps column '%s' by %.1f cm of its %.1f cm width; the column stands inside the clear opening. Move the opening clear of the column, or the column off the opening."),
+							*Describe(Opening.Id), *Describe(Column.Id),
+							Overlap * ScaleToCm, Opening.Width * ScaleToCm));
+				}
+			}
+		}
+	}
+
 	// -------------------------------------------------------------------------------- walls
 	for (const FHFWall& Wall : Spec.Walls)
 	{
