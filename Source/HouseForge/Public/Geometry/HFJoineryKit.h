@@ -160,7 +160,15 @@ struct HOUSEFORGE_API FHFShelfStackParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double BackClearance = 0.0;
 
-	/** A hanging rail slung under the top of the stack, in the compartment above the last shelf. */
+	/**
+	 * A hanging rail slung under the top of the stack, in the compartment above the last shelf.
+	 *
+	 * Compartments are equal, so this and ShelfCount together decide how much room a garment gets.
+	 * Ask for both in a tall bay and the rail ends up with a compartment's worth under it, which for
+	 * four shelves in a 2 m bay is 32 cm - nothing hangs in that. SanitiseShelfStack reports it by
+	 * clearing this flag, the same way it does for a bay too shallow to take the tube at all; see
+	 * MinHangingClearance.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	bool bHangingRail = false;
 
@@ -823,6 +831,17 @@ public:
 
 	/** Below this a compartment holds nothing a wardrobe is for. Folded clothes need 300 mm. */
 	static constexpr double MinUsefulCompartment = 30.0;
+
+	/**
+	 * Clear height below a hanging rail, under which nothing hangs. 900 mm is a short-hang bay.
+	 *
+	 * A shirt or a jacket on a hanger wants 950 to 1000 mm and a full-length garment 1500, so this
+	 * is the floor rather than a target - the figure below which a rail is not a hanging rail. It is
+	 * the one proportion in a shelf stack that is wrong at real scale rather than wrong on paper:
+	 * with compartments forced equal, four shelves and a rail in a 2 m bay leaves 321 mm under it,
+	 * and the geometry is perfectly correct.
+	 */
+	static constexpr double MinHangingClearance = 90.0;
 
 	// --------------------------------------------------------------------------------- shutters
 	//

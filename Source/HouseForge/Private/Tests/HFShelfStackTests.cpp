@@ -365,24 +365,66 @@ bool FHFShelfStackRailTest::RunTest(const FString& Parameters)
 			FHFJoineryKit::GenerateShelfStack(Low).GetBounds().Center().Z, 180.0, 0.001);
 	}
 
-	// With shelves under it, the rail is the same rail, in the compartment above the top shelf.
+	// With a shelf under it, the rail is the same rail, in the compartment above the top shelf -
+	// and asserted on the CLEAR HEIGHT below it, which is what a garment actually needs.
+	//
+	// One shelf, not four. Compartments are forced equal, so ShelfCount is what decides how much
+	// room a garment gets: four shelves and a rail in this 2 m bay leaves 32.1 cm under the rail, on
+	// which nothing hangs. That configuration used to be built, and asserted here as correct.
 	{
 		FHFShelfStackParams WithShelves = MakeWardrobeBay();
+		WithShelves.ShelfCount = 1;
 		WithShelves.bHangingRail = true;
+
+		const FHFShelfStackParams Fitted = FHFJoineryKit::SanitiseShelfStack(WithShelves);
+		if (!TestTrue(TEXT("A bay with one shelf still takes a hanging rail"), Fitted.bHangingRail))
+		{
+			return false;
+		}
 
 		const FDynamicMesh3 Mesh = FHFJoineryKit::GenerateShelfStack(WithShelves);
 		CheckSolidAndTagged(*this, Mesh,
 			{ EHFSurfaceRole::JoineryCarcass, EHFSurfaceRole::MetalHardware }, TEXT("A shelved bay with a rail"));
 
-		const double Shelved = VolumeOf(FHFJoineryKit::GenerateShelfStack(MakeWardrobeBay()));
+		FHFShelfStackParams ShelfOnly = WithShelves;
+		ShelfOnly.bHangingRail = false;
+		const double Shelved = VolumeOf(FHFJoineryKit::GenerateShelfStack(ShelfOnly));
 		TestNearlyEqual(TEXT("Adding a rail adds exactly the rail"),
 			VolumeOf(Mesh) - Shelved, RailVolume, RailVolume * 1e-5);
 
-		const double Compartment = (200.0 - 4 * 1.8) / 5.0;
+		const double Compartment = (200.0 - 1 * 1.8) / 2.0;
 		const double TopShelfTop = 200.0 - Compartment;
 		TestTrue(TEXT("The rail hangs in the compartment above the top shelf"),
 			Mesh.GetBounds().Max.Z > TopShelfTop);
 		TestTrue(TEXT("The rail stays inside the bay"), Mesh.GetBounds().Max.Z <= 200.0);
+
+		// The measurement the rail is actually for: rail centre down to the shelf below it.
+		const double ClearHang = (200.0 - Fitted.RailDrop) - TopShelfTop;
+		TestTrue(*FString::Printf(TEXT("A garment has somewhere to hang: %.1f cm below the rail"), ClearHang),
+			ClearHang >= FHFJoineryKit::MinHangingClearance);
+	}
+
+	// And the configuration that used to be built and blessed: a realistic shelf count PLUS a rail.
+	// The tube fits, sits in the right place and is inside the volume it was given - and there is
+	// 32.1 cm under it, which holds no garment anybody owns. Refused, and reported, exactly as a bay
+	// too shallow to take the tube at all is.
+	{
+		FHFShelfStackParams Crowded = MakeWardrobeBay();
+		Crowded.bHangingRail = true;
+
+		const double Compartment = (200.0 - 4 * 1.8) / 5.0;
+		const double WouldHang = Compartment - Crowded.RailDrop;
+		TestTrue(TEXT("Four shelves really do leave under a metre to hang in"),
+			WouldHang < FHFJoineryKit::MinHangingClearance);
+
+		TestFalse(TEXT("A bay with no room to hang in reports that it has no rail"),
+			FHFJoineryKit::SanitiseShelfStack(Crowded).bHangingRail);
+
+		// And builds the shelves it can build, rather than a rail with nothing under it.
+		const FDynamicMesh3 Mesh = FHFJoineryKit::GenerateShelfStack(Crowded);
+		TestNearlyEqual(TEXT("It builds the shelves and no rail"),
+			VolumeOf(Mesh), VolumeOf(FHFJoineryKit::GenerateShelfStack(MakeWardrobeBay())), 1e-6);
+		TestFalse(TEXT("There is no metal in it at all"), HasRole(Mesh, EHFSurfaceRole::MetalHardware));
 	}
 
 	// A bay too shallow to hang anything in says so, rather than emitting a rail through its own

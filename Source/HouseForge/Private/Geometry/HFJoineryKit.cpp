@@ -362,7 +362,18 @@ FHFShelfStackParams FHFJoineryKit::SanitiseShelfStack(const FHFShelfStackParams&
 			ClearDepth * 0.5 - RailFixingProud,
 			Compartment * 0.5 - RailFixingProud);
 
-		if (Radius < MinRailRadius || Bays.Width <= 2.0 * RailFixingThickness)
+		// Nothing hangs under a rail with a compartment's worth of air below it, and compartments
+		// are forced equal - so a caller who asks for a realistic shelf count AND a rail gets one
+		// with 32 cm under it in a 2 m bay. The tube is the right diameter, in the right place,
+		// inside the volume it was given, and the wardrobe holds no clothes.
+		//
+		// Refused for the same reason, and in the same way, as a bay too shallow to take the tube:
+		// a caller reading the parameters back can tell "no room to hang" from "not asked for",
+		// where a rail that came out anyway says neither.
+		const double ClearBelowRail = Compartment - Out.RailDrop;
+
+		if (Radius < MinRailRadius || Bays.Width <= 2.0 * RailFixingThickness
+			|| ClearBelowRail < MinHangingClearance)
 		{
 			// No room for a rail is a real answer. Saying so here rather than silently emitting
 			// nothing is what lets a caller - or a test - tell "too shallow" from "not asked for".
