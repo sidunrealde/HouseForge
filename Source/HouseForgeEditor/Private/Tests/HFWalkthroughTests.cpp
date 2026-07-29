@@ -46,6 +46,12 @@ namespace HouseForgeWalkthrough
 	 *
 	 * Multi rather than single throughout, because every assertion here needs to know WHICH body
 	 * answered, not merely that one did.
+	 *
+	 * Multi is not "every body on the line", though, and the difference matters. A multi trace
+	 * returns overlaps plus the FIRST BLOCKING hit, and everything HouseForge builds is BlockAll -
+	 * so a trace aimed through a window frame is answered by the frame and stops there, and the sash
+	 * behind it looks as though it has no collision at all. Aim these traces so the body being asked
+	 * about is the first solid thing on the line.
 	 */
 	void WalkTraceMulti(UWorld* World, const FVector& Start, const FVector& End, TArray<FHitResult>& OutHits)
 	{
@@ -522,6 +528,170 @@ bool FHFWalkthroughDoorTest::RunTest(const FString& Parameters)
 	}
 
 	TestTrue(TEXT("Every swing door in the reference flat was walked into"), Checked >= 7);
+
+	return true;
+}
+
+/**
+ * A window's collision follows its sash, so a walkthrough cannot step through an open one.
+ *
+ * Both halves are needed and neither is sufficient. That the sash blocks where it stands proves it
+ * has collision at all; that it stops blocking where it USED to stand would also pass with a body
+ * that was simply thrown away. So the sash is asked at both ends of its travel and in both halves
+ * of the opening: it must let go of the half it left AND take hold of the half it moved into.
+ *
+ * The ventilator is asked the same question about a rotation, in the one place a translation and a
+ * rotation differ: out in front of the wall, where only a swung sash can reach.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFWalkthroughSashTest,
+	"HouseForge.Walkthrough.CollisionFollowsAnOpenSash", HF_TEST_FLAGS)
+
+bool FHFWalkthroughSashTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeWalkthrough;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	ClearHouseForgeActors(World);
+
+	// A 400 cm wall running along +X, so the wall normal is +Y.
+	auto SpawnOpening = [World](EHFOpeningKind Kind, double Width, double Height, double Sill) -> AHFOpeningActor*
+	{
+		AHFOpeningActor* Actor = World->SpawnActor<AHFOpeningActor>();
+		if (Actor == nullptr)
+		{
+			return nullptr;
+		}
+
+		Actor->HostWall.Id = TEXT("W1");
+		Actor->HostWall.Start = FVector2D(0.0, 0.0);
+		Actor->HostWall.End = FVector2D(400.0, 0.0);
+		Actor->HostWall.Thickness = 20.0;
+		Actor->HostWall.Height = 300.0;
+
+		Actor->Opening.Id = TEXT("Win1");
+		Actor->Opening.WallId = TEXT("W1");
+		Actor->Opening.OffsetAlongWall = 200.0;
+		Actor->Opening.Width = Width;
+		Actor->Opening.Height = Height;
+		Actor->Opening.SillHeight = Sill;
+		Actor->Opening.Kind = Kind;
+		Actor->Regenerate();
+		return Actor;
+	};
+
+	// ------------------------------------------------------------------------ sliding window
+	{
+		AHFOpeningActor* Window = SpawnOpening(EHFOpeningKind::SlidingWindow, 150.0, 135.0, 90.0);
+		if (!TestNotNull(TEXT("A sliding window spawns"), Window))
+		{
+			return false;
+		}
+		ON_SCOPE_EXIT{ if (IsValid(Window)) { Window->Destroy(); } };
+
+		UDynamicMeshComponent* Sash = Window->GetPartComponent(AHFOpeningActor::SashPartId);
+		if (!TestNotNull(TEXT("The running sash has a component"), Sash))
+		{
+			return false;
+		}
+
+		// Across the wall at mid-pane height, in one half of the opening or the other. The opening
+		// spans 125..275, so 150 is well inside the near half and 250 well inside the far one.
+		//
+		// Run from +Y inward, which is the side the running sash's track is on. The other way round
+		// the fixed sash is the first blocking body on the line and the trace never reaches the one
+		// being asked about - which reads exactly like a sash with no collision.
+		auto SashBlocksAt = [&](double X)
+		{
+			TArray<FHitResult> Hits;
+			WalkTraceMulti(World, FVector(X, 60.0, 157.5), FVector(X, -60.0, 157.5), Hits);
+
+			for (const FHitResult& Hit : Hits)
+			{
+				if (Hit.GetComponent() == Sash)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+
+		Window->SetPartOpenAmount(AHFOpeningActor::SashPartId, 0.0);
+		TestTrue(TEXT("Shut, the sash blocks the half of the window it covers"), SashBlocksAt(150.0));
+		TestFalse(TEXT("Shut, it does not block the half its fixed partner covers"), SashBlocksAt(250.0));
+
+		// Ajar is still shut as far as walking through that half goes.
+		Window->SetPartOpenAmount(AHFOpeningActor::SashPartId, 0.5);
+		TestTrue(TEXT("Half open, the sash is still in the way partway across"), SashBlocksAt(200.0));
+
+		Window->SetPartOpenAmount(AHFOpeningActor::SashPartId, 1.0);
+		TestFalse(TEXT("Open, the half the sash left is clear to walk through"), SashBlocksAt(150.0));
+		TestTrue(TEXT("Open, the sash blocks where it has moved TO"), SashBlocksAt(250.0));
+
+		Window->SetPartOpenAmount(AHFOpeningActor::SashPartId, 0.0);
+	}
+
+	// -------------------------------------------------------------------- top-hung ventilator
+	{
+		AHFOpeningActor* Vent = SpawnOpening(EHFOpeningKind::Ventilator, 60.0, 45.0, 210.0);
+		if (!TestNotNull(TEXT("A ventilator spawns"), Vent))
+		{
+			return false;
+		}
+		ON_SCOPE_EXIT{ if (IsValid(Vent)) { Vent->Destroy(); } };
+
+		UDynamicMeshComponent* Sash = Vent->GetPartComponent(AHFOpeningActor::SashPartId);
+		if (!TestNotNull(TEXT("The ventilator sash has a component"), Sash))
+		{
+			return false;
+		}
+
+		auto HitTheSash = [&](const FVector& Start, const FVector& End)
+		{
+			TArray<FHitResult> Hits;
+			WalkTraceMulti(World, Start, End, Hits);
+
+			for (const FHitResult& Hit : Hits)
+			{
+				if (Hit.GetComponent() == Sash)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+
+		// Across the wall, at mid-span and mid-height where the frame's own members are not in the
+		// way. This is the half that says the sash has collision at all.
+		auto SashBlocksAcross = [&]()
+		{
+			return HitTheSash(FVector(200.0, 60.0, 232.5), FVector(200.0, -60.0, 232.5));
+		};
+
+		// Straight down, 6 cm out from the wall. The closed sash and its pull lie within 1.5 cm of
+		// the frame centreline and the frame itself within 3, so nothing is on this line until a sash
+		// has actually swung out onto it - which is the whole difference between a rotation and a
+		// body that stayed where it was cooked.
+		auto SashBlocksOutInFront = [&]()
+		{
+			return HitTheSash(FVector(200.0, 6.0, 270.0), FVector(200.0, 6.0, 200.0));
+		};
+
+		Vent->SetPartOpenAmount(AHFOpeningActor::SashPartId, 0.0);
+		TestTrue(TEXT("Shut, the ventilator sash blocks its own opening"), SashBlocksAcross());
+		TestFalse(TEXT("Shut, it does not reach out into the room"), SashBlocksOutInFront());
+
+		Vent->SetPartOpenAmount(AHFOpeningActor::SashPartId, 1.0);
+		TestTrue(TEXT("Open, the sash hangs out into the room and is solid there"), SashBlocksOutInFront());
+
+		Vent->SetPartOpenAmount(AHFOpeningActor::SashPartId, 0.0);
+		TestFalse(TEXT("Shut again, the collision comes back with it"), SashBlocksOutInFront());
+		TestTrue(TEXT("Shut again, it is back across its own opening"), SashBlocksAcross());
+	}
 
 	return true;
 }
