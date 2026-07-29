@@ -20,6 +20,7 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Model/HFSpecSerializer.h"
+#include "Model/HFBuildDefaults.h"
 #include "Model/HFSpecValidator.h"
 #include "Model/HFSettings.h"
 #include "Actors/HFElementActors.h"
@@ -32,6 +33,25 @@
 #include "Serialization/JsonSerializer.h"
 
 #define LOCTEXT_NAMESPACE "HouseForgeEditor"
+
+namespace
+{
+	/**
+	 * What this project judges a spec against.
+	 *
+	 * Resolved here, in the composing layer, for the same reason the construction figures are: the
+	 * validator takes its limits as an argument and never looks them up, so something has to do the
+	 * looking up, and the subsystem is the outermost thing that knows a project exists.
+	 *
+	 * Every entry point that validates has to go through this. A limit only some of them honour is
+	 * worse than no limit at all - a spec would be refused by the MCP validate tool and then accepted
+	 * by the apply tool that follows it, or the other way round.
+	 */
+	FHFValidationLimits ProjectValidationLimits()
+	{
+		return FHFBuildDefaults::FromProjectSettings().Validation;
+	}
+}
 
 FHFOperationResult FHFOperationResult::Ok(const FString& InMessage)
 {
@@ -255,7 +275,7 @@ FHFOperationResult UHFEditorSubsystem::ValidateSpecJson(const FString& SpecJson)
 		return FHFOperationResult::Fail(Error);
 	}
 
-	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec);
+	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec, ProjectValidationLimits());
 	if (Validation.HasErrors())
 	{
 		return FHFOperationResult::Fail(Validation.ToString());
@@ -273,7 +293,7 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 		return FHFOperationResult::Fail(Error);
 	}
 
-	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec);
+	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec, ProjectValidationLimits());
 	if (Validation.HasErrors())
 	{
 		// Refusing here matters: a half-built house would screenshot plausibly while the spec
@@ -553,7 +573,7 @@ FHFOperationResult UHFEditorSubsystem::ModifyElement(const FString& Category, co
 		return FHFOperationResult::Fail(Error);
 	}
 
-	const FHFValidationResult Validation = FHFSpecValidator::Validate(Working);
+	const FHFValidationResult Validation = FHFSpecValidator::Validate(Working, ProjectValidationLimits());
 	if (Validation.HasErrors())
 	{
 		return FHFOperationResult::Fail(FString::Printf(

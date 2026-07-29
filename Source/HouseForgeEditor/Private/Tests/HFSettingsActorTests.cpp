@@ -15,6 +15,7 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "Model/HFSettings.h"
+#include "Model/HFSpecSerializer.h"
 #include "Model/HFTypes.h"
 
 using namespace UE::Geometry;
@@ -277,6 +278,76 @@ bool FHFSettingsSpareHandEditedElementsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Once reverted, the door rebuilds like any other element"), RebuiltAfterRevert, 1);
 	TestEqual(TEXT("And it now carries the new figures"),
 		Door->BuildParams.Door.LeafThickness, SavedLeaf * 3.0);
+
+	return true;
+}
+
+/**
+ * The validation limits on the settings page have to reach the tools that validate.
+ *
+ * FHFSpecValidator takes its limits as an argument and never looks them up - that is what keeps it
+ * testable - so something has to do the looking up, and if nothing does, the Validation section of
+ * the settings page is decorative. It was: all three entry points in this subsystem called
+ * Validate(Spec) with no limits, so a project could raise its headroom floor to 250 and every spec
+ * with 240 of clear height would still be waved through.
+ *
+ * Asserted through ValidateSpecJson because that is the MCP tool Claude actually calls, rather than
+ * through the validator directly - the defect was never in the validator.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsValidationLimitsReachTheToolsTest,
+	"HouseForge.Settings.ValidationLimitsReachTheValidateTool", HF_TEST_FLAGS)
+
+bool FHFSettingsValidationLimitsReachTheToolsTest::RunTest(const FString& Parameters)
+{
+	UHFEditorSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<UHFEditorSubsystem>() : nullptr;
+	UHFSettings* Settings = GetMutableDefault<UHFSettings>();
+	if (!TestNotNull(TEXT("The subsystem exists"), Subsystem)
+		|| !TestNotNull(TEXT("The settings CDO exists"), Settings))
+	{
+		return false;
+	}
+
+	const double SavedHeadroom = Settings->Validation.MinHeadroomCm;
+	ON_SCOPE_EXIT
+	{
+		Settings->Validation.MinHeadroomCm = SavedHeadroom;
+	};
+
+	// A 3 m room with a 60 cm false ceiling in it: 240 of clear height.
+	FHFHouseSpec Spec;
+	Spec.Name = TEXT("Headroom");
+	Spec.Units = EHFUnits::Centimeters;
+	Spec.UnitsSource = TEXT("test");
+
+	FHFRoom& Room = Spec.Rooms.AddDefaulted_GetRef();
+	Room.Id = TEXT("R1");
+	Room.Type = EHFRoomType::Bedroom;
+	Room.CeilingHeight = 300.0;
+	Room.FloorZ = 0.0;
+	Room.Boundary = { FVector2D(0, 0), FVector2D(400, 0), FVector2D(400, 350), FVector2D(0, 350) };
+
+	FHFFalseCeiling& Ceiling = Spec.FalseCeilings.AddDefaulted_GetRef();
+	Ceiling.Id = TEXT("FC1");
+	Ceiling.RoomId = TEXT("R1");
+	Ceiling.Drop = 60.0;
+
+	FString Json;
+	FString Error;
+	if (!TestTrue(TEXT("The spec serialises"), FHFSpecSerializer::ToJsonString(Spec, Json, Error)))
+	{
+		return false;
+	}
+
+	// At the shipped 210 floor, 240 of clear height is not worth mentioning.
+	Settings->Validation.MinHeadroomCm = 210.0;
+	TestFalse(TEXT("At the shipped 210 limit the tool says nothing about headroom"),
+		Subsystem->ValidateSpecJson(Json).Message.Contains(TEXT("LowHeadroom")));
+
+	// A project building to a taller slab raises the floor, and the tool has to change its answer -
+	// which it only can if it read the setting.
+	Settings->Validation.MinHeadroomCm = 250.0;
+	TestTrue(TEXT("Raising the project's headroom floor to 250 makes the tool report the same spec"),
+		Subsystem->ValidateSpecJson(Json).Message.Contains(TEXT("LowHeadroom")));
 
 	return true;
 }
