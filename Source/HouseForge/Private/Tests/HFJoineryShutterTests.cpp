@@ -96,6 +96,20 @@ namespace
 		return false;
 	}
 
+	/**
+	 * The leaf's leading edge on the hinge axis, in the leaf's own local space.
+	 *
+	 * Read off the leaf's own box rather than assumed to be at +LeafWidth: a right-hung leaf is cut
+	 * on -X of its axis, so a hard-coded +X tip measures a point in mid-air beside the leaf, which
+	 * turns out to move plausibly enough to pass a direction test the leaf itself would fail.
+	 */
+	FVector LeafTipLocal(const FHFShutterParams& Params)
+	{
+		const FBox Panel = FHFJoineryKit::ShutterPanelBox(Params);
+		const bool bLeft = FHFJoineryKit::ShutterLeadingEdge(Params) == EHFHandleEdge::MaxX;
+		return FVector(bLeft ? Panel.Max.X : Panel.Min.X, 0.0, 0.0);
+	}
+
 	/** Plan direction from the hinge axis to the leaf's leading edge, at a given open amount. */
 	FVector2D LeafAxisDirection(const FHFShutterParams& Params, const FHFMeshPart& Part, double OpenAmount)
 	{
@@ -104,7 +118,7 @@ namespace
 		State.Motion = Part.Motion;
 
 		const FVector Hinge = State.PoseAt(OpenAmount).TransformPosition(FVector::ZeroVector);
-		const FVector Tip = State.PoseAt(OpenAmount).TransformPosition(FVector(Params.LeafWidth(), 0.0, 0.0));
+		const FVector Tip = State.PoseAt(OpenAmount).TransformPosition(LeafTipLocal(Params));
 
 		return FVector2D(Tip.X - Hinge.X, Tip.Y - Hinge.Y).GetSafeNormal();
 	}
@@ -376,6 +390,47 @@ bool FHFShutterParametersTest::RunTest(const FString& Parameters)
 			LeftPart.PivotTransform.GetLocation().X, Base.RevealGap * 0.5, 1e-9);
 		TestNearlyEqual(TEXT("A right-hung leaf hinges on the right edge"),
 			RightPart.PivotTransform.GetLocation().X, Base.ModuleWidth - Base.RevealGap * 0.5, 1e-9);
+
+		// ------------------------------------------------------- the frame anything mounted relies on
+		//
+		// Handedness must not reach into the leaf's own local Y. Both hands carry their board on +Y
+		// of the hinge axis and therefore look out along -Y, which is what lets a handle, a routed
+		// groove or a glued-on mirror be described once and fitted to either hand. A leaf that
+		// presented its outward face at +Y for one hand would take every mounted part with it, and
+		// closed - which is how a wardrobe is photographed - the result is indistinguishable.
+		const FAxisAlignedBox3d LeftLocal = LeftPart.Mesh.GetBounds();
+		const FAxisAlignedBox3d RightLocal = RightPart.Mesh.GetBounds();
+
+		TestNearlyEqual(TEXT("A left-hung leaf looks out of the cupboard along its own -Y"),
+			LeftLocal.Min.Y, 0.0, 1e-9);
+		TestNearlyEqual(TEXT("A right-hung leaf looks out of the cupboard along its own -Y too"),
+			RightLocal.Min.Y, 0.0, 1e-9);
+		TestNearlyEqual(TEXT("A left-hung leaf's board is behind that face"),
+			LeftLocal.Max.Y, Base.Thickness, 1e-9);
+		TestNearlyEqual(TEXT("A right-hung leaf's board is behind that face"),
+			RightLocal.Max.Y, Right.Thickness, 1e-9);
+
+		// The pivot is a pure translation for both, which is the mechanism that guarantees it: a
+		// half-turn would take one hand's -Y to the module's +Y and flip its outward face.
+		TestTrue(TEXT("A leaf hangs on a translation, not a turn"),
+			LeftPart.PivotTransform.GetRotation().IsIdentity(1e-9)
+				&& RightPart.PivotTransform.GetRotation().IsIdentity(1e-9));
+
+		// What handedness does change: which side of the axis the leaf is cut on, and therefore
+		// which edge it opens from. Stated as the box a mounted part is fitted to.
+		TestTrue(TEXT("A left-hung leaf is cut on +X of its hinge"),
+			LeftLocal.Min.X > -1e-9 && FMath::IsNearlyEqual(LeftLocal.Max.X, Base.LeafWidth(), 1e-9));
+		TestTrue(TEXT("A right-hung leaf is cut on -X of its hinge"),
+			RightLocal.Max.X < 1e-9 && FMath::IsNearlyEqual(RightLocal.Min.X, -Right.LeafWidth(), 1e-9));
+
+		TestTrue(TEXT("The leaf's declared panel box is the leaf that was cut"),
+			FHFJoineryKit::ShutterPanelBox(Base).Min.Equals(FVector(LeftLocal.Min), 1e-9)
+				&& FHFJoineryKit::ShutterPanelBox(Base).Max.Equals(FVector(LeftLocal.Max), 1e-9)
+				&& FHFJoineryKit::ShutterPanelBox(Right).Min.Equals(FVector(RightLocal.Min), 1e-9)
+				&& FHFJoineryKit::ShutterPanelBox(Right).Max.Equals(FVector(RightLocal.Max), 1e-9));
+		TestTrue(TEXT("The declared leading edge is the one away from the hinge"),
+			FHFJoineryKit::ShutterLeadingEdge(Base) == EHFHandleEdge::MaxX
+				&& FHFJoineryKit::ShutterLeadingEdge(Right) == EHFHandleEdge::MinX);
 	}
 
 	{
@@ -476,8 +531,7 @@ bool FHFShutterSwingTest::RunTest(const FString& Parameters)
 			for (int32 Step = 0; Step <= 40; ++Step)
 			{
 				const double Alpha = Step / 40.0;
-				const FVector Tip =
-					State.PoseAt(Alpha).TransformPosition(FVector(Params.LeafWidth(), 0.0, 0.0));
+				const FVector Tip = State.PoseAt(Alpha).TransformPosition(LeafTipLocal(Params));
 				TestNearlyEqual(TEXT("The leaf stays a leaf-width from its hinge"),
 					FVector2D(Tip.X - Axis.X, Tip.Y - Axis.Y).Size(), Params.LeafWidth(), 1e-6);
 			}

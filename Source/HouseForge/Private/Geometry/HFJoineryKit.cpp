@@ -438,16 +438,19 @@ FDynamicMesh3 FHFJoineryKit::GenerateShutter(const FHFShutterParams& Params)
 	const double H = Params.LeafHeight();
 	const double T = Params.Thickness;
 
-	// The thickness lies opposite the swing, which puts the hinge axis on the face the leaf turns
-	// towards. See the header for why that is what keeps the swept leaf out of its own carcass.
-	const double YNear = 0.0;
-	const double YFar = -Params.SwingSign() * T;
-	const double Y0 = FMath::Min(YNear, YFar);
-	const double Y1 = FMath::Max(YNear, YFar);
+	// The leaf is cut out on the side of the hinge axis its module lies on, and its board always
+	// lies on +Y of that axis. Both hands therefore present their outward face at local Y = 0 and
+	// carry their thickness opposite the swing, which is what keeps the swept leaf out of its own
+	// carcass. See the header for the whole argument, including why the mirror is the cheaper price.
+	const bool bLeft = Params.Hinge == EHFShutterHinge::Left;
+	const double X0 = bLeft ? 0.0 : -W;
+	const double X1 = bLeft ? W : 0.0;
+	const double Y0 = 0.0;
+	const double Y1 = T;
 
 	if (!Params.HasGlazableFrame())
 	{
-		AppendRail(Mesh, FVector3d(0.0, Y0, 0.0), FVector3d(W, Y1, H), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(X0, Y0, 0.0), FVector3d(X1, Y1, H), EHFSurfaceRole::ShutterLaminate);
 	}
 	else
 	{
@@ -456,10 +459,10 @@ FDynamicMesh3 FHFJoineryKit::GenerateShutter(const FHFShutterParams& Params)
 		// Stiles run the full height and the rails butt between them, rather than both running
 		// full length and lapping at the corners. Lapped members would put four corners' worth of
 		// board into the mesh twice, which quietly inflates the volume this is measured on.
-		AppendRail(Mesh, FVector3d(0.0, Y0, 0.0), FVector3d(S, Y1, H), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(W - S, Y0, 0.0), FVector3d(W, Y1, H), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(S, Y0, 0.0), FVector3d(W - S, Y1, S), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(S, Y0, H - S), FVector3d(W - S, Y1, H), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(X0, Y0, 0.0), FVector3d(X0 + S, Y1, H), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(X1 - S, Y0, 0.0), FVector3d(X1, Y1, H), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(X0 + S, Y0, 0.0), FVector3d(X1 - S, Y1, S), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(X0 + S, Y0, H - S), FVector3d(X1 - S, Y1, H), EHFSurfaceRole::ShutterLaminate);
 
 		// The pane runs under the frame by the rebate all round, so the join is a shadow rather
 		// than a gap you can see through, and it is a solid of real thickness centred in the
@@ -469,8 +472,8 @@ FDynamicMesh3 FHFJoineryKit::GenerateShutter(const FHFShutterParams& Params)
 		const double GlassHalf = Params.GlassThickness * 0.5;
 
 		AppendRail(Mesh,
-			FVector3d(PaneInset, GlassCentreY - GlassHalf, PaneInset),
-			FVector3d(W - PaneInset, GlassCentreY + GlassHalf, H - PaneInset),
+			FVector3d(X0 + PaneInset, GlassCentreY - GlassHalf, PaneInset),
+			FVector3d(X1 - PaneInset, GlassCentreY + GlassHalf, H - PaneInset),
 			EHFSurfaceRole::Glass);
 	}
 
@@ -478,23 +481,42 @@ FDynamicMesh3 FHFJoineryKit::GenerateShutter(const FHFShutterParams& Params)
 	return Mesh;
 }
 
+FBox FHFJoineryKit::ShutterPanelBox(const FHFShutterParams& Params)
+{
+	if (!Params.IsValid())
+	{
+		return FBox(ForceInit);
+	}
+
+	const double W = Params.LeafWidth();
+	const bool bLeft = Params.Hinge == EHFShutterHinge::Left;
+
+	return FBox(
+		FVector(bLeft ? 0.0 : -W, 0.0, 0.0),
+		FVector(bLeft ? W : 0.0, Params.Thickness, Params.LeafHeight()));
+}
+
+EHFHandleEdge FHFJoineryKit::ShutterLeadingEdge(const FHFShutterParams& Params)
+{
+	return Params.Hinge == EHFShutterHinge::Left ? EHFHandleEdge::MaxX : EHFHandleEdge::MinX;
+}
+
 FTransform FHFJoineryKit::ShutterPivotTransform(const FHFShutterParams& Params)
 {
 	const bool bLeft = Params.Hinge == EHFShutterHinge::Left;
 	const double HalfReveal = Params.RevealGap * 0.5;
 
-	// Half a reveal in from the module edge on the hinge side. The half-turn for a right-hung leaf
-	// is what lets local +X keep meaning "towards the leading edge" for both hands, so the leaf
-	// mesh differs between them by nothing but which side of the axis its thickness is on.
+	// Half a reveal in from the module edge on the hinge side. The leaf itself is cut on whichever
+	// side of that axis its module lies, so there is no rotation to apply: a pure translation keeps
+	// the leaf's local axes pointing the same way as the module's, and therefore keeps "out of the
+	// cupboard" at -Y for both hands. A half-turn here would flip that for one of them.
 	const double HingeX = bLeft ? HalfReveal : Params.ModuleWidth - HalfReveal;
 
 	// The axis sits on the leaf's front face, which is the leaf's thickness plus the clearance the
 	// hinge leaves, in front of the carcass. Same for both hands.
 	const double AxisY = -(Params.BackClearance + Params.Thickness);
 
-	return FTransform(
-		FRotator(0.0, bLeft ? 0.0 : 180.0, 0.0),
-		FVector(HingeX, AxisY, HalfReveal));
+	return FTransform(FVector(HingeX, AxisY, HalfReveal));
 }
 
 FHFPartMotion FHFJoineryKit::ShutterMotion(const FHFShutterParams& Params)

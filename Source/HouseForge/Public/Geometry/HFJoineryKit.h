@@ -163,10 +163,11 @@ struct HOUSEFORGE_API FHFShelfStackParams
 /**
  * Which vertical edge of the module a shutter hangs on, seen from the front.
  *
- * Downstream this is nothing but the sign of the hinge's MaxAngleDegrees and a half-turn of the
- * pivot, exactly the handedness mechanism FHFPartMotion describes. The one thing it genuinely
- * changes is which side of the hinge plane the leaf's own thickness sits on - see
- * FHFJoineryKit::GenerateShutter, where that turns out to be what makes the swing clean.
+ * Downstream this is the sign of the hinge's MaxAngleDegrees and which side of the hinge axis the
+ * leaf is cut on - exactly the handedness mechanism FHFPartMotion describes. What it deliberately
+ * does NOT change is which way the leaf faces in its own local space: both hands present their
+ * outward face at local Y = 0 looking down -Y, so anything mounted on a leaf is described the same
+ * way whichever way that leaf is hung. See FHFJoineryKit::GenerateShutter.
  */
 UENUM(BlueprintType)
 enum class EHFShutterHinge : uint8
@@ -383,10 +384,15 @@ struct HOUSEFORGE_API FHFCorniceParams
 /**
  * Which way a panel's front face looks, along the panel's own local Y.
  *
- * It has to be said out loud rather than inferred. A left-hung shutter and a right-hung one are the
- * same leaf mesh with their thickness on opposite sides of the hinge axis - see GenerateShutter -
- * so the face a handle belongs on is +Y for one hand and -Y for the other. Guess it and the handle
- * is fitted inside the cupboard, which reads as correct in plan and absurd in a walkthrough.
+ * Every panel this kit generates - a shutter leaf of either hand, a drawer front - carries its
+ * board on +Y of its own origin and therefore looks out along NegativeY. That is the value a
+ * handle on the outside of a cabinet always wants, and it is a constant rather than something to
+ * derive from how the panel is hung.
+ *
+ * The enum exists for the panel fitted the other way round: a handle on the INSIDE face of a leaf,
+ * or a panel a caller has generated itself on the opposite convention. It has to be said out loud
+ * rather than inferred, because getting it wrong fits the handle inside the cupboard, which reads
+ * as correct in plan and absurd in a walkthrough.
  */
 UENUM(BlueprintType)
 enum class EHFPanelFacing : uint8
@@ -408,9 +414,9 @@ enum class EHFHandleEdge : uint8
 	Top,
 	/** The -Z edge. */
 	Bottom,
-	/** The -X edge. */
+	/** The -X edge - the leading edge of a RIGHT-hung leaf. */
 	MinX,
-	/** The +X edge - the leading edge of a shutter, which is where a wardrobe handle goes. */
+	/** The +X edge - the leading edge of a LEFT-hung leaf, and of a drawer front. */
 	MaxX
 };
 
@@ -794,11 +800,17 @@ public:
 	/**
 	 * A shutter leaf in its own local space, hinge axis on the origin.
 	 *
-	 * Local frame: +X runs from the hinge edge to the leading edge, +Z up from the leaf's bottom
-	 * edge, and the thickness lies on Y *opposite the way the leaf swings*. That last part is the
-	 * one non-obvious decision here, and it is not arbitrary - it puts the hinge axis on the face
-	 * the leaf turns towards, which is where a butt hinge's knuckle sits and what makes the swing
-	 * provably clean rather than merely clean-looking:
+	 * Local frame: +Z up from the leaf's bottom edge, the board on +Y of the hinge axis, and the
+	 * leaf cut out on the side of that axis its module lies on - +X for a left-hung leaf, -X for a
+	 * right-hung one. The pivot is a pure translation for both hands, so those axes mean the same
+	 * thing in the leaf's space as they do in the module's.
+	 *
+	 * TWO CONSEQUENCES, and both are load-bearing.
+	 *
+	 * The thickness always lies on Y *opposite the way the leaf swings*, because the leaf swings
+	 * out of the unit - towards -Y - whichever way it is hung. That is not arbitrary: it puts the
+	 * hinge axis on the face the leaf turns towards, which is where a butt hinge's knuckle sits and
+	 * what makes the swing provably clean rather than merely clean-looking:
 	 *
 	 *   - the leaf never crosses behind its own closed back face, at any angle up to 180 degrees,
 	 *     so it cannot reach the carcass however deep that carcass is or however thick its sides;
@@ -812,11 +824,38 @@ public:
 	 * 3 mm on a 19 mm leaf at 100 degrees: too little to catch in a wireframe, and obvious the
 	 * moment the thing is lit and opened.
 	 *
+	 * And because of that, BOTH HANDS PRESENT THEIR OUTWARD FACE AT LOCAL Y = 0, LOOKING DOWN -Y -
+	 * the same convention as a drawer front. Anything mounted on a leaf, or routed into one, is
+	 * therefore described identically for the two hands, and the only thing that changes hand to
+	 * hand is which edge is the leading one. ShutterPanelBox and ShutterLeadingEdge answer both
+	 * questions so a caller never derives them from Hinge itself.
+	 *
+	 * The mirror is deliberate, and it is the cheaper of the two prices available. Keeping +X on
+	 * the leading edge for both hands would need a half-turn in the pivot, and a half-turn about Z
+	 * necessarily takes local -Y to module +Y: the outward direction would then be -Y for one hand
+	 * and +Y for the other. Every mounted part would need that flip applied by hand, and getting it
+	 * wrong fits the handle inside the cupboard or routs the groove into the back of the leaf -
+	 * failures that look right in every still and are only visible once the leaf is opened.
+	 *
 	 * @return An empty mesh when the parameters do not describe a leaf, never a degenerate one.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateShutter(const FHFShutterParams& Params);
 
-	/** Where the leaf's hinge axis sits, in the module frame. */
+	/**
+	 * The leaf's own box, in part-local space: what a handle or a mounted part is fitted to.
+	 *
+	 * Public because it is the answer to the one question handedness genuinely changes. A caller
+	 * reading it off Hinge itself writes the flip out by hand at every call site, which is how a
+	 * handle ends up on the hinge edge of the one right-hung leaf in a run.
+	 *
+	 * @return An empty box when the parameters describe no leaf.
+	 */
+	static FBox ShutterPanelBox(const FHFShutterParams& Params);
+
+	/** The edge of that box the leaf opens from: MaxX left-hung, MinX right-hung. */
+	static EHFHandleEdge ShutterLeadingEdge(const FHFShutterParams& Params);
+
+	/** Where the leaf's hinge axis sits, in the module frame. A pure translation, both hands. */
 	static FTransform ShutterPivotTransform(const FHFShutterParams& Params);
 
 	/** The hinge the leaf turns on, expressed in the leaf's own local space. */

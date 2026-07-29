@@ -283,26 +283,20 @@ namespace
 	/**
 	 * The handle for one leaf, in that leaf's own local space.
 	 *
-	 * The facing is the whole reason this is a function and not a constant. GenerateShutter puts a
-	 * left-hung leaf's thickness on +Y of the hinge axis and a right-hung leaf's on -Y, so the face
-	 * that looks out of the cupboard is Box.Min.Y for one hand and Box.Max.Y for the other. Both
-	 * leaves nevertheless present their outward face at local Y = 0 - which is exactly why the
-	 * facing flips while the edge does not.
+	 * Not one line of this is conditional on how the leaf is hung, and that is the point. A leaf of
+	 * either hand carries its board on +Y of its hinge axis, so the face that looks out of the
+	 * cupboard is the plane Y = 0 for both and the facing is a constant - the same constant a
+	 * drawer front uses. What handedness does change is which edge the leaf opens from, and the kit
+	 * is asked rather than the answer being written out here: a run of shutters is exactly where a
+	 * hand-derived flip gets applied to five leaves and forgotten on the sixth.
 	 */
 	FHFHandleParams MakeLeafHandle(const FHFShutterParams& Shutter)
 	{
-		const bool bLeft = Shutter.Hinge == EHFShutterHinge::Left;
-
 		FHFHandleParams Handle;
 		Handle.Style = EHFHandleStyle::Bar;
-		Handle.PanelBox = bLeft
-			? FBox(FVector(0.0, 0.0, 0.0), FVector(Shutter.LeafWidth(), Shutter.Thickness, Shutter.LeafHeight()))
-			: FBox(FVector(0.0, -Shutter.Thickness, 0.0), FVector(Shutter.LeafWidth(), 0.0, Shutter.LeafHeight()));
-		Handle.Facing = bLeft ? EHFPanelFacing::NegativeY : EHFPanelFacing::PositiveY;
-
-		// The leading edge, for both hands. Part-local +X runs from the hinge to the leading edge
-		// whichever way the leaf is hung, which is what the half-turn in ShutterPivotTransform buys.
-		Handle.Edge = EHFHandleEdge::MaxX;
+		Handle.PanelBox = FHFJoineryKit::ShutterPanelBox(Shutter);
+		Handle.Facing = EHFPanelFacing::NegativeY;
+		Handle.Edge = FHFJoineryKit::ShutterLeadingEdge(Shutter);
 		Handle.EdgeInset = 5.0;
 		Handle.BarLength = 12.8;
 		Handle.BarDiameter = 1.2;
