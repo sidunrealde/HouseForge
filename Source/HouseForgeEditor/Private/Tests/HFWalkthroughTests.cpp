@@ -10,6 +10,7 @@
 #include "Components/DynamicMeshComponent.h"
 #include "Editor.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Misc/AutomationTest.h"
 #include "Model/HFSampleHouse.h"
 #include "Model/HFTypes.h"
@@ -52,6 +53,48 @@ namespace HouseForgeWalkthrough
 	{
 		FCollisionQueryParams Params(TEXT("HFWalkthroughMulti"), /*bTraceComplex*/ false);
 		World->LineTraceMultiByChannel(OutHits, Start, End, ECC_Pawn, Params);
+	}
+
+	/**
+	 * The element of THIS house that a walking trace ran into, and what it hit if none.
+	 *
+	 * Identified rather than merely counted. Every test in a run shares one editor world, an actor
+	 * destroyed by a previous test keeps its physics body until the world next ticks, and several of
+	 * these tests build geometry on the same coordinates - so "something blocked" can be answered by
+	 * a door that was destroyed two tests ago. That happened while this file was being written and
+	 * read convincingly as a collision defect.
+	 *
+	 * Membership of this house's own elements is the check, NOT a particular element id. Asking for
+	 * a specific id overreaches: rooms share a slab edge where they meet, and walls meet at columns,
+	 * so the nearest solid thing under a point in the living room is quite legitimately the adjoining
+	 * room's slab, and the nearest solid thing through a wall by a junction is the column on it.
+	 * Both are construction, both stop a walkthrough, and demanding one of them by name fails on
+	 * geometry that is entirely correct.
+	 */
+	AHFElementActor* FirstHouseElementHit(UWorld* World, const FVector& Start, const FVector& End,
+		const AHFHouseActor* House, FHitResult& OutHit, FString& OutWhatWasHit)
+	{
+		TArray<FHitResult> Hits;
+		WalkTraceMulti(World, Start, End, Hits);
+
+		TArray<FString> Described;
+		for (const FHitResult& Hit : Hits)
+		{
+			AHFElementActor* Element = Cast<AHFElementActor>(Hit.GetActor());
+			if (Element != nullptr && House != nullptr && House->ElementActors.Contains(Element))
+			{
+				OutHit = Hit;
+				return Element;
+			}
+
+			const AActor* Actor = Hit.GetActor();
+			Described.Add(Actor != nullptr
+				? FString::Printf(TEXT("%s '%s' at Z=%.1f"), *Actor->GetClass()->GetName(), *Actor->GetName(), Hit.ImpactPoint.Z)
+				: TEXT("<no actor>"));
+		}
+
+		OutWhatWasHit = Described.IsEmpty() ? TEXT("nothing at all") : FString::Join(Described, TEXT(", "));
+		return nullptr;
 	}
 
 	/**
@@ -105,9 +148,45 @@ namespace HouseForgeWalkthrough
 		return false;
 	}
 
+	/**
+	 * Removes every HouseForge actor already in the world.
+	 *
+	 * The editor world is shared by the whole run and is not torn down between tests, so geometry
+	 * from an earlier one is still standing - and several tests build the same reference flat on the
+	 * same coordinates. Two coincident floor slabs make "which one did the trace hit" arbitrary, and
+	 * a stale one can answer for a missing real one. Cleared up front so each test traces against
+	 * only what it built itself.
+	 */
+	void ClearHouseForgeActors(UWorld* World)
+	{
+		TArray<AActor*> Doomed;
+
+		for (TActorIterator<AHFHouseActor> It(World); It; ++It)
+		{
+			It->ClearGeometry();
+			Doomed.Add(*It);
+		}
+
+		// Element actors spawned directly by other tests, with no house owning them.
+		for (TActorIterator<AHFElementActor> It(World); It; ++It)
+		{
+			Doomed.Add(*It);
+		}
+
+		for (AActor* Actor : Doomed)
+		{
+			if (IsValid(Actor))
+			{
+				Actor->Destroy();
+			}
+		}
+	}
+
 	/** Builds the reference flat and hands back the house actor holding it. */
 	AHFHouseActor* BuildReferenceFlat(UWorld* World, FHFHouseSpec& OutSpec)
 	{
+		ClearHouseForgeActors(World);
+
 		OutSpec = FHFSampleHouse::Make2BHK();
 		FHFUnits::ConvertToCentimeters(OutSpec);
 
@@ -166,15 +245,27 @@ bool FHFWalkthroughFloorTest::RunTest(const FString& Parameters)
 		const FVector End(Plan.X, Plan.Y, Room.FloorZ - 50.0);
 
 		FHitResult Hit;
-		if (!WalkTrace(World, Start, End, Hit))
+		FString WhatWasHit;
+		AHFElementActor* Stood = FirstHouseElementHit(World, Start, End, House, Hit, WhatWasHit);
+
+		if (Stood == nullptr)
 		{
 			AddError(FString::Printf(
-				TEXT("Nothing to stand on in room '%s': a pawn-channel trace with simple collision found no floor at (%.0f, %.0f). A walkthrough falls through it."),
-				*Room.Id.ToString(), Plan.X, Plan.Y));
+				TEXT("Nothing to stand on in room '%s': a pawn-channel trace with simple collision found no floor at (%.0f, %.0f). It hit %s. A walkthrough falls through it."),
+				*Room.Id.ToString(), Plan.X, Plan.Y, *WhatWasHit));
 			continue;
 		}
 
-		// And it is the floor, at the floor's level - not a fixture the trace happened to clip.
+		// A slab, not a fixture the trace clipped on the way down. It may belong to the adjoining
+		// room where two slabs meet, which is why the room is not named - but it must be a floor.
+		if (!TestTrue(*FString::Printf(TEXT("What is underfoot in room '%s' is a floor slab"), *Room.Id.ToString()),
+			Stood->IsA<AHFRoomActor>()))
+		{
+			continue;
+		}
+
+		// And it is that room's own slab, at the finished floor level - not a fixture the trace
+		// happened to clip on the way down.
 		TestNearlyEqual(
 			*FString::Printf(TEXT("Room '%s' is walkable at its finished floor level"), *Room.Id.ToString()),
 			Hit.ImpactPoint.Z, Room.FloorZ, 2.0);
@@ -273,11 +364,12 @@ bool FHFWalkthroughWallTest::RunTest(const FString& Parameters)
 		const FVector End(Plan.X - Normal.X * Reach, Plan.Y - Normal.Y * Reach, Z);
 
 		FHitResult Hit;
-		if (!WalkTrace(World, Start, End, Hit))
+		FString WhatWasHit;
+		if (FirstHouseElementHit(World, Start, End, House, Hit, WhatWasHit) == nullptr)
 		{
 			AddError(FString::Printf(
-				TEXT("Wall '%s' does not block a walking trace at (%.0f, %.0f, %.0f). It renders but a walkthrough passes through it."),
-				*Wall.Id.ToString(), Plan.X, Plan.Y, Z));
+				TEXT("Wall '%s' does not block a walking trace at (%.0f, %.0f, %.0f). It hit %s. It renders but a walkthrough passes through it."),
+				*Wall.Id.ToString(), Plan.X, Plan.Y, Z, *WhatWasHit));
 			continue;
 		}
 
@@ -432,6 +524,96 @@ bool FHFWalkthroughDoorTest::RunTest(const FString& Parameters)
 	}
 
 	TestTrue(TEXT("Every swing door in the reference flat was walked into"), Checked >= 7);
+
+	return true;
+}
+
+/**
+ * Collision follows the mesh when the mesh is rebuilt, rather than staying where it was cooked.
+ *
+ * A parameter change rewrites the geometry, and the body has to be recooked with it. If it is not,
+ * the element renders at its new shape and collides at its old one - the flat looks right in every
+ * screenshot and a walkthrough catches on doors that are not there any more. Nothing else asserts
+ * this: the existing regeneration tests measure the rebuilt mesh's volume, which is the visual half
+ * only, and the collision tests never regenerate.
+ *
+ * Measured by shortening a door until a trace that used to hit it passes over its head.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFWalkthroughRegeneratedCollisionTest,
+	"HouseForge.Walkthrough.CollisionFollowsARegeneratedMesh", HF_TEST_FLAGS)
+
+bool FHFWalkthroughRegeneratedCollisionTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeWalkthrough;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	ClearHouseForgeActors(World);
+
+	// A door in a 400 cm wall running along +X, so the wall normal is +Y.
+	AHFOpeningActor* Door = World->SpawnActor<AHFOpeningActor>();
+	if (!TestNotNull(TEXT("A door actor spawns"), Door))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
+
+	Door->HostWall.Id = TEXT("W1");
+	Door->HostWall.Start = FVector2D(0.0, 0.0);
+	Door->HostWall.End = FVector2D(400.0, 0.0);
+	Door->HostWall.Thickness = 20.0;
+	Door->HostWall.Height = 300.0;
+
+	Door->Opening.Id = TEXT("D1");
+	Door->Opening.WallId = TEXT("W1");
+	Door->Opening.OffsetAlongWall = 200.0;
+	Door->Opening.Width = 90.0;
+	Door->Opening.Height = 210.0;
+	Door->Opening.Kind = EHFOpeningKind::Door;
+	Door->Opening.Swing = EHFSwing::InwardLeft;
+	Door->Regenerate();
+
+	// Still a world trace on the pawn channel - what is being proved is that this body is in the
+	// physics scene and answers a character's query - but resolved to the leaf's own component.
+	// The editor world is shared by every test in the run, and several of them spawn a door on
+	// exactly this wall at exactly this offset; "something blocked" would be answering for whichever
+	// actor happened to be standing there.
+	auto LeafBlocksAt = [&](double Z)
+	{
+		UDynamicMeshComponent* Leaf = Door->GetPartComponent(AHFOpeningActor::LeafPartId);
+
+		TArray<FHitResult> Hits;
+		WalkTraceMulti(World, FVector(200.0, -60.0, Z), FVector(200.0, 60.0, Z), Hits);
+
+		for (const FHitResult& Hit : Hits)
+		{
+			if (Hit.GetComponent() == Leaf)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// 180 cm is inside a 210 cm leaf and over the head of a 120 cm one.
+	if (!TestTrue(TEXT("The full-height door blocks a walking trace at 180 cm"), LeafBlocksAt(180.0)))
+	{
+		return false;
+	}
+
+	Door->Opening.Height = 120.0;
+	Door->Regenerate();
+
+	TestFalse(TEXT("Shortened, its collision comes down with it rather than staying at full height"),
+		LeafBlocksAt(180.0));
+
+	// And the leaf that is left still collides, so the check above cannot pass by the body simply
+	// having been thrown away.
+	TestTrue(TEXT("The shortened door still blocks below its new head"), LeafBlocksAt(60.0));
 
 	return true;
 }
