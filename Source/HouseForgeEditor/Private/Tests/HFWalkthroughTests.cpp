@@ -41,17 +41,15 @@
  */
 namespace HouseForgeWalkthrough
 {
-	/** The trace a character makes: the world, a pawn's channel, and simple collision. */
-	bool WalkTrace(UWorld* World, const FVector& Start, const FVector& End, FHitResult& OutHit)
-	{
-		FCollisionQueryParams Params(TEXT("HFWalkthrough"), /*bTraceComplex*/ false);
-		return World->LineTraceSingleByChannel(OutHit, Start, End, ECC_Pawn, Params);
-	}
-
-	/** Every component a walking trace runs into, so a specific one can be looked for among them. */
+	/**
+	 * The trace a character makes: the world, a pawn's channel, and simple collision.
+	 *
+	 * Multi rather than single throughout, because every assertion here needs to know WHICH body
+	 * answered, not merely that one did.
+	 */
 	void WalkTraceMulti(UWorld* World, const FVector& Start, const FVector& End, TArray<FHitResult>& OutHits)
 	{
-		FCollisionQueryParams Params(TEXT("HFWalkthroughMulti"), /*bTraceComplex*/ false);
+		FCollisionQueryParams Params(TEXT("HFWalkthrough"), /*bTraceComplex*/ false);
 		World->LineTraceMultiByChannel(OutHits, Start, End, ECC_Pawn, Params);
 	}
 
