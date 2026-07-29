@@ -430,8 +430,8 @@
 		{
 			"id": "Win_Bed2_E",
 			"wallId": "W_East",
-			"offsetAlongWall": 1800,
-			"width": 1200,
+			"offsetAlongWall": 810,
+			"width": 900,
 			"height": 1350,
 			"sillHeight": 900,
 			"kind": "SlidingWindow",
@@ -452,8 +452,8 @@
 			"wallId": "W_North",
 			"offsetAlongWall": 8700,
 			"width": 1200,
-			"height": 1350,
-			"sillHeight": 900,
+			"height": 900,
+			"sillHeight": 1200,
 			"kind": "SlidingWindow",
 			"swing": "None"
 		},
@@ -1799,19 +1799,19 @@
 			}
 		},
 		{
-			"id": "F_Kitchen_Wall",
+			"id": "F_Kitchen_WallW",
 			"roomId": "R_Kitchen",
 			"type": "KitchenWallCabinet",
-			"label": "Wall units, north run",
+			"label": "Wall units, north run west of the window",
 			"position":
 			{
-				"x": 2100,
+				"x": 1050,
 				"y": 8135
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 3000,
+				"x": 900,
 				"y": 300
 			},
 			"height": 700,
@@ -1819,7 +1819,43 @@
 			"anchorWallId": "W_North",
 			"params":
 			{
-				"shutterCount": 4,
+				"shutterCount": 2,
+				"drawerCount": 0,
+				"shelfCount": 2,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": true,
+				"upstandHeight": 0,
+				"corniceHeight": 60,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_WallE",
+			"roomId": "R_Kitchen",
+			"type": "KitchenWallCabinet",
+			"label": "Wall units, north run east of the window",
+			"position":
+			{
+				"x": 3150,
+				"y": 8135
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 900,
+				"y": 300
+			},
+			"height": 700,
+			"baseZ": 1400,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 2,
 				"drawerCount": 0,
 				"shelfCount": 2,
 				"bHasLoft": false,

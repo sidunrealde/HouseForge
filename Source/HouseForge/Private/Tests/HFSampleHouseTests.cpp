@@ -100,6 +100,66 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * Nothing in the reference flat stands in front of a window.
+ *
+ * A window used to be fixed glazing: a wardrobe in front of one looked odd and nothing more, and
+ * both of the flat's blocked windows survived every test in the suite because no test looked. A
+ * sliding window is different. Its catch is on the meeting stile of the running sash, at about
+ * mid-height in the middle of the opening, and a wardrobe or a run of kitchen wall units across that
+ * is a window that cannot be opened - the one failure a screenshot of a closed window will not show.
+ *
+ * Doors are reported rather than failed. The obstructions in front of them are a circulation problem
+ * in the plan - two bedroom doors open into bathrooms, and the fittings behind them are where a
+ * bathroom's fittings belong - and redrawing the flat's circulation is not this test's business. It
+ * says so on every run instead of letting it go quiet.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSampleHouseWindowsAreClearTest, "HouseForge.Model.SampleHouseWindowsAreClear", HF_TEST_FLAGS)
+
+bool FHFSampleHouseWindowsAreClearTest::RunTest(const FString& Parameters)
+{
+	const FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
+	const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
+
+	int32 Windows = 0;
+	int32 Doorways = 0;
+
+	for (const FHFValidationIssue& Issue : Result.Issues)
+	{
+		if (Issue.Code != TEXT("OpeningBlockedByFixture"))
+		{
+			continue;
+		}
+
+		const FHFOpening* Opening = Spec.Openings.FindByPredicate(
+			[&Issue](const FHFOpening& O) { return O.Id == Issue.ElementId; });
+
+		const bool bIsWindow = Opening != nullptr &&
+			(Opening->Kind == EHFOpeningKind::Window ||
+			 Opening->Kind == EHFOpeningKind::SlidingWindow ||
+			 Opening->Kind == EHFOpeningKind::Ventilator);
+
+		if (bIsWindow)
+		{
+			++Windows;
+			AddError(Issue.Message);
+		}
+		else
+		{
+			++Doorways;
+			AddWarning(Issue.Message);
+		}
+	}
+
+	TestEqual(TEXT("No window in the reference flat has a fixture in front of it"), Windows, 0);
+
+	AddInfo(FString::Printf(
+		TEXT("%d doorway obstruction(s) remain in the reference flat; they belong to its circulation, not to its windows."),
+		Doorways));
+
+	return true;
+}
+
+/**
  * The committed Reference/Specs/Sample2BHK.json is a generated artifact of Make2BHK(). If someone
  * edits the layout in code and forgets to re-export, the drawings and the spec would disagree -
  * so the gate fails here rather than letting them drift apart silently.

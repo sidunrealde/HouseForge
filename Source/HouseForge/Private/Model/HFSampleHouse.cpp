@@ -101,9 +101,10 @@ namespace
 		 * and no top-hung casement in it - so nothing here is fixed just to have one of each.
 		 */
 		void AddWindow(const FName& Id, const FName& WallId, double Offset, double Width,
-			EHFOpeningKind Kind = EHFOpeningKind::SlidingWindow)
+			EHFOpeningKind Kind = EHFOpeningKind::SlidingWindow,
+			double Height = WindowHeight, double Sill = WindowSill)
 		{
-			AddOpening(Id, WallId, Offset, Width, WindowHeight, WindowSill, Kind);
+			AddOpening(Id, WallId, Offset, Width, Height, Sill, Kind);
 		}
 
 		/** Rooms in this plan are all rectangles, so a corner pair is enough to describe them. */
@@ -276,7 +277,14 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// this class is built with; the kitchen's is the same unit at a smaller size.
 	B.AddWindow(TEXT("Win_Living"),  TEXT("W_South"), 5400.0, 1500.0);
 	B.AddWindow(TEXT("Win_Bed2_S"),  TEXT("W_South"), 8700.0, 1500.0);
-	B.AddWindow(TEXT("Win_Bed2_E"),  TEXT("W_East"),  1800.0, 1200.0);
+	// 900 wide at 810 along the wall, not 1200 at 1800. At 1800 it spanned Y 1200..2400 and the
+	// bedroom's wardrobe stands at Y 1500..3300 against the same wall, so three quarters of the
+	// window was behind a 2400-tall wardrobe. Nothing said so while a window was fixed glazing
+	// nobody had to reach; a sliding sash has a catch on its meeting stile, and that catch was
+	// inside a cupboard. The wall is clear from the corner column at Y 115 to the wardrobe at
+	// 1500, which takes a 900 unit - the smaller of the two common bedroom sizes - with a pier of
+	// about 240 either side.
+	B.AddWindow(TEXT("Win_Bed2_E"),  TEXT("W_East"),  810.0, 900.0);
 	// W_North runs east to west from (X5,Y3), so offsets count back from the north-east corner.
 	// The master bedroom window opens onto the north balcony, alongside its sliding door.
 	//
@@ -285,7 +293,16 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// Invisible while windows were fixed geometry nothing swept; the moment they became sashes the
 	// house sweep found it. 1500 is also the size a master bedroom window is.
 	B.AddWindow(TEXT("Win_MBed_N"),  TEXT("W_North"), X5 - 7500.0, 1500.0);
-	B.AddWindow(TEXT("Win_Kitchen"), TEXT("W_North"), X5 - 2100.0, 1200.0);
+	// The kitchen window is the one window in the flat that cannot take the standard sill. A
+	// kitchen window sits over the worktop, so it starts above the counter and its backsplash
+	// rather than at the 900 the habitable rooms use: at 900 its bottom 90 mm was behind the
+	// granite's upstand, and the wall units above the counter ran straight across its middle.
+	//
+	// 1200 x 900 on a 1200 sill is what a kitchen window is, and it puts the head on 2100 - the
+	// same line as every door head in the flat, which is the convention Indian practice follows.
+	// The wall units are split around it below.
+	B.AddWindow(TEXT("Win_Kitchen"), TEXT("W_North"), X5 - 2100.0, 1200.0,
+		EHFOpeningKind::SlidingWindow, /*Height*/ 900.0, /*Sill*/ 1200.0);
 
 	// Balcony access. Master bedroom to the north balcony; utility to the east wash area.
 	B.AddOpening(TEXT("D_BalcN"), TEXT("W_North"), X5 - 9300.0, 1800.0, 2100.0, 0.0,
@@ -431,14 +448,26 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		CounterN.AnchorWallId = TEXT("W_North");
 		CounterN.Params.UpstandHeight = 100.0;
 
-		FHFFixture& WallUnits = B.AddFixture(TEXT("F_Kitchen_Wall"), TEXT("R_Kitchen"), EHFFixtureType::KitchenWallCabinet,
-			TEXT("Wall units, north run"), FVector2D(2100.0, 8135.0), FVector2D(3000.0, 300.0), 700.0, 0.0, 1400.0);
-		WallUnits.AnchorWallId = TEXT("W_North");
-		WallUnits.Params.ShutterCount = 4;
-		WallUnits.Params.ShelfCount = 2;
-		WallUnits.Params.CorniceHeight = 60.0;
-		WallUnits.Params.bHasGlassInsert = true;
-		WallUnits.Params.HandleStyle = EHFHandleStyle::Bar;
+		// Two runs, not one, because the window is between them.
+		//
+		// A single 3000 run centred on the same X as the window put 700 mm of cabinet across the
+		// whole width of it. A real kitchen splits the wall units around the window over the sink,
+		// which is exactly where this window is, and each half then carries two shutters instead of
+		// four. X 600..1500 and 2700..3600, with the window's 1500..2700 clear between them.
+		auto AddWallUnits = [&B](const FName& Id, const FString& Label, double CentreX, double Length)
+		{
+			FHFFixture& Units = B.AddFixture(Id, TEXT("R_Kitchen"), EHFFixtureType::KitchenWallCabinet,
+				Label, FVector2D(CentreX, 8135.0), FVector2D(Length, 300.0), 700.0, 0.0, 1400.0);
+			Units.AnchorWallId = TEXT("W_North");
+			Units.Params.ShutterCount = 2;
+			Units.Params.ShelfCount = 2;
+			Units.Params.CorniceHeight = 60.0;
+			Units.Params.bHasGlassInsert = true;
+			Units.Params.HandleStyle = EHFHandleStyle::Bar;
+		};
+
+		AddWallUnits(TEXT("F_Kitchen_WallW"), TEXT("Wall units, north run west of the window"), 1050.0, 900.0);
+		AddWallUnits(TEXT("F_Kitchen_WallE"), TEXT("Wall units, north run east of the window"), 3150.0, 900.0);
 
 		B.AddFixture(TEXT("F_Kitchen_Sink"), TEXT("R_Kitchen"), EHFFixtureType::Sink,
 			TEXT("Double-bowl sink"), FVector2D(2100.0, 7985.0), FVector2D(800.0, 450.0), 200.0, 0.0, 690.0);
