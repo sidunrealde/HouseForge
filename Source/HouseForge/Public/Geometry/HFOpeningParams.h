@@ -27,7 +27,7 @@ struct HOUSEFORGE_API FHFDoorParams
 	 * 4.0 is a 40 mm flush shutter, which is what an Indian internal door is. A main door is 45.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "2.5", UIMax = "6.0"))
+		meta = (ClampMin = "0.5", ClampMax = "6.0", UIMin = "2.5", UIMax = "6.0"))
 	double LeafThickness = 4.0;
 
 	/**
@@ -37,7 +37,7 @@ struct HOUSEFORGE_API FHFDoorParams
 	 * through every frame of a walkthrough - the one artefact a still screenshot will not show you.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "0.1", UIMax = "1.5"))
+		meta = (ClampMin = "0.0", ClampMax = "1.5", UIMin = "0.1", UIMax = "1.5"))
 	double LeafFrameGap = 0.5;
 
 	/**
@@ -48,7 +48,7 @@ struct HOUSEFORGE_API FHFDoorParams
 	 * travel so the running panel comes to rest exactly over its fixed partner.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "6.0"))
+		meta = (ClampMin = "0.0", ClampMax = "6.0", UIMin = "1.0", UIMax = "6.0"))
 	double SlidingPanelOverlap = 2.5;
 
 	/**
@@ -58,8 +58,11 @@ struct HOUSEFORGE_API FHFDoorParams
 	 * the leaf thickness plus this.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "0.2", UIMax = "4.0"))
+		meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.2", UIMax = "4.0"))
 	double SlidingTrackGap = 1.0;
+
+	/** @see FHFOpeningBuildParams::Sanitised */
+	FHFDoorParams Sanitised(double OpeningWidth, double OpeningHeight) const;
 };
 
 /**
@@ -78,7 +81,7 @@ struct HOUSEFORGE_API FHFSlidingWindowParams
 
 	/** Outer frame depth front to back, in centimetres. Sits inside the wall reveal. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "1.0", UIMin = "4.0", UIMax = "12.0"))
+		meta = (ClampMin = "1.0", ClampMax = "12.0", UIMin = "4.0", UIMax = "12.0"))
 	double FrameDepth = 6.5;
 
 	/**
@@ -88,12 +91,12 @@ struct HOUSEFORGE_API FHFSlidingWindowParams
 	 * much glass a given hole in the wall actually gets.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "3.0", UIMax = "8.0"))
+		meta = (ClampMin = "0.5", ClampMax = "8.0", UIMin = "3.0", UIMax = "8.0"))
 	double FrameFace = 4.5;
 
 	/** Sash section depth along the wall normal, in centimetres. The series is named for it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "2.0", UIMax = "5.0"))
+		meta = (ClampMin = "0.5", ClampMax = "5.0", UIMin = "2.0", UIMax = "5.0"))
 	double SashDepth = 2.7;
 
 	/**
@@ -103,12 +106,12 @@ struct HOUSEFORGE_API FHFSlidingWindowParams
 	 * numbers are stated separately rather than one derived from the other.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "2.5", UIMax = "5.0"))
+		meta = (ClampMin = "0.5", ClampMax = "5.0", UIMin = "2.5", UIMax = "5.0"))
 	double TrackPitch = 3.0;
 
 	/** Sight line of the sash stiles and rails around the glass, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "3.0", UIMax = "6.0"))
+		meta = (ClampMin = "0.5", ClampMax = "6.0", UIMin = "3.0", UIMax = "6.0"))
 	double SashFaceWidth = 4.0;
 
 	/**
@@ -120,42 +123,42 @@ struct HOUSEFORGE_API FHFSlidingWindowParams
 	 * between the sashes, too much and the running sash stops short of its partner.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "4.0"))
+		meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "1.0", UIMax = "4.0"))
 	double InterlockOverlap = 2.5;
 
 	/** Pane thickness, in centimetres. 5 mm clear toughened is the near-universal included spec. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.1", UIMin = "0.4", UIMax = "1.2"))
+		meta = (ClampMin = "0.1", ClampMax = "1.2", UIMin = "0.4", UIMax = "1.2"))
 	double GlassThickness = 0.5;
 
 	/** How far the pane sits into the sash's glazing groove, in centimetres. The groove is 18 mm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "0.4", UIMax = "1.8"))
+		meta = (ClampMin = "0.0", ClampMax = "1.8", UIMin = "0.4", UIMax = "1.8"))
 	double GlassRebate = 0.9;
 
 	/** Upstand the sash rollers ride on, standing proud of the frame's sill member, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "0.8", UIMax = "3.0"))
+		meta = (ClampMin = "0.0", ClampMax = "3.0", UIMin = "0.8", UIMax = "3.0"))
 	double TrackUpstand = 1.5;
 
 	/** Width of one track section, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.1", UIMin = "0.3", UIMax = "1.5"))
+		meta = (ClampMin = "0.1", ClampMax = "1.5", UIMin = "0.3", UIMax = "1.5"))
 	double TrackWidth = 0.6;
 
 	/** How far the catch on the meeting stile stands proud, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "0.5", UIMax = "3.0"))
+		meta = (ClampMin = "0.0", ClampMax = "3.0", UIMin = "0.5", UIMax = "3.0"))
 	double HandleProjection = 1.2;
 
 	/** Width of the catch across the stile, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.1", UIMin = "1.0", UIMax = "4.0"))
+		meta = (ClampMin = "0.1", ClampMax = "4.0", UIMin = "1.0", UIMax = "4.0"))
 	double HandleWidth = 1.6;
 
 	/** Height of the catch up the stile, in centimetres. The only part of the window anybody touches. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.1", UIMin = "4.0", UIMax = "20.0"))
+		meta = (ClampMin = "0.1", ClampMax = "20.0", UIMin = "4.0", UIMax = "20.0"))
 	double HandleHeight = 8.0;
 
 	/**
@@ -166,12 +169,12 @@ struct HOUSEFORGE_API FHFSlidingWindowParams
 	 * same question, so they cannot disagree and leave a framed hole.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "1.0", UIMin = "10.0", UIMax = "60.0"))
+		meta = (ClampMin = "1.0", ClampMax = "60.0", UIMin = "10.0", UIMax = "60.0"))
 	double MinSashWidth = 20.0;
 
 	/** Shortest sash worth building, in centimetres. Below it the window is fixed glazing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "1.0", UIMin = "10.0", UIMax = "60.0"))
+		meta = (ClampMin = "1.0", ClampMax = "60.0", UIMin = "10.0", UIMax = "60.0"))
 	double MinSashHeight = 25.0;
 
 	/** Clear width inside the outer frame - what the sashes actually have to fill. */
@@ -183,6 +186,13 @@ struct HOUSEFORGE_API FHFSlidingWindowParams
 		return OpeningWidth - FrameFace * 2.0 >= MinSashWidth * 2.0
 			&& OpeningHeight - FrameFace * 2.0 >= MinSashHeight;
 	}
+
+	/**
+	 * A copy with the section made to close.
+	 *
+	 * @see FHFOpeningBuildParams::Sanitised for why this exists at all.
+	 */
+	FHFSlidingWindowParams Sanitised(double OpeningWidth, double OpeningHeight) const;
 };
 
 /**
@@ -200,12 +210,12 @@ struct HOUSEFORGE_API FHFVentilatorParams
 
 	/** Outer frame depth front to back, in centimetres. 60 mm is the commodity uPVC section. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "1.0", UIMin = "3.0", UIMax = "12.0"))
+		meta = (ClampMin = "1.0", ClampMax = "12.0", UIMin = "3.0", UIMax = "12.0"))
 	double FrameDepth = 6.0;
 
 	/** How far the frame eats into the clear opening on each side, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "2.0", UIMax = "6.0"))
+		meta = (ClampMin = "0.5", ClampMax = "6.0", UIMin = "2.0", UIMax = "6.0"))
 	double FrameFace = 3.5;
 
 	/**
@@ -214,22 +224,22 @@ struct HOUSEFORGE_API FHFVentilatorParams
 	 * IS practice is 20/25/30 mm by opening size; a ventilator is at the small end of that, so 25.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "1.5", UIMax = "4.0"))
+		meta = (ClampMin = "0.5", ClampMax = "4.0", UIMin = "1.5", UIMax = "4.0"))
 	double SashThickness = 2.5;
 
 	/** Sight line of the sash stiles and rails around the pane, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "2.0", UIMax = "6.0"))
+		meta = (ClampMin = "0.5", ClampMax = "6.0", UIMin = "2.0", UIMax = "6.0"))
 	double SashFaceWidth = 3.0;
 
 	/** Pane thickness, in centimetres. 4 mm, as a ventilator pane or a louvre blade is. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.1", UIMin = "0.3", UIMax = "0.8"))
+		meta = (ClampMin = "0.1", ClampMax = "0.8", UIMin = "0.3", UIMax = "0.8"))
 	double GlassThickness = 0.4;
 
 	/** How far the pane runs under the frame all round, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "0.3", UIMax = "1.5"))
+		meta = (ClampMin = "0.0", ClampMax = "1.5", UIMin = "0.3", UIMax = "1.5"))
 	double GlassRebate = 0.6;
 
 	/**
@@ -244,27 +254,27 @@ struct HOUSEFORGE_API FHFVentilatorParams
 
 	/** How far the pull on the bottom rail stands proud, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", UIMin = "0.5", UIMax = "4.0"))
+		meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.5", UIMax = "4.0"))
 	double PullProjection = 1.5;
 
 	/** Width of that pull along the rail, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.1", UIMin = "3.0", UIMax = "15.0"))
+		meta = (ClampMin = "0.1", ClampMax = "15.0", UIMin = "3.0", UIMax = "15.0"))
 	double PullWidth = 6.0;
 
 	/** Height of that pull, in centimetres. How a ventilator this high up is reached at all. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.1", UIMin = "0.8", UIMax = "4.0"))
+		meta = (ClampMin = "0.1", ClampMax = "4.0", UIMin = "0.8", UIMax = "4.0"))
 	double PullHeight = 1.4;
 
 	/** Narrowest sash worth building, in centimetres. Below it the ventilator is fixed glazing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "1.0", UIMin = "10.0", UIMax = "60.0"))
+		meta = (ClampMin = "1.0", ClampMax = "60.0", UIMin = "10.0", UIMax = "60.0"))
 	double MinSashWidth = 20.0;
 
 	/** Shortest sash worth building, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "1.0", UIMin = "10.0", UIMax = "60.0"))
+		meta = (ClampMin = "1.0", ClampMax = "60.0", UIMin = "10.0", UIMax = "60.0"))
 	double MinSashHeight = 25.0;
 
 	/** True when the opening can carry an opening sash rather than being glazed shut. */
@@ -273,6 +283,9 @@ struct HOUSEFORGE_API FHFVentilatorParams
 		return OpeningWidth - FrameFace * 2.0 >= MinSashWidth
 			&& OpeningHeight - FrameFace * 2.0 >= MinSashHeight;
 	}
+
+	/** @see FHFOpeningBuildParams::Sanitised */
+	FHFVentilatorParams Sanitised(double OpeningWidth, double OpeningHeight) const;
 };
 
 /**
@@ -288,17 +301,17 @@ struct HOUSEFORGE_API FHFFixedWindowParams
 
 	/** Frame depth front to back, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "1.0", UIMin = "3.0", UIMax = "15.0"))
+		meta = (ClampMin = "1.0", ClampMax = "15.0", UIMin = "3.0", UIMax = "15.0"))
 	double FrameDepth = 6.0;
 
 	/** How far the frame eats into the clear opening on each side, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.5", UIMin = "3.0", UIMax = "10.0"))
+		meta = (ClampMin = "0.5", ClampMax = "10.0", UIMin = "3.0", UIMax = "10.0"))
 	double FrameFace = 5.0;
 
 	/** Pane thickness, in centimetres. A solid, never a plane, or refraction reads wrong. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.1", UIMin = "0.4", UIMax = "2.5"))
+		meta = (ClampMin = "0.1", ClampMax = "2.5", UIMin = "0.4", UIMax = "2.5"))
 	double GlassThickness = 0.8;
 
 	/**
@@ -308,8 +321,11 @@ struct HOUSEFORGE_API FHFFixedWindowParams
 	 * window. A sliding unit never gets one whatever this says: its meeting stiles are the mullion.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "1.0", UIMin = "60.0", UIMax = "300.0"))
+		meta = (ClampMin = "1.0", ClampMax = "300.0", UIMin = "60.0", UIMax = "300.0"))
 	double MullionAboveWidth = 120.0;
+
+	/** @see FHFOpeningBuildParams::Sanitised */
+	FHFFixedWindowParams Sanitised(double OpeningWidth, double OpeningHeight) const;
 };
 
 /**
@@ -335,4 +351,34 @@ struct HOUSEFORGE_API FHFOpeningBuildParams
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFFixedWindowParams FixedWindow;
+
+	/**
+	 * A copy in which every figure is compatible with every other figure, for this opening.
+	 *
+	 * ClampMin and ClampMax bound each field on its own, and that is all they can do. Every rule that
+	 * actually keeps a unit well formed is a rule BETWEEN two fields, and no amount of metadata can
+	 * state one:
+	 *
+	 *   - the glazing rebate must be shallower than the sash section it is cut into, or the pane is
+	 *     wider than the sash that holds it and stands out through the frame into the reveal;
+	 *   - the track pitch must exceed the sash depth, or the two sashes occupy the same band of the
+	 *     wall and the running one passes bodily through the fixed one as it opens;
+	 *   - the outer frame must be deeper than the tracks and sashes it contains, or they stand proud
+	 *     of it into the room;
+	 *   - the frame face and the leaf gap are subtracted from the opening on every side, so either
+	 *     one, taken far enough, leaves nothing - and AppendBox declines a non-positive box, so what
+	 *     the artist sees is not a warning but a pane, or a whole door leaf, that is simply absent.
+	 *
+	 * Each of those is reachable with two values that are individually inside their own clamps. This
+	 * is where they are reconciled, and it is the same answer the joinery kit reached with its
+	 * SanitiseShutter/SanitisePlinth family - the opening params were the half of the codebase that
+	 * had not caught up.
+	 *
+	 * Sanitising here rather than at the settings page is deliberate. Values loaded from an ini go
+	 * straight into the UPROPERTY without passing through the details panel, so ClampMin and ClampMax
+	 * never see them; and BuildParams is editable per actor, so the settings page is not the only way
+	 * in. The generator is the one place every route converges, and it is still a pure function of
+	 * its arguments - see .claude/rules/04-conventions.md.
+	 */
+	FHFOpeningBuildParams Sanitised(double OpeningWidth, double OpeningHeight) const;
 };

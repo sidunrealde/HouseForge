@@ -421,7 +421,7 @@ FDynamicMesh3 FHFGenerators::GenerateColumn(const FHFColumn& Column)
 }
 
 FDynamicMesh3 FHFGenerators::GenerateDoorLeaf(const FHFOpening& Opening, double SwingSign,
-	const FHFDoorParams& Params)
+	const FHFDoorParams& InParams)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -430,6 +430,10 @@ FDynamicMesh3 FHFGenerators::GenerateDoorLeaf(const FHFOpening& Opening, double 
 	{
 		return Mesh;
 	}
+
+	// Reconciled against this opening before anything is measured from them, because a gap wider
+	// than the opening does not thin the leaf, it deletes it.
+	const FHFDoorParams Params = InParams.Sanitised(Opening.Width, Opening.Height);
 
 	// Leaf-local space: the pivot is the origin, the leaf runs along +X to the far jamb, its
 	// thickness sits on Y and its height on Z from the sill. Generating it here rather than in
@@ -688,13 +692,18 @@ namespace
 }
 
 void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& Wall,
-	TArray<FHFMeshPart>& OutParts, const FHFOpeningBuildParams& Params)
+	TArray<FHFMeshPart>& OutParts, const FHFOpeningBuildParams& InParams)
 {
 	const FWallFrame Frame = MakeWallFrame(Wall.Start, Wall.End);
 	if (!Frame.bValid || Opening.Width <= 0.0 || Opening.Height <= 0.0)
 	{
 		return;
 	}
+
+	// Sanitised against the same opening as GenerateOpeningFixedInfill, so the two agree about where
+	// the frame ends and whether this unit has sashes at all. They ask HasSashes separately, and a
+	// disagreement would leave a framed hole with no glass in it.
+	const FHFOpeningBuildParams Params = InParams.Sanitised(Opening.Width, Opening.Height);
 
 	const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
 	const bool bHasSash =
@@ -843,7 +852,7 @@ FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, co
 }
 
 FDynamicMesh3 FHFGenerators::GenerateOpeningFixedInfill(const FHFOpening& Opening, const FHFWall& Wall,
-	const FHFOpeningBuildParams& Params)
+	const FHFOpeningBuildParams& InParams)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -853,6 +862,10 @@ FDynamicMesh3 FHFGenerators::GenerateOpeningFixedInfill(const FHFOpening& Openin
 	{
 		return Mesh;
 	}
+
+	// The same reconciliation BuildOpeningParts does, on the same opening, so the pair cannot
+	// disagree about the frame face or about whether the sashes carry the glass.
+	const FHFOpeningBuildParams Params = InParams.Sanitised(Opening.Width, Opening.Height);
 
 	// An archway is a hole and nothing else, and a door's only infill is its leaf, which moves.
 	if (Opening.Kind == EHFOpeningKind::Archway ||

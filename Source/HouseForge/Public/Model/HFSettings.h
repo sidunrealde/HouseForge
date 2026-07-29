@@ -21,6 +21,29 @@
  * exposing them would only offer a user a way to break their geometry.
  *
  *
+ * WHAT EACH SECTION REACHES TODAY
+ * -------------------------------
+ * A settings page is a promise, so it is worth writing down which of these promises the plugin can
+ * currently keep. Openings and Validation are wired end to end: an opening actor is seeded from
+ * this page whenever the house composes it or a value changes here, and every entry point that
+ * validates a spec asks this page for its limits.
+ *
+ * The Joinery section is not, and cannot yet be. Its figures resolve into FHFJoineryDefaults and
+ * stamp themselves onto the kit's parameter structs correctly - that is tested - but nothing in the
+ * plugin composes a fixture out of the joinery kit yet, so there is no actor for them to reach. The
+ * kit is exercised only by its tests. Until fixtures exist, changing a figure under Joinery changes
+ * nothing you can see in a level, and that is a statement of fact rather than a defect in the
+ * plumbing: when the fixture actor lands it seeds itself from here exactly as AHFOpeningActor does,
+ * and no figure below has to move.
+ *
+ * Four of them go further and are inert even against the kit: ShelfThicknessPly, ShelfThicknessGlass,
+ * MaxShelfSpanPly and MaxShelfSpanGlass. SanitiseShelfStack resolves a shelf's material to its own
+ * compiled-in figures through a zero sentinel, and ApplyTo deliberately leaves that sentinel alone -
+ * writing the ply figure over it would generate an 18 mm glass shelf. Honouring these four means
+ * giving SanitiseShelfStack the pair as an argument, which is a change to the kit rather than to
+ * this page.
+ *
+ *
  * WHERE THE VALUES LIVE, and why this specifier
  * ---------------------------------------------
  * `config=HouseForge` names a config branch of the plugin's own, NOT Engine and NOT Game. UE's
@@ -83,32 +106,32 @@ public:
 
 	/** Carcass side, top, bottom and partition board, in centimetres. 18 mm faced ply. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Board Thickness",
-		meta = (ClampMin = "0.1", UIMin = "0.6", UIMax = "3.0"))
+		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.6", UIMax = "3.0"))
 	double CarcassBoardThickness = 1.8;
 
 	/** Finished shutter leaf, in centimetres: 18 mm ply plus a laminate on each face. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Board Thickness",
-		meta = (ClampMin = "0.1", UIMin = "0.9", UIMax = "3.0"))
+		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.9", UIMax = "3.0"))
 	double ShutterLeafThickness = 1.9;
 
 	/** Drawer front, in centimetres. Built the same way as a shutter leaf. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Board Thickness",
-		meta = (ClampMin = "0.1", UIMin = "0.9", UIMax = "3.0"))
+		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.9", UIMax = "3.0"))
 	double DrawerFrontThickness = 1.9;
 
 	/** Drawer box side, in centimetres: 12 mm ply, or the 13 mm side of a metal box. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Board Thickness",
-		meta = (ClampMin = "0.1", UIMin = "0.6", UIMax = "2.0"))
+		meta = (ClampMin = "0.1", ClampMax = "2.0", UIMin = "0.6", UIMax = "2.0"))
 	double DrawerBoxSideThickness = 1.2;
 
 	/** Drawer box bottom, in centimetres. Grooved in above the bottom of the sides. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Board Thickness",
-		meta = (ClampMin = "0.1", UIMin = "0.3", UIMax = "1.8"))
+		meta = (ClampMin = "0.1", ClampMax = "1.8", UIMin = "0.3", UIMax = "1.8"))
 	double DrawerBoxBottomThickness = 0.6;
 
 	/** Plinth board, in centimetres. 18 faced ply, or 6 for ply clad in aluminium in a wet kitchen. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Board Thickness",
-		meta = (ClampMin = "0.1", UIMin = "0.6", UIMax = "3.0"))
+		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.6", UIMax = "3.0"))
 	double PlinthPanelThickness = 1.8;
 
 	// ============================================================ joinery: reveals & clearances
@@ -121,34 +144,34 @@ public:
 	 * also what a hinged leaf needs in order to swing past its neighbour at all.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Reveals and Clearances",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
+		meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	double ShutterRevealGap = 0.3;
 
 	/** The same shadow line between one drawer front and the next, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Reveals and Clearances",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
+		meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	double DrawerRevealGap = 0.3;
 
 	/** Gap a hinge leaves between a closed leaf's back and the carcass front edges, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Reveals and Clearances",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
+		meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	double ShutterBackClearance = 0.1;
 
 	/** The same behind a drawer front, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Reveals and Clearances",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
+		meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	double DrawerBackClearance = 0.1;
 
 	/** How far a shelf front sits behind the carcass front plane, in centimetres, clear of a shutter. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Reveals and Clearances",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "5.0"))
+		meta = (ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
 	double ShelfFrontSetback = 1.0;
 
 	// ======================================================================== joinery: toe kick
 
 	/** Height the carcass stands off the floor on, in centimetres. 10 in a kitchen, 8 under a TV unit. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Plinth",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "20.0"))
+		meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "0.0", UIMax = "20.0"))
 	double PlinthHeight = 10.0;
 
 	/**
@@ -158,24 +181,24 @@ public:
 	 * puts the base in its own shadow so the carcass appears to float. 5 to 8 in real Indian work.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Plinth",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "15.0"))
+		meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "0.0", UIMax = "15.0"))
 	double PlinthFrontRecess = 5.0;
 
 	/** The same setback at an end on show, in centimetres. An end dying into a wall keeps its width. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Plinth",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "15.0"))
+		meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "0.0", UIMax = "15.0"))
 	double PlinthEndRecess = 5.0;
 
 	// ========================================================================= joinery: cornice
 
 	/** Front-to-back depth of the moulding, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Cornice",
-		meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "15.0"))
+		meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "1.0", UIMax = "15.0"))
 	double CorniceDepth = 4.5;
 
 	/** Height of the moulding, in centimetres. 6 caps a kitchen wall unit; 7.5 tops a wardrobe. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Cornice",
-		meta = (ClampMin = "0.0", UIMin = "2.0", UIMax = "20.0"))
+		meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "2.0", UIMax = "20.0"))
 	double CorniceHeight = 6.0;
 
 	/**
@@ -185,12 +208,12 @@ public:
 	 * what throws the shadow line that reads as a capped run.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Cornice",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "10.0"))
+		meta = (ClampMin = "0.0", ClampMax = "10.0", UIMin = "0.0", UIMax = "10.0"))
 	double CorniceProjection = 2.5;
 
 	/** Size of the front-underside feature, in centimetres: the splay leg, the cove radius, the step. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Cornice",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "10.0"))
+		meta = (ClampMin = "0.0", ClampMax = "10.0", UIMin = "0.0", UIMax = "10.0"))
 	double CorniceProfileSize = 2.0;
 
 	/**
@@ -200,49 +223,49 @@ public:
 	 * a cornice sits at eye level in every walkthrough - see .claude/rules/04-conventions.md.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Cornice",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
+		meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	double CorniceEdgeBevel = 0.2;
 
 	// ============================================================ joinery: shelving and hanging
 
 	/** Compartment height the shelf ladder aims for, in centimetres. A shoe rack wants 18. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "1.0", UIMin = "15.0", UIMax = "60.0"))
+		meta = (ClampMin = "1.0", ClampMax = "60.0", UIMin = "15.0", UIMax = "60.0"))
 	double TargetShelfSpacing = 37.5;
 
 	/** Below this a compartment holds nothing a wardrobe is for, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "1.0", UIMin = "10.0", UIMax = "60.0"))
+		meta = (ClampMin = "1.0", ClampMax = "60.0", UIMin = "10.0", UIMax = "60.0"))
 	double MinUsefulCompartment = 30.0;
 
 	/** Ply shelf board, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "0.1", UIMin = "0.6", UIMax = "3.0"))
+		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.6", UIMax = "3.0"))
 	double ShelfThicknessPly = 1.8;
 
 	/** Toughened glass shelf, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "0.1", UIMin = "0.4", UIMax = "1.5"))
+		meta = (ClampMin = "0.1", ClampMax = "1.5", UIMin = "0.4", UIMax = "1.5"))
 	double ShelfThicknessGlass = 0.8;
 
 	/** How far a ply shelf spans before it sags on camera, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "1.0", UIMin = "40.0", UIMax = "150.0"))
+		meta = (ClampMin = "1.0", ClampMax = "150.0", UIMin = "40.0", UIMax = "150.0"))
 	double MaxShelfSpanPly = 90.0;
 
 	/** The same for toughened glass, which sags sooner and more visibly, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "1.0", UIMin = "30.0", UIMax = "120.0"))
+		meta = (ClampMin = "1.0", ClampMax = "120.0", UIMin = "30.0", UIMax = "120.0"))
 	double MaxShelfSpanGlass = 60.0;
 
 	/** Hanging rail tube diameter, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "0.1", UIMin = "1.2", UIMax = "5.0"))
+		meta = (ClampMin = "0.1", ClampMax = "5.0", UIMin = "1.2", UIMax = "5.0"))
 	double HangingRailDiameter = 2.5;
 
 	/** Rail centre below the top of its compartment, in centimetres. A hanger needs 65 mm to lift off. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "0.0", UIMin = "3.0", UIMax = "20.0"))
+		meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "3.0", UIMax = "20.0"))
 	double HangingRailDrop = 6.5;
 
 	/**
@@ -255,14 +278,14 @@ public:
 	 * with the rail omitted rather than with a rail nothing fits under.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shelving",
-		meta = (ClampMin = "0.0", UIMin = "60.0", UIMax = "160.0"))
+		meta = (ClampMin = "0.0", ClampMax = "160.0", UIMin = "60.0", UIMax = "160.0"))
 	double MinHangingClearance = 90.0;
 
 	// ======================================================================== joinery: shutters
 
 	/** Bay width one shutter closes, in centimetres. 60 is where a hinged leaf starts to sag. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shutters",
-		meta = (ClampMin = "1.0", UIMin = "25.0", UIMax = "90.0"))
+		meta = (ClampMin = "1.0", ClampMax = "90.0", UIMin = "25.0", UIMax = "90.0"))
 	double ShutterModuleWidth = 45.0;
 
 	/** Swing at open amount 1, in degrees. Concealed hinges open 100-110, not 90. */
@@ -272,12 +295,12 @@ public:
 
 	/** Width of the frame members around a pane in a glazed leaf, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shutters",
-		meta = (ClampMin = "0.1", UIMin = "2.0", UIMax = "15.0"))
+		meta = (ClampMin = "0.1", ClampMax = "15.0", UIMin = "2.0", UIMax = "15.0"))
 	double GlazedShutterStileWidth = 6.0;
 
 	/** Pane thickness in a glazed leaf, in centimetres. A real solid, never a plane. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shutters",
-		meta = (ClampMin = "0.1", UIMin = "0.3", UIMax = "1.2"))
+		meta = (ClampMin = "0.1", ClampMax = "1.2", UIMin = "0.3", UIMax = "1.2"))
 	double ShutterGlassThickness = 0.5;
 
 	// ======================================================================= validation limits
