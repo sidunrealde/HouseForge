@@ -605,6 +605,102 @@ bool FHFValidatorColumnInOpeningTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A fixture standing in front of an opening.
+ *
+ * The same misread as a column in a doorway, one layer out, and until now nothing looked for it: a
+ * wardrobe and a window are drawn on different layers and read as separate things. It went unnoticed
+ * because a fixed pane behind a wardrobe merely looks odd. A sliding sash behind one cannot be
+ * opened - its catch is inside the cupboard - so the reference flat's own east bedroom window had to
+ * move before its sashes meant anything.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorFixtureInOpeningTest, "HouseForge.Model.Validator.FixtureInOpening", HF_TEST_FLAGS)
+
+bool FHFValidatorFixtureInOpeningTest::RunTest(const FString& Parameters)
+{
+	// W_South runs from (0,0) to (400,0). Turn D1 into a window so the height test has something to
+	// say: 120 wide at offset 200 on a 90 sill, so it spans 140..260 along the wall and 90..225 up.
+	auto SpecWithWardrobeAt = [](const FVector2D& Position, double BaseZ = 0.0, double Height = 240.0)
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		Spec.Openings[0].Kind = EHFOpeningKind::SlidingWindow;
+		Spec.Openings[0].Swing = EHFSwing::None;
+		Spec.Openings[0].Width = 120.0;
+		Spec.Openings[0].SillHeight = 90.0;
+		Spec.Openings[0].Height = 135.0;
+
+		FHFFixture Wardrobe = MakeFixture(TEXT("F_Wardrobe"), EHFFixtureType::Wardrobe, Position);
+		Wardrobe.Footprint = FVector2D(180.0, 60.0);
+		Wardrobe.BaseZ = BaseZ;
+		Wardrobe.Height = Height;
+		Spec.Fixtures.Add(Wardrobe);
+
+		return Spec;
+	};
+
+	// Standing against the wall with its back on the inner face at Y=5.75, centred on the window.
+	ExpectIssue(*this, SpecWithWardrobeAt(FVector2D(200.0, 35.75)),
+		TEXT("OpeningBlockedByFixture"), EHFValidationSeverity::Warning);
+
+	// The message has to be actionable: which fixture, which opening, and how much of it.
+	{
+		const FHFValidationResult Result = FHFSpecValidator::Validate(SpecWithWardrobeAt(FVector2D(200.0, 35.75)));
+		const FHFValidationIssue* Issue = Result.Issues.FindByPredicate(
+			[](const FHFValidationIssue& I) { return I.Code == TEXT("OpeningBlockedByFixture"); });
+
+		if (TestNotNull(TEXT("The obstruction is reported"), Issue))
+		{
+			TestTrue(TEXT("The message names the fixture"), Issue->Message.Contains(TEXT("F_Wardrobe")));
+			TestTrue(TEXT("The message names the opening"), Issue->Message.Contains(TEXT("D1")));
+			// The whole 120 of width and the whole 135 of height: a wardrobe taller than the head.
+			TestTrue(TEXT("The message quantifies the obstruction"), Issue->Message.Contains(TEXT("120.0")));
+		}
+	}
+
+	// Along the same wall but well clear of the opening.
+	TestFalse(TEXT("A wardrobe elsewhere along the wall is not reported"),
+		FHFSpecValidator::Validate(SpecWithWardrobeAt(FVector2D(20.0, 35.75)))
+			.Contains(TEXT("OpeningBlockedByFixture")));
+
+	// In front of the window in plan, but out in the middle of the room and anchored to nothing.
+	// A bed two metres from a window is in the photograph and in nobody's way.
+	TestFalse(TEXT("A fixture standing off the wall is not reported"),
+		FHFSpecValidator::Validate(SpecWithWardrobeAt(FVector2D(200.0, 200.0)))
+			.Contains(TEXT("OpeningBlockedByFixture")));
+
+	// Below the sill: base units under a window are the whole point of a kitchen.
+	TestFalse(TEXT("A run that stops below the sill is not reported"),
+		FHFSpecValidator::Validate(SpecWithWardrobeAt(FVector2D(200.0, 35.75), /*BaseZ*/ 0.0, /*Height*/ 85.0))
+			.Contains(TEXT("OpeningBlockedByFixture")));
+
+	// Above the head: a pelmet sits on a window head by design, and so does a boxed-in AC unit.
+	TestFalse(TEXT("A pelmet above the head is not reported"),
+		FHFSpecValidator::Validate(SpecWithWardrobeAt(FVector2D(200.0, 35.75), /*BaseZ*/ 235.0, /*Height*/ 20.0))
+			.Contains(TEXT("OpeningBlockedByFixture")));
+
+	// A position read off a plan is not exact. A fixture that says which wall it stands against is
+	// against it, even when its footprint is drawn a few centimetres proud of the face - which is
+	// how the reference flat's TV unit came to sit in front of a balcony door unnoticed.
+	{
+		FHFHouseSpec Spec = SpecWithWardrobeAt(FVector2D(200.0, 45.0));
+		TestFalse(TEXT("Drawn proud of the wall and anchored to nothing, it is not reported"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("OpeningBlockedByFixture")));
+
+		Spec.Fixtures.Last().AnchorWallId = TEXT("W_South");
+		TestTrue(TEXT("The same fixture anchored to that wall is reported"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("OpeningBlockedByFixture")));
+	}
+
+	// The threshold is a project convention, not a law: a run drawn hard against a jamb shares an
+	// edge with it and is normal construction. Its far edge lands at 140, where the window starts.
+	TestFalse(TEXT("A run abutting the jamb is not reported"),
+		FHFSpecValidator::Validate(SpecWithWardrobeAt(FVector2D(50.0, 35.75)))
+			.Contains(TEXT("OpeningBlockedByFixture")));
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

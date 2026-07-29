@@ -559,6 +559,106 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 		}
 	}
 
+	// A fixture standing in front of an opening.
+	//
+	// The same misread as a column in a doorway, one layer out: a wardrobe against the east wall and
+	// a window in the east wall are drawn as separate things and read as separate things, and until
+	// now nothing noticed that one was in front of the other. A wall solid is swept against; a
+	// fixture never was.
+	//
+	// It matters more since a window became a sliding unit with a catch somebody reaches for. Fixed
+	// glazing behind a wardrobe merely looks odd; a sash behind one cannot be opened at all, and the
+	// window photographs as a cabinet.
+	{
+		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+		const double Obstruction = (ScaleToCm > 0.0) ? Limits.MinOpeningObstructionCm / ScaleToCm : 0.0;
+
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+			if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER ||
+				Opening.Width <= 0.0 || Opening.Height <= 0.0)
+			{
+				continue;
+			}
+
+			const FVector2D Direction = (Wall->End - Wall->Start) / Wall->Length();
+			const FVector2D Normal(-Direction.Y, Direction.X);
+			const double HalfThickness = Wall->Thickness * 0.5;
+
+			const double OpeningMin = Opening.OffsetAlongWall - Opening.Width * 0.5;
+			const double OpeningMax = Opening.OffsetAlongWall + Opening.Width * 0.5;
+			const double SillZ = Wall->BaseZ + Opening.SillHeight;
+			const double HeadZ = SillZ + Opening.Height;
+
+			for (const FHFFixture& Fixture : Spec.Fixtures)
+			{
+				// A ceiling-mounted fixture measures its BaseZ down from the ceiling rather than up
+				// from the floor, so its height range cannot be compared with a sill without the room
+				// it hangs in. Nothing that hangs from a ceiling stands in front of a window anyway.
+				if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0 || Fixture.Height <= 0.0
+					|| Fixture.IsCeilingMounted())
+				{
+					continue;
+				}
+
+				double AlongMin = TNumericLimits<double>::Max();
+				double AlongMax = -TNumericLimits<double>::Max();
+				double AcrossMin = TNumericLimits<double>::Max();
+				double AcrossMax = -TNumericLimits<double>::Max();
+
+				for (const FVector2D& Corner : FootprintCorners(Fixture))
+				{
+					const FVector2D Relative = Corner - Wall->Start;
+					const double Along = FVector2D::DotProduct(Relative, Direction);
+					const double Across = FVector2D::DotProduct(Relative, Normal);
+
+					AlongMin = FMath::Min(AlongMin, Along);
+					AlongMax = FMath::Max(AlongMax, Along);
+					AcrossMin = FMath::Min(AcrossMin, Across);
+					AcrossMax = FMath::Max(AcrossMax, Across);
+				}
+
+				// It has to be standing against THIS wall. A dining table out in the middle of the
+				// room is in front of the window in a photograph and in nobody's way in fact.
+				//
+				// Two ways of being against it, because a position read off a plan is not exact: the
+				// fixture says so, or its footprint reaches the wall's own slab. The declaration is
+				// what catches the near miss - the reference flat's TV unit is anchored to the south
+				// wall and drawn 60 mm proud of its face, which is a rounding on a drawing and still
+				// a cabinet in front of whatever is behind it.
+				const bool bAgainstThisWall =
+					(!Fixture.AnchorWallId.IsNone() && Fixture.AnchorWallId == Wall->Id) ||
+					(AcrossMin <= HalfThickness && AcrossMax >= -HalfThickness);
+
+				if (!bAgainstThisWall)
+				{
+					continue;
+				}
+
+				const double AlongOverlap =
+					FMath::Min(AlongMax, OpeningMax) - FMath::Max(AlongMin, OpeningMin);
+				const double UpOverlap =
+					FMath::Min(Fixture.BaseZ + Fixture.Height, HeadZ) - FMath::Max(Fixture.BaseZ, SillZ);
+
+				// Both, or a pelmet sitting on a window head and a base unit stopping at a sill would
+				// each read as an obstruction rather than as the neat detail they are.
+				if (AlongOverlap <= Obstruction || UpOverlap <= Obstruction)
+				{
+					continue;
+				}
+
+				const double Covered = (AlongOverlap * UpOverlap) / (Opening.Width * Opening.Height);
+
+				Result.Add(EHFValidationSeverity::Warning, TEXT("OpeningBlockedByFixture"), Opening.Id,
+					FString::Printf(TEXT("Fixture '%s' stands across %.0f%% of opening '%s': %.1f cm of its %.1f cm width and %.1f cm of its %.1f cm height. Move one clear of the other, or split the run around the opening."),
+						*Describe(Fixture.Id), Covered * 100.0, *Describe(Opening.Id),
+						AlongOverlap * ScaleToCm, Opening.Width * ScaleToCm,
+						UpOverlap * ScaleToCm, Opening.Height * ScaleToCm));
+			}
+		}
+	}
+
 	// -------------------------------------------------------------------------------- walls
 	for (const FHFWall& Wall : Spec.Walls)
 	{

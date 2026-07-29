@@ -104,6 +104,18 @@ struct HOUSEFORGE_API FHFValidationLimits
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
 		meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.25"))
 	double FixtureOverlapToleranceRatio = 0.05;
+
+	/**
+	 * How far a fixture may reach across an opening before it is called an obstruction, in centimetres.
+	 *
+	 * Measured in both directions at once: joinery drawn hard against a jamb or a head shares an edge
+	 * with the opening and is normal construction, so a bite has to have real extent along the wall
+	 * AND up it before anything is said. 5 cm is about a shutter's thickness - below that it is a
+	 * shared line read off a plan rather than a wardrobe in front of a window.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "30.0"))
+	double MinOpeningObstructionCm = 5.0;
 };
 
 /**
