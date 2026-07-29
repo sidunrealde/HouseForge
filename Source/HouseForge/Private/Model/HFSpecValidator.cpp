@@ -1,14 +1,12 @@
-// Copyright Siddartha G. All Rights Reserved.
+﻿// Copyright Siddartha G. All Rights Reserved.
 
 #include "Model/HFSpecValidator.h"
 
 namespace
 {
-	/** Minimum clear height under a false ceiling before the room becomes oppressive. */
-	constexpr double MinHeadroomCm = 210.0;
-
-	/** Fixture overlap below this fraction of the smaller footprint is treated as touching. */
-	constexpr double OverlapToleranceRatio = 0.05;
+	// The two thresholds that used to live here are now FHFValidationLimits, because they are
+	// project conventions rather than laws of geometry. Everything else this file checks is
+	// structural and stays hardcoded.
 
 	FString Describe(const FName& Id)
 	{
@@ -240,7 +238,8 @@ FString FHFValidationResult::ToString() const
 
 // -------------------------------------------------------------------------------- FHFSpecValidator
 
-FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
+FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
+	const FHFValidationLimits& Limits)
 {
 	FHFValidationResult Result;
 
@@ -438,11 +437,11 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 				FString::Printf(TEXT("Beam '%s' hangs %.1f below a soffit at %.1f; it would reach the floor."),
 					*Describe(Beam.Id), Beam.Depth, Beam.SoffitZ));
 		}
-		else if (Beam.ClearHeight() < MinHeadroomCm)
+		else if (Beam.ClearHeight() < Limits.MinHeadroomCm)
 		{
 			Result.Add(EHFValidationSeverity::Warning, TEXT("BeamLowHeadroom"), Beam.Id,
 				FString::Printf(TEXT("Beam '%s' leaves %.1f clear beneath it, below the %.0f usually treated as minimum headroom."),
-					*Describe(Beam.Id), Beam.ClearHeight(), MinHeadroomCm));
+					*Describe(Beam.Id), Beam.ClearHeight(), Limits.MinHeadroomCm));
 		}
 	}
 
@@ -760,11 +759,11 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 				FString::Printf(TEXT("False ceiling '%s' drops %.1f but room '%s' is only %.1f tall; it would land at or below the floor."),
 					*Describe(Ceiling.Id), Ceiling.Drop, *Describe(Room->Id), Room->CeilingHeight));
 		}
-		else if (Room->CeilingHeight - Ceiling.Drop < MinHeadroomCm)
+		else if (Room->CeilingHeight - Ceiling.Drop < Limits.MinHeadroomCm)
 		{
 			Result.Add(EHFValidationSeverity::Warning, TEXT("LowHeadroom"), Ceiling.Id,
 				FString::Printf(TEXT("False ceiling '%s' leaves %.1f clear in room '%s', below the %.0f usually treated as minimum headroom."),
-					*Describe(Ceiling.Id), Room->CeilingHeight - Ceiling.Drop, *Describe(Room->Id), MinHeadroomCm));
+					*Describe(Ceiling.Id), Room->CeilingHeight - Ceiling.Drop, *Describe(Room->Id), Limits.MinHeadroomCm));
 		}
 
 		const bool bNeedsBand =
@@ -952,7 +951,7 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec)
 			const double OverlapArea = Overlap.GetArea();
 			const double SmallerArea = FMath::Min(BoundsA.GetArea(), BoundsB.GetArea());
 
-			if (SmallerArea > 0.0 && (OverlapArea / SmallerArea) > OverlapToleranceRatio)
+			if (SmallerArea > 0.0 && (OverlapArea / SmallerArea) > Limits.FixtureOverlapToleranceRatio)
 			{
 				Result.Add(EHFValidationSeverity::Warning, TEXT("OverlappingFixtures"), A.Id,
 					FString::Printf(TEXT("Fixtures '%s' and '%s' overlap by %.0f%% of the smaller footprint and share a height range."),

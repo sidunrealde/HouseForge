@@ -1,0 +1,248 @@
+// Copyright Siddartha G. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Geometry/HFJoineryKit.h"
+#include "Geometry/HFOpeningParams.h"
+#include "Model/HFSpecValidator.h"
+#include "HFBuildDefaults.generated.h"
+
+/**
+ * The project's construction figures, as a plain value.
+ *
+ * This is the type that stands between UHFSettings and the generators, and the reason it exists is
+ * .claude/rules/04-conventions.md: every generator is a pure function, and a pure function may not
+ * reach for a settings singleton. Global state behind a generator would make its output depend on
+ * ini contents and on which test ran first, and would end the ability to test any of it headlessly.
+ *
+ * So the flow is one-directional and has exactly one place where the settings object is touched:
+ *
+ *     UHFSettings                 the user-editable object in Project Settings
+ *       -> Resolve()              read ONCE, in the composing layer
+ *       -> FHFBuildDefaults       this - plain, copyable, no UObject anywhere in it
+ *       -> ApplyTo(params)        stamps the figures onto a parameter struct
+ *       -> generator(params)      unchanged, still pure, still headlessly testable
+ *
+ * Default-constructed, it carries exactly the figures that were compiled in before any of this was
+ * overridable. That is what makes the whole change a no-op until somebody edits something, and it
+ * is asserted by HouseForge.Settings.DefaultsMatchTheConstantsTheyReplaced.
+ *
+ * A test that wants particular figures builds one of these by hand. No settings object need exist,
+ * and nothing here will go looking for one.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFJoineryDefaults
+{
+	GENERATED_BODY()
+
+	// ------------------------------------------------------------------- board & panel thickness
+
+	/** Carcass side, top, bottom and partition board. 18 mm faced ply. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CarcassBoardThickness = 1.8;
+
+	/** Finished shutter leaf: 18 mm ply plus a laminate on each face. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShutterLeafThickness = 1.9;
+
+	/** Drawer front, built the same way as a shutter leaf. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double DrawerFrontThickness = 1.9;
+
+	/** Drawer box side: 12 mm ply, or the 13 mm side of a metal box. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double DrawerBoxSideThickness = 1.2;
+
+	/** Drawer box bottom, grooved in above the bottom of the sides. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double DrawerBoxBottomThickness = 0.6;
+
+	// ------------------------------------------------------- reveals, shadow gaps and clearances
+
+	/**
+	 * Total gap between one shutter and the next, taken half from each side.
+	 *
+	 * The most load-bearing figure in the kit. Without it a run of shutters renders as one unbroken
+	 * slab, which is the clearest tell there is that joinery was generated rather than built.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShutterRevealGap = 0.3;
+
+	/** The same shadow line between one drawer front and the next. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double DrawerRevealGap = 0.3;
+
+	/** Gap a hinge leaves between a closed leaf's back and the carcass front edges. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShutterBackClearance = 0.1;
+
+	/** The same behind a drawer front. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double DrawerBackClearance = 0.1;
+
+	/** How far a shelf's front edge sits behind the carcass front plane, clear of a closing shutter. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShelfFrontSetback = 1.0;
+
+	// ------------------------------------------------------------------------- plinth / toe kick
+
+	/** Height the carcass stands off the floor on. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double PlinthHeight = 10.0;
+
+	/** Toe kick: how far the plinth front sits behind the shutter face. What makes a run float. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double PlinthFrontRecess = 5.0;
+
+	/** The same setback at an end on show. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double PlinthEndRecess = 5.0;
+
+	/** Plinth board. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double PlinthPanelThickness = 1.8;
+
+	// ------------------------------------------------------------------------ cornice / moulding
+
+	/** Front-to-back depth of the moulding. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CorniceDepth = 4.5;
+
+	/** Height of the moulding. 6 caps a kitchen wall unit; 7.5 tops a wardrobe. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CorniceHeight = 6.0;
+
+	/** How far the front face stands proud of the shutter face - the shadow line that reads as a cap. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CorniceProjection = 2.5;
+
+	/** Size of the front-underside feature: the splay leg, the cove radius, the step. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CorniceProfileSize = 2.0;
+
+	/** Chamfer on the exposed arrises. A sharp edge reads as CG under any lighting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CorniceEdgeBevel = 0.2;
+
+	// ------------------------------------------------------------------ shelving & hanging rails
+
+	/** Compartment height the shelf ladder aims for. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double TargetShelfSpacing = 37.5;
+
+	/** Below this a compartment holds nothing a wardrobe is for. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double MinUsefulCompartment = 30.0;
+
+	/** 18 mm faced ply. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShelfThicknessPly = 1.8;
+
+	/** 8 mm toughened. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShelfThicknessGlass = 0.8;
+
+	/** How far 18 ply spans before it sags on camera. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double MaxShelfSpanPly = 90.0;
+
+	/** The same for 8 mm toughened, which sags sooner and more visibly. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double MaxShelfSpanGlass = 60.0;
+
+	/** Hanging rail tube diameter. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double HangingRailDiameter = 2.5;
+
+	/** Rail centre below the top of its compartment - the clearance a hanger needs to lift off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double HangingRailDrop = 6.5;
+
+	/**
+	 * Clear height under a rail below which a rail is not fitted.
+	 *
+	 * The setting the user asked for by name. 90 is a short-hang bay, and the composed wardrobe's
+	 * hanging bay measures 90.8 - correct, but 8 mm of margin. A project that wants full-length
+	 * garments to hang needs 150 here, and until this was a setting there was no way to say so.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double MinHangingClearance = 90.0;
+
+	// -------------------------------------------------------------------------------- shutters
+
+	/** Bay width one shutter closes. 60 is where a hinged leaf starts to sag. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShutterModuleWidth = 45.0;
+
+	/** Swing at open amount 1. Concealed hinges open 100-110, not 90. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShutterOpenAngleDegrees = 100.0;
+
+	/** Width of the frame members around a pane in a glazed leaf. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double GlazedShutterStileWidth = 6.0;
+
+	/** Pane thickness in a glazed leaf. A real solid, never a plane. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ShutterGlassThickness = 0.5;
+
+	// --------------------------------------------------------------------------------- applying
+	//
+	// One overload per parameter struct. Each stamps ONLY the construction figures and never the
+	// dimensions - a plinth's Width and Depth, a shelf stack's Height, are what the composing layer
+	// is working out and would be destroyed by a blanket copy. Sentinel fields that mean "use the
+	// material's own" are left alone for the same reason.
+
+	void ApplyTo(FHFPlinthParams& Params) const;
+	void ApplyTo(FHFShutterParams& Params) const;
+	void ApplyTo(FHFCorniceParams& Params) const;
+	void ApplyTo(FHFShelfStackParams& Params) const;
+	void ApplyTo(FHFDrawerParams& Params) const;
+
+	/** A parameter struct with the project's figures already on it, ready for dimensions. */
+	template <typename ParamsType>
+	ParamsType Make() const
+	{
+		ParamsType Params;
+		ApplyTo(Params);
+		return Params;
+	}
+};
+
+/**
+ * Everything the project says about how its house is built.
+ *
+ * Held by value, copied freely, and the only thing the composing layer needs in hand before it can
+ * build parameter structs. Contains no UObject and reads no global state.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFBuildDefaults
+{
+	GENERATED_BODY()
+
+	/** Doors, sliding windows, ventilators and fixed glazing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFOpeningBuildParams Opening;
+
+	/** The joinery kit's construction figures. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFJoineryDefaults Joinery;
+
+	/** What the validator judges a spec against. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFValidationLimits Validation;
+
+	/**
+	 * The project's settings, resolved.
+	 *
+	 * THE ONE PLACE the settings object is read. Everything downstream takes the result by value.
+	 * Defined in HFSettings.cpp, because this header must stay usable - and this struct must stay
+	 * constructible - with no settings object anywhere in the picture.
+	 *
+	 * Safe before the settings CDO exists and safe in a headless commandlet: falls back to the
+	 * compiled-in defaults rather than failing, so a test that never mentions settings gets exactly
+	 * the figures it always got.
+	 */
+	static FHFBuildDefaults FromProjectSettings();
+};

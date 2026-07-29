@@ -282,15 +282,16 @@ namespace
 
 double FHFJoineryKit::DefaultShelfThickness(EHFShelfMaterial Material)
 {
-	return Material == EHFShelfMaterial::Glass ? 0.8 : 1.8;
+	return Material == EHFShelfMaterial::Glass ? GlassShelfThickness : PlyShelfThickness;
 }
 
 double FHFJoineryKit::DefaultMaxSpan(EHFShelfMaterial Material)
 {
-	return Material == EHFShelfMaterial::Glass ? 60.0 : 90.0;
+	return Material == EHFShelfMaterial::Glass ? GlassMaxSpan : PlyMaxSpan;
 }
 
-int32 FHFJoineryKit::ShelfCountForClearHeight(double ClearHeight, double TargetSpacing, double ShelfThickness)
+int32 FHFJoineryKit::ShelfCountForClearHeight(double ClearHeight, double TargetSpacing,
+	double ShelfThickness, double MinCompartment)
 {
 	if (ClearHeight <= 0.0)
 	{
@@ -298,14 +299,15 @@ int32 FHFJoineryKit::ShelfCountForClearHeight(double ClearHeight, double TargetS
 	}
 
 	const double Thickness = ShelfThickness > 0.0 ? ShelfThickness : DefaultShelfThickness(EHFShelfMaterial::Ply);
-	const double Target = TargetSpacing > 0.0 ? TargetSpacing : 37.5;
+	const double Target = TargetSpacing > 0.0 ? TargetSpacing : DefaultTargetShelfSpacing;
+	const double SmallestUseful = MinCompartment > 0.0 ? MinCompartment : MinUsefulCompartment;
 
 	// Whole compartments of about the target spacing. Each one past the first costs a shelf's
 	// thickness as well as its own clear height, which is why the thickness appears on both sides.
 	const int32 Compartments = FMath::Max(1, FMath::RoundToInt32((ClearHeight + Thickness) / (Target + Thickness)));
 
 	int32 Count = Compartments - 1;
-	while (Count > 0 && (ClearHeight - Count * Thickness) / (Count + 1) < MinUsefulCompartment)
+	while (Count > 0 && (ClearHeight - Count * Thickness) / (Count + 1) < SmallestUseful)
 	{
 		--Count;
 	}
@@ -372,8 +374,15 @@ FHFShelfStackParams FHFJoineryKit::SanitiseShelfStack(const FHFShelfStackParams&
 		// where a rail that came out anyway says neither.
 		const double ClearBelowRail = Compartment - Out.RailDrop;
 
+		// The floor a rail has to clear. Taken from the params so a project can raise it - 90 is a
+		// short-hang bay, and a wardrobe meant for full-length garments wants 150. Zero means the
+		// caller did not express a view, so the domain floor stands.
+		const double RequiredClearance = Out.MinHangingClearance > 0.0
+			? Out.MinHangingClearance
+			: MinHangingClearance;
+
 		if (Radius < MinRailRadius || Bays.Width <= 2.0 * RailFixingThickness
-			|| ClearBelowRail < MinHangingClearance)
+			|| ClearBelowRail < RequiredClearance)
 		{
 			// No room for a rail is a real answer. Saying so here rather than silently emitting
 			// nothing is what lets a caller - or a test - tell "too shallow" from "not asked for".

@@ -180,6 +180,21 @@ struct HOUSEFORGE_API FHFShelfStackParams
 	double RailDrop = 6.5;
 
 	/**
+	 * Clear height under the rail below which SanitiseShelfStack refuses to fit one, in centimetres.
+	 *
+	 * Carried on the params rather than read from a constant so a project can raise it: 90 is a
+	 * short-hang bay and the composed wardrobe clears it by 8 mm, which is correct but is not much
+	 * margin, and a project that wants full-length hanging needs 150 here. The default is exactly
+	 * FHFJoineryKit::MinHangingClearance, which stays the documented domain floor - a test asserts
+	 * the two agree, so this cannot drift away from it silently.
+	 *
+	 * Zero or less means "use the domain floor", so a params struct built by hand and left alone
+	 * behaves as it always did.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double MinHangingClearance = 90.0;
+
+	/**
 	 * Break the stack with a mid partition once a shelf would span further than its material takes.
 	 *
 	 * On by default, because the alternative is a shelf that visibly sags: a 1200 wardrobe bay is
@@ -819,9 +834,10 @@ public:
 	 * 1 shelf and 32.3 clear, which is the 310-330 the trade actually builds.
 	 *
 	 * @param ShelfThickness Zero to assume 18 ply.
+	 * @param MinCompartment Smallest compartment worth leaving. Zero takes MinUsefulCompartment.
 	 */
 	static int32 ShelfCountForClearHeight(double ClearHeight, double TargetSpacing = 37.5,
-		double ShelfThickness = 0.0);
+		double ShelfThickness = 0.0, double MinCompartment = 0.0);
 
 	/** 1.8 for ply, 0.8 for toughened glass. */
 	static double DefaultShelfThickness(EHFShelfMaterial Material);
@@ -831,6 +847,21 @@ public:
 
 	/** Below this a compartment holds nothing a wardrobe is for. Folded clothes need 300 mm. */
 	static constexpr double MinUsefulCompartment = 30.0;
+
+	/** Compartment height the shelf ladder aims for when nobody says otherwise. */
+	static constexpr double DefaultTargetShelfSpacing = 37.5;
+
+	/** 18 mm faced ply, the board this joinery is built from. */
+	static constexpr double PlyShelfThickness = 1.8;
+
+	/** 8 mm toughened, which is what a glass shelf is. */
+	static constexpr double GlassShelfThickness = 0.8;
+
+	/** How far 18 ply spans before it sags on camera. */
+	static constexpr double PlyMaxSpan = 90.0;
+
+	/** The same for 8 mm toughened glass, which sags sooner and more visibly. */
+	static constexpr double GlassMaxSpan = 60.0;
 
 	/**
 	 * Clear height below a hanging rail, under which nothing hangs. 900 mm is a short-hang bay.

@@ -1,4 +1,4 @@
-// Copyright Siddartha G. All Rights Reserved.
+﻿// Copyright Siddartha G. All Rights Reserved.
 
 #include "HFEditorSubsystem.h"
 
@@ -21,6 +21,9 @@
 #include "Misc/ScopeExit.h"
 #include "Model/HFSpecSerializer.h"
 #include "Model/HFSpecValidator.h"
+#include "Model/HFSettings.h"
+#include "Actors/HFElementActors.h"
+#include "Actors/HFOpeningActor.h"
 #include "UnrealEdGlobals.h"
 
 #include "Dom/JsonObject.h"
@@ -788,6 +791,89 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 
 	return FHFOperationResult::Ok(FString::Printf(
 		TEXT("Captured %dx%d top-down view to %s"), ToSave->SizeX, ToSave->SizeY, *OutPath));
+}
+
+// ------------------------------------------------------------------------------- settings
+
+void UHFEditorSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	// A settings page nothing listens to is a settings page that appears to do nothing. UDeveloperSettings
+	// broadcasts this from its own PostEditChangeProperty, so an edit in Project Settings reaches the
+	// open level immediately rather than waiting for somebody to rebuild the house by hand.
+	if (UHFSettings* Settings = GetMutableDefault<UHFSettings>())
+	{
+		SettingsChangedHandle = Settings->OnSettingChanged().AddUObject(
+			this, &UHFEditorSubsystem::HandleSettingsChanged);
+	}
+}
+
+void UHFEditorSubsystem::Deinitialize()
+{
+	if (SettingsChangedHandle.IsValid())
+	{
+		if (UHFSettings* Settings = GetMutableDefault<UHFSettings>())
+		{
+			Settings->OnSettingChanged().Remove(SettingsChangedHandle);
+		}
+		SettingsChangedHandle.Reset();
+	}
+
+	Super::Deinitialize();
+}
+
+void UHFEditorSubsystem::HandleSettingsChanged(UObject* Settings, FPropertyChangedEvent& Event)
+{
+	ApplyProjectSettingsToLevel();
+}
+
+int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (House == nullptr)
+	{
+		return 0;
+	}
+
+	int32 Rebuilt = 0;
+	int32 Preserved = 0;
+
+	for (AActor* Element : House->ElementActors)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (!IsValid(Typed))
+		{
+			continue;
+		}
+
+		// Asked before anything is touched. Regenerate would refuse on its own, but re-seeding the
+		// construction figures first would still change what a later Revert To Generated produced -
+		// so a hand-edited element is left alone completely, parameters included.
+		if (Typed->ShouldPreserveOnRebuild())
+		{
+			++Preserved;
+			continue;
+		}
+
+		// Only elements whose construction the settings actually feed. Re-seeding is the composing
+		// layer's job and is done HERE, not inside any generator.
+		if (AHFOpeningActor* Opening = Cast<AHFOpeningActor>(Typed))
+		{
+			Opening->ApplyProjectDefaults();
+			Opening->Regenerate();
+			++Rebuilt;
+		}
+	}
+
+	if (Rebuilt > 0 || Preserved > 0)
+	{
+		UE_LOG(LogHouseForgeEditor, Log,
+			TEXT("HouseForge settings applied: %d element(s) rebuilt, %d preserved as hand-edited."),
+			Rebuilt, Preserved);
+	}
+
+	return Rebuilt;
 }
 
 #undef LOCTEXT_NAMESPACE

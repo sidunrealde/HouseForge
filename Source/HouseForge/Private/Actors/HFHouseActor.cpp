@@ -311,6 +311,15 @@ void AHFHouseActor::BuildGeometry()
 		{
 			OpeningActor->Opening = Opening;
 			OpeningActor->HostWall = *Wall;
+
+			// Settings resolve HERE, in the composing layer, and never inside a generator - see
+			// .claude/rules/04-conventions.md. Before Regenerate, so the first mesh this actor ever
+			// builds already has the project's figures on it.
+			//
+			// Only on a freshly spawned actor: Spawn returns null for a preserved one, so an opening
+			// somebody has edited by hand keeps the figures it was built with rather than having a
+			// project-wide setting reach in and change it.
+			OpeningActor->ApplyProjectDefaults();
 			OpeningActor->Regenerate();
 		}
 	}

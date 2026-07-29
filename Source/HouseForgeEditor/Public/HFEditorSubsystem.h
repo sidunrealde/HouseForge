@@ -131,7 +131,33 @@ public:
 	/** The house actor in the current level, or nullptr. */
 	AHFHouseActor* FindHouseActor() const;
 
+	// ------------------------------------------------------------------------------ settings
+
+	/**
+	 * Re-seeds every element in the level from Project Settings and rebuilds it.
+	 *
+	 * What makes the settings page do something visible: change the leaf thickness and the doors in
+	 * the open level get thicker, rather than the change waiting for the next full rebuild.
+	 *
+	 * Hand-edited elements are skipped entirely - not re-seeded and not rebuilt. An artist who has
+	 * modelled a door does not expect a project-wide setting to reach in and overwrite it, and
+	 * .claude/rules/04-conventions.md calls that loss silent and unrecoverable. Reverting such an
+	 * element picks the new figures up in the ordinary way.
+	 *
+	 * @return How many elements were rebuilt. Elements preserved as hand-edited are not counted.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Settings")
+	int32 ApplyProjectSettingsToLevel();
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
 private:
+	/** Bound to UHFSettings::OnSettingChanged so an edit on the settings page reaches the level. */
+	void HandleSettingsChanged(UObject* Settings, struct FPropertyChangedEvent& Event);
+
+	FDelegateHandle SettingsChangedHandle;
+
 	/** Applies a validated spec into the current level, replacing any existing house. */
 	FHFOperationResult SpawnHouse(const FHFHouseSpec& Spec);
 

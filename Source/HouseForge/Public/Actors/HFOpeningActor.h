@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Actors/HFArticulatedActor.h"
+#include "Geometry/HFOpeningParams.h"
 #include "Model/HFTypes.h"
 #include "HFOpeningActor.generated.h"
 
@@ -32,6 +33,24 @@ public:
 	/** The wall this opening sits in, needed to place the leaf in the wall's plane. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFWall HostWall;
+
+	/**
+	 * How this opening is constructed: leaf thickness, sash section, track pitch.
+	 *
+	 * The actor owns its own figures, exactly as it owns its own parameters - see
+	 * .claude/rules/04-conventions.md. They are seeded from the project's settings when the house
+	 * composes the actor, and are editable per opening afterwards, so a main door can be 45 mm in a
+	 * flat whose internal doors are 40 without changing a project-wide setting.
+	 *
+	 * Held here rather than read inside the generator, which is the whole architecture of the
+	 * settings work: the generator stays a pure function of its arguments.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Construction",
+		meta = (ShowOnlyInnerProperties))
+	FHFOpeningBuildParams BuildParams;
+
+	/** Seeds BuildParams from the project's settings. Called by the composing layer, not by generation. */
+	void ApplyProjectDefaults();
 
 	/** Part id of a door's leaf, and of the running panel of a sliding door. */
 	static const FName LeafPartId;
