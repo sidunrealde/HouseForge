@@ -156,7 +156,20 @@ namespace
 			return Bays;
 		}
 
-		const int32 First = FMath::Max(2, FMath::CeilToInt32(P.Width / P.MaxSpan));
+		// Clamped INTO the search range, not merely floored at two.
+		//
+		// Taking Max(2, ceil(Width / MaxSpan)) alone turns MaxShelfBays into a trapdoor: the moment
+		// the span limit asks for more bays than the ceiling allows, the loop body never runs at all
+		// and Bays goes back untouched as one full-width unsupported shelf - the exact opposite of
+		// what the guard is for, and a cliff rather than a degradation. At 300 wide, a 19 limit gave
+		// 16 supported bays and an 18 limit gave one unsupported 3 m shelf.
+		//
+		// The Min() before the cast also keeps CeilToInt32 in range: a very small positive MaxSpan
+		// overflows int32 and the conversion is undefined.
+		const int32 First = FMath::Clamp(
+			FMath::CeilToInt32(FMath::Min(P.Width / P.MaxSpan, static_cast<double>(MaxShelfBays))),
+			2, MaxShelfBays);
+
 		for (int32 Count = First; Count <= MaxShelfBays; ++Count)
 		{
 			const double BayWidth = (P.Width - (Count - 1) * P.PartitionThickness) / Count;
@@ -456,24 +469,60 @@ FDynamicMesh3 FHFJoineryKit::GenerateShutter(const FHFShutterParams& Params)
 	{
 		const double S = Params.StileWidth;
 
-		// Stiles run the full height and the rails butt between them, rather than both running
-		// full length and lapping at the corners. Lapped members would put four corners' worth of
-		// board into the mesh twice, which quietly inflates the volume this is measured on.
-		AppendRail(Mesh, FVector3d(X0, Y0, 0.0), FVector3d(X0 + S, Y1, H), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(X1 - S, Y0, 0.0), FVector3d(X1, Y1, H), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(X0 + S, Y0, 0.0), FVector3d(X1 - S, Y1, S), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(X0 + S, Y0, H - S), FVector3d(X1 - S, Y1, H), EHFSurfaceRole::ShutterLaminate);
-
-		// The pane runs under the frame by the rebate all round, so the join is a shadow rather
-		// than a gap you can see through, and it is a solid of real thickness centred in the
-		// leaf - glass modelled as a plane refracts and reflects wrong under any real lighting.
+		// The pane runs under the frame by the rebate all round, so the join reads as a shadow
+		// rather than a gap you can see through, and it is a solid of real thickness centred in
+		// the leaf - glass modelled as a plane refracts and reflects wrong under any real lighting.
 		const double PaneInset = S - Params.GlassRebate;
 		const double GlassCentreY = (Y0 + Y1) * 0.5;
 		const double GlassHalf = Params.GlassThickness * 0.5;
 
+		// The rebate is CUT, not implied. Emitting the frame at full thickness right across the
+		// pane's footprint and then dropping the pane through it puts a rebate-wide strip of ply
+		// and a rebate-wide strip of glass in exactly the same space: IsClosed still passes,
+		// because each box is closed on its own, and GetVolumeArea sums both, so the leaf reports
+		// board it does not contain. It is the same double count the butted stiles and rails below
+		// exist to avoid, and it leaves a self-intersecting solid - which matters, because
+		// SubtractInPlace refuses any boolean whose result is not closed, so a glazed leaf handed
+		// to ApplyHandle for a J-profile would silently come back with no handle recess at all.
+		//
+		// So the frame comes in two parts. Outside the pane's footprint it is full thickness; over
+		// the rebate strip only the two shoulders either side of the groove are emitted, and the
+		// pane sits in what is left. Nothing overlaps, and the volume is the board really cut.
+		const double PaneX0 = X0 + PaneInset;
+		const double PaneX1 = X1 - PaneInset;
+		const double PaneZ0 = PaneInset;
+		const double PaneZ1 = H - PaneInset;
+
+		// Full-thickness outer band. Stiles run the full height and the rails butt between them,
+		// rather than both running full length and lapping at the corners; lapped members would put
+		// four corners' worth of board into the mesh twice.
+		AppendRail(Mesh, FVector3d(X0, Y0, 0.0), FVector3d(PaneX0, Y1, H), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(PaneX1, Y0, 0.0), FVector3d(X1, Y1, H), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(PaneX0, Y0, 0.0), FVector3d(PaneX1, Y1, PaneZ0), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(PaneX0, Y0, PaneZ1), FVector3d(PaneX1, Y1, H), EHFSurfaceRole::ShutterLaminate);
+
+		// The shoulders: the same picture-frame ring the pane overlaps, split either side of the
+		// groove the glass sits in. A zero rebate, or a pane as thick as the leaf, collapses these
+		// to nothing - which AppendBox declines rather than emitting a degenerate board.
+		const double GrooveY0 = GlassCentreY - GlassHalf;
+		const double GrooveY1 = GlassCentreY + GlassHalf;
+
+		auto AppendShoulders = [&](double SX0, double SZ0, double SX1, double SZ1)
+		{
+			AppendRail(Mesh, FVector3d(SX0, Y0, SZ0), FVector3d(SX1, GrooveY0, SZ1),
+				EHFSurfaceRole::ShutterLaminate);
+			AppendRail(Mesh, FVector3d(SX0, GrooveY1, SZ0), FVector3d(SX1, Y1, SZ1),
+				EHFSurfaceRole::ShutterLaminate);
+		};
+
+		AppendShoulders(PaneX0, PaneZ0, X0 + S, PaneZ1);
+		AppendShoulders(X1 - S, PaneZ0, PaneX1, PaneZ1);
+		AppendShoulders(X0 + S, PaneZ0, X1 - S, S);
+		AppendShoulders(X0 + S, H - S, X1 - S, PaneZ1);
+
 		AppendRail(Mesh,
-			FVector3d(X0 + PaneInset, GlassCentreY - GlassHalf, PaneInset),
-			FVector3d(X1 - PaneInset, GlassCentreY + GlassHalf, H - PaneInset),
+			FVector3d(PaneX0, GrooveY0, PaneZ0),
+			FVector3d(PaneX1, GrooveY1, PaneZ1),
 			EHFSurfaceRole::Glass);
 	}
 
@@ -753,10 +802,27 @@ namespace
 		if (P.Style == EHFHandleStyle::JProfile)
 		{
 			// The corner comes off: out through the edge and out through the face, with a chamfer
-			// where the lip that is left meets the face. That break-out is the whole character of a
+			// on EACH of the two arrises the cut creates. That break-out is the whole character of a
 			// J-profile - it is what makes a run of fronts read as one continuous shadow gap.
+			//
+			// Both lips, and the outer one is the one that matters most. The cut leaves two convex
+			// arrises: the inner one where the recess wall meets the panel face, and the outer one
+			// where the recess floor runs out through the edge - and that outer arris IS the grip
+			// lip, at hand height on every front in the flat and the most prominent edge the profile
+			// produces. Breaking only the inner one leaves the other mathematically sharp, which
+			// reads as CG under any lighting; the handleless groove below breaks both of its lips
+			// for exactly this reason. See .claude/rules/04-conventions.md.
+			//
+			// The outer break is taken by leaving material rather than by cutting deeper: the floor
+			// runs out and up to meet the edge, so the recess is never deeper than RecessDepth and
+			// the web behind it is untouched. Halved against the profile height so a very shallow
+			// profile cannot fold the section through itself.
+			const double Lip = FMath::Min(C, H * 0.5);
+
 			Push(-H, -D);
-			Push(O, -D);
+			Push(-Lip, -D);
+			Push(0.0, -D + Lip);
+			Push(O, -D + Lip);
 			Push(O, O);
 			Push(-H - C, O);
 			Push(-H - C, 0.0);
@@ -1445,6 +1511,14 @@ namespace
 			return L;
 		}
 
+		// The same guard the width gets, on the other two axes. A box shallower than its own front
+		// and back boards has them passing through each other, and one shallower in height than its
+		// bottom board silently loses the bottom - both of which come back reporting bValid.
+		if (P.RunnerLength <= 2.0 * P.BoxSideThickness)
+		{
+			return L;
+		}
+
 		L.BoxDepth = P.RunnerLength;
 		L.BoxY0 = DrawerBoxFrontClearance;
 		L.BoxY1 = L.BoxY0 + L.BoxDepth;
@@ -1453,6 +1527,11 @@ namespace
 		// over to reach into the drawer, and the gap below is where the runner's fixings land.
 		const double FrontHeight = P.FrontHeight();
 		const double BoxHeight = FMath::Max(FrontHeight - DrawerBoxHeightRelief, FrontHeight * 0.5);
+
+		if (BoxHeight <= P.BoxBottomThickness)
+		{
+			return L;
+		}
 
 		// Four tenths of the relief below and six above, so the front stands a little proud of the
 		// box top rather than level with it, which is what stops a drawer reading as an open crate.
@@ -1506,6 +1585,22 @@ namespace
 		}
 		return Best;
 	}
+
+	/** The rung above this height, or 0 when it is already the deepest front made. */
+	double NextDrawerFrontHeightAbove(double Height)
+	{
+		for (const double Rung : DrawerFrontLadder)
+		{
+			if (Rung > Height + UE_KINDA_SMALL_NUMBER)
+			{
+				return Rung;
+			}
+		}
+		return 0.0;
+	}
+
+	/** The step between rungs. What "a front one size up" is worth. */
+	constexpr double DrawerFrontRung = 5.0;
 
 	/** The box, its bottom and the drawer half of its runners - everything but the applied front. */
 	void AppendDrawerBoxBoards(FDynamicMesh3& Mesh, const FDrawerLayout& L)
@@ -1587,8 +1682,16 @@ FHFDrawerParams FHFJoineryKit::SanitiseDrawer(const FHFDrawerParams& Params)
 	// take it - a wardrobe drawer specified at 450 in a body that would auto-select 500 is somebody
 	// matching hardware they already have. One that cannot fit is dropped to the longest that can,
 	// because the alternative is a box driven out through the back panel.
+	//
+	// It also has to be a runner. Runners are made from 250 up, and honouring anything shorter
+	// builds a box whose front and back boards pass through each other and whose back board breaks
+	// out through the carcass front plane into the applied front - reported as a valid drawer, with
+	// the overlap counted twice in its volume. Falling back to the longest that fits is the same
+	// documented answer a length that cannot be used already gets.
 	const double Fits = Out.CarcassDepth - DrawerRunnerFrontSetback - DrawerRunnerRearClearance;
-	Out.RunnerLength = (Out.RunnerLength > 0.0 && Out.RunnerLength <= Fits)
+	const double ShortestRunner = DrawerRunnerLadder[0];
+
+	Out.RunnerLength = (Out.RunnerLength >= ShortestRunner && Out.RunnerLength <= Fits)
 		? Out.RunnerLength
 		: SelectRunnerLength(Out.CarcassDepth);
 
@@ -1855,6 +1958,60 @@ bool FHFJoineryKit::GraduateDrawerFronts(const FHFDrawerBankParams& Bank, TArray
 			Height = Even;
 		}
 		Sum = Available;
+	}
+
+	// And back UP a rung at a time, the mirror of the pass above, always onto whichever front is
+	// furthest BELOW its target.
+	//
+	// Without this the whole of the slack landed on the bottom front, unbounded: the ladder tops out
+	// at 50, so three drawers in a 200 cm bank came out 45 / 50 / 104.1 and were reported as a
+	// successful graduation. A metre-tall drawer front is not a thing any kitchen or wardrobe in a
+	// 2BHK contains, and it is not "a few millimetres where they are least visible" either. With the
+	// raise pass, only the sub-rung remainder ever reaches the bottom front, which is what the
+	// comment below has always claimed.
+	while (Sum + DrawerFrontRung <= Available + UE_KINDA_SMALL_NUMBER)
+	{
+		int32 Chosen = INDEX_NONE;
+		double ChosenDeficit = -UE_DOUBLE_BIG_NUMBER;
+
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const double Higher = NextDrawerFrontHeightAbove(Heights[Index]);
+			if (Higher <= 0.0)
+			{
+				continue;
+			}
+			// Only where it stays no deeper than the front below it, so the bank keeps reading as a
+			// graduation rather than a mistake.
+			if (Index + 1 < Count && Higher > Heights[Index + 1] + UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const double Deficit = Targets[Index] - Heights[Index];
+			if (Deficit > ChosenDeficit)
+			{
+				ChosenDeficit = Deficit;
+				Chosen = Index;
+			}
+		}
+
+		if (Chosen == INDEX_NONE)
+		{
+			break;
+		}
+
+		const double Higher = NextDrawerFrontHeightAbove(Heights[Chosen]);
+		Sum += Higher - Heights[Chosen];
+		Heights[Chosen] = Higher;
+	}
+
+	if (Sum + DrawerFrontRung <= Available + UE_KINDA_SMALL_NUMBER)
+	{
+		// Every front is already the deepest one made and there is still a whole rung of bank left
+		// over. That bank cannot be built out of fronts anyone cuts, and it needs more drawers -
+		// which is the same answer, in the other direction, as the too-many-fronts refusal above.
+		return false;
 	}
 
 	// What the ladder leaves over goes on the bottom front. It is the deepest, so a few millimetres

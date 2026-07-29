@@ -515,7 +515,13 @@ bool FHFShelfStackSpanTest::RunTest(const FString& Parameters)
 			VolumeOf(Mesh), 2.0 * OneRail + Partition, (2.0 * OneRail + Partition) * 1e-5);
 	}
 
-	// An absurd span limit must not spin the bay search or produce a bay of nothing.
+	// A span limit tighter than the bay ceiling can honour must SPLIT AS FAR AS IT CAN, not fall
+	// back to no split at all.
+	//
+	// The bay ceiling used to be a trapdoor: once the limit asked for more bays than the ceiling
+	// allows, the search never ran and the stack came back as one full-width unsupported shelf. The
+	// outer bounds are identical either way, which is why asserting them alone passed on the bug and
+	// the comment could call the result "over-split" when nothing had been split.
 	{
 		FHFShelfStackParams P = MakeWardrobeBay();
 		P.Width = 300.0;
@@ -525,6 +531,32 @@ bool FHFShelfStackSpanTest::RunTest(const FString& Parameters)
 		CheckSolidAndTagged(*this, Mesh, { EHFSurfaceRole::JoineryCarcass }, TEXT("An over-split stack"));
 		TestNearlyEqual(TEXT("An over-split stack still fills its bay exactly"),
 			Mesh.GetBounds().Max.X, 300.0, 0.001);
+
+		// Measured off the material, which is what says how many partitions were really built: the
+		// stack is bays of shelf plus one partition per division. At the ceiling of 16 bays that is
+		// 15 partitions, and at one bay it is none.
+		const double Partition = 1.8 * ClearDepth * 200.0;
+		const double Ceiling = ExpectedMaterial(16, (300.0 - 15 * 1.8) / 16.0, 1.8, 4, 1.8, ClearDepth, 200.0);
+		TestNearlyEqual(TEXT("An impossible span limit splits to the bay ceiling, not back to one bay"),
+			VolumeOf(Mesh), Ceiling, Ceiling * 1e-5);
+		TestTrue(TEXT("That is genuinely more material than an unsplit shelf, i.e. partitions exist"),
+			VolumeOf(Mesh) > VolumeOf(FHFJoineryKit::GenerateShelfStack(MakeWardrobeBay())) + Partition);
+	}
+
+	// And the cliff either side of it: one centimetre of span limit must not be the difference
+	// between sixteen supported bays and one unsupported three-metre shelf.
+	{
+		FHFShelfStackParams Wide = MakeWardrobeBay();
+		Wide.Width = 300.0;
+		Wide.ShelfCount = 1;
+
+		FHFShelfStackParams Tighter = Wide;
+		Wide.MaxSpan = 19.0;
+		Tighter.MaxSpan = 18.0;
+
+		TestTrue(TEXT("A slightly tighter span limit does not un-split the stack"),
+			VolumeOf(FHFJoineryKit::GenerateShelfStack(Tighter))
+				>= VolumeOf(FHFJoineryKit::GenerateShelfStack(Wide)) - 1e-6);
 	}
 
 	return true;

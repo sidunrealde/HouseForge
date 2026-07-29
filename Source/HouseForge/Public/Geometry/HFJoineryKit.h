@@ -450,8 +450,19 @@ struct HOUSEFORGE_API FHFHandleParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FBox PanelBox = FBox(FVector(0.0, 0.0, 0.0), FVector(45.0, 1.9, 210.0));
 
+	/**
+	 * NegativeY, because that is the face on the outside of the cabinet.
+	 *
+	 * Every panel this kit generates carries its board on +Y of its own origin and therefore looks
+	 * out along -Y, which the enum above says in as many words. The rest of these defaults describe
+	 * a left-hung wardrobe leaf exactly - PanelBox is ShutterPanelBox for one and Edge is its
+	 * leading edge - so defaulting the other way fitted the bar inside the wardrobe and routed the
+	 * J-profile into the back of the leaf. Both call sites in the kit override this, so the exposure
+	 * was a designer editing it in a details panel, or the next fixture generator that forgets the
+	 * line; and both failures look right in every still and are only visible once the leaf is opened.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
-	EHFPanelFacing Facing = EHFPanelFacing::PositiveY;
+	EHFPanelFacing Facing = EHFPanelFacing::NegativeY;
 
 	/** The edge served. A bar runs parallel to it; a routed profile runs along it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
@@ -1107,9 +1118,12 @@ public:
 	 *
 	 * What the ladder leaves over goes on the bottom front, where a few millimetres are least visible
 	 * and where a deep pan drawer swallows them - rather than into the reveals, which have to stay
-	 * the 3 mm shadow line they are on site whatever the carcass measures.
+	 * the 3 mm shadow line they are on site whatever the carcass measures. Never more than the step
+	 * between two rungs: past that, the front is simply one size up.
 	 *
-	 * @return false if the bank cannot hold that many fronts.
+	 * @return false if the bank cannot hold that many fronts, and false the other way too - if every
+	 *         front is already the deepest one made and the bank is still not full. A 2 m bank of
+	 *         three is not a bank of three enormous drawers; it is a bank that needs more of them.
 	 */
 	static bool GraduateDrawerFronts(const FHFDrawerBankParams& Bank, TArray<double>& OutFrontHeights);
 

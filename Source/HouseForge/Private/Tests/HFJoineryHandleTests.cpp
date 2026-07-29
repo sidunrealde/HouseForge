@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "DynamicMesh/DynamicMeshAABBTree3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFJoineryKit.h"
@@ -12,6 +13,7 @@
 #include "Misc/AutomationTest.h"
 #include "Model/HFArticulation.h"
 #include "Model/HFTypes.h"
+#include "Spatial/FastWinding.h"
 
 using namespace UE::Geometry;
 
@@ -289,6 +291,7 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 	const FBox Box = ShutterPanelBox();
 	const double PanelVolume = Box.GetSize().X * Box.GetSize().Y * Box.GetSize().Z;
 	const double RunSpan = Box.GetSize().X;
+	const double RunMid = Box.GetCenter().X;
 
 	TestTrue(TEXT("A J-profile is routed, not applied"),
 		FHFJoineryKit::IsRecessedHandle(EHFHandleStyle::JProfile));
@@ -344,10 +347,44 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("No routed face was left without a surface role"), EveryTriangleTagged(JPanel));
 	TestTrue(TEXT("The routed panel is unwrapped"), HasUVs(JPanel));
 
-	// The corner notch, plus the little wedge the chamfer takes off the lip. Measured, not counted.
-	const double JRemoved = RunSpan * (J.ProfileHeight * J.RecessDepth + J.LipChamfer * J.LipChamfer * 0.5);
+	// The corner notch, plus the wedge the inner chamfer takes off the face, less the wedge the
+	// outer chamfer leaves on the lip. Both breaks are the same size, so they cancel exactly - which
+	// is a coincidence of arithmetic and not the assertion; the two chamfers are asserted
+	// individually below, where they are actually visible.
+	const double Wedge = J.LipChamfer * J.LipChamfer * 0.5;
+	const double JRemoved = RunSpan * (J.ProfileHeight * J.RecessDepth + Wedge - Wedge);
 	TestNearlyEqual(TEXT("A J-profile removes exactly the corner it describes"),
 		PanelVolume - Volume(JPanel), JRemoved, FMath::Abs(JRemoved) * 0.01);
+
+	// Both arrises the cut creates are broken, and both are asserted where a hand would find them.
+	//
+	// The inner lip, where the recess wall meets the panel face: the cutter reaches a chamfer's
+	// worth further down the face than the profile height alone, which is the wedge coming off.
+	TestNearlyEqual(TEXT("The inner lip is broken by a chamfer"),
+		Box.Max.Z - JBox.Min.Z, J.ProfileHeight + J.LipChamfer, 0.001);
+	TestTrue(TEXT("There is a chamfer to break it with"), J.LipChamfer > 0.0);
+
+	// The outer lip, where the recess floor runs out through the edge. Measured as board that is
+	// there: at a quarter of a chamfer in from the edge, the routed panel must still be solid a
+	// quarter of a chamfer above the recess floor. An unbroken 90-degree arris would have cut that
+	// away, and the volume above cannot see the difference because the two wedges cancel.
+	{
+		const double Depth = J.RecessDepth;
+		const double Quarter = J.LipChamfer * 0.25;
+		const FVector3d InsideTheChamfer(
+			RunMid, Box.Max.Y - Depth + Quarter, Box.Max.Z - Quarter);
+
+		FDynamicMeshAABBTree3 Tree(&JPanel, true);
+		TFastWindingTree<FDynamicMesh3> Winding(&Tree, true);
+		TestTrue(TEXT("The outer lip is broken rather than left a sharp arris"),
+			Winding.IsInside(InsideTheChamfer));
+
+		// And the recess really is cut to its full depth further in, so the chamfer is a break on
+		// the lip and not a shallower recess.
+		const FVector3d InsideTheRecess(
+			RunMid, Box.Max.Y - Depth * 0.5, Box.Max.Z - J.ProfileHeight * 0.5);
+		TestFalse(TEXT("The recess itself is still cut away"), Winding.IsInside(InsideTheRecess));
+	}
 
 	// A notch off one corner leaves the panel's overall extents alone: board survives behind the
 	// recess and below it, so nothing has actually got smaller.
@@ -890,6 +927,70 @@ bool FHFHandleParametersTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Applying no handle succeeds"), FHFJoineryKit::ApplyHandle(Panel, None));
 		TestNearlyEqual(TEXT("Applying no handle changes nothing"), Volume(Panel), Before, 0.0001);
 	}
+
+	return true;
+}
+
+/**
+ * A handle taken straight out of the box goes on the OUTSIDE of the cabinet.
+ *
+ * FHFHandleParams' defaults describe a left-hung wardrobe leaf exactly - PanelBox is that leaf's
+ * own box and Edge is its leading edge - so the facing has to describe the same leaf. Every panel
+ * this kit generates carries its board on +Y and therefore looks out along -Y; defaulting the other
+ * way mounted the bar inside the wardrobe and routed the J-profile into the back of the leaf.
+ *
+ * Both call sites in the kit set it explicitly, so nothing failed - which is the point. The exposure
+ * is a designer editing the property in a details panel, or the next fixture generator that forgets
+ * the line, and both failures look right in every still and only show once the leaf is opened.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFHandleDefaultsTest, "HouseForge.Joinery.HandleDefaults", HF_TEST_FLAGS)
+
+bool FHFHandleDefaultsTest::RunTest(const FString& Parameters)
+{
+	FHFHandleParams Default;
+	Default.Style = EHFHandleStyle::Bar;
+
+	const FBox Panel = Default.PanelBox;
+	TestTrue(TEXT("The defaults describe a real panel"), Panel.IsValid != 0);
+
+	const FTransform Placement = FHFJoineryKit::HandlePlacement(Default);
+
+	// The handle's local +Y is the direction it projects. Out of the cabinet is -Y.
+	TestTrue(TEXT("A default handle projects out of the cabinet rather than into it"),
+		Placement.GetUnitAxis(EAxis::Y).Y < -0.99);
+	TestNearlyEqual(TEXT("And is mounted on the panel's outward face"),
+		Placement.GetTranslation().Y, Panel.Min.Y, 1e-6);
+
+	// Measured on the geometry as well, because the transform alone could be right while the solid
+	// went the other way.
+	FDynamicMesh3 WithHandle = MakePanelMesh(Panel);
+	if (!TestTrue(TEXT("A default handle applies"), FHFJoineryKit::ApplyHandle(WithHandle, Default)))
+	{
+		return false;
+	}
+
+	const FHFHandleParams P = FHFJoineryKit::SanitiseHandle(Default);
+	const FAxisAlignedBox3d Bounds = WithHandle.GetBounds();
+
+	TestNearlyEqual(TEXT("The bar stands its declared projection proud of the outward face"),
+		Panel.Min.Y - Bounds.Min.Y, P.Projection, 0.001);
+	TestNearlyEqual(TEXT("And nothing was added behind the panel, inside the cupboard"),
+		Bounds.Max.Y, Panel.Max.Y, 0.001);
+
+	// A routed default goes the same way: into the front of the leaf, not the back.
+	FHFHandleParams Routed = Default;
+	Routed.Style = EHFHandleStyle::JProfile;
+
+	FDynamicMesh3 Grooved = MakePanelMesh(Panel);
+	if (!TestTrue(TEXT("A default J-profile applies"), FHFJoineryKit::ApplyHandle(Grooved, Routed)))
+	{
+		return false;
+	}
+
+	const FHFHandleParams R = FHFJoineryKit::SanitiseHandle(Routed);
+	const FAxisAlignedBox3d Cut = FHFJoineryKit::GenerateHandleRecessCutter(Routed).GetBounds();
+	TestNearlyEqual(TEXT("The recess is routed into the front of the leaf, not the back"),
+		Cut.Max.Y, Panel.Min.Y + R.RecessDepth, 0.001);
 
 	return true;
 }

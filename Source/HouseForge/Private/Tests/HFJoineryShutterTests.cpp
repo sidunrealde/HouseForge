@@ -274,14 +274,34 @@ bool FHFShutterGlassTest::RunTest(const FString& Parameters)
 	const double T = Params.Thickness;
 	const double S = Params.StileWidth;
 
-	// Stiles full height, rails butted between them, and the pane running under the rebate all
-	// round. The rails do not lap the stiles, so this is the board the leaf is really made of.
-	const double FrameVolume = 2.0 * S * T * H + 2.0 * (W - 2.0 * S) * T * S;
+	// Set out from the leaf's own dimensions rather than from the generator's construction, because
+	// the defect this replaces was a construction and an expectation that agreed with each other.
+	//
+	// Three regions, and no two of them may occupy the same space:
+	//   - outside the pane's footprint, the frame is the full leaf thickness;
+	//   - over the rebate strip, the frame is two shoulders with the glass groove between them;
+	//   - inside the frame's opening, the pane and nothing else.
 	const double PaneInset = S - Params.GlassRebate;
-	const double PaneVolume = (W - 2.0 * PaneInset) * Params.GlassThickness * (H - 2.0 * PaneInset);
+	const double PaneWidth = W - 2.0 * PaneInset;
+	const double PaneHeight = H - 2.0 * PaneInset;
 
-	TestNearlyEqual(TEXT("A glazed leaf is its frame plus its pane"),
-		Volume(Glazed), FrameVolume + PaneVolume, (FrameVolume + PaneVolume) * 1e-6);
+	const double OuterBandArea = W * H - PaneWidth * PaneHeight;
+	const double RebateRingArea = PaneWidth * PaneHeight - (W - 2.0 * S) * (H - 2.0 * S);
+
+	const double Expected = OuterBandArea * T
+		+ RebateRingArea * (T - Params.GlassThickness)
+		+ PaneWidth * PaneHeight * Params.GlassThickness;
+
+	TestNearlyEqual(TEXT("A glazed leaf is a rebated frame with a pane in the groove"),
+		Volume(Glazed), Expected, Expected * 1e-6);
+
+	// Named explicitly, because a frame emitted at full thickness across the rebate would report
+	// exactly this much board it does not contain - and would pass every other check here, since
+	// each box is closed on its own and the bounds are unchanged.
+	const double DoubleCounted = RebateRingArea * Params.GlassThickness;
+	TestTrue(TEXT("The rebate is really cut, and there is board to cut"), DoubleCounted > 0.0);
+	TestNearlyEqual(TEXT("No part of the leaf is counted as both ply and glass"),
+		(Expected + DoubleCounted) - Volume(Glazed), DoubleCounted, Expected * 1e-6);
 
 	// Less material than a solid leaf, which is the point of glazing one.
 	const FDynamicMesh3 Solid = FHFJoineryKit::GenerateShutter(MakeShutterParams());
@@ -307,6 +327,24 @@ bool FHFShutterGlassTest::RunTest(const FString& Parameters)
 	TestNearlyEqual(TEXT("The pane runs under the frame by the rebate"), Pane.Min.X, PaneInset, 1e-9);
 	TestNearlyEqual(TEXT("The pane runs under the far stile too"), Pane.Max.X, W - PaneInset, 1e-9);
 	TestTrue(TEXT("The pane is captured by the frame"), Pane.Min.X < S && Pane.Max.X > W - S);
+
+	// The downstream consequence of getting the rebate wrong, and the reason it is not merely a
+	// bookkeeping error: SubtractInPlace refuses any boolean whose result is not closed and leaves
+	// the target uncut, so a self-intersecting glazed leaf takes no handle recess at all - and the
+	// leaf that comes back looks, from the front and closed, exactly like one that did.
+	{
+		FHFHandleParams Routed;
+		Routed.Style = EHFHandleStyle::JProfile;
+		Routed.PanelBox = FHFJoineryKit::ShutterPanelBox(Params);
+		Routed.Facing = EHFPanelFacing::NegativeY;
+		Routed.Edge = FHFJoineryKit::ShutterLeadingEdge(Params);
+
+		FDynamicMesh3 WithHandle = Glazed;
+		TestTrue(TEXT("A glazed leaf takes a routed handle"),
+			FHFJoineryKit::ApplyHandle(WithHandle, Routed));
+		TestTrue(TEXT("Routing a glazed leaf actually cuts board out of it"),
+			Volume(WithHandle) < Volume(Glazed) - 0.1);
+	}
 
 	// A frame with no room for a pane is a solid leaf, not a broken one.
 	FHFShutterParams Impossible = Params;
