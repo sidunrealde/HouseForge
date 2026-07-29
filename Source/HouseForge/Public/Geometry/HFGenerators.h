@@ -83,8 +83,14 @@ public:
 	 */
 	static void BuildOpeningParts(const FHFOpening& Opening, const FHFWall& Wall, TArray<FHFMeshPart>& OutParts);
 
-	/** A door leaf in its own local space: +X from the hinge, +Z from the sill. */
-	static UE::Geometry::FDynamicMesh3 GenerateDoorLeaf(const FHFOpening& Opening);
+	/**
+	 * A door leaf in its own local space: +X from the hinge, +Z from the sill.
+	 *
+	 * @param SwingSign  sign of the hinge rotation this leaf will be given. The leaf body hangs on
+	 *                   the face it swings towards, so its back edge sweeps out of the reveal
+	 *                   instead of through the masonry beside the jamb. Zero centres it on the wall.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateDoorLeaf(const FHFOpening& Opening, double SwingSign = 0.0);
 
 	/** Centre point of an opening along its wall, in plan. */
 	static FVector2D OpeningCentre(const FHFOpening& Opening, const FHFWall& Wall);

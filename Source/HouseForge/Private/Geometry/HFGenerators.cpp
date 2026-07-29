@@ -14,6 +14,12 @@ namespace
 
 	/** Door leaf and window frame thicknesses. */
 	constexpr double DoorLeafThickness = 4.0;
+
+	/** Interlock between the meeting stiles of a sliding unit, so its two panels never show a gap. */
+	constexpr double SlidingPanelOverlap = 2.5;
+
+	/** Clearance between the two tracks of a sliding unit, so its panels pass rather than collide. */
+	constexpr double SlidingTrackGap = 1.0;
 	constexpr double WindowFrameDepth = 6.0;
 	constexpr double WindowFrameWidth = 5.0;
 	constexpr double GlassThickness = 0.8;
@@ -386,7 +392,7 @@ FDynamicMesh3 FHFGenerators::GenerateColumn(const FHFColumn& Column)
 	return Mesh;
 }
 
-FDynamicMesh3 FHFGenerators::GenerateDoorLeaf(const FHFOpening& Opening)
+FDynamicMesh3 FHFGenerators::GenerateDoorLeaf(const FHFOpening& Opening, double SwingSign)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -401,15 +407,51 @@ FDynamicMesh3 FHFGenerators::GenerateDoorLeaf(const FHFOpening& Opening)
 	// place is what lets the actor swing it without the generator knowing anything about the
 	// house - see .claude/rules/04-conventions.md.
 	//
+	// The leaf hangs on the face it swings towards rather than on the wall centreline. A leaf
+	// centred in the reveal pivots its own back edge into the masonry beside the jamb - half the
+	// leaf thickness at the limit, which a walkthrough camera on the hinge side sees as the door
+	// vanishing into the wall. Hanging it on the swing face sweeps that edge out into the room,
+	// which is where a real butt hinge puts it.
+	const double LeafY = -FMath::Sign(SwingSign) * DoorLeafThickness * 0.5;
+
 	// The half-centimetre inset all round is the gap a real leaf leaves in its frame; without it
 	// the leaf shares faces with the reveal and the two z-fight.
 	FHFMeshOps::AppendBox(Mesh,
-		FVector3d(Opening.Width * 0.5, 0.0, Opening.Height * 0.5),
+		FVector3d(Opening.Width * 0.5, LeafY, Opening.Height * 0.5),
 		FVector3d(Opening.Width * 0.5 - 0.5, DoorLeafThickness * 0.5, Opening.Height * 0.5 - 0.5),
 		0.0, EHFSurfaceRole::DoorLeaf);
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
 	return Mesh;
+}
+
+namespace
+{
+	/**
+	 * One panel of a sliding unit, in the unit's local space.
+	 *
+	 * X is measured from the near jamb, Y is the track the panel runs in. Panels are generated
+	 * where they sit rather than each about its own origin, so both share the unit's pivot and the
+	 * only difference between them is that one of them moves.
+	 */
+	FDynamicMesh3 MakeSlidingPanel(double XMin, double XMax, double TrackY, double Height)
+	{
+		FDynamicMesh3 Mesh;
+		FHFMeshOps::InitialiseMesh(Mesh);
+
+		if (XMax - XMin <= 1.0 || Height <= 1.0)
+		{
+			return Mesh;
+		}
+
+		FHFMeshOps::AppendBox(Mesh,
+			FVector3d((XMin + XMax) * 0.5, TrackY, Height * 0.5),
+			FVector3d((XMax - XMin) * 0.5, DoorLeafThickness * 0.5, Height * 0.5 - 0.5),
+			0.0, EHFSurfaceRole::DoorLeaf);
+
+		FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+		return Mesh;
+	}
 }
 
 void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& Wall, TArray<FHFMeshPart>& OutParts)
@@ -448,33 +490,54 @@ void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& 
 	const FVector2D LeafDirection = bHingeAtNear ? Frame.Direction : -Frame.Direction;
 	const double LeafYaw = FMath::RadiansToDegrees(FMath::Atan2(LeafDirection.Y, LeafDirection.X));
 
-	FHFMeshPart Part;
-	Part.PartId = TEXT("Leaf");
-	Part.Mesh = GenerateDoorLeaf(Opening);
-	Part.PivotTransform = FTransform(
-		FRotator(0.0, LeafYaw, 0.0),
-		FVector(HingePlan.X, HingePlan.Y, SillZ));
+	const FTransform Pivot(FRotator(0.0, LeafYaw, 0.0), FVector(HingePlan.X, HingePlan.Y, SillZ));
 
 	if (Opening.Kind == EHFOpeningKind::SlidingDoor)
 	{
-		// Slides along its own length, clearing the opening at full travel.
-		Part.Motion.Type = EHFMotionType::Slide;
-		Part.Motion.Axis = FVector::XAxisVector;
-		Part.Motion.MaxTravelCm = Opening.Width;
-	}
-	else
-	{
-		// Local +Y is up-cross-leaf-direction, which is the wall normal when the leaf hangs on the
-		// near jamb and its opposite when it hangs on the far one. Inward swings follow the wall
-		// normal, outward swings oppose it, so the sign flips with both choices.
-		const double InwardSign =
-			(Opening.Swing == EHFSwing::OutwardLeft || Opening.Swing == EHFSwing::OutwardRight) ? -1.0 : 1.0;
-		const double HingeSign = bHingeAtNear ? InwardSign : -InwardSign;
+		// A sliding unit is two panels on two tracks, not one leaf that slides into the wall.
+		//
+		// One leaf the full width of the opening has nowhere to go: sliding it its own width buries
+		// it in the masonry beside the jamb, or drives it through the next window along, which is
+		// what the 1800 balcony units in the reference flat did. Half the opening each, and the
+		// moving panel travelling until its far edge meets the fixed panel's, keeps every panel
+		// inside the reveal at every open amount - and is what a sliding unit actually is.
+		const double Half = Opening.Width * 0.5;
+		const double TrackY = (DoorLeafThickness + SlidingTrackGap) * 0.5;
 
-		Part.Motion.Type = EHFMotionType::Hinge;
-		Part.Motion.Axis = FVector::ZAxisVector;
-		Part.Motion.MaxAngleDegrees = 90.0 * HingeSign;
+		FHFMeshPart Fixed;
+		Fixed.PartId = TEXT("PanelFixed");
+		Fixed.Mesh = MakeSlidingPanel(Half - SlidingPanelOverlap, Opening.Width - 0.5, -TrackY, Opening.Height);
+		Fixed.PivotTransform = Pivot;
+		OutParts.Add(MoveTemp(Fixed));
+
+		FHFMeshPart Slider;
+		Slider.PartId = TEXT("Leaf");
+		Slider.Mesh = MakeSlidingPanel(0.5, Half + SlidingPanelOverlap, TrackY, Opening.Height);
+		Slider.PivotTransform = Pivot;
+		Slider.Motion.Type = EHFMotionType::Slide;
+		Slider.Motion.Axis = FVector::XAxisVector;
+
+		// Far edge to far edge: the panel comes to rest exactly over its fixed partner, so it is
+		// still wholly inside the opening at full travel.
+		Slider.Motion.MaxTravelCm = FMath::Max(0.0, Half - SlidingPanelOverlap - 0.5);
+		OutParts.Add(MoveTemp(Slider));
+		return;
 	}
+
+	// Local +Y is up-cross-leaf-direction, which is the wall normal when the leaf hangs on the
+	// near jamb and its opposite when it hangs on the far one. Inward swings follow the wall
+	// normal, outward swings oppose it, so the sign flips with both choices.
+	const double InwardSign =
+		(Opening.Swing == EHFSwing::OutwardLeft || Opening.Swing == EHFSwing::OutwardRight) ? -1.0 : 1.0;
+	const double HingeSign = bHingeAtNear ? InwardSign : -InwardSign;
+
+	FHFMeshPart Part;
+	Part.PartId = TEXT("Leaf");
+	Part.Mesh = GenerateDoorLeaf(Opening, HingeSign);
+	Part.PivotTransform = Pivot;
+	Part.Motion.Type = EHFMotionType::Hinge;
+	Part.Motion.Axis = FVector::ZAxisVector;
+	Part.Motion.MaxAngleDegrees = 90.0 * HingeSign;
 
 	OutParts.Add(MoveTemp(Part));
 }
@@ -492,7 +555,7 @@ FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, co
 	{
 		FDynamicMesh3 Posed = Part.Mesh;
 		MeshTransforms::ApplyTransform(Posed, FTransformSRT3d(Part.PivotTransform), /*bReverseOrientationIfNeeded*/ true);
-		Mesh.AppendWithOffsets(Posed);
+		FHFMeshOps::AppendPreservingRoles(Mesh, Posed);
 	}
 
 	return Mesh;

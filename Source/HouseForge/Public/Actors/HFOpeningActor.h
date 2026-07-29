@@ -11,9 +11,10 @@
  * What sits inside an opening: a door leaf, or a window frame and its glazing.
  *
  * Articulated, because a real door opens. The leaf is a moving part hung on the jamb the drawing's
- * swing arc puts it on, and a sliding door's leaf slides instead - see
- * .claude/rules/04-conventions.md. Window sashes are still fixed; they move in the retrofit that
- * follows the joinery kit.
+ * swing arc puts it on. A sliding door is two panels instead - one fixed, one running in its own
+ * track - because a single leaf the width of the opening has nowhere to slide to but into the wall.
+ * See .claude/rules/04-conventions.md. Window sashes are still fixed; they move in the retrofit
+ * that follows the joinery kit.
  */
 UCLASS()
 class HOUSEFORGE_API AHFOpeningActor : public AHFArticulatedActor
@@ -28,8 +29,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFWall HostWall;
 
-	/** Part id of a door or sliding door's leaf. */
+	/** Part id of a door's leaf, and of the running panel of a sliding door. */
 	static const FName LeafPartId;
+
+	/** Part id of the fixed panel of a sliding door. Present only on a sliding door. */
+	static const FName FixedPanelPartId;
 
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;

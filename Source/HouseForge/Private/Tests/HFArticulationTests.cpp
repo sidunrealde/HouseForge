@@ -288,7 +288,14 @@ bool FHFDoorLeafPartTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-/** A sliding door slides its own width clear of the opening, and nothing else moves. */
+/**
+ * A sliding unit is two panels, and the one that moves has somewhere to move to.
+ *
+ * One leaf the full width of the opening had nowhere to go: sliding it its own width drove 1.65 m
+ * of it into the masonry beside the jamb, and in the reference flat straight through the next
+ * window along. Half the opening each, on two tracks, is both what a sliding unit is and what
+ * keeps every panel inside the reveal at every open amount.
+ */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSlidingDoorPartTest, "HouseForge.Articulation.SlidingDoorPart", HF_TEST_FLAGS)
 
 bool FHFSlidingDoorPartTest::RunTest(const FString& Parameters)
@@ -298,27 +305,80 @@ bool FHFSlidingDoorPartTest::RunTest(const FString& Parameters)
 	TArray<FHFMeshPart> Parts;
 	FHFGenerators::BuildOpeningParts(MakeDoorOpening(EHFOpeningKind::SlidingDoor, EHFSwing::None), Wall, Parts);
 
-	if (!TestEqual(TEXT("A sliding door produces one moving part"), Parts.Num(), 1))
+	if (!TestEqual(TEXT("A sliding door is two panels"), Parts.Num(), 2))
 	{
 		return false;
 	}
 
-	const FHFMeshPart& Leaf = Parts[0];
-	TestTrue(TEXT("A sliding door slides"), Leaf.Motion.Type == EHFMotionType::Slide);
-	TestNearlyEqual(TEXT("It travels its own width"), FMath::Abs(Leaf.Motion.MaxTravelCm), 90.0, 0.01);
+	const FHFMeshPart* Fixed = Parts.FindByPredicate(
+		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("PanelFixed")); });
+	const FHFMeshPart* Leaf = Parts.FindByPredicate(
+		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("Leaf")); });
 
-	const FAxisAlignedBox3d Closed = PosedBounds(Leaf, 0.0);
-	const FAxisAlignedBox3d Open = PosedBounds(Leaf, 1.0);
+	if (!TestNotNull(TEXT("It has a fixed panel"), Fixed) || !TestNotNull(TEXT("It has a running panel"), Leaf))
+	{
+		return false;
+	}
 
-	// The measurable property is the swept distance, along the wall, with nothing else changed.
-	TestNearlyEqual(TEXT("The leaf travels exactly its declared distance"),
-		Open.Center().X - Closed.Center().X, 90.0, 0.01);
+	TestTrue(TEXT("The fixed panel does not move"), !Fixed->Motion.Moves());
+	TestTrue(TEXT("The running panel slides"), Leaf->Motion.Type == EHFMotionType::Slide);
+
+	// Both panels are solids in their own right, because a bake treats each as a mesh of its own.
+	TestTrue(TEXT("The fixed panel is watertight"), FHFMeshOps::IsClosed(Fixed->Mesh));
+	TestTrue(TEXT("The running panel is watertight"), FHFMeshOps::IsClosed(Leaf->Mesh));
+
+	// The opening spans 155..245 along this wall. Every panel stays inside it at every open amount,
+	// which is the property the old single leaf broke.
+	constexpr double OpeningMin = 155.0;
+	constexpr double OpeningMax = 245.0;
+
+	const FAxisAlignedBox3d FixedBounds = PosedBounds(*Fixed, 0.0);
+	TestTrue(TEXT("The fixed panel sits inside the opening"),
+		FixedBounds.Min.X >= OpeningMin - 0.01 && FixedBounds.Max.X <= OpeningMax + 0.01);
+
+	for (double Alpha = 0.0; Alpha <= 1.0001; Alpha += 0.05)
+	{
+		const FAxisAlignedBox3d Posed = PosedBounds(*Leaf, Alpha);
+		if (Posed.Min.X < OpeningMin - 0.01 || Posed.Max.X > OpeningMax + 0.01)
+		{
+			AddError(FString::Printf(
+				TEXT("At %.2f open, the running panel spans %.2f..%.2f and leaves the %.0f..%.0f opening; it is sliding into the wall."),
+				Alpha, Posed.Min.X, Posed.Max.X, OpeningMin, OpeningMax));
+			break;
+		}
+	}
+
+	const FAxisAlignedBox3d Closed = PosedBounds(*Leaf, 0.0);
+	const FAxisAlignedBox3d Open = PosedBounds(*Leaf, 1.0);
+
+	// Closed, the two panels together fill the opening with no daylight between their meeting
+	// stiles - they interlock rather than merely abut.
+	TestTrue(TEXT("Closed, the panels overlap at the meeting stile"), Closed.Max.X > FixedBounds.Min.X + 1.0);
+	TestTrue(TEXT("Closed, the pair fills the opening"),
+		Closed.Min.X <= OpeningMin + 1.0 && FixedBounds.Max.X >= OpeningMax - 1.0);
+
+	// Open, the running panel has come to rest exactly over its fixed partner, which is as far as
+	// it can travel without leaving the reveal.
+	TestNearlyEqual(TEXT("Open, the running panel stacks on the fixed one"), Open.Max.X, FixedBounds.Max.X, 0.01);
+	TestTrue(TEXT("Open, roughly half the opening is clear"),
+		Open.Min.X - OpeningMin >= (OpeningMax - OpeningMin) * 0.4);
+
+	// It slides: the swept distance is along the wall, with nothing else disturbed.
+	TestNearlyEqual(TEXT("It travels its declared distance"),
+		Open.Center().X - Closed.Center().X, Leaf->Motion.MaxTravelCm, 0.01);
 	TestNearlyEqual(TEXT("It does not drift off the wall"), Open.Center().Y, Closed.Center().Y, 0.01);
 	TestNearlyEqual(TEXT("It does not change height"), Open.Center().Z, Closed.Center().Z, 0.01);
 	TestNearlyEqual(TEXT("It stays the same size"), Open.Volume(), Closed.Volume(), 0.01);
 
-	// Fully open means the opening is genuinely clear, not merely mostly clear.
-	TestTrue(TEXT("Open, the leaf is clear of the opening"), Open.Min.X >= 244.5 - 0.01);
+	// The two panels run in different tracks, or they would pass through one another.
+	TestTrue(TEXT("The panels are on separate tracks"),
+		Closed.Min.Y >= FixedBounds.Max.Y - 0.01 || Closed.Max.Y <= FixedBounds.Min.Y + 0.01);
+
+	// And both tracks still fit inside a 20 cm wall.
+	const double AcrossMin = FMath::Min(Closed.Min.Y, FixedBounds.Min.Y);
+	const double AcrossMax = FMath::Max(Closed.Max.Y, FixedBounds.Max.Y);
+	TestTrue(TEXT("The whole unit fits within the wall thickness"),
+		AcrossMin >= -Wall.Thickness * 0.5 && AcrossMax <= Wall.Thickness * 0.5);
 
 	return true;
 }
