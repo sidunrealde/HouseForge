@@ -18,9 +18,15 @@ AHFElementActor::AHFElementActor()
 
 	// Complex collision only: these are thin boxed shapes, and simple collision would fill the
 	// door openings back in - you could not walk through a doorway that had been cut out.
+	//
+	// Both flags, and they are not the same flag. CollisionType says which collision to use;
+	// bEnableComplexCollision says whether to build any. Setting only the first asks for complex
+	// collision that was never cooked, and a component with no simple shapes either then has no
+	// collision at all - it renders correctly and a walkthrough falls straight through it.
 	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Mesh->SetCollisionProfileName(TEXT("BlockAll"));
 	Mesh->CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
+	Mesh->bEnableComplexCollision = true;
 	Mesh->SetGenerateOverlapEvents(false);
 }
 
@@ -128,7 +134,7 @@ FDynamicMesh3 AHFRoomActor::BuildMesh() const
 
 	if (bGenerateCeilingSlab)
 	{
-		Result.AppendWithOffsets(FHFGenerators::GenerateCeilingSlab(Room, SlabThickness));
+		FHFMeshOps::AppendPreservingRoles(Result, FHFGenerators::GenerateCeilingSlab(Room, SlabThickness));
 	}
 
 	return Result;

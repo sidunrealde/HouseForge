@@ -99,6 +99,21 @@ public:
 		const FVector3d& Origin, const FVector3d& Axis, int32 SideCount, EHFSurfaceRole Role);
 
 	/**
+	 * Appends Source into Target with every triangle's surface role intact.
+	 *
+	 * The only safe way to join two generated meshes. FDynamicMesh3::AppendWithOffsets shifts every
+	 * appended triangle's polygroup by the target's MaxGroupID, which is right for a mesh whose
+	 * groups are arbitrary partitions and catastrophic for one where the group IS the surface role:
+	 * a shutter appended onto a carcass comes out tagged with a group no role maps to, RoleForGroup
+	 * falls back to WallPaint, and the material panel can never reach it again.
+	 *
+	 * The failure is invisible - the geometry is in the right place and looks right in every
+	 * screenshot - which is exactly why the raw append must not be called on role-tagged meshes.
+	 */
+	static void AppendPreservingRoles(UE::Geometry::FDynamicMesh3& Target,
+		const UE::Geometry::FDynamicMesh3& Source);
+
+	/**
 	 * Subtracts Tool from Target in place.
 	 *
 	 * @return false if the boolean failed, in which case Target is left untouched rather than

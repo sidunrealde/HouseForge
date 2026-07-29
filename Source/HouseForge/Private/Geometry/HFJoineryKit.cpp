@@ -1894,7 +1894,7 @@ bool FHFJoineryKit::BuildDrawerBank(const FHFDrawerBankParams& Bank, TArray<FHFM
 			if (One.TriangleCount() > 0)
 			{
 				MeshTransforms::Translate(One, FVector3d(0.0, 0.0, ModuleZ));
-				Mounts.AppendWithOffsets(One);
+				FHFMeshOps::AppendPreservingRoles(Mounts, One);
 			}
 		}
 	}
@@ -1903,17 +1903,10 @@ bool FHFJoineryKit::BuildDrawerBank(const FHFDrawerBankParams& Bank, TArray<FHFM
 
 	if (OutFixedMounts != nullptr && Mounts.TriangleCount() > 0)
 	{
-		// Appending into a mesh somebody else owns, which may not carry roles yet. Without groups the
-		// mounts would lose their surface role silently and the material panel could never reach them.
-		if (!OutFixedMounts->HasTriangleGroups())
-		{
-			OutFixedMounts->EnableTriangleGroups();
-		}
-		if (!OutFixedMounts->HasAttributes())
-		{
-			OutFixedMounts->EnableAttributes();
-		}
-		OutFixedMounts->AppendWithOffsets(Mounts);
+		// Appending into a mesh somebody else owns, which may already carry roles of its own. The
+		// role-preserving append is what keeps both sets reachable from the material panel - a plain
+		// append renumbers the incoming groups and the mounts stop being metal.
+		FHFMeshOps::AppendPreservingRoles(*OutFixedMounts, Mounts);
 	}
 
 	return true;

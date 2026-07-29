@@ -518,6 +518,45 @@ bool FHFMeshOps::AppendRevolvedProfile(FDynamicMesh3& Mesh, const TArray<FVector
 	return true;
 }
 
+void FHFMeshOps::AppendPreservingRoles(FDynamicMesh3& Target, const FDynamicMesh3& Source)
+{
+	if (Source.TriangleCount() == 0)
+	{
+		return;
+	}
+
+	// Without these the append drops the source's groups and UVs on the floor rather than failing,
+	// and a caller handed a bare mesh would get untagged, unwrapped geometry back.
+	if (!Target.HasTriangleGroups())
+	{
+		Target.EnableTriangleGroups();
+	}
+	if (!Target.HasAttributes())
+	{
+		Target.EnableAttributes();
+	}
+	Target.EnableMatchingAttributes(Source, /*bClearExisting*/ false, /*bDiscardExtraAttributes*/ false);
+
+	FDynamicMesh3::FAppendInfo Info;
+	Target.AppendWithOffsets(Source, &Info);
+
+	if (Info.GroupOffset == 0)
+	{
+		return;
+	}
+
+	// Put the roles back. The offset the append applied is exactly what has to come off again; the
+	// group counter is left where the append moved it, which costs nothing and keeps any later
+	// AllocateTriangleGroup from colliding with a role id.
+	for (int32 Tid = Info.TriangleOffset; Tid < Target.MaxTriangleID(); ++Tid)
+	{
+		if (Target.IsTriangle(Tid))
+		{
+			Target.SetTriangleGroup(Tid, Target.GetTriangleGroup(Tid) - Info.GroupOffset);
+		}
+	}
+}
+
 bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Tool)
 {
 	if (Tool.TriangleCount() == 0 || Target.TriangleCount() == 0)

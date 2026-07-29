@@ -427,6 +427,80 @@ bool FHFUVScaleTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * Joining two generated meshes keeps every triangle's surface role.
+ *
+ * FDynamicMesh3::AppendWithOffsets shifts the incoming polygroups by the target's MaxGroupID, which
+ * is right for meshes whose groups are arbitrary partitions and wrong for every mesh in this plugin,
+ * where the group IS the surface role. The result of getting it wrong is not a crash or a hole: the
+ * geometry lands exactly where it should and simply stops being reachable from the material panel,
+ * so it is worth testing at this level rather than only through whatever composed it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFAppendPreservingRolesTest, "HouseForge.Geometry.AppendPreservingRoles", HF_TEST_FLAGS)
+
+bool FHFAppendPreservingRolesTest::RunTest(const FString& Parameters)
+{
+	auto CountGroup = [](const FDynamicMesh3& Mesh, EHFSurfaceRole Role)
+	{
+		const int32 Group = FHFMeshOps::GroupForRole(Role);
+		int32 Count = 0;
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			if (Mesh.GetTriangleGroup(Tid) == Group)
+			{
+				++Count;
+			}
+		}
+		return Count;
+	};
+
+	FDynamicMesh3 Carcass;
+	FHFMeshOps::InitialiseMesh(Carcass);
+	FHFMeshOps::AppendBox(Carcass, FVector3d(0, 0, 0), FVector3d(50, 30, 100), 0.0,
+		EHFSurfaceRole::JoineryCarcass);
+	FHFMeshOps::ApplyWorldScaleUVs(Carcass);
+
+	FDynamicMesh3 Rail;
+	FHFMeshOps::InitialiseMesh(Rail);
+	FHFMeshOps::AppendBox(Rail, FVector3d(0, 0, 120), FVector3d(50, 2, 2), 0.0,
+		EHFSurfaceRole::MetalHardware);
+	FHFMeshOps::ApplyWorldScaleUVs(Rail);
+
+	const int32 CarcassTris = CountGroup(Carcass, EHFSurfaceRole::JoineryCarcass);
+	const int32 RailTris = CountGroup(Rail, EHFSurfaceRole::MetalHardware);
+	TestTrue(TEXT("Both meshes start out tagged"), CarcassTris > 0 && RailTris > 0);
+
+	FDynamicMesh3 Joined = Carcass;
+	FHFMeshOps::AppendPreservingRoles(Joined, Rail);
+
+	TestEqual(TEXT("The carcass keeps every board triangle"),
+		CountGroup(Joined, EHFSurfaceRole::JoineryCarcass), CarcassTris);
+	TestEqual(TEXT("The rail is still metal after the join"),
+		CountGroup(Joined, EHFSurfaceRole::MetalHardware), RailTris);
+	TestEqual(TEXT("Nothing else was tagged on the way in"),
+		Joined.TriangleCount(), CarcassTris + RailTris);
+
+	// Three-way, because the offset the raw append applies grows with each join: the second
+	// appended mesh is the one that showed the defect in a drawer bank of three.
+	FDynamicMesh3 Second;
+	FHFMeshOps::InitialiseMesh(Second);
+	FHFMeshOps::AppendBox(Second, FVector3d(0, 0, 140), FVector3d(50, 2, 2), 0.0,
+		EHFSurfaceRole::MetalHardware);
+	FHFMeshOps::ApplyWorldScaleUVs(Second);
+
+	FHFMeshOps::AppendPreservingRoles(Joined, Second);
+	TestEqual(TEXT("A second join is still metal"),
+		CountGroup(Joined, EHFSurfaceRole::MetalHardware), RailTris * 2);
+
+	// And the geometry itself survived intact.
+	TestTrue(TEXT("The joined mesh is watertight"), FHFMeshOps::IsClosed(Joined));
+	TestTrue(TEXT("The joined mesh is unwrapped"),
+		Joined.Attributes() != nullptr && Joined.Attributes()->PrimaryUV() != nullptr
+			&& Joined.Attributes()->PrimaryUV()->ElementCount() > 0);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

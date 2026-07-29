@@ -20,6 +20,29 @@ class UDynamicMeshComponent;
  * gets its own UDynamicMeshComponent parented to it. A chest of drawers is therefore one carcass
  * mesh plus one component per drawer front - not five carcass meshes, and never one welded block.
  *
+ * ## Two limits of that model, both deliberate
+ *
+ * **Parts hang off the shell, never off each other.** Every part component is parented to the fixed
+ * mesh, so a part cannot ride on another part's moving frame. The case that would want it is a
+ * pull-out unit carrying its own baskets or drawers, and there is nothing in the joinery kit that
+ * produces one yet. It is a small change to make when there is - an optional parent id on
+ * FHFMeshPart, resolved to the parent's component here - and adding it before there is a fixture to
+ * test it against would be an untested mechanism, not a feature.
+ *
+ * **Open amounts are independent, and MasterOpenAmount ignores the order things really open in.**
+ * This is the one worth being careful about, because the obvious fix is the wrong one. A drawer
+ * inside a wardrobe cannot come out until its shutter is open, and driving both from one master
+ * amount runs it straight through the closed leaf. Parenting the drawer to the leaf would NOT fix
+ * that: an internal drawer's runners are screwed to the CARCASS, so a drawer riding on the leaf
+ * would swing out of the cabinet with it - a worse lie than the one being corrected. The real
+ * constraint is an ordering between two independent parts, not a parent-child relationship, and
+ * nothing here expresses orderings.
+ *
+ * So MasterOpenAmount is a diagnostic - "does everything on this fixture actually move" - and not a
+ * physically valid pose for a fixture whose parts occlude each other. Pose those in order, or in
+ * Sequencer on separate tracks. HouseForge.Joinery.InternalDrawerInterlock measures exactly where
+ * the boundary is and fails if any of this stops being true.
+ *
  * A subclass provides:
  *   BuildMesh()   the fixed geometry, in actor space, exactly as any other element.
  *   BuildParts()  the moving parts, each mesh in its own local space with the pivot at the origin.

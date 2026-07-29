@@ -974,6 +974,19 @@ public:
 	// A slide may pivot anywhere on its line of travel, so the module corner is a free choice, and
 	// it is the useful one: it is the only point a carcass already knows without being told a box
 	// depth or a runner length.
+	//
+	// TWO THINGS A COMPOSER HAS TO SUPPLY, because nothing here can:
+	//
+	// The front is always a full-overlay front the width of its module, which is right for a kitchen
+	// base unit and wrong for a drawer INSIDE a wardrobe. An internal drawer's module must be inset
+	// far enough that its front clears the arc its shutter's thickness sweeps - about half a reveal
+	// plus the leaf thickness in from the hinge edge, not merely inside the carcass - and set back in
+	// Y behind the closed leaf. Inset like that, GenerateDrawerRunnerMounts lands short of the
+	// carcass sides, so the composer owes it packers to be screwed to.
+	//
+	// And the drawer still cannot come out until the shutter is open, which no open amount here
+	// expresses: see AHFArticulatedActor for why that is an ordering rather than a parenting problem.
+	// HouseForge.Joinery.InternalDrawerInterlock builds the composition and measures both.
 
 	/**
 	 * The parameters actually used, with the runner resolved and everything clamped to fit.
