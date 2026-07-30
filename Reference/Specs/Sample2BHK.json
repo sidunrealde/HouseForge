@@ -2313,7 +2313,7 @@
 				"drawerCount": 0,
 				"shelfCount": 4,
 				"bHasLoft": true,
-				"loftHeight": 60,
+				"loftHeight": 450,
 				"plinthHeight": 100,
 				"handleStyle": "Bar",
 				"bHasHangingRail": true,

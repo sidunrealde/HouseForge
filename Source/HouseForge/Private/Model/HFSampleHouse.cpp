@@ -670,6 +670,15 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Wardrobe.Params.ShutterCount = 3;
 		Wardrobe.Params.ShelfCount = 4;
 		Wardrobe.Params.bHasLoft = true;
+
+		// Stated, in the millimetres this spec is written in, and it has to be: FHFFixtureParams
+		// defaults LoftHeight to 60, which is a CENTIMETRE figure on a struct whose lengths are
+		// converted from whatever the spec declares. Left unsaid it came through as a 60 mm loft -
+		// 24 mm of clear height once the boards are off it - and AHFWardrobeActor correctly refused
+		// to build a loft nothing could be put in, so this wardrobe had a loft on the drawing and
+		// none in the level. Nothing caught it while no fixture read the figure.
+		Wardrobe.Params.LoftHeight = 450.0;
+
 		Wardrobe.Params.bHasHangingRail = true;
 		Wardrobe.Params.PlinthHeight = 100.0;
 		Wardrobe.Params.HandleStyle = EHFHandleStyle::Bar;
