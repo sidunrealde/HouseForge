@@ -195,6 +195,7 @@ struct HOUSEFORGE_API FHFJoineryDefaults
 	// material's own" are left alone for the same reason.
 
 	void ApplyTo(FHFPlinthParams& Params) const;
+	void ApplyTo(FHFCarcassParams& Params) const;
 	void ApplyTo(FHFShutterParams& Params) const;
 	void ApplyTo(FHFCorniceParams& Params) const;
 	void ApplyTo(FHFShelfStackParams& Params) const;
