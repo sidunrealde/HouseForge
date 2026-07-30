@@ -4,6 +4,7 @@
 
 #include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFMeshOps.h"
+#include "Geometry/HFSlidingSetOut.h"
 #include "HouseForge.h"
 
 using namespace UE::Geometry;
@@ -788,27 +789,30 @@ void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& 
 		// inside the reveal at every open amount - and is what a sliding unit actually is.
 		const FHFDoorParams& Door = Params.Door;
 
-		const double Half = Opening.Width * 0.5;
 		const double TrackY = (Door.LeafThickness + Door.SlidingTrackGap) * 0.5;
-		const double Overlap = Door.SlidingPanelOverlap;
-		const double Gap = Door.LeafFrameGap;
+
+		// The set-out rule itself lives in FHFSlidingSetOut, because a sliding wardrobe shutter is
+		// the same problem and must not grow a second copy of the answer.
+		const FHFSlidingSetOut Running =
+			FHFSlidingSetOut::Leaf(Opening.Width * 0.5, Door.SlidingPanelOverlap, Door.LeafFrameGap);
+		const FHFSlidingSetOut Standing = Running.MirroredIn(Opening.Width);
 
 		FHFMeshPart Fixed;
 		Fixed.PartId = TEXT("PanelFixed");
-		Fixed.Mesh = MakeSlidingPanel(Half - Overlap, Opening.Width - Gap, -TrackY, Opening.Height, Door);
+		Fixed.Mesh = MakeSlidingPanel(Standing.NearEdge, Standing.FarEdge, -TrackY, Opening.Height, Door);
 		Fixed.PivotTransform = Pivot;
 		OutParts.Add(MoveTemp(Fixed));
 
 		FHFMeshPart Slider;
 		Slider.PartId = TEXT("Leaf");
-		Slider.Mesh = MakeSlidingPanel(Gap, Half + Overlap, TrackY, Opening.Height, Door);
+		Slider.Mesh = MakeSlidingPanel(Running.NearEdge, Running.FarEdge, TrackY, Opening.Height, Door);
 		Slider.PivotTransform = Pivot;
 		Slider.Motion.Type = EHFMotionType::Slide;
 		Slider.Motion.Axis = FVector::XAxisVector;
 
 		// Far edge to far edge: the panel comes to rest exactly over its fixed partner, so it is
 		// still wholly inside the opening at full travel.
-		Slider.Motion.MaxTravelCm = FMath::Max(0.0, Half - Overlap - Gap);
+		Slider.Motion.MaxTravelCm = Running.Travel;
 		OutParts.Add(MoveTemp(Slider));
 		return;
 	}

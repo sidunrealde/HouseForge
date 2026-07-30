@@ -496,23 +496,27 @@ FDynamicMesh3 FHFJoineryKit::GenerateShutter(const FHFShutterParams& Params)
 		return Mesh;
 	}
 
-	const double W = Params.LeafWidth();
-	const double H = Params.LeafHeight();
 	const double T = Params.Thickness;
 
-	// The leaf is cut out on the side of the hinge axis its module lies on, and its board always
-	// lies on +Y of that axis. Both hands therefore present their outward face at local Y = 0 and
-	// carry their thickness opposite the swing, which is what keeps the swept leaf out of its own
-	// carcass. See the header for the whole argument, including why the mirror is the cheaper price.
-	const bool bLeft = Params.Hinge == EHFShutterHinge::Left;
-	const double X0 = bLeft ? 0.0 : -W;
-	const double X1 = bLeft ? W : 0.0;
+	// The leaf is cut out on the side of its own origin that its module lies on, and its board
+	// always lies on +Y of that origin. Every kind therefore presents its outward face at local
+	// Y = 0 and carries its thickness away from the room, which is what keeps a swung leaf out of
+	// its own carcass. See the header for the whole argument, including why the mirror is the
+	// cheaper price.
+	const FBox Leaf = FHFJoineryKit::ShutterPanelBox(Params);
+	const double X0 = Leaf.Min.X;
+	const double X1 = Leaf.Max.X;
 	const double Y0 = 0.0;
 	const double Y1 = T;
 
+	// A top-hung flap hangs BELOW its hinge, so its own space runs from -LeafHeight up to 0 rather
+	// than from 0 up. Everything below is written against these two rather than against 0 and H.
+	const double Z0 = Leaf.Min.Z;
+	const double Z1 = Leaf.Max.Z;
+
 	if (!Params.HasGlazableFrame())
 	{
-		AppendRail(Mesh, FVector3d(X0, Y0, 0.0), FVector3d(X1, Y1, H), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(X0, Y0, Z0), FVector3d(X1, Y1, Z1), EHFSurfaceRole::ShutterLaminate);
 	}
 	else
 	{
@@ -539,16 +543,16 @@ FDynamicMesh3 FHFJoineryKit::GenerateShutter(const FHFShutterParams& Params)
 		// pane sits in what is left. Nothing overlaps, and the volume is the board really cut.
 		const double PaneX0 = X0 + PaneInset;
 		const double PaneX1 = X1 - PaneInset;
-		const double PaneZ0 = PaneInset;
-		const double PaneZ1 = H - PaneInset;
+		const double PaneZ0 = Z0 + PaneInset;
+		const double PaneZ1 = Z1 - PaneInset;
 
 		// Full-thickness outer band. Stiles run the full height and the rails butt between them,
 		// rather than both running full length and lapping at the corners; lapped members would put
 		// four corners' worth of board into the mesh twice.
-		AppendRail(Mesh, FVector3d(X0, Y0, 0.0), FVector3d(PaneX0, Y1, H), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(PaneX1, Y0, 0.0), FVector3d(X1, Y1, H), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(PaneX0, Y0, 0.0), FVector3d(PaneX1, Y1, PaneZ0), EHFSurfaceRole::ShutterLaminate);
-		AppendRail(Mesh, FVector3d(PaneX0, Y0, PaneZ1), FVector3d(PaneX1, Y1, H), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(X0, Y0, Z0), FVector3d(PaneX0, Y1, Z1), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(PaneX1, Y0, Z0), FVector3d(X1, Y1, Z1), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(PaneX0, Y0, Z0), FVector3d(PaneX1, Y1, PaneZ0), EHFSurfaceRole::ShutterLaminate);
+		AppendRail(Mesh, FVector3d(PaneX0, Y0, PaneZ1), FVector3d(PaneX1, Y1, Z1), EHFSurfaceRole::ShutterLaminate);
 
 		// The shoulders: the same picture-frame ring the pane overlaps, split either side of the
 		// groove the glass sits in. A zero rebate, or a pane as thick as the leaf, collapses these
@@ -566,8 +570,8 @@ FDynamicMesh3 FHFJoineryKit::GenerateShutter(const FHFShutterParams& Params)
 
 		AppendShoulders(PaneX0, PaneZ0, X0 + S, PaneZ1);
 		AppendShoulders(X1 - S, PaneZ0, PaneX1, PaneZ1);
-		AppendShoulders(X0 + S, PaneZ0, X1 - S, S);
-		AppendShoulders(X0 + S, H - S, X1 - S, PaneZ1);
+		AppendShoulders(X0 + S, PaneZ0, X1 - S, Z0 + S);
+		AppendShoulders(X0 + S, Z1 - S, X1 - S, PaneZ1);
 
 		AppendRail(Mesh,
 			FVector3d(PaneX0, GrooveY0, PaneZ0),
@@ -587,15 +591,45 @@ FBox FHFJoineryKit::ShutterPanelBox(const FHFShutterParams& Params)
 	}
 
 	const double W = Params.LeafWidth();
+	const double H = Params.LeafHeight();
 	const bool bLeft = Params.Hinge == EHFShutterHinge::Left;
+
+	if (Params.IsTopHung())
+	{
+		// A flap hangs below its hinge. Its X runs the way the module's does, because a flap has no
+		// handedness to mirror - only one thing can happen to it, and that is lifting.
+		return FBox(FVector(0.0, 0.0, -H), FVector(W, Params.Thickness, 0.0));
+	}
+
+	if (Params.IsSliding())
+	{
+		// Set out over the module rather than inside it: the near edge stands off the jamb by the
+		// running clearance, and the far edge reaches past the meeting line by the lap. Mirrored for
+		// a leaf set out from the right, exactly as the second panel of a sliding door is.
+		const FHFSlidingSetOut SetOut = Params.SlideSetOut();
+		const double Near = bLeft ? SetOut.NearEdge : -SetOut.FarEdge;
+		const double Far = bLeft ? SetOut.FarEdge : -SetOut.NearEdge;
+
+		return FBox(FVector(Near, 0.0, 0.0), FVector(Far, Params.Thickness, H));
+	}
 
 	return FBox(
 		FVector(bLeft ? 0.0 : -W, 0.0, 0.0),
-		FVector(bLeft ? W : 0.0, Params.Thickness, Params.LeafHeight()));
+		FVector(bLeft ? W : 0.0, Params.Thickness, H));
 }
 
 EHFHandleEdge FHFJoineryKit::ShutterLeadingEdge(const FHFShutterParams& Params)
 {
+	// A flap's leading edge is its bottom one: that is where the handle goes, and where a gas stay
+	// pushes. Reading it off the hand instead would put the pull on a vertical edge of a panel that
+	// does not turn about a vertical axis at all.
+	if (Params.IsTopHung())
+	{
+		return EHFHandleEdge::Bottom;
+	}
+
+	// A sliding leaf leads with the edge it runs towards, which is the one away from the jamb it is
+	// set out from - the same edge a hinged leaf of that hand opens from.
 	return Params.Hinge == EHFShutterHinge::Left ? EHFHandleEdge::MaxX : EHFHandleEdge::MinX;
 }
 
@@ -604,15 +638,32 @@ FTransform FHFJoineryKit::ShutterPivotTransform(const FHFShutterParams& Params)
 	const bool bLeft = Params.Hinge == EHFShutterHinge::Left;
 	const double HalfReveal = Params.RevealGap * 0.5;
 
+	// The origin sits on the leaf's FRONT FACE in every case, one leaf thickness and its clearance
+	// in front of the carcass - and for a slider, a further track out for each track it runs in
+	// front of. Putting the axis on the face the leaf turns towards is what makes a swing provably
+	// clean rather than merely clean-looking; see the header.
+	const double AxisY = -Params.FaceOffset();
+
+	if (Params.IsTopHung())
+	{
+		// The head of the module, half a reveal down from its top. The leaf hangs below.
+		return FTransform(FVector(HalfReveal, AxisY, Params.ModuleHeight - HalfReveal));
+	}
+
+	if (Params.IsSliding())
+	{
+		// A slide may pivot anywhere on its line of travel, so the module edge this leaf is set out
+		// from is the free and useful choice: it is the one point the carcass already knows. The
+		// running clearance is in the leaf's own box rather than here, so a leaf and its mirror are
+		// described by the same set-out.
+		return FTransform(FVector(bLeft ? 0.0 : Params.ModuleWidth, AxisY, HalfReveal));
+	}
+
 	// Half a reveal in from the module edge on the hinge side. The leaf itself is cut on whichever
 	// side of that axis its module lies, so there is no rotation to apply: a pure translation keeps
 	// the leaf's local axes pointing the same way as the module's, and therefore keeps "out of the
 	// cupboard" at -Y for both hands. A half-turn here would flip that for one of them.
 	const double HingeX = bLeft ? HalfReveal : Params.ModuleWidth - HalfReveal;
-
-	// The axis sits on the leaf's front face, which is the leaf's thickness plus the clearance the
-	// hinge leaves, in front of the carcass. Same for both hands.
-	const double AxisY = -(Params.BackClearance + Params.Thickness);
 
 	return FTransform(FVector(HingeX, AxisY, HalfReveal));
 }
@@ -620,6 +671,29 @@ FTransform FHFJoineryKit::ShutterPivotTransform(const FHFShutterParams& Params)
 FHFPartMotion FHFJoineryKit::ShutterMotion(const FHFShutterParams& Params)
 {
 	FHFPartMotion Motion;
+
+	if (Params.IsTopHung())
+	{
+		// About the horizontal axis at its head, and NEGATIVE, which is what lifts the leaf out of
+		// the unit rather than driving it back through the carcass. The sign is the whole
+		// correctness of a flap: hung the other way it swings inward and disappears into the
+		// cabinet, which is invisible in elevation and obvious the moment it is opened.
+		Motion.Type = EHFMotionType::Hinge;
+		Motion.Axis = FVector::XAxisVector;
+		Motion.MaxAngleDegrees = -Params.OpenAngleDegrees;
+		return Motion;
+	}
+
+	if (Params.IsSliding())
+	{
+		// It runs along the module, towards its neighbour's bay, and comes to rest exactly over it -
+		// the same stopping rule a sliding door's panel obeys, from the same set-out.
+		Motion.Type = EHFMotionType::Slide;
+		Motion.Axis = FVector::XAxisVector;
+		Motion.MaxTravelCm = Params.SlideSign() * Params.SlideTravel();
+		return Motion;
+	}
+
 	Motion.Type = EHFMotionType::Hinge;
 	Motion.Axis = FVector::ZAxisVector;
 	Motion.MaxAngleDegrees = Params.SwingSign() * Params.OpenAngleDegrees;

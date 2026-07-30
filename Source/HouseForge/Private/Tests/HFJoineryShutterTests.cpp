@@ -651,4 +651,306 @@ bool FHFShutterSwingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A top-hung flap: a loft shutter, or the lift-up door of a kitchen wall cabinet.
+ *
+ * The property that matters is the same one the ventilator sash turns on, and it is easy to get
+ * backwards: a flap hinged along its head must swing OUT of the unit and up. Hung the other way it
+ * turns straight into the carcass behind it, which is invisible in elevation - the closed pose is
+ * identical - and obvious the moment anything opens it.
+ *
+ * Measured on where the bottom edge actually goes, and on the leaf never crossing the plane of the
+ * carcass front at any angle, rather than on the sign of an angle read back off the motion.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFTopHungShutterTest, "HouseForge.Joinery.ShutterTopHungFlap", HF_TEST_FLAGS)
+
+bool FHFTopHungShutterTest::RunTest(const FString& Parameters)
+{
+	// A loft flap over a wardrobe: 900 wide, 600 high, on a lift-up stay opening 100 degrees.
+	FHFShutterParams Flap = MakeShutterParams();
+	Flap.MotionKind = EHFShutterMotion::TopHung;
+	Flap.ModuleWidth = 90.0;
+	Flap.ModuleHeight = 60.0;
+
+	const FHFMeshPart Part = FHFJoineryKit::BuildShutterPart(Flap, TEXT("Flap"));
+
+	TestTrue(TEXT("A flap is a solid leaf"), FHFMeshOps::IsClosed(Part.Mesh));
+	TestTrue(TEXT("A flap is cut to its module like any other leaf"),
+		FMath::IsNearlyEqual(SpanX(Part.Mesh.GetBounds()), Flap.LeafWidth(), 1e-9)
+			&& FMath::IsNearlyEqual(SpanZ(Part.Mesh.GetBounds()), Flap.LeafHeight(), 1e-9));
+
+	// ------------------------------------------------------------------- it turns the right way
+	//
+	// About the horizontal axis running ALONG the run. A vertical axis here would be a side-hung
+	// leaf wearing a flap's name, and an axis across the unit is geometry no flap has.
+	TestTrue(TEXT("A flap hinges"), Part.Motion.Type == EHFMotionType::Hinge);
+	TestTrue(TEXT("It pivots about the horizontal axis along its head"),
+		Part.Motion.UnitAxis().Equals(FVector::XAxisVector, 1e-9));
+	TestNearlyEqual(TEXT("It opens its declared angle"),
+		FMath::Abs(Part.Motion.MaxAngleDegrees), Flap.OpenAngleDegrees, 1e-9);
+
+	// The leaf hangs BELOW its hinge in its own space, which is what makes the head the pivot.
+	const FBox Panel = FHFJoineryKit::ShutterPanelBox(Flap);
+	TestNearlyEqual(TEXT("The leaf hangs below its own origin"), Panel.Max.Z, 0.0, 1e-9);
+	TestNearlyEqual(TEXT("...by its whole height"), Panel.Min.Z, -Flap.LeafHeight(), 1e-9);
+	TestTrue(TEXT("A flap's leading edge is its bottom one, where the handle and the stay go"),
+		FHFJoineryKit::ShutterLeadingEdge(Flap) == EHFHandleEdge::Bottom);
+
+	// The hinge is at the head of the module, half a reveal down, and on the leaf's front face.
+	const FVector Axis = Part.PivotTransform.GetLocation();
+	TestNearlyEqual(TEXT("The hinge runs along the head of the module"),
+		Axis.Z, Flap.ModuleHeight - Flap.RevealGap * 0.5, 1e-9);
+	TestNearlyEqual(TEXT("...on the leaf's front face, clear of the carcass"),
+		Axis.Y, -(Flap.BackClearance + Flap.Thickness), 1e-9);
+	TestTrue(TEXT("A flap hangs on a translation, not a turn"),
+		Part.PivotTransform.GetRotation().IsIdentity(1e-9));
+
+	// Closed, it fills its module exactly like a side-hung leaf does. A run of loft flaps over a
+	// run of wardrobes has to line up with them.
+	const FAxisAlignedBox3d Closed = PosedBounds(Part, 0.0);
+	const double HalfReveal = Flap.RevealGap * 0.5;
+	TestNearlyEqual(TEXT("Closed, the flap fills its module across"), Closed.Min.X, HalfReveal, 1e-9);
+	TestNearlyEqual(TEXT("Closed, the flap fills its module across"),
+		Closed.Max.X, Flap.ModuleWidth - HalfReveal, 1e-9);
+	TestNearlyEqual(TEXT("Closed, the flap fills its module up"), Closed.Min.Z, HalfReveal, 1e-9);
+	TestNearlyEqual(TEXT("Closed, the flap fills its module up"),
+		Closed.Max.Z, Flap.ModuleHeight - HalfReveal, 1e-9);
+
+	// ------------------------------------------------------------ out and up, never in and down
+	//
+	// A point on the bottom edge of the leaf, tracked through the swing. At 100 degrees it has come
+	// out in front of the unit and risen just past its own hinge - which is what a lift-up flap
+	// does, and the opposite of what one hung on the wrong face does.
+	FHFPartState State;
+	State.PivotTransform = Part.PivotTransform;
+	State.Motion = Part.Motion;
+
+	const FVector BottomEdgeLocal(Panel.Max.X * 0.5, 0.0, Panel.Min.Z);
+	const FVector Shut = State.PoseAt(0.0).TransformPosition(BottomEdgeLocal);
+	const FVector Open = State.PoseAt(1.0).TransformPosition(BottomEdgeLocal);
+
+	TestTrue(TEXT("Opening carries the bottom edge out of the unit"), Open.Y < Shut.Y - 1.0);
+	TestTrue(TEXT("Opening lifts the bottom edge"), Open.Z > Shut.Z + 1.0);
+	TestNearlyEqual(TEXT("It does not travel along the run at all"), Open.X, Shut.X, 1e-9);
+
+	// Past square, so the leaf has lifted above the hinge line rather than stopping level with it.
+	TestTrue(TEXT("At 100 degrees the leaf has come up past its own hinge"), Open.Z > Axis.Z);
+
+	// A hinge is a rotation: the bottom edge keeps its distance from the hinge line the whole way.
+	for (int32 Step = 0; Step <= 40; ++Step)
+	{
+		const FVector At = State.PoseAt(Step / 40.0).TransformPosition(BottomEdgeLocal);
+		TestNearlyEqual(TEXT("The flap stays a leaf-height from its hinge"),
+			FVector2D(At.Y - Axis.Y, At.Z - Axis.Z).Size(), Flap.LeafHeight(), 1e-6);
+	}
+
+	// And the whole leaf stays in front of the carcass at every angle. The module frame puts the
+	// carcass front plane at Y = 0 with everything the carcass owns behind it, so a leaf that never
+	// reaches Y = 0 cannot touch it whatever is in there - the plane is the certificate.
+	double WorstClearance = TNumericLimits<double>::Max();
+	for (int32 Step = 0; Step <= 200; ++Step)
+	{
+		const FDynamicMesh3 Swept = PosedMesh(Part, Step / 200.0);
+
+		double MaxY = -TNumericLimits<double>::Max();
+		for (const int32 Vid : Swept.VertexIndicesItr())
+		{
+			MaxY = FMath::Max(MaxY, Swept.GetVertex(Vid).Y);
+		}
+		WorstClearance = FMath::Min(WorstClearance, -MaxY);
+	}
+
+	TestTrue(TEXT("The flap never reaches the carcass at any angle"), WorstClearance > 0.0);
+	TestNearlyEqual(TEXT("It keeps its hinge clearance throughout"),
+		WorstClearance, Flap.BackClearance, 1e-9);
+
+	// The other kinds are unaffected: changing the motion kind must not have moved a side-hung leaf.
+	{
+		const FHFShutterParams Side = MakeShutterParams();
+		TestTrue(TEXT("A side-hung leaf still hinges about a vertical axis"),
+			FHFJoineryKit::ShutterMotion(Side).UnitAxis().Equals(FVector::ZAxisVector, 1e-9));
+	}
+
+	return true;
+}
+
+/**
+ * A sliding wardrobe: two leaves on two tracks, lapping rather than leaving a reveal.
+ *
+ * The commonest wardrobe in a modern Indian flat, and the one the kit could not build. It is not a
+ * hinged run with a different motion bolted on - the set-out is genuinely different:
+ *
+ *   - the leaves OVERLAP at the meeting line instead of being separated by a reveal, because they
+ *     pass one another on separate tracks. A reveal there would be a hole into the wardrobe.
+ *   - each leaf is therefore WIDER than its module, not narrower.
+ *   - and each runs until it comes to rest exactly over its neighbour, which is what keeps every
+ *     leaf inside the carcass at every open amount.
+ *
+ * The rule comes from FHFSlidingSetOut, which is the same one the sliding doors use.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSlidingShutterTest, "HouseForge.Joinery.ShutterSliding", HF_TEST_FLAGS)
+
+bool FHFSlidingShutterTest::RunTest(const FString& Parameters)
+{
+	// A 1800 two-door sliding wardrobe: two 900 bays, 2100 high.
+	constexpr double Bay = 90.0;
+
+	auto MakeLeaf = [](EHFShutterHinge Hand, int32 Track)
+	{
+		FHFShutterParams Params;
+		Params.MotionKind = EHFShutterMotion::Sliding;
+		Params.ModuleWidth = Bay;
+		Params.ModuleHeight = 210.0;
+		Params.Thickness = 1.9;
+		Params.RevealGap = 0.3;
+		Params.BackClearance = 0.1;
+		Params.SlideOverlap = 1.25;
+		Params.TrackGap = 1.0;
+		Params.Hinge = Hand;
+		Params.Track = Track;
+		return Params;
+	};
+
+	// The left leaf runs on the track against the carcass, the right one in front of it.
+	const FHFShutterParams LeftParams = MakeLeaf(EHFShutterHinge::Left, 0);
+	const FHFShutterParams RightParams = MakeLeaf(EHFShutterHinge::Right, 1);
+
+	const FHFMeshPart Left = FHFJoineryKit::BuildShutterPart(LeftParams, TEXT("SlideL"));
+	const FHFMeshPart Right = FHFJoineryKit::BuildShutterPart(RightParams, TEXT("SlideR"));
+
+	TestTrue(TEXT("Both leaves are solids"),
+		FHFMeshOps::IsClosed(Left.Mesh) && FHFMeshOps::IsClosed(Right.Mesh));
+
+	// ------------------------------------------------------------------------------ it slides
+	TestTrue(TEXT("A sliding shutter slides rather than swinging"),
+		Left.Motion.Type == EHFMotionType::Slide);
+	TestTrue(TEXT("It runs along the carcass, not through it"),
+		Left.Motion.UnitAxis().Equals(FVector::XAxisVector, 1e-9));
+	TestTrue(TEXT("The two leaves run opposite ways"),
+		Left.Motion.MaxTravelCm * Right.Motion.MaxTravelCm < 0.0);
+	TestNearlyEqual(TEXT("Each runs a bay less its lap and its clearance"),
+		FMath::Abs(Left.Motion.MaxTravelCm), Bay - 1.25 - 0.3, 1e-9);
+
+	// ------------------------------------------------------------- wider than its module, lapping
+	//
+	// The difference from a hinged run, as a measurement. A hinged leaf is its module LESS a reveal;
+	// a sliding one is its module PLUS its lap, less the running clearance at the jamb.
+	FHFShutterParams AsHinged = LeftParams;
+	AsHinged.MotionKind = EHFShutterMotion::SideHung;
+
+	TestTrue(TEXT("A sliding leaf is wider than its module, where a hinged one is narrower"),
+		LeftParams.LeafWidth() > Bay && AsHinged.LeafWidth() < Bay);
+	TestNearlyEqual(TEXT("It is a bay plus its lap, less the running clearance"),
+		LeftParams.LeafWidth(), Bay + 1.25 - 0.3, 1e-9);
+	TestNearlyEqual(TEXT("The cut leaf is that width"),
+		SpanX(Left.Mesh.GetBounds()), LeftParams.LeafWidth(), 1e-9);
+
+	// Closed, the pair covers the whole run and LAPS in the middle. No daylight, no reveal: a gap
+	// between two sliding leaves is a hole straight into the wardrobe.
+	const FAxisAlignedBox3d LeftShut = PosedBounds(Left, 0.0);
+	const FAxisAlignedBox3d RightShutInOwnModule = PosedBounds(Right, 0.0);
+
+	// The right leaf's module starts one bay along, so its pose is offset by that to read the pair
+	// in one frame - which is what a carcass does when it places the second module.
+	const double ModuleOffset = Bay;
+	const double RightMinX = RightShutInOwnModule.Min.X + ModuleOffset;
+	const double RightMaxX = RightShutInOwnModule.Max.X + ModuleOffset;
+
+	TestTrue(TEXT("Closed, the leaves lap at the meeting line rather than leaving a reveal"),
+		LeftShut.Max.X > RightMinX + 1e-9);
+	TestNearlyEqual(TEXT("They lap by the declared overlap from each side"),
+		LeftShut.Max.X - RightMinX, 2.0 * 1.25, 1e-9);
+	TestNearlyEqual(TEXT("Closed, the pair reaches the left jamb"), LeftShut.Min.X, 0.3, 1e-9);
+	TestNearlyEqual(TEXT("Closed, the pair reaches the right jamb"), RightMaxX, 2.0 * Bay - 0.3, 1e-9);
+
+	// ------------------------------------------------------------------ two tracks, never one
+	//
+	// They overlap in elevation, so if they shared a track they would share a volume. The track
+	// offset is what makes the lap possible at all.
+	TestTrue(TEXT("The leaves are on separate tracks"),
+		LeftShut.Min.Y >= RightShutInOwnModule.Max.Y - 1e-9
+			|| LeftShut.Max.Y <= RightShutInOwnModule.Min.Y + 1e-9);
+	TestNearlyEqual(TEXT("The front track stands a leaf and a running clearance proud of the back one"),
+		LeftShut.Min.Y - RightShutInOwnModule.Min.Y, LeftParams.Thickness + LeftParams.TrackGap, 1e-9);
+	TestTrue(TEXT("Both leaves hang in front of the carcass"),
+		LeftShut.Max.Y < 0.0 && RightShutInOwnModule.Max.Y < 0.0);
+
+	// ------------------------------------------------------ inside the carcass at every amount
+	//
+	// The property the single full-width leaf broke on the balcony doors: a leaf that runs its own
+	// width leaves the unit. Every leaf here stays within the run of the carcass throughout.
+	constexpr double RunMin = 0.0;
+	constexpr double RunMax = 2.0 * Bay;
+
+	for (int32 Step = 0; Step <= 40; ++Step)
+	{
+		const double Alpha = Step / 40.0;
+
+		const FAxisAlignedBox3d L = PosedBounds(Left, Alpha);
+		const FAxisAlignedBox3d R = PosedBounds(Right, Alpha);
+		const double RMin = R.Min.X + ModuleOffset;
+		const double RMax = R.Max.X + ModuleOffset;
+
+		if (L.Min.X < RunMin - 1e-9 || L.Max.X > RunMax + 1e-9 || RMin < RunMin - 1e-9 || RMax > RunMax + 1e-9)
+		{
+			AddError(FString::Printf(
+				TEXT("At %.2f open the leaves span %.2f..%.2f and %.2f..%.2f, outside the 0..%.0f carcass; a shutter is running out of the wardrobe."),
+				Alpha, L.Min.X, L.Max.X, RMin, RMax, RunMax));
+			break;
+		}
+
+		// A slide is a translation: nothing changes size, height or depth on the way.
+		TestNearlyEqual(TEXT("A sliding leaf keeps its height"), L.Max.Z - L.Min.Z,
+			LeftShut.Max.Z - LeftShut.Min.Z, 1e-9);
+		TestNearlyEqual(TEXT("A sliding leaf stays on its own track"), L.Min.Y, LeftShut.Min.Y, 1e-9);
+	}
+
+	// Fully open, each leaf has come to rest exactly over its neighbour's closed position - as far
+	// as it can go without leaving the carcass, and the whole point of the two-track set-out.
+	const FAxisAlignedBox3d LeftOpen = PosedBounds(Left, 1.0);
+	TestNearlyEqual(TEXT("Open, the left leaf stacks on where the right one closed"),
+		LeftOpen.Max.X, RightMaxX, 1e-9);
+	TestTrue(TEXT("Open, its own bay is clear to walk into"),
+		LeftOpen.Min.X >= Bay - 1.25 - 1e-9);
+
+	// It travelled, and it travelled exactly its declared distance.
+	TestNearlyEqual(TEXT("It travels its declared distance"),
+		LeftOpen.Min.X - LeftShut.Min.X, Left.Motion.MaxTravelCm, 1e-9);
+
+	// A sliding leaf has no swing, so nothing about it should be read off the open angle. Changing
+	// that angle must not move it at all.
+	{
+		FHFShutterParams Angled = LeftParams;
+		Angled.OpenAngleDegrees = 45.0;
+		TestNearlyEqual(TEXT("The open angle means nothing to a slider"),
+			FHFJoineryKit::ShutterMotion(Angled).MaxTravelCm, Left.Motion.MaxTravelCm, 1e-9);
+	}
+
+	// A leaf with nowhere to run is refused rather than generated as a panel that cannot move: a
+	// lap as wide as the bay leaves no travel at all.
+	{
+		FHFShutterParams Stuck = LeftParams;
+		Stuck.SlideOverlap = Bay;
+		TestFalse(TEXT("A sliding leaf with no travel is not a sliding leaf"), Stuck.IsValid());
+		TestEqual(TEXT("...and produces no geometry"),
+			FHFJoineryKit::GenerateShutter(Stuck).TriangleCount(), 0);
+	}
+
+	// The handle goes on the edge it runs towards, which is the same edge a hinged leaf of that
+	// hand opens from - so a run of sliders and a run of hinged leaves are described the same way.
+	TestTrue(TEXT("A left-set slider leads with its right edge"),
+		FHFJoineryKit::ShutterLeadingEdge(LeftParams) == EHFHandleEdge::MaxX);
+	TestTrue(TEXT("A right-set slider leads with its left edge"),
+		FHFJoineryKit::ShutterLeadingEdge(RightParams) == EHFHandleEdge::MinX);
+
+	// And a slider still presents its outward face at local Y = 0, like every other leaf in the
+	// kit, so anything mounted on one is described exactly as it is on a hinged leaf.
+	TestNearlyEqual(TEXT("A sliding leaf looks out of the wardrobe along its own -Y"),
+		Left.Mesh.GetBounds().Min.Y, 0.0, 1e-9);
+	TestNearlyEqual(TEXT("...with its board behind that face"),
+		Left.Mesh.GetBounds().Max.Y, LeftParams.Thickness, 1e-9);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

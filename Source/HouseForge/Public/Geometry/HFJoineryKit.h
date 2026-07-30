@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "Geometry/HFSlidingSetOut.h"
 #include "Model/HFArticulation.h"
 #include "Model/HFTypes.h"
 #include "HFJoineryKit.generated.h"
@@ -283,7 +284,41 @@ enum class EHFShutterHinge : uint8
 };
 
 /**
- * One hinged shutter leaf, filling one module of a carcass.
+ * How a shutter leaf moves.
+ *
+ * A side-hung leaf is the commonest thing in a fitted kitchen and the least common thing in a
+ * modern Indian wardrobe, which is why all three of these exist. Hard-coding the vertical hinge
+ * ruled out a loft flap, a lift-up wall cabinet and the sliding wardrobe that most flats of this
+ * class actually have.
+ */
+UENUM(BlueprintType)
+enum class EHFShutterMotion : uint8
+{
+	/** Hinged on a vertical edge and swinging out. The kitchen and cabinet default. */
+	SideHung,
+
+	/**
+	 * Hinged along its head and lifting out and up: a loft flap, a lift-up wall cabinet.
+	 *
+	 * The leaf hangs BELOW its hinge, so its local Z runs from -LeafHeight to 0, and it opens
+	 * about the horizontal axis at its head. Its leading edge is therefore the bottom one, which is
+	 * where the handle and the gas stay go.
+	 */
+	TopHung,
+
+	/**
+	 * Running on a track, passing its neighbour rather than swinging clear of it.
+	 *
+	 * Different from a hinged run in a way that shows: sliding leaves LAP one another on separate
+	 * tracks instead of being separated by a reveal, so there is no shadow gap between them and no
+	 * daylight either. The set-out is the same two-track rule a sliding door uses, and is taken
+	 * from FHFSlidingSetOut rather than worked out again here.
+	 */
+	Sliding
+};
+
+/**
+ * One shutter leaf, filling one module of a carcass.
  *
  * The sizes here are the MODULE - the bay the shutter closes - and not the leaf. That is the way
  * joinery is actually set out: a carcass is divided into bays and each leaf is cut to its bay less
@@ -321,18 +356,70 @@ struct HOUSEFORGE_API FHFShutterParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double RevealGap = 0.3;
 
+	/**
+	 * How this leaf moves. Side-hung unless said otherwise, which is what a cabinet door is.
+	 *
+	 * Not a cosmetic choice: it changes which axis the leaf turns about, where its local space is
+	 * anchored, and for a sliding leaf whether there is a reveal between it and its neighbour at
+	 * all. See EHFShutterMotion, and ShutterPanelBox for the frame a handle is fitted to.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	EHFShutterMotion MotionKind = EHFShutterMotion::SideHung;
+
+	/**
+	 * Which edge a side-hung leaf hangs on, and which way a sliding one is set out and runs.
+	 *
+	 * Ignored by a top-hung flap, which has only one hand: it lifts.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (EditCondition = "MotionKind != EHFShutterMotion::TopHung"))
 	EHFShutterHinge Hinge = EHFShutterHinge::Left;
 
 	/**
-	 * Swing at open amount 1, unsigned - the direction comes from Hinge.
+	 * Swing at open amount 1, unsigned - the direction comes from Hinge, or from the flap lifting.
 	 *
 	 * 100 degrees rather than 90 because a leaf stopped square to the carcass still stands in front
 	 * of the drawer bank behind it, and every concealed hinge sold for this work opens 100-110.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
-		meta = (ClampMin = "0.0", ClampMax = "180.0"))
+		meta = (EditCondition = "MotionKind != EHFShutterMotion::Sliding", ClampMin = "0.0", ClampMax = "180.0"))
 	double OpenAngleDegrees = 100.0;
+
+	/**
+	 * Sliding only: how far this leaf laps past the meeting line, over the leaf on the other track.
+	 *
+	 * THE DIFFERENCE BETWEEN A SLIDING RUN AND A HINGED ONE, in one number. Hinged leaves are
+	 * separated by a reveal and read as a run of panels with shadow lines between them. Sliding
+	 * leaves run on separate tracks and OVERLAP, so there is no gap between them and no daylight
+	 * either - a reveal between two sliding leaves would be a hole straight into the wardrobe.
+	 *
+	 * 1.25 each side, so a pair laps 25 mm, which is what the meeting stile of a domestic sliding
+	 * wardrobe actually is.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (EditCondition = "MotionKind == EHFShutterMotion::Sliding", ClampMin = "0.0"))
+	double SlideOverlap = 1.25;
+
+	/**
+	 * Sliding only: clear distance between one track's leaf face and the next one's.
+	 *
+	 * What stops two leaves that overlap in elevation from sharing a volume. 10 mm is the running
+	 * clearance of a domestic top-hung sliding gear.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (EditCondition = "MotionKind == EHFShutterMotion::Sliding", ClampMin = "0.0"))
+	double TrackGap = 1.0;
+
+	/**
+	 * Sliding only: which track this leaf runs in. 0 is against the carcass, 1 stands in front of it.
+	 *
+	 * A two-leaf wardrobe is one leaf on each. Every further track stands the leaf another leaf
+	 * thickness plus a running clearance out into the room, which is exactly what a real one does
+	 * and why a three-track wardrobe visibly projects.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (EditCondition = "MotionKind == EHFShutterMotion::Sliding", ClampMin = "0", ClampMax = "3"))
+	int32 Track = 0;
 
 	/** The gap a hinge leaves between the closed leaf's back and the carcass front edges. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
@@ -357,25 +444,77 @@ struct HOUSEFORGE_API FHFShutterParams
 		meta = (EditCondition = "bGlassInsert", ClampMin = "0.0"))
 	double GlassRebate = 0.6;
 
-	/** Cut width of the leaf: the module less half a reveal at each edge. */
-	double LeafWidth() const { return ModuleWidth - RevealGap; }
+	bool IsSideHung() const { return MotionKind == EHFShutterMotion::SideHung; }
+	bool IsTopHung() const { return MotionKind == EHFShutterMotion::TopHung; }
+	bool IsSliding() const { return MotionKind == EHFShutterMotion::Sliding; }
 
-	/** Cut height of the leaf. */
+	/**
+	 * Where the leaf runs to, along the module, as the two-track rule sets it out.
+	 *
+	 * Measured from the module edge this leaf is set out from, so it reads the same for both hands
+	 * and the mirroring is applied once, where the leaf is actually cut. Meaningless for a hinged
+	 * leaf, which is cut to its module rather than over it.
+	 */
+	FHFSlidingSetOut SlideSetOut() const
+	{
+		return FHFSlidingSetOut::Leaf(ModuleWidth, SlideOverlap, RevealGap);
+	}
+
+	/**
+	 * Cut width of the leaf.
+	 *
+	 * A hinged leaf is the module less half a reveal at each edge - it has to fit BETWEEN its
+	 * neighbours. A sliding leaf is the module plus its lap, less the running clearance at the
+	 * jamb: it covers its own bay and reaches over the next one, because it passes its neighbour
+	 * rather than meeting it.
+	 */
+	double LeafWidth() const
+	{
+		return IsSliding() ? SlideSetOut().Width() : ModuleWidth - RevealGap;
+	}
+
+	/** Cut height of the leaf. The reveal is a running clearance top and bottom on a slider. */
 	double LeafHeight() const { return ModuleHeight - RevealGap; }
 
 	/**
-	 * Sign of the hinge rotation that opens this leaf.
+	 * Sign of the hinge rotation that opens a side-hung leaf.
 	 *
 	 * Negative for a left-hung leaf and positive for a right-hung one, because the module frame's
 	 * +Y runs back into the unit and opening always carries the leading edge forward out of it.
 	 */
 	double SwingSign() const { return Hinge == EHFShutterHinge::Left ? -1.0 : 1.0; }
 
+	/**
+	 * Direction a sliding leaf runs, along the module's +X.
+	 *
+	 * Opposite in sign to SwingSign and deliberately its own function rather than a reuse of it: a
+	 * left-set sliding leaf runs to the RIGHT, over its neighbour's bay, which is the opposite
+	 * relationship to a left-hung leaf swinging away from its hinge.
+	 */
+	double SlideSign() const { return Hinge == EHFShutterHinge::Left ? 1.0 : -1.0; }
+
+	/** How far a sliding leaf runs before it comes to rest over its neighbour. Unsigned. */
+	double SlideTravel() const { return IsSliding() ? SlideSetOut().Travel : 0.0; }
+
+	/**
+	 * How far in front of the carcass front plane this leaf's face hangs.
+	 *
+	 * One leaf thickness plus its hinge clearance for anything hung, and a further leaf and running
+	 * clearance for each track a slider is out from the carcass.
+	 */
+	double FaceOffset() const
+	{
+		return BackClearance + Thickness
+			+ (IsSliding() ? FMath::Max(0, Track) * (Thickness + TrackGap) : 0.0);
+	}
+
 	/** False when the reveal has eaten the module, or a dimension is non-positive. */
 	bool IsValid() const
 	{
+		const bool bMotionIsPossible = IsSliding() ? SlideTravel() > 0.0 : OpenAngleDegrees > 0.0;
+
 		return LeafWidth() > 0.0 && LeafHeight() > 0.0 && Thickness > 0.0 && RevealGap >= 0.0
-			&& OpenAngleDegrees > 0.0;
+			&& bMotionIsPossible;
 	}
 
 	/** True when the frame and its rebate actually leave a pane worth glazing. */
@@ -951,12 +1090,21 @@ public:
 	//               carcass, and ShutterPivotTransform is expressed in this frame.
 
 	/**
-	 * A shutter leaf in its own local space, hinge axis on the origin.
+	 * A shutter leaf in its own local space, its pivot on the origin.
 	 *
-	 * Local frame: +Z up from the leaf's bottom edge, the board on +Y of the hinge axis, and the
-	 * leaf cut out on the side of that axis its module lies on - +X for a left-hung leaf, -X for a
-	 * right-hung one. The pivot is a pure translation for both hands, so those axes mean the same
+	 * Local frame: +Z up from the leaf's bottom edge, the board on +Y of the pivot, and the leaf cut
+	 * out on the side of that pivot its module lies on - +X for a left-hung leaf, -X for a
+	 * right-hung one. The pivot is a pure translation for every kind, so those axes mean the same
 	 * thing in the leaf's space as they do in the module's.
+	 *
+	 * The two kinds that are not side-hung differ only in where that origin sits, which is the
+	 * point of describing them all this way:
+	 *
+	 *   TopHung   the origin is on the head, and the leaf hangs below it: Z runs -LeafHeight to 0.
+	 *   Sliding   the origin is on the module edge the leaf is set out from, and the leaf reaches
+	 *             OVER its neighbour rather than stopping short of it - so its box starts a running
+	 *             clearance in from that edge and ends a lap past the far one. There is no reveal
+	 *             between two sliding leaves; they overlap on separate tracks.
 	 *
 	 * TWO CONSEQUENCES, and both are load-bearing.
 	 *
@@ -1005,13 +1153,33 @@ public:
 	 */
 	static FBox ShutterPanelBox(const FHFShutterParams& Params);
 
-	/** The edge of that box the leaf opens from: MaxX left-hung, MinX right-hung. */
+	/**
+	 * The edge of that box the leaf opens from: MaxX left, MinX right, Bottom for a flap.
+	 *
+	 * A flap is the one that catches people out. It turns about a horizontal axis, so neither
+	 * vertical edge leads and the handle belongs on the bottom - which is also where its gas stay
+	 * pushes.
+	 */
 	static EHFHandleEdge ShutterLeadingEdge(const FHFShutterParams& Params);
 
-	/** Where the leaf's hinge axis sits, in the module frame. A pure translation, both hands. */
+	/**
+	 * Where the leaf's own origin sits, in the module frame. A pure translation, every kind.
+	 *
+	 * The hinge line for a side-hung leaf or a flap; a point on the line of travel for a slider.
+	 * Always on the leaf's front face, and for a slider a further track out for each track it runs
+	 * in front of, which is what makes a two-track wardrobe project further into the room than a
+	 * hinged one.
+	 */
 	static FTransform ShutterPivotTransform(const FHFShutterParams& Params);
 
-	/** The hinge the leaf turns on, expressed in the leaf's own local space. */
+	/**
+	 * The motion the leaf makes, expressed in the leaf's own local space.
+	 *
+	 * A vertical hinge for a side-hung leaf, a horizontal one at the head for a flap, and a slide
+	 * along the run for a sliding leaf. A shutter is not always a hinge, and assuming it was ruled
+	 * out a loft flap, a lift-up wall cabinet and the sliding wardrobe most flats of this class
+	 * actually have.
+	 */
 	static FHFPartMotion ShutterMotion(const FHFShutterParams& Params);
 
 	/**
