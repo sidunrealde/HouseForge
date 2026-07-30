@@ -50,9 +50,35 @@ rather than one problem per round trip.
 a house would screenshot plausibly while the spec behind it is wrong, and the comparison in step 6
 would silently pass.
 
-**6. Capture and compare.** `CaptureTopDown` writes a top-down orthographic view under
-`Saved/Screenshots`. Compare it against the source plan. This step is what closes the loop —
-without it Claude is building blind and cannot tell whether what it read matches what it built.
+**6. Capture and compare.** `CaptureTopDown` writes a **plan** under `Saved/Screenshots`: the flat
+cut through horizontally at 120 cm — where an architectural plan is conventionally cut — and viewed
+orthographically from above, so walls read as walls, doorways as gaps and rooms as rooms. Compare it
+against the source plan. This step is what closes the loop; without it Claude is building blind and
+cannot tell whether what it read matches what it built.
+
+A section rather than a plain top-down view because a top-down view of a house shows the top of its
+ceilings, which is a featureless slab. The cut is real geometry, built into a throwaway copy and
+captured from that — the house itself is read, never modified. Hiding the ceilings is not an
+alternative: `AHFRoomActor` holds its ceiling slab and its floor slab in one mesh.
+
+`CaptureView` renders a perspective view from a camera position to a target, for judging a single
+room rather than the layout.
+
+Both render offscreen, through a scene capture into a render target, so they work with the editor
+window minimised, covered or on another desktop. Neither can run under `-nullrhi`, where there is no
+renderer at all; they refuse with that reason rather than writing a black image.
+
+**Orientation.** A captured plan runs world **+X right and +Y down** the image. The drawing sheets
+under `Reference/Drawings` are laid out with **+Y up**. The two are therefore mirrored vertically,
+and the capture says so in its own result message. This is not a bug in the capture — a camera
+looking straight down with +X to the right has −Y as its up vector, and no rotation gives both. It
+is a symptom of Unreal's world being left-handed where a drawing's is not.
+
+**Lighting.** Both captures first place a small placeholder viewing rig in the level — a sun, a sky
+light, a sky atmosphere and an interior exposure — because a level with no lights renders black and
+a black image says nothing about the geometry in it. It is scaffolding, labelled `HF_Placeholder_*`
+in the outliner, spawned once per level and removable in one call. The lighting milestone replaces
+it.
 
 **7. Correct.** `ListElements` to orient, `ModifyElement` to patch individual fields,
 `DeleteElement` to remove something misread. Every change is re-validated and **rolled back if it
