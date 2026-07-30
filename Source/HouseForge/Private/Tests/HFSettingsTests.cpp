@@ -604,6 +604,96 @@ bool FHFSettingsShelfFiguresReachGeometryTest::RunTest(const FString& Parameters
 	return true;
 }
 
+/**
+ * Every number on the page says what unit it is in.
+ *
+ * This project converts millimetres to centimetres exactly once, at spec ingest, and has been bitten
+ * at that boundary before - see .claude/rules/04-conventions.md. A settings page is the one place a
+ * figure is typed in by hand rather than converted, so a control whose unit an artist has to guess
+ * is how a millimetre gets into centimetre territory. "18" and "1.8" are both plausible board
+ * thicknesses; only the tooltip says which this field wants.
+ *
+ * Enforced rather than audited, because a tooltip is exactly the kind of thing a later milestone
+ * adds a control without.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsUnitsAreStatedTest,
+	"HouseForge.Settings.EveryControlStatesItsUnit", HF_TEST_FLAGS)
+
+bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
+{
+#if WITH_EDITORONLY_DATA
+	const UHFSettings* Settings = GetDefault<UHFSettings>();
+	if (!TestNotNull(TEXT("The settings page is registered"), Settings))
+	{
+		return false;
+	}
+
+	// What counts as naming a unit. Deliberately short: a figure is a length, an angle or a ratio,
+	// and anything else on this page would want a rule of its own rather than a looser match here.
+	static const TArray<FString> Units = {
+		TEXT("centimetre"), TEXT("centimeter"), TEXT("millimetre"), TEXT("millimeter"),
+		TEXT("degree"), TEXT("ratio"), TEXT("fraction"), TEXT("percent")
+	};
+
+	int32 Checked = 0;
+
+	TFunction<void(const UStruct*)> Walk = [&](const UStruct* Struct)
+	{
+		for (TFieldIterator<FProperty> It(Struct); It; ++It)
+		{
+			const FProperty* Property = *It;
+			if (!Property->HasAnyPropertyFlags(CPF_Edit))
+			{
+				continue;
+			}
+
+			if (const FStructProperty* AsStruct = CastField<FStructProperty>(Property))
+			{
+				Walk(AsStruct->Struct);
+				continue;
+			}
+
+			// Only numbers carry units. A bool or an enum is its own explanation.
+			if (!Property->IsA<FNumericProperty>())
+			{
+				continue;
+			}
+
+			++Checked;
+
+			const FString ToolTip = Property->GetToolTipText().ToString();
+			if (ToolTip.IsEmpty())
+			{
+				AddError(FString::Printf(
+					TEXT("'%s' has no tooltip at all, so nothing on the page says what unit it wants."),
+					*Property->GetName()));
+				continue;
+			}
+
+			const bool bNamesAUnit = Units.ContainsByPredicate(
+				[&ToolTip](const FString& Unit) { return ToolTip.Contains(Unit); });
+
+			if (!bNamesAUnit)
+			{
+				AddError(FString::Printf(
+					TEXT("'%s' does not name its unit: \"%s\". This project converts mm to cm exactly once, so a figure typed in against an unstated unit is how the two get mixed."),
+					*Property->GetName(), *ToolTip.Left(120)));
+			}
+		}
+	};
+
+	Walk(UHFSettings::StaticClass());
+
+	AddInfo(FString::Printf(TEXT("%d numeric controls checked, every one naming its unit."), Checked));
+
+	// The same guard the marking test carries: a walk that silently stopped finding anything would
+	// otherwise pass.
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 70);
+#endif // WITH_EDITORONLY_DATA
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

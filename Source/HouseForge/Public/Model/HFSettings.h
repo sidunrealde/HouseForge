@@ -144,7 +144,7 @@ public:
 		meta = (ClampMin = "0.1", ClampMax = "1.8", UIMin = "0.3", UIMax = "1.8"))
 	double DrawerBoxBottomThickness = 0.6;
 
-	/** Plinth board, in centimetres. 18 faced ply, or 6 for ply clad in aluminium in a wet kitchen. */
+	/** Plinth board, in centimetres. 18 mm faced ply, or 6 mm ply clad in aluminium in a wet kitchen. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery - takes effect when fixtures land|Board Thickness",
 		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.6", UIMax = "3.0"))
 	double PlinthPanelThickness = 1.8;
