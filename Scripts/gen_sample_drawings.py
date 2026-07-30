@@ -388,8 +388,29 @@ def draw_room_labels(c, spec, view, with_area=True):
         if with_area:
             area = abs(_polygon_area([pt(p) for p in r["boundary"]])) / 1_000_000.0
             c.text((cx, cy + 12), f"{area:.2f} SQM", size=14, anchor="mm", color=DIM)
-            c.text((cx, cy + 33), f"{(x1 - x0):.0f} x {(y1 - y0):.0f}", size=13,
-                   anchor="mm", color=LIGHT)
+
+            # A W x H only means anything on a rectangle. The kitchen is an L since the utility
+            # was boxed out of its corner, and printing its bounding box under its real area put
+            # "4200 x 3000" over "10.44 SQM" - a sheet contradicting itself, in the two figures a
+            # reader checks against each other first. An overall size is given instead.
+            label = (f"{(x1 - x0):.0f} x {(y1 - y0):.0f}" if _is_rectangle(r["boundary"])
+                     else f"{(x1 - x0):.0f} x {(y1 - y0):.0f} OVERALL")
+            c.text((cx, cy + 33), label, size=13, anchor="mm", color=LIGHT)
+
+
+def _is_rectangle(boundary, tol=1.0):
+    """Four corners, axis aligned, and the area to prove it is not a bow tie."""
+    if len(boundary) != 4:
+        return False
+    pts = [pt(p) for p in boundary]
+    for i in range(4):
+        (ax, ay), (bx, by) = pts[i], pts[(i + 1) % 4]
+        if abs(ax - bx) > tol and abs(ay - by) > tol:
+            return False
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    box = (max(xs) - min(xs)) * (max(ys) - min(ys))
+    return abs(abs(_polygon_area(pts)) - box) <= tol * max(box, 1.0) ** 0.5 + tol
 
 
 def _polygon_area(points):
@@ -1348,8 +1369,13 @@ def sheet_elevations(spec, room, sheet_no, total):
 
     x0r, y0r, x1r, y1r = room_bounds(room)
     area = abs(_polygon_area([pt(p) for p in room["boundary"]])) / 1_000_000.0
+    size = f"{int(round(x1r - x0r))} x {int(round(y1r - y0r))}"
+    if not _is_rectangle(room["boundary"]):
+        # The elevations are set out on the room's bounding box, which is the right thing to draw
+        # four walls against - but on a room that is not a rectangle it is not the room's size.
+        size += " OVERALL"
     c.text((INNER + 40, SHEET_H - INNER - 74),
-           f"{room['name'].upper()}   {int(round(x1r - x0r))} x {int(round(y1r - y0r))}   "
+           f"{room['name'].upper()}   {size}   "
            f"{area:.2f} SQM   CEILING {int(round(ceiling_h))}",
            size=15, anchor="lm")
 
