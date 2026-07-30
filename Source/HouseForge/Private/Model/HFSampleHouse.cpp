@@ -683,8 +683,13 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		B.AddFixture(TEXT("F_MBath_Basin"), TEXT("R_MBath"), EHFFixtureType::Basin,
 			TEXT("Counter basin"), FVector2D(8900.0, 3900.0), FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
+		// The one fitting in either bathroom that could not simply travel with its room. The master
+		// bath's door is in its north wall now, and a shower enclosure against that same wall put
+		// 75 mm of itself across the doorway - the enclosure is 2100 tall, so unlike a vanity or a
+		// mirror it is in the opening for the whole height of it. It goes to the east end, under the
+		// geyser, which is where the geyser was always drawn anyway.
 		B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"), EHFFixtureType::Shower,
-			TEXT("Shower area"), FVector2D(9450.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
+			TEXT("Shower area"), FVector2D(9900.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
 	}
 
 	// Utility, off the kitchen, with the machine under its own window and against the outside wall

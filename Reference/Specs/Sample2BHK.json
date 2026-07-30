@@ -134,7 +134,7 @@
 			"surfaceRole": "WallPaint"
 		},
 		{
-			"id": "W_Foyer_Corr",
+			"id": "W_Foyer_CBath",
 			"start":
 			{
 				"x": 1800,
@@ -152,7 +152,7 @@
 			"surfaceRole": "WallPaint"
 		},
 		{
-			"id": "W_Corr_CBath",
+			"id": "W_CBath_Corr",
 			"start":
 			{
 				"x": 4200,
@@ -170,33 +170,15 @@
 			"surfaceRole": "WallPaint"
 		},
 		{
-			"id": "W_CBath_MBath",
+			"id": "W_Corr_MBath",
 			"start":
 			{
-				"x": 6600,
+				"x": 8100,
 				"y": 3600
 			},
 			"end":
 			{
-				"x": 6600,
-				"y": 5400
-			},
-			"thickness": 115,
-			"height": 3000,
-			"baseZ": 0,
-			"bIsExternal": false,
-			"surfaceRole": "WallPaint"
-		},
-		{
-			"id": "W_MBath_Util",
-			"start":
-			{
-				"x": 8700,
-				"y": 3600
-			},
-			"end":
-			{
-				"x": 8700,
+				"x": 8100,
 				"y": 5400
 			},
 			"thickness": 115,
@@ -216,6 +198,42 @@
 			{
 				"x": 4200,
 				"y": 8400
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Kitchen_Util",
+			"start":
+			{
+				"x": 3000,
+				"y": 6600
+			},
+			"end":
+			{
+				"x": 3000,
+				"y": 8400
+			},
+			"thickness": 115,
+			"height": 3000,
+			"baseZ": 0,
+			"bIsExternal": false,
+			"surfaceRole": "WallPaint"
+		},
+		{
+			"id": "W_Kitchen_Util_S",
+			"start":
+			{
+				"x": 3000,
+				"y": 6600
+			},
+			"end":
+			{
+				"x": 4200,
+				"y": 6600
 			},
 			"thickness": 115,
 			"height": 3000,
@@ -412,7 +430,7 @@
 			"wallId": "W_South",
 			"offsetAlongWall": 5400,
 			"width": 1500,
-			"height": 1350,
+			"height": 1200,
 			"sillHeight": 900,
 			"kind": "SlidingWindow",
 			"swing": "None"
@@ -422,7 +440,7 @@
 			"wallId": "W_South",
 			"offsetAlongWall": 8700,
 			"width": 1500,
-			"height": 1350,
+			"height": 1200,
 			"sillHeight": 900,
 			"kind": "SlidingWindow",
 			"swing": "None"
@@ -432,7 +450,7 @@
 			"wallId": "W_East",
 			"offsetAlongWall": 810,
 			"width": 900,
-			"height": 1350,
+			"height": 1200,
 			"sillHeight": 900,
 			"kind": "SlidingWindow",
 			"swing": "None"
@@ -442,7 +460,7 @@
 			"wallId": "W_North",
 			"offsetAlongWall": 3300,
 			"width": 1500,
-			"height": 1350,
+			"height": 1200,
 			"sillHeight": 900,
 			"kind": "SlidingWindow",
 			"swing": "None"
@@ -450,8 +468,18 @@
 		{
 			"id": "Win_Kitchen",
 			"wallId": "W_North",
-			"offsetAlongWall": 8700,
+			"offsetAlongWall": 9000,
 			"width": 1200,
+			"height": 900,
+			"sillHeight": 1200,
+			"kind": "SlidingWindow",
+			"swing": "None"
+		},
+		{
+			"id": "Win_Utility",
+			"wallId": "W_North",
+			"offsetAlongWall": 7400,
+			"width": 600,
 			"height": 900,
 			"sillHeight": 1200,
 			"kind": "SlidingWindow",
@@ -479,7 +507,7 @@
 		},
 		{
 			"id": "Vent_CBath",
-			"wallId": "W_Corr_CBath",
+			"wallId": "W_CBath_Corr",
 			"offsetAlongWall": 900,
 			"width": 600,
 			"height": 450,
@@ -488,49 +516,39 @@
 			"swing": "None"
 		},
 		{
-			"id": "Vent_MBath",
-			"wallId": "W_CBath_MBath",
+			"id": "D_Foyer",
+			"wallId": "W_Mid_Lower",
 			"offsetAlongWall": 900,
-			"width": 600,
-			"height": 450,
-			"sillHeight": 2100,
-			"kind": "Ventilator",
-			"swing": "None"
+			"width": 1050,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "OutwardLeft"
 		},
 		{
 			"id": "D_Living",
 			"wallId": "W_Mid_Lower",
-			"offsetAlongWall": 3000,
+			"offsetAlongWall": 5400,
 			"width": 900,
 			"height": 2100,
 			"sillHeight": 0,
 			"kind": "Door",
-			"swing": "InwardLeft"
+			"swing": "OutwardLeft"
 		},
 		{
 			"id": "D_Bed2",
 			"wallId": "W_Mid_Lower",
-			"offsetAlongWall": 7200,
+			"offsetAlongWall": 7400,
 			"width": 900,
 			"height": 2100,
 			"sillHeight": 0,
 			"kind": "Door",
-			"swing": "InwardRight"
+			"swing": "OutwardLeft"
 		},
 		{
 			"id": "D_Kitchen",
 			"wallId": "W_Mid_Upper",
-			"offsetAlongWall": 3000,
-			"width": 900,
-			"height": 2100,
-			"sillHeight": 0,
-			"kind": "Door",
-			"swing": "InwardLeft"
-		},
-		{
-			"id": "D_MBed",
-			"wallId": "W_Mid_Upper",
-			"offsetAlongWall": 5100,
+			"offsetAlongWall": 1200,
 			"width": 900,
 			"height": 2100,
 			"sillHeight": 0,
@@ -538,10 +556,10 @@
 			"swing": "InwardRight"
 		},
 		{
-			"id": "D_CBath",
-			"wallId": "W_Corr_CBath",
-			"offsetAlongWall": 900,
-			"width": 750,
+			"id": "D_MBed",
+			"wallId": "W_Mid_Upper",
+			"offsetAlongWall": 4850,
+			"width": 900,
 			"height": 2100,
 			"sillHeight": 0,
 			"kind": "Door",
@@ -549,7 +567,17 @@
 		},
 		{
 			"id": "D_MBath",
-			"wallId": "W_CBath_MBath",
+			"wallId": "W_Mid_Upper",
+			"offsetAlongWall": 8700,
+			"width": 750,
+			"height": 2100,
+			"sillHeight": 0,
+			"kind": "Door",
+			"swing": "OutwardLeft"
+		},
+		{
+			"id": "D_CBath",
+			"wallId": "W_CBath_Corr",
 			"offsetAlongWall": 900,
 			"width": 750,
 			"height": 2100,
@@ -559,8 +587,8 @@
 		},
 		{
 			"id": "D_Utility",
-			"wallId": "W_MBath_Util",
-			"offsetAlongWall": 900,
+			"wallId": "W_Kitchen_Util_S",
+			"offsetAlongWall": 600,
 			"width": 750,
 			"height": 2100,
 			"sillHeight": 0,
@@ -1000,19 +1028,19 @@
 			"type": "Corridor",
 			"boundary": [
 				{
-					"x": 1800,
-					"y": 3600
-				},
-				{
 					"x": 4200,
 					"y": 3600
 				},
 				{
-					"x": 4200,
+					"x": 8100,
+					"y": 3600
+				},
+				{
+					"x": 8100,
 					"y": 5400
 				},
 				{
-					"x": 1800,
+					"x": 4200,
 					"y": 5400
 				}
 			],
@@ -1027,19 +1055,19 @@
 			"type": "Bathroom",
 			"boundary": [
 				{
+					"x": 1800,
+					"y": 3600
+				},
+				{
 					"x": 4200,
 					"y": 3600
 				},
 				{
-					"x": 6600,
-					"y": 3600
-				},
-				{
-					"x": 6600,
+					"x": 4200,
 					"y": 5400
 				},
 				{
-					"x": 4200,
+					"x": 1800,
 					"y": 5400
 				}
 			],
@@ -1054,19 +1082,19 @@
 			"type": "Bathroom",
 			"boundary": [
 				{
-					"x": 6600,
+					"x": 8100,
 					"y": 3600
 				},
 				{
-					"x": 8700,
+					"x": 10800,
 					"y": 3600
 				},
 				{
-					"x": 8700,
+					"x": 10800,
 					"y": 5400
 				},
 				{
-					"x": 6600,
+					"x": 8100,
 					"y": 5400
 				}
 			],
@@ -1081,20 +1109,20 @@
 			"type": "Utility",
 			"boundary": [
 				{
-					"x": 8700,
-					"y": 3600
+					"x": 3000,
+					"y": 6600
 				},
 				{
-					"x": 10800,
-					"y": 3600
+					"x": 4200,
+					"y": 6600
 				},
 				{
-					"x": 10800,
-					"y": 5400
+					"x": 4200,
+					"y": 8400
 				},
 				{
-					"x": 8700,
-					"y": 5400
+					"x": 3000,
+					"y": 8400
 				}
 			],
 			"floorZ": 0,
@@ -1117,6 +1145,14 @@
 				},
 				{
 					"x": 4200,
+					"y": 6600
+				},
+				{
+					"x": 3000,
+					"y": 6600
+				},
+				{
+					"x": 3000,
 					"y": 8400
 				},
 				{
@@ -1371,7 +1407,7 @@
 			"explicitPolygon": [],
 			"lightPositions": [
 				{
-					"x": 5400,
+					"x": 3000,
 					"y": 4500
 				}
 			]
@@ -1392,7 +1428,7 @@
 			"explicitPolygon": [],
 			"lightPositions": [
 				{
-					"x": 7650,
+					"x": 9450,
 					"y": 4500
 				}
 			]
@@ -1445,29 +1481,29 @@
 			},
 			"explicitPolygon": [
 				{
-					"x": 1800,
-					"y": 3600
-				},
-				{
 					"x": 4200,
 					"y": 3600
 				},
 				{
-					"x": 4200,
+					"x": 8100,
+					"y": 3600
+				},
+				{
+					"x": 8100,
 					"y": 5400
 				},
 				{
-					"x": 1800,
+					"x": 4200,
 					"y": 5400
 				}
 			],
 			"lightPositions": [
 				{
-					"x": 2400,
+					"x": 5400,
 					"y": 4500
 				},
 				{
-					"x": 3600,
+					"x": 6900,
 					"y": 4500
 				}
 			]
@@ -1481,7 +1517,7 @@
 			"label": "3-seater sofa",
 			"position":
 			{
-				"x": 2100,
+				"x": 3800,
 				"y": 2900
 			},
 			"rotationDegrees": 180,
@@ -1517,7 +1553,7 @@
 			"label": "Coffee table",
 			"position":
 			{
-				"x": 2100,
+				"x": 3800,
 				"y": 1800
 			},
 			"rotationDegrees": 0,
@@ -1547,19 +1583,55 @@
 			}
 		},
 		{
-			"id": "F_TVUnit",
+			"id": "F_TVUnit_W",
 			"roomId": "R_Living",
 			"type": "TVUnit",
-			"label": "TV unit with drawers",
+			"label": "TV wall unit, tall storage west of the balcony door",
 			"position":
 			{
-				"x": 2100,
+				"x": 690,
 				"y": 400
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 1800,
+				"x": 900,
+				"y": 450
+			},
+			"height": 1800,
+			"baseZ": 0,
+			"anchorWallId": "W_South",
+			"params":
+			{
+				"shutterCount": 2,
+				"drawerCount": 0,
+				"shelfCount": 4,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 80,
+				"handleStyle": "HandlelessGroove",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_TVUnit_E",
+			"roomId": "R_Living",
+			"type": "TVUnit",
+			"label": "TV console with drawers, east of the balcony door",
+			"position":
+			{
+				"x": 3800,
+				"y": 400
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1200,
 				"y": 450
 			},
 			"height": 600,
@@ -1697,13 +1769,13 @@
 			"label": "Base units, north run",
 			"position":
 			{
-				"x": 2100,
+				"x": 1750,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 3000,
+				"x": 2300,
 				"y": 600
 			},
 			"height": 850,
@@ -1769,13 +1841,13 @@
 			"label": "Granite counter, north",
 			"position":
 			{
-				"x": 2100,
+				"x": 1750,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 3000,
+				"x": 2300,
 				"y": 600
 			},
 			"height": 40,
@@ -1805,13 +1877,13 @@
 			"label": "Wall units, north run west of the window",
 			"position":
 			{
-				"x": 1050,
+				"x": 900,
 				"y": 8135
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 900,
+				"x": 600,
 				"y": 300
 			},
 			"height": 700,
@@ -1819,7 +1891,7 @@
 			"anchorWallId": "W_North",
 			"params":
 			{
-				"shutterCount": 2,
+				"shutterCount": 1,
 				"drawerCount": 0,
 				"shelfCount": 2,
 				"bHasLoft": false,
@@ -1841,13 +1913,13 @@
 			"label": "Wall units, north run east of the window",
 			"position":
 			{
-				"x": 3150,
+				"x": 2650,
 				"y": 8135
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 900,
+				"x": 500,
 				"y": 300
 			},
 			"height": 700,
@@ -1855,7 +1927,7 @@
 			"anchorWallId": "W_North",
 			"params":
 			{
-				"shutterCount": 2,
+				"shutterCount": 1,
 				"drawerCount": 0,
 				"shelfCount": 2,
 				"bHasLoft": false,
@@ -1877,7 +1949,7 @@
 			"label": "Double-bowl sink",
 			"position":
 			{
-				"x": 2100,
+				"x": 1800,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
@@ -2201,7 +2273,7 @@
 			"label": "6-gang switch plate",
 			"position":
 			{
-				"x": 5200,
+				"x": 5500,
 				"y": 5500
 			},
 			"rotationDegrees": 0,
@@ -2309,10 +2381,10 @@
 			"label": "Study table",
 			"position":
 			{
-				"x": 7000,
-				"y": 3300
+				"x": 6950,
+				"y": 1200
 			},
-			"rotationDegrees": 0,
+			"rotationDegrees": 90,
 			"footprint":
 			{
 				"x": 1200,
@@ -2320,7 +2392,7 @@
 			},
 			"height": 750,
 			"baseZ": 0,
-			"anchorWallId": "W_Mid_Lower",
+			"anchorWallId": "W_Living_Bed2",
 			"params":
 			{
 				"shutterCount": 0,
@@ -2381,7 +2453,7 @@
 			"label": "Wall-hung WC",
 			"position":
 			{
-				"x": 6300,
+				"x": 3900,
 				"y": 3900
 			},
 			"rotationDegrees": 0,
@@ -2417,7 +2489,7 @@
 			"label": "Counter basin",
 			"position":
 			{
-				"x": 4600,
+				"x": 2200,
 				"y": 3900
 			},
 			"rotationDegrees": 0,
@@ -2453,7 +2525,7 @@
 			"label": "Shower area",
 			"position":
 			{
-				"x": 5400,
+				"x": 2900,
 				"y": 4900
 			},
 			"rotationDegrees": 0,
@@ -2489,7 +2561,7 @@
 			"label": "Wall-hung WC",
 			"position":
 			{
-				"x": 8400,
+				"x": 10200,
 				"y": 3900
 			},
 			"rotationDegrees": 0,
@@ -2525,7 +2597,7 @@
 			"label": "Vanity unit",
 			"position":
 			{
-				"x": 7100,
+				"x": 8900,
 				"y": 3900
 			},
 			"rotationDegrees": 0,
@@ -2561,7 +2633,7 @@
 			"label": "Counter basin",
 			"position":
 			{
-				"x": 7100,
+				"x": 8900,
 				"y": 3900
 			},
 			"rotationDegrees": 0,
@@ -2597,7 +2669,7 @@
 			"label": "Shower area",
 			"position":
 			{
-				"x": 7650,
+				"x": 9900,
 				"y": 4900
 			},
 			"rotationDegrees": 0,
@@ -2633,8 +2705,8 @@
 			"label": "Washing machine",
 			"position":
 			{
-				"x": 9100,
-				"y": 3950
+				"x": 3400,
+				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2644,7 +2716,7 @@
 			},
 			"height": 850,
 			"baseZ": 0,
-			"anchorWallId": "W_Mid_Lower",
+			"anchorWallId": "W_North",
 			"params":
 			{
 				"shutterCount": 0,
@@ -2669,7 +2741,7 @@
 			"label": "4-gang switch plate",
 			"position":
 			{
-				"x": 1000,
+				"x": 1565,
 				"y": 3700
 			},
 			"rotationDegrees": 0,
@@ -2706,7 +2778,7 @@
 			"position":
 			{
 				"x": 1600,
-				"y": 4900
+				"y": 5150
 			},
 			"rotationDegrees": 90,
 			"footprint":
@@ -2716,7 +2788,7 @@
 			},
 			"height": 350,
 			"baseZ": 1800,
-			"anchorWallId": "W_Foyer_Corr",
+			"anchorWallId": "W_Foyer_CBath",
 			"params":
 			{
 				"shutterCount": 0,
@@ -2741,10 +2813,10 @@
 			"label": "Shoe rack",
 			"position":
 			{
-				"x": 900,
-				"y": 5250
+				"x": 1600,
+				"y": 4300
 			},
-			"rotationDegrees": 0,
+			"rotationDegrees": 90,
 			"footprint":
 			{
 				"x": 1200,
@@ -2752,7 +2824,7 @@
 			},
 			"height": 900,
 			"baseZ": 0,
-			"anchorWallId": "W_Mid_Upper",
+			"anchorWallId": "W_Foyer_CBath",
 			"params":
 			{
 				"shutterCount": 2,
@@ -2777,7 +2849,7 @@
 			"label": "Power socket",
 			"position":
 			{
-				"x": 2100,
+				"x": 3800,
 				"y": 120
 			},
 			"rotationDegrees": 0,
@@ -2849,7 +2921,7 @@
 			"label": "8-gang switch plate",
 			"position":
 			{
-				"x": 3300,
+				"x": 6060,
 				"y": 3480
 			},
 			"rotationDegrees": 0,
@@ -2885,7 +2957,7 @@
 			"label": "Split AC indoor unit",
 			"position":
 			{
-				"x": 4800,
+				"x": 3300,
 				"y": 3480
 			},
 			"rotationDegrees": 0,
@@ -3065,7 +3137,7 @@
 			"label": "6-gang switch plate",
 			"position":
 			{
-				"x": 7100,
+				"x": 8050,
 				"y": 3480
 			},
 			"rotationDegrees": 0,
@@ -3137,7 +3209,7 @@
 			"label": "Power socket",
 			"position":
 			{
-				"x": 1200,
+				"x": 700,
 				"y": 8280
 			},
 			"rotationDegrees": 0,
@@ -3173,7 +3245,7 @@
 			"label": "Power socket",
 			"position":
 			{
-				"x": 3000,
+				"x": 2700,
 				"y": 8280
 			},
 			"rotationDegrees": 0,
@@ -3209,7 +3281,7 @@
 			"label": "6-gang switch plate",
 			"position":
 			{
-				"x": 3900,
+				"x": 550,
 				"y": 5520
 			},
 			"rotationDegrees": 0,
@@ -3239,13 +3311,13 @@
 			}
 		},
 		{
-			"id": "F_Exh_Kitchen",
-			"roomId": "R_Kitchen",
+			"id": "F_Exh_Utility",
+			"roomId": "R_Utility",
 			"type": "ExhaustFan",
 			"label": "Exhaust fan",
 			"position":
 			{
-				"x": 3600,
+				"x": 3950,
 				"y": 8280
 			},
 			"rotationDegrees": 0,
@@ -3281,7 +3353,7 @@
 			"label": "Storage water heater",
 			"position":
 			{
-				"x": 5400,
+				"x": 3000,
 				"y": 5250
 			},
 			"rotationDegrees": 0,
@@ -3317,7 +3389,7 @@
 			"label": "Exhaust fan",
 			"position":
 			{
-				"x": 4700,
+				"x": 2300,
 				"y": 5300
 			},
 			"rotationDegrees": 0,
@@ -3353,7 +3425,7 @@
 			"label": "Mirror",
 			"position":
 			{
-				"x": 4900,
+				"x": 2500,
 				"y": 3720
 			},
 			"rotationDegrees": 0,
@@ -3389,7 +3461,7 @@
 			"label": "Towel rail",
 			"position":
 			{
-				"x": 5900,
+				"x": 3500,
 				"y": 3700
 			},
 			"rotationDegrees": 0,
@@ -3425,7 +3497,7 @@
 			"label": "Storage water heater",
 			"position":
 			{
-				"x": 7650,
+				"x": 9450,
 				"y": 5250
 			},
 			"rotationDegrees": 0,
@@ -3461,7 +3533,7 @@
 			"label": "Exhaust fan",
 			"position":
 			{
-				"x": 6950,
+				"x": 8750,
 				"y": 5300
 			},
 			"rotationDegrees": 0,
@@ -3497,7 +3569,7 @@
 			"label": "Mirror",
 			"position":
 			{
-				"x": 7150,
+				"x": 8950,
 				"y": 3720
 			},
 			"rotationDegrees": 0,
@@ -3533,7 +3605,7 @@
 			"label": "Towel rail",
 			"position":
 			{
-				"x": 8150,
+				"x": 9950,
 				"y": 3700
 			},
 			"rotationDegrees": 0,
@@ -3569,8 +3641,8 @@
 			"label": "Power socket",
 			"position":
 			{
-				"x": 9100,
-				"y": 5300
+				"x": 3950,
+				"y": 8250
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -3580,7 +3652,7 @@
 			},
 			"height": 120,
 			"baseZ": 1000,
-			"anchorWallId": "W_Mid_Upper",
+			"anchorWallId": "W_North",
 			"params":
 			{
 				"shutterCount": 0,
