@@ -1122,18 +1122,21 @@ bool FHFDrawerBankAssemblyTest::RunTest(const FString& Parameters)
 /**
  * A drawer bank inside a wardrobe, behind a hinged shutter - and the interlock that implies.
  *
- * This is the composition the framework cannot express. AHFArticulatedActor parents every part to
- * the fixed shell, so no part can hang off another part's moving frame, and a drawer's open amount
- * is therefore independent of its shutter's. Driving both from one master open amount runs the
- * drawer out through the closed leaf on the way.
+ * AHFArticulatedActor parents every part to the fixed shell, so no part hangs off another part's
+ * moving frame, and an internal drawer's open amount is therefore independent of its shutter's.
+ * That is correct and deliberate: an internal drawer's runners are screwed to the CARCASS, not to
+ * the leaf, so a drawer parented to the leaf would swing out of the cabinet with it - a different
+ * and worse lie than the one being fixed.
  *
- * Parenting the drawer to the shutter would NOT fix that, and it is worth being precise about why:
- * an internal drawer's runners are screwed to the CARCASS, not to the leaf. A drawer riding on the
- * leaf's frame would swing out of the cabinet with it, which is a different and worse lie than the
- * one being fixed. The real constraint is an ordering - open the shutter, then pull the drawer -
- * and it is recorded here as a measurement rather than a comment: there is a shutter opening beyond
- * which the drawer is clear at every extension, it is strictly between closed and open, and driving
- * both together does not respect it.
+ * What follows from it is an ORDERING - open the shutter, then pull the drawer - and this test
+ * measures the whole of it rather than describing it:
+ *
+ *   1. There is a shutter opening beyond which the drawer is clear at every extension. It is
+ *      searched for, not assumed, so the number tracks the geometry rather than a comment about it.
+ *   2. Declared as the drawer's SequenceThreshold, one master open amount then produces a pose the
+ *      wardrobe could really be in - at EVERY sample, not merely at the ends.
+ *   3. Without the ordering the same sweep drives the drawer through the closed leaf, so the test
+ *      shows what is actually holding the pose up.
  *
  * Two composition rules fall out of this and are asserted, because nothing in the kit states them:
  *
@@ -1294,40 +1297,221 @@ bool FHFInternalDrawerInterlockTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A fully open leaf lets every drawer all the way out"),
 		ClearAtEveryExtension(1.0));
 
-	double Threshold = 1.0;
+	// Coarse over the samples, then bisected, because the figure is going to be DECLARED as the
+	// ordering's threshold and a number quantised to the sample grid would be the grid's answer
+	// rather than the geometry's.
+	//
+	// It lands just under a right angle, and that is worth understanding rather than merely
+	// recording: a leaf turned to 87 degrees has its far corner swung round to X = thickness times
+	// sine, which is nearly the whole thickness, so the BACK of the leaf is still across the bay
+	// even though its front face has left it. Only past square does the whole leaf finally clear.
+	// It is why a wardrobe with internal drawers is built with 165 degree hinges, or with sliding
+	// shutters, and it is the sort of thing that is obvious in a workshop and invisible in a plan.
+	double Blocked = 0.0;
+	double Clear = 1.0;
+
 	for (const double Amount : SweepSamples())
 	{
 		if (ClearAtEveryExtension(Amount))
 		{
-			Threshold = Amount;
+			Clear = Amount;
 			break;
 		}
+		Blocked = Amount;
 	}
+
+	for (int32 Bisection = 0; Bisection < 8; ++Bisection)
+	{
+		const double Middle = (Blocked + Clear) * 0.5;
+		if (ClearAtEveryExtension(Middle))
+		{
+			Clear = Middle;
+		}
+		else
+		{
+			Blocked = Middle;
+		}
+	}
+
+	// Rounded up to the next hundredth. A composer states a figure with a little margin on it, not
+	// the last angle at which the leaf grazes the drawer front.
+	const double Threshold = FMath::Min(1.0, FMath::CeilToDouble(Clear * 100.0) / 100.0);
+
 	AddInfo(FString::Printf(
-		TEXT("Internal drawers need the shutter at least %.3f open before they can run their full travel."),
-		Threshold));
+		TEXT("Internal drawers need the shutter at least %.3f open (measured %.4f) before they can run their full travel."),
+		Threshold, Clear));
 	TestTrue(TEXT("The leaf has to be open before its drawers can run - the ordering is real"),
 		Threshold > 0.0);
+	TestTrue(TEXT("...and it is an ordering rather than a ban: the leaf does not have to be fully open"),
+		Threshold < 1.0);
 
-	// And the failure the framework's flat parenting produces: one master open amount drives both
-	// at once, which does not respect that ordering. Pinned so it cannot regress into being
-	// "fixed" by parenting a drawer to a leaf it is not screwed to.
-	bool bMasterSweepIsClear = true;
-	for (const double Amount : SweepSamples())
+	// Driving both from one amount with no ordering declared is what used to happen, and it is
+	// still what happens if the ordering is left off. Measured here so that the assertions below
+	// are known to be held up by the ordering rather than by a bank that happens to fit anyway.
 	{
-		FSolid Leafy(Posed(Shutter, Amount));
-		for (const FHFMeshPart& Drawer : Drawers)
+		bool bUnorderedSweepIsClear = true;
+		for (const double Amount : SweepSamples())
 		{
-			FSolid Box(Posed(Drawer, Amount));
-			if (!AreClear(Leafy, Box))
+			FSolid Leafy(Posed(Shutter, Amount));
+			for (const FHFMeshPart& Drawer : Drawers)
 			{
-				bMasterSweepIsClear = false;
+				FSolid Box(Posed(Drawer, Amount));
+				if (!AreClear(Leafy, Box))
+				{
+					bUnorderedSweepIsClear = false;
+				}
+			}
+		}
+		TestFalse(
+			TEXT("With no ordering, one master amount drives the drawers through their own leaf"),
+			bUnorderedSweepIsClear);
+	}
+
+	// ------------------------------------------------------------------- the ordering, declared
+	//
+	// The composer's job, and the reason the threshold is a parameter rather than a constant: only
+	// the thing assembling the bay knows that these drawers sit behind that leaf, and the figure it
+	// states is the one measured above.
+	//
+	// The runner members are left alone. Each is geared to its own drawer, so it is already carried
+	// by whatever the drawer is allowed - a runner with an ordering of its own would be a second
+	// statement of the same fact, and the two could drift apart.
+	for (FHFMeshPart& Part : Drawers)
+	{
+		if (Part.Motion.DrivenByPartId.IsNone())
+		{
+			Part.Motion.SequencedAfterPartId = Shutter.PartId;
+			Part.Motion.SequenceThreshold = Threshold;
+		}
+	}
+
+	// Every part asked for the same amount, exactly as MasterOpenAmount asks them, and then settled
+	// against the orderings between them. This is the actor's own resolve, not a copy of it.
+	auto AmountsAtMaster = [&Shutter, &Drawers](double Master)
+	{
+		TArray<FHFPartState> States;
+		States.Reserve(Drawers.Num() + 1);
+
+		auto AddState = [&States, Master](const FHFMeshPart& Part)
+		{
+			FHFPartState State;
+			State.PartId = Part.PartId;
+			State.PivotTransform = Part.PivotTransform;
+			State.Motion = Part.Motion;
+			State.OpenAmount = Master;
+			States.Add(State);
+		};
+
+		AddState(Shutter);
+		for (const FHFMeshPart& Part : Drawers)
+		{
+			AddState(Part);
+		}
+
+		TMap<FName, double> Resolved;
+		FHFArticulation::ResolvePartAmounts(States);
+		for (const FHFPartState& State : States)
+		{
+			Resolved.Add(State.PartId, State.OpenAmount);
+		}
+		return Resolved;
+	};
+
+	// The masters worth sampling: the coarse sweep, plus the band above the threshold where the
+	// drawers actually run. All the interesting poses are in that band and none of the coarse
+	// samples land in it, so a sweep over those alone would be checking the part that cannot fail.
+	TArray<double> MasterSamples = SweepSamples();
+	for (int32 Step = 0; Step <= 8; ++Step)
+	{
+		MasterSamples.Add(Threshold + (1.0 - Threshold) * Step / 8.0);
+	}
+
+	// Below the threshold the drawers have not moved at all, however far the master has gone. This
+	// is the assertion that replaces the one pinning the defect: the drawer stays shut until the
+	// leaf is clear.
+	for (const double Master : MasterSamples)
+	{
+		const TMap<FName, double> Resolved = AmountsAtMaster(Master);
+
+		if (Master < Threshold - UE_KINDA_SMALL_NUMBER)
+		{
+			for (const FHFMeshPart& Part : Drawers)
+			{
+				const double Amount = Resolved[Part.PartId];
+				if (Amount > UE_KINDA_SMALL_NUMBER)
+				{
+					AddError(FString::Printf(
+						TEXT("At master %.3f the leaf is only %.3f open, which is short of the %.3f its drawers need, but '%s' is %.3f out."),
+						Master, Resolved[Shutter.PartId], Threshold, *Part.PartId.ToString(), Amount));
+					break;
+				}
 			}
 		}
 	}
-	TestFalse(
-		TEXT("Driving a leaf and the drawers behind it from one master open amount is not a physical pose"),
-		bMasterSweepIsClear);
+
+	// And the whole sweep is a physical pose: at every master amount, every drawer and every runner
+	// member is clear of the leaf in front of it.
+	{
+		bool bOrderedSweepIsClear = true;
+
+		for (const double Master : MasterSamples)
+		{
+			const TMap<FName, double> Resolved = AmountsAtMaster(Master);
+			FSolid Leafy(Posed(Shutter, Resolved[Shutter.PartId]));
+
+			for (const FHFMeshPart& Part : Drawers)
+			{
+				FSolid Box(Posed(Part, Resolved[Part.PartId]));
+				if (!AreClear(Leafy, Box))
+				{
+					bOrderedSweepIsClear = false;
+					AddError(FString::Printf(
+						TEXT("At master %.3f, with the leaf %.3f open, '%s' at %.3f is not clear of it."),
+						Master, Resolved[Shutter.PartId], *Part.PartId.ToString(), Resolved[Part.PartId]));
+				}
+			}
+		}
+
+		TestTrue(
+			TEXT("Opening a wardrobe from one master amount is now a pose it could really be in"),
+			bOrderedSweepIsClear);
+	}
+
+	// Fully open is fully open. An ordering that bought its safety by never letting the drawers out
+	// would pass everything above and be useless.
+	{
+		const TMap<FName, double> Resolved = AmountsAtMaster(1.0);
+		TestNearlyEqual(TEXT("Fully open, the leaf is fully open"), Resolved[Shutter.PartId], 1.0, 1e-9);
+
+		for (const FHFMeshPart& Part : Drawers)
+		{
+			TestNearlyEqual(*FString::Printf(TEXT("Fully open, '%s' is all the way out too"),
+					*Part.PartId.ToString()),
+				Resolved[Part.PartId], 1.0, 1e-9);
+		}
+	}
+
+	// A drawer hauled out on its own, with the leaf shut, is refused the same way: the interlock
+	// belongs to the assembly and not to the master control.
+	{
+		TArray<FHFPartState> States;
+
+		FHFPartState ShutLeaf;
+		ShutLeaf.PartId = Shutter.PartId;
+		ShutLeaf.Motion = Shutter.Motion;
+		ShutLeaf.OpenAmount = 0.0;
+		States.Add(ShutLeaf);
+
+		FHFPartState HauledOut;
+		HauledOut.PartId = Drawers[0].PartId;
+		HauledOut.Motion = Drawers[0].Motion;
+		HauledOut.OpenAmount = 1.0;
+		States.Add(HauledOut);
+
+		FHFArticulation::ResolvePartAmounts(States);
+		TestNearlyEqual(TEXT("A drawer cannot be pulled out through a leaf that is shut"),
+			States[1].OpenAmount, 0.0, 1e-9);
+	}
 
 	return true;
 }

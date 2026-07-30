@@ -1118,9 +1118,12 @@ public:
 	// Y behind the closed leaf. Inset like that, GenerateDrawerRunnerMounts lands short of the
 	// carcass sides, so the composer owes it packers to be screwed to.
 	//
-	// And the drawer still cannot come out until the shutter is open, which no open amount here
-	// expresses: see AHFArticulatedActor for why that is an ordering rather than a parenting problem.
-	// HouseForge.Joinery.InternalDrawerInterlock builds the composition and measures both.
+	// And the drawer still cannot come out until the shutter is open. That is an ordering rather
+	// than a parenting problem - see AHFArticulatedActor - and the composer states it by setting
+	// FHFPartMotion::SequencedAfterPartId on the drawer part to the shutter's id, with the threshold
+	// at which its leaf swings clear. Nothing here can do it: the kit builds one drawer and knows
+	// nothing about what is hung in front of it.
+	// HouseForge.Joinery.InternalDrawerInterlock builds the composition and measures all of it.
 
 	/**
 	 * The parameters actually used, with the runner resolved and everything clamped to fit.
