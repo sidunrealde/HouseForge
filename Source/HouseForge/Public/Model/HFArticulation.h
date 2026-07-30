@@ -339,6 +339,28 @@ struct HOUSEFORGE_API FHFMeshPart
 };
 
 /**
+ * A part naming a dependency that is not in the assembly.
+ *
+ * Not an error the solve can refuse - a fixture still has to pose - but it is never harmless. The
+ * part resolves completely UNCONSTRAINED, so a typo in a composer, or a shutter part renamed without
+ * its drawer's ordering being renamed with it, silently turns the interlock off: the drawer comes
+ * straight out through a shut leaf and every measurement of the pose agrees that it should have.
+ *
+ * So it is reported rather than dropped. The solve stays permissive and the caller says so out loud.
+ */
+struct HOUSEFORGE_API FHFUnresolvedDependency
+{
+	/** The part that declared it. */
+	FName PartId;
+
+	/** The id it named, which no part in the assembly carries. */
+	FName MissingPartId;
+
+	/** True when the missing id was DrivenByPartId; false when it was SequencedAfterPartId. */
+	bool bGearing = false;
+};
+
+/**
  * Resolving a whole assembly's open amounts at once.
  *
  * The two relationships a part can declare - geared to another part, or sequenced after one - are
@@ -373,8 +395,18 @@ struct HOUSEFORGE_API FHFArticulation
 	 * their names come back so the caller can say which fixture is at fault. The alternative is an
 	 * editor that hangs on a generator bug.
 	 *
+	 * A DANGLING DEPENDENCY IS PERMITTED AND REPORTED. A part naming an id no part in the assembly
+	 * carries resolves unconstrained, because freezing every drawer in a fixture over one bad name
+	 * would be a second and more confusing failure than the first. But unconstrained is exactly the
+	 * pre-interlock behaviour - the drawer goes straight through the shut leaf - so it comes back in
+	 * OutUnresolved rather than being dropped on the floor. Silence here would let a renamed part
+	 * revert the whole ordering guarantee with nothing in any log to say so.
+	 *
 	 * @param OutCyclicPartIds Optional: the parts found on a cycle, whose dependencies were ignored.
-	 * @return false if a cycle was found, in which case the parts on it were left unresolved.
+	 * @param OutUnresolved Optional: the parts whose declared dependency id is not in the assembly.
+	 * @return false if a cycle was found, in which case the parts on it were left unresolved. A
+	 *         dangling dependency does NOT make this false - the assembly still poses.
 	 */
-	static bool ResolvePartAmounts(TArrayView<FHFPartState> Parts, TArray<FName>* OutCyclicPartIds = nullptr);
+	static bool ResolvePartAmounts(TArrayView<FHFPartState> Parts, TArray<FName>* OutCyclicPartIds = nullptr,
+		TArray<FHFUnresolvedDependency>* OutUnresolved = nullptr);
 };

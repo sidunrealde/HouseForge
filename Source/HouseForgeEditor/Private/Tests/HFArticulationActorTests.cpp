@@ -882,6 +882,66 @@ bool FHFSequencedPartOnActorTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * An ordering naming a part that is not on the fixture is reported, not swallowed.
+ *
+ * The interlock's silent failure mode, and the reason this test exists at the ACTOR level rather
+ * than only against the solve: a dangling id resolves the part completely unconstrained, which is
+ * precisely the pre-interlock behaviour - the drawer travels straight out through the shut leaf,
+ * and every measurement of the resulting pose agrees that it should have.
+ *
+ * Nothing else catches it. AHFArticulatedActor::RegenerateParts validates empty ids and duplicate
+ * ids and never that a declared dependency resolves, so a shutter part renamed without its drawer's
+ * ordering renamed with it would turn the physical-pose guarantee off across the whole plugin with
+ * nothing in any log to say so. The permissiveness is deliberate - a fixture still has to pose - so
+ * what is asserted here is that it is AUDIBLE.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFDanglingOrderingIsReportedTest,
+	"HouseForge.Editor.DanglingOrderingIsReported", HF_TEST_FLAGS)
+
+bool FHFDanglingOrderingIsReportedTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFOpeningActor* Door = SpawnTestDoor(World, EHFOpeningKind::SlidingDoor, EHFSwing::None);
+	if (!TestNotNull(TEXT("A two-part actor spawns"), Door))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
+
+	const FName BlockedId = AHFOpeningActor::FixedPanelPartId;
+
+	FHFPartState* Blocked = Door->Parts.FindByPredicate(
+		[BlockedId](const FHFPartState& Part) { return Part.PartId == BlockedId; });
+	if (!TestNotNull(TEXT("The part is addressable"), Blocked))
+	{
+		return false;
+	}
+
+	Blocked->Motion.Type = EHFMotionType::Slide;
+	Blocked->Motion.Axis = FVector::XAxisVector;
+	Blocked->Motion.MaxTravelCm = 40.0;
+	Blocked->Motion.SequencedAfterPartId = TEXT("NoSuchLeaf");
+	Blocked->Motion.SequenceThreshold = 0.5;
+
+	// Expected rather than merely tolerated: if the warning stops being emitted this test fails on
+	// the missing message, which is the whole point of asserting a diagnostic.
+	AddExpectedMessagePlain(TEXT("which is not a part of this fixture"), ELogVerbosity::Warning,
+		EAutomationExpectedMessageFlags::Contains, 0);
+
+	Door->SetPartOpenAmount(BlockedId, 1.0);
+
+	TestNearlyEqual(TEXT("A part whose ordering names nothing still moves - a fixture has to pose"),
+		Door->GetPartOpenAmount(BlockedId), 1.0, 1e-9);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS
