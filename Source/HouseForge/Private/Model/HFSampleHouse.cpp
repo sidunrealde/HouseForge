@@ -281,9 +281,26 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddParapet(TEXT("W_BalcE_North"), FVector2D(X5, Y2), FVector2D(XE, Y2));
 
 	// ----------------------------------------------------------------- structure
-	// Downstand beams follow the load-bearing lines, plus one crossing the living room, whose
-	// 6600 span is too wide to go unbeamed. That crossing beam is why the living room carries a
-	// bulkhead as well as its cove.
+	// Every downstand beam follows a wall line, and the grid is the wall grid. Nothing here crosses
+	// open floor.
+	//
+	// BM_Living_Cross used to. It ran X 0..6600 at Y 1800 - the exact centre of the living room, on
+	// no wall line and between no columns - and it was the only beam in the flat written with a
+	// literal coordinate instead of a grid constant, and the only one 400 deep instead of 450. Both
+	// of those were the tell. Its stated reason was that the living room's 6600 span was too wide to
+	// go unbeamed, and that reads the room the wrong way round: the slab in this bay is framed on
+	// all four sides - BM_West at X0, BM_Living_Bed2 at X3, BM_South at Y0, BM_Mid_Lower at Y1 - so
+	// it spans 3600 across the short direction, not 6600 along the long one. 3600 is an ordinary
+	// span for a 125 slab and it is two-way at that aspect anyway. A beam down the middle of it
+	// relieves nothing, because nothing was spanning 6600 in the first place; it merely hangs its
+	// own reaction on the mid-span of the two beams it lands on and makes both of them work harder.
+	//
+	// It was also the one thing in the flat somebody actually saw. R_Living's ceiling is a Cove, so
+	// the centre of the room stays at slab height and there is no soffit for a 400 downstand to hide
+	// behind. It read in a render as a 400 mm rib crossing the living room at 2600.
+	//
+	// The validator's BeamNotSupported rule now refuses one, so a beam cannot come back here without
+	// a wall under it or a column at each end.
 	B.AddBeam(TEXT("BM_South"),      FVector2D(X0, Y0), FVector2D(X5, Y0));
 	B.AddBeam(TEXT("BM_North"),      FVector2D(X0, Y3), FVector2D(X5, Y3));
 	B.AddBeam(TEXT("BM_West"),       FVector2D(X0, Y0), FVector2D(X0, Y3));
@@ -292,7 +309,6 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddBeam(TEXT("BM_Mid_Upper"),  FVector2D(X0, Y2), FVector2D(X5, Y2));
 	B.AddBeam(TEXT("BM_Living_Bed2"), FVector2D(X3, Y0), FVector2D(X3, Y1));
 	B.AddBeam(TEXT("BM_Kitchen_MBed"), FVector2D(X2, Y2), FVector2D(X2, Y3));
-	B.AddBeam(TEXT("BM_Living_Cross"), FVector2D(X0, 1800.0), FVector2D(X3, 1800.0), 400.0);
 
 	// Columns at the shell corners and the main wall junctions.
 	B.AddColumn(TEXT("COL_SW"), FVector2D(X0, Y0));
@@ -440,21 +456,11 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 400.0, 0.0,
 		{ FVector2D(9450.0, 4500.0) });
 
-	{
-		// The living room's cove leaves its centre at slab height, so the beam crossing at
-		// Y=1800 has to be boxed in separately. This is how it is detailed in practice, and the
-		// validator's CeilingDoesNotClearBeam rule is satisfied by exactly this pairing.
-		FHFFalseCeiling Bulkhead;
-		Bulkhead.Id = TEXT("FC_Living_Beam");
-		Bulkhead.RoomId = TEXT("R_Living");
-		Bulkhead.Style = EHFCeilingStyle::Bulkhead;
-		Bulkhead.Drop = 450.0;
-		Bulkhead.BandWidth = 0.0;
-		Bulkhead.ExplicitPolygon = {
-			FVector2D(X0, 1700.0), FVector2D(X3, 1700.0), FVector2D(X3, 1900.0), FVector2D(X0, 1900.0)
-		};
-		B.Spec.FalseCeilings.Add(Bulkhead);
-	}
+	// FC_Living_Beam went with BM_Living_Cross. It existed only to box that beam in, and a 450 deep
+	// bulkhead crossing the middle of the living room for no reason is worse than the beam was - the
+	// beam at least stopped at 2600, and the bulkhead reached 2550 over the whole width of the room.
+	// Nothing else in R_Living needs a localised drop: its cove is a perimeter band and its four
+	// downlights sit in that band.
 
 	{
 		// A bulkhead follows its own polygon rather than the room, so it needs one explicitly.

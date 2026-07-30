@@ -732,23 +732,6 @@
 			"depth": 450,
 			"soffitZ": 3000,
 			"surfaceRole": "Structure"
-		},
-		{
-			"id": "BM_Living_Cross",
-			"start":
-			{
-				"x": 0,
-				"y": 1800
-			},
-			"end":
-			{
-				"x": 6600,
-				"y": 1800
-			},
-			"width": 230,
-			"depth": 400,
-			"soffitZ": 3000,
-			"surfaceRole": "Structure"
 		}
 	],
 	"columns": [
@@ -1432,39 +1415,6 @@
 					"y": 4500
 				}
 			]
-		},
-		{
-			"id": "FC_Living_Beam",
-			"roomId": "R_Living",
-			"style": "Bulkhead",
-			"drop": 450,
-			"bandWidth": 0,
-			"cove":
-			{
-				"channelWidth": 10,
-				"lipHeight": 5,
-				"setback": 2,
-				"bHasLedStrip": true
-			},
-			"explicitPolygon": [
-				{
-					"x": 0,
-					"y": 1700
-				},
-				{
-					"x": 6600,
-					"y": 1700
-				},
-				{
-					"x": 6600,
-					"y": 1900
-				},
-				{
-					"x": 0,
-					"y": 1900
-				}
-			],
-			"lightPositions": []
 		},
 		{
 			"id": "FC_Corridor",

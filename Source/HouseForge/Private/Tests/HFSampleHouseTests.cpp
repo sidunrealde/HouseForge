@@ -61,8 +61,10 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 	// 22, not 21. The service band lost W_CBath_MBath when the utility left it, and the utility
 	// gained W_Kitchen_Util and W_Kitchen_Util_S where it now sits in the kitchen's corner.
 	TestEqual(TEXT("Sample has 22 walls"), Spec.Walls.Num(), 22);
-	TestEqual(TEXT("Sample has 8 false ceilings"), Spec.FalseCeilings.Num(), 8);
-	TestEqual(TEXT("Sample has 9 beams"), Spec.Beams.Num(), 9);
+	// 7 and 8, not 8 and 9. BM_Living_Cross crossed the middle of the living room on no wall line
+	// and between no columns, and FC_Living_Beam was the bulkhead that existed only to box it in.
+	TestEqual(TEXT("Sample has 7 false ceilings"), Spec.FalseCeilings.Num(), 7);
+	TestEqual(TEXT("Sample has 8 beams"), Spec.Beams.Num(), 8);
 	TestEqual(TEXT("Sample has 11 columns"), Spec.Columns.Num(), 11);
 
 	TestTrue(TEXT("Sample has a main entrance door"), Spec.Openings.ContainsByPredicate(
@@ -76,14 +78,19 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Sample has 3 balconies"), Balconies, 3);
 
-	// Only the living room's cross beam actually spans a room interior; every other beam sits
-	// over a wall, where the wall itself conceals it.
-	const FHFBeam* LivingBeam = Spec.DeepestBeamOverRoom(TEXT("R_Living"));
-	TestNotNull(TEXT("The living room's cross beam is detected"), LivingBeam);
-	TestNull(TEXT("Perimeter beams are not reported as crossing the kitchen"),
-		Spec.DeepestBeamOverRoom(TEXT("R_Kitchen")));
-	TestNull(TEXT("Perimeter beams are not reported as crossing the common bathroom"),
-		Spec.DeepestBeamOverRoom(TEXT("R_CBath")));
+	// No beam crosses the interior of any room. Every one of the eight sits over a wall for its
+	// whole length, where the wall itself conceals it.
+	//
+	// This used to say the opposite for the living room: BM_Living_Cross was asserted PRESENT, and
+	// the assertion was written as though a beam through the middle of a room were a feature of the
+	// layout worth pinning. It was the defect. Sweeping every room is the assertion that was wanted
+	// all along - it is what would have caught the beam, and it holds the line for the next one.
+	for (const FHFRoom& Room : Spec.Rooms)
+	{
+		const FHFBeam* Crossing = Spec.DeepestBeamOverRoom(Room.Id);
+		TestNull(*FString::Printf(TEXT("No beam crosses the interior of '%s' (%s)"),
+			*Room.Id.ToString(), *Room.Name), Crossing);
+	}
 
 	// Every room must be reachable by the builder, and every opening must host on a real wall.
 	for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)

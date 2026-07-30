@@ -182,9 +182,6 @@
 <line x1="1061.75" y1="688.58" x2="1061.75" y2="392.52" stroke="#005aaa" stroke-width="1.30" stroke-dasharray="16 8" stroke-linecap="round"/>
 <line x1="1039.05" y1="688.58" x2="1039.05" y2="392.52" stroke="#005aaa" stroke-width="1.30" stroke-dasharray="16 8" stroke-linecap="round"/>
 <text x="1050.40" y="540.55" font-family="DejaVu Sans, Arial, sans-serif" font-size="10.00" fill="#005aaa" text-anchor="middle" dominant-baseline="central" transform="rotate(-90.00 1050.40 540.55)">BEAM 230x450</text>
-<line x1="635.92" y1="1055.19" x2="1287.25" y2="1055.19" stroke="#005aaa" stroke-width="1.30" stroke-dasharray="16 8" stroke-linecap="round"/>
-<line x1="635.92" y1="1032.50" x2="1287.25" y2="1032.50" stroke="#005aaa" stroke-width="1.30" stroke-dasharray="16 8" stroke-linecap="round"/>
-<text x="961.58" y="1043.85" font-family="DejaVu Sans, Arial, sans-serif" font-size="10.00" fill="#005aaa" text-anchor="middle" dominant-baseline="central">BEAM 230x400</text>
 <polygon points="635.92,1221.48 1287.25,1221.48 1287.25,866.21 635.92,866.21" fill="none" stroke="#8c2882" stroke-width="2.00"/>
 <polygon points="695.13,1162.27 1228.03,1162.27 1228.03,925.42 695.13,925.42" fill="none" stroke="#8c2882" stroke-width="1.40" stroke-dasharray="16 8"/>
 <polygon points="693.16,1164.24 1230.01,1164.24 1230.01,923.45 693.16,923.45" fill="none" stroke="#005aaa" stroke-width="2.40"/>
@@ -255,10 +252,6 @@
 <circle cx="1568.50" cy="777.39" r="10.86" fill="#ffffff" stroke="#8c2882" stroke-width="1.40"/>
 <line x1="1557.64" y1="777.39" x2="1579.36" y2="777.39" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
 <line x1="1568.50" y1="766.54" x2="1568.50" y2="788.25" stroke="#8c2882" stroke-width="1.00" stroke-linecap="round"/>
-<polygon points="635.92,1053.71 1287.25,1053.71 1287.25,1033.98 635.92,1033.98" fill="none" stroke="#8c2882" stroke-width="2.00"/>
-<text x="961.58" y="937.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">LIVING / DINING</text>
-<text x="961.58" y="958.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">BULKHEAD</text>
-<text x="961.58" y="977.27" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">DROP 450</text>
 <polygon points="1050.40,866.21 1435.27,866.21 1435.27,688.58 1050.40,688.58" fill="none" stroke="#8c2882" stroke-width="2.00"/>
 <text x="1242.84" y="724.10" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">CORRIDOR</text>
 <text x="1242.84" y="745.10" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#8c2882" text-anchor="middle" dominant-baseline="central" font-weight="bold">BULKHEAD</text>
