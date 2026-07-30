@@ -2,7 +2,9 @@
 
 #include "Actors/HFHouseActor.h"
 
+#include "Actors/HFArticulatedActor.h"
 #include "Actors/HFElementActors.h"
+#include "Actors/HFOpeningActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
 #include "Geometry/HFGenerators.h"
@@ -97,6 +99,12 @@ void AHFHouseActor::SetSpec(const FHFHouseSpec& InSpec)
 	BuildGeometry();
 }
 
+void AHFHouseActor::Destroyed()
+{
+	ClearGeometry();
+	Super::Destroyed();
+}
+
 void AHFHouseActor::ClearGeometry()
 {
 	for (AActor* Element : ElementActors)
@@ -123,10 +131,25 @@ void AHFHouseActor::BuildGeometry()
 	TMap<TPair<UClass*, FName>, AHFElementActor*> Preserved;
 	TArray<TObjectPtr<AActor>> Survivors;
 
+	// Open amounts are user state, exactly as a hand edit is. The elements themselves are respawned
+	// here, so a pose held only on the actor would die with it and every door in the flat would slam
+	// shut on a rebuild. Poses are carried across by element id and put back once the parts exist.
+	TMap<TPair<UClass*, FName>, FHFPartPoses> PosedElements;
+
 	for (AActor* Element : ElementActors)
 	{
+		const AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Element);
+		if (IsValid(Articulated))
+		{
+			FHFPartPoses Poses = Articulated->CapturePartPoses();
+			if (!Poses.IsEmpty())
+			{
+				PosedElements.Add({ Articulated->GetClass(), Articulated->ElementId }, MoveTemp(Poses));
+			}
+		}
+
 		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
-		if (IsValid(Typed) && Typed->bArtistEdited)
+		if (IsValid(Typed) && Typed->ShouldPreserveOnRebuild())
 		{
 			Preserved.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
 			Survivors.Add(Typed);
@@ -288,7 +311,33 @@ void AHFHouseActor::BuildGeometry()
 		{
 			OpeningActor->Opening = Opening;
 			OpeningActor->HostWall = *Wall;
+
+			// Settings resolve HERE, in the composing layer, and never inside a generator - see
+			// .claude/rules/04-conventions.md. Before Regenerate, so the first mesh this actor ever
+			// builds already has the project's figures on it.
+			//
+			// Only on a freshly spawned actor: Spawn returns null for a preserved one, so an opening
+			// somebody has edited by hand keeps the figures it was built with rather than having a
+			// project-wide setting reach in and change it.
+			OpeningActor->ApplyProjectDefaults();
 			OpeningActor->Regenerate();
+		}
+	}
+
+	// Once every element has been regenerated its parts exist again, so the poses captured above can
+	// go back on. Done in one pass at the end rather than per element type, so any future articulated
+	// element gets it without having to remember to ask.
+	for (AActor* Element : ElementActors)
+	{
+		AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Element);
+		if (Articulated == nullptr)
+		{
+			continue;
+		}
+
+		if (const FHFPartPoses* Poses = PosedElements.Find({ Articulated->GetClass(), Articulated->ElementId }))
+		{
+			Articulated->RestorePartPoses(*Poses);
 		}
 	}
 

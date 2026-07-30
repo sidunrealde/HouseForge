@@ -97,9 +97,16 @@ $TestExit = $LASTEXITCODE
 $IndexPath = Join-Path $ReportDir 'index.json'
 if (Test-Path $IndexPath) {
     $Report  = Get-Content $IndexPath -Raw | ConvertFrom-Json
-    $Total   = $Report.succeeded + $Report.failed + $Report.notRun
+
+    # A test that logs a warning is reported under succeededWithWarnings, NOT under succeeded.
+    # Leaving it out undercounts the suite - it is why the gate said 102 of 102 while the report
+    # held 106 - and those counts are what a merge commit records as its evidence. Worse, the
+    # emptiness check below divides the same way: if every test warned, succeeded would be 0 and a
+    # fully passing suite would be rejected as "no tests matched".
+    $Passed  = $Report.succeeded + $Report.succeededWithWarnings
+    $Total   = $Passed + $Report.failed + $Report.notRun
     Write-Host ''
-    Write-Host "Tests: $($Report.succeeded) passed, $($Report.failed) failed, $($Report.notRun) not run (of $Total)"
+    Write-Host "Tests: $Passed passed ($($Report.succeededWithWarnings) with warnings), $($Report.failed) failed, $($Report.notRun) not run (of $Total)"
 
     foreach ($t in $Report.tests) {
         if ($t.state -ne 'Success') {
@@ -107,6 +114,18 @@ if (Test-Path $IndexPath) {
             foreach ($e in $t.entries) {
                 if ($e.event.type -eq 'Error') { Write-Host "        $($e.event.message)" -ForegroundColor Red }
             }
+        }
+    }
+
+    # Warnings printed too, because several tests deliberately report a real problem as a warning
+    # rather than a failure - a door clashing with a column in the plan is not the articulation's
+    # fault, but it is still a door embedded in a column. Written only to the report, the only way
+    # to see one was to parse the JSON by hand, so nobody did.
+    foreach ($t in $Report.tests) {
+        $Warnings = @($t.entries | Where-Object { $_.event.type -eq 'Warning' })
+        if ($Warnings.Count -gt 0) {
+            Write-Host "  WARN  $($t.fullTestPath)" -ForegroundColor Yellow
+            foreach ($e in $Warnings) { Write-Host "        $($e.event.message)" -ForegroundColor Yellow }
         }
     }
 

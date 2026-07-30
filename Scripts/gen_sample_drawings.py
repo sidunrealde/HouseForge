@@ -282,7 +282,20 @@ def draw_openings(c, spec, view, show_swings=True):
             c.line(view((endpoint[0] + nx * ht, endpoint[1] + ny * ht)),
                    view((endpoint[0] - nx * ht, endpoint[1] - ny * ht)), width=1.4)
 
-        if kind in ("Window", "SlidingWindow"):
+        if kind == "SlidingWindow":
+            # Two sashes on two tracks, each running half the opening and crossing at the meeting
+            # stile - the sliding door's symbol one size down, which is what the unit is. Drawn
+            # over a light line down the frame centre so the opening still reads as glazed.
+            c.line(view(a), view(b), width=0.9, color=GREY)
+
+            q = wall["thickness"] * 0.16
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            c.line(view((a[0] + nx * q, a[1] + ny * q)),
+                   view((mid[0] + ux * 40 + nx * q, mid[1] + uy * 40 + ny * q)), width=2.0)
+            c.line(view((b[0] - nx * q, b[1] - ny * q)),
+                   view((mid[0] - ux * 40 - nx * q, mid[1] - uy * 40 - ny * q)), width=2.0)
+
+        elif kind == "Window":
             for f in (0.28, 0.5, 0.72):
                 off = (f - 0.5) * wall["thickness"]
                 c.line(view((a[0] + nx * off, a[1] + ny * off)),
@@ -375,8 +388,29 @@ def draw_room_labels(c, spec, view, with_area=True):
         if with_area:
             area = abs(_polygon_area([pt(p) for p in r["boundary"]])) / 1_000_000.0
             c.text((cx, cy + 12), f"{area:.2f} SQM", size=14, anchor="mm", color=DIM)
-            c.text((cx, cy + 33), f"{(x1 - x0):.0f} x {(y1 - y0):.0f}", size=13,
-                   anchor="mm", color=LIGHT)
+
+            # A W x H only means anything on a rectangle. The kitchen is an L since the utility
+            # was boxed out of its corner, and printing its bounding box under its real area put
+            # "4200 x 3000" over "10.44 SQM" - a sheet contradicting itself, in the two figures a
+            # reader checks against each other first. An overall size is given instead.
+            label = (f"{(x1 - x0):.0f} x {(y1 - y0):.0f}" if _is_rectangle(r["boundary"])
+                     else f"{(x1 - x0):.0f} x {(y1 - y0):.0f} OVERALL")
+            c.text((cx, cy + 33), label, size=13, anchor="mm", color=LIGHT)
+
+
+def _is_rectangle(boundary, tol=1.0):
+    """Four corners, axis aligned, and the area to prove it is not a bow tie."""
+    if len(boundary) != 4:
+        return False
+    pts = [pt(p) for p in boundary]
+    for i in range(4):
+        (ax, ay), (bx, by) = pts[i], pts[(i + 1) % 4]
+        if abs(ax - bx) > tol and abs(ay - by) > tol:
+            return False
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    box = (max(xs) - min(xs)) * (max(ys) - min(ys))
+    return abs(abs(_polygon_area(pts)) - box) <= tol * max(box, 1.0) ** 0.5 + tol
 
 
 def _polygon_area(points):
@@ -972,9 +1006,34 @@ def room_wall_segments(room):
     ]
 
 
-def openings_on_segment(spec, seg, tol=200.0):
-    """Openings hosted on a wall collinear with this room side and overlapping its span."""
-    letter, axis, fixed, (r0, r1), _ = seg
+def _point_in_boundary(boundary, px, py):
+    """Even-odd ray cast. The rooms here are rectangles and one L, and the L is the point."""
+    pts = [pt(p) for p in boundary]
+    inside = False
+    n = len(pts)
+    for i in range(n):
+        ax, ay = pts[i]
+        bx, by = pts[i - 1]
+        if (ay > py) != (by > py):
+            if px < (bx - ax) * (py - ay) / (by - ay) + ax:
+                inside = not inside
+    return inside
+
+
+def openings_on_segment(spec, room, seg, tol=200.0):
+    """Openings hosted on a wall collinear with this room side and overlapping its span.
+
+    The span comes from the room's BOUNDING BOX, which is not the same thing as the room's wall
+    once a room is not a rectangle. The kitchen lost its north-east corner to the utility and is
+    now an L: its box still runs X 0..4200 while its north wall stops at 3000, so this picked up
+    Win_Utility - a window in another room, behind a partition - and drew it on sheet 10 as though
+    it were the kitchen's. The sheet had already been corrected to label the box as a box; this is
+    the content the label was describing.
+
+    So each candidate is checked against the boundary itself: step off the opening's centre into
+    the room, and if the point is not inside the polygon, the wall there is somebody else's.
+    """
+    letter, axis, fixed, (r0, r1), (nx, ny) = seg
     lo, hi = min(r0, r1), max(r0, r1)
     found = []
 
@@ -995,8 +1054,15 @@ def openings_on_segment(spec, seg, tol=200.0):
         cy = sy + (ey - sy) * t
         along = cx if axis == "h" else cy
 
-        if lo - o["width"] / 2.0 <= along <= hi + o["width"] / 2.0:
-            found.append((along, o))
+        if not (lo - o["width"] / 2.0 <= along <= hi + o["width"] / 2.0):
+            continue
+
+        # A step inward off the wall face, far enough to clear the wall's own thickness.
+        step = wall.get("thickness", 115.0) / 2.0 + 50.0
+        if not _point_in_boundary(room["boundary"], cx - nx * step, cy - ny * step):
+            continue
+
+        found.append((along, o))
 
     return found
 
@@ -1285,7 +1351,7 @@ def sheet_elevations(spec, room, sheet_no, total):
             if b - a > 2:
                 draw_fixture_elevation(c, fx, a, b, floor_y, px_per_mm)
 
-        for along, o in openings_on_segment(spec, seg):
+        for along, o in openings_on_segment(spec, room, seg):
             a, b = sorted((to_px(along - o["width"] / 2.0), to_px(along + o["width"] / 2.0)))
             a, b = max(a, x0), min(b, x0 + ew)
             if b - a <= 2:
@@ -1294,7 +1360,20 @@ def sheet_elevations(spec, room, sheet_no, total):
             oy1 = floor_y - sill * px_per_mm
             oy0 = oy1 - o["height"] * px_per_mm
             c.rect(a, oy0, b - a, oy1 - oy0, fill=WHITE, stroke=BLACK, width=1.8)
-            if o["kind"] in ("Window", "SlidingWindow", "Ventilator"):
+            if o["kind"] == "SlidingWindow":
+                # The meeting stile, and an arrow on the operable sash showing which way it runs.
+                mid = (a + b) / 2.0
+                c.line((mid, oy0), (mid, oy1), width=1.8)
+                arrow_y = (oy0 + oy1) / 2.0
+                c.line((a + 12, arrow_y), (mid - 12, arrow_y), width=1.0, color=DIM)
+                c.line((mid - 12, arrow_y), (mid - 22, arrow_y - 6), width=1.0, color=DIM)
+                c.line((mid - 12, arrow_y), (mid - 22, arrow_y + 6), width=1.0, color=DIM)
+            elif o["kind"] == "Ventilator":
+                # Top-hung: the dashed V points at the hinged edge, which is the head.
+                mid = (a + b) / 2.0
+                c.line((a, oy1), (mid, oy0), width=1.0, color=DIM, dash=DASH_FINE)
+                c.line((b, oy1), (mid, oy0), width=1.0, color=DIM, dash=DASH_FINE)
+            elif o["kind"] == "Window":
                 c.line(((a + b) / 2.0, oy0), ((a + b) / 2.0, oy1), width=1.2)
                 c.line((a, (oy0 + oy1) / 2.0), (b, (oy0 + oy1) / 2.0), width=1.0, color=LIGHT)
             else:
@@ -1322,8 +1401,13 @@ def sheet_elevations(spec, room, sheet_no, total):
 
     x0r, y0r, x1r, y1r = room_bounds(room)
     area = abs(_polygon_area([pt(p) for p in room["boundary"]])) / 1_000_000.0
+    size = f"{int(round(x1r - x0r))} x {int(round(y1r - y0r))}"
+    if not _is_rectangle(room["boundary"]):
+        # The elevations are set out on the room's bounding box, which is the right thing to draw
+        # four walls against - but on a room that is not a rectangle it is not the room's size.
+        size += " OVERALL"
     c.text((INNER + 40, SHEET_H - INNER - 74),
-           f"{room['name'].upper()}   {int(round(x1r - x0r))} x {int(round(y1r - y0r))}   "
+           f"{room['name'].upper()}   {size}   "
            f"{area:.2f} SQM   CEILING {int(round(ceiling_h))}",
            size=15, anchor="lm")
 

@@ -63,6 +63,17 @@ public:
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
 	void ClearGeometry();
 
+	/**
+	 * Takes the house's elements with it.
+	 *
+	 * UWorld::DestroyActor explicitly DETACHES attached children rather than destroying them, and
+	 * does not touch owned actors either, so without this every wall, floor, ceiling and opening
+	 * from the previous run is orphaned in the level - occupying the same space as the new one, and
+	 * invisible in a top-down capture because the two houses are coincident. Owning the cleanup here
+	 * rather than at the one call site also covers a user deleting the house in the outliner.
+	 */
+	virtual void Destroyed() override;
+
 	/** Element actors generated from the spec, owned by this house. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
 	TArray<TObjectPtr<AActor>> ElementActors;

@@ -4,14 +4,24 @@
 
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "Geometry/HFOpeningParams.h"
+#include "Model/HFArticulation.h"
 #include "Model/HFTypes.h"
 
 /**
  * Element generators.
  *
  * Each is a pure function from parameters to a mesh, in world centimetres. No world, no actor, no
- * asset loading - see .claude/rules/04-conventions.md. That is what makes them testable headlessly
- * and what will let the same code run in a commandlet later.
+ * asset loading, and no global state either - see .claude/rules/04-conventions.md. That is what
+ * makes them testable headlessly and what will let the same code run in a commandlet later.
+ *
+ * The opening functions take an FHFOpeningBuildParams carrying the construction figures - leaf
+ * thickness, sash section, track pitch - that used to be constants in the .cpp. It is DEFAULTED, and
+ * the defaults are exactly those constants, so a caller that has nothing to say about construction
+ * says nothing. A caller that does - the element actors, which resolve the project's settings into
+ * one - passes it in. What must never happen is a generator reaching for the settings object itself:
+ * that would put global state behind a pure function and make it untestable headlessly, which is the
+ * failure HouseForge.Architecture.GeneratorsDoNotReadSettings exists to catch.
  */
 class HOUSEFORGE_API FHFGenerators
 {
@@ -61,9 +71,51 @@ public:
 	/**
 	 * What sits inside an opening: a door leaf, or a window's frame and glazing.
 	 *
+	 * The whole infill as one mesh, with every moving part in its closed pose. Kept for callers
+	 * that want a static snapshot; an actor uses GenerateOpeningFixedInfill plus BuildOpeningParts
+	 * instead, so its door can actually open.
+	 *
 	 * Returns an empty mesh for an archway, which is a hole and nothing else.
 	 */
-	static UE::Geometry::FDynamicMesh3 GenerateOpeningInfill(const FHFOpening& Opening, const FHFWall& Wall);
+	static UE::Geometry::FDynamicMesh3 GenerateOpeningInfill(const FHFOpening& Opening, const FHFWall& Wall,
+		const FHFOpeningBuildParams& Params = FHFOpeningBuildParams());
+
+	/**
+	 * The part of an opening's infill that never moves.
+	 *
+	 * A fixed window's frame and its glazing; a sliding window's outer frame and the tracks its
+	 * sashes run on; a ventilator's frame. Where an opening has sashes, the glazing rides in THEM
+	 * and is deliberately absent here - a fixed pane behind a closed sash is invisible, doubles the
+	 * glass, and would make a closed window and an open one render identically.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateOpeningFixedInfill(const FHFOpening& Opening, const FHFWall& Wall,
+		const FHFOpeningBuildParams& Params = FHFOpeningBuildParams());
+
+	/**
+	 * The moving parts of an opening.
+	 *
+	 * A hinged leaf for a door; two panels on two tracks for a sliding door; two sashes on two
+	 * tracks for a sliding window, one of them running; a top-hung sash for a ventilator. A fixed
+	 * window and an archway have none, which is the honest answer rather than an omission.
+	 *
+	 * Pure, like every other generator: each part's mesh comes back in the part's own local space
+	 * with the origin on its pivot - the hinge jamb for a swing door, the near jamb at the sill for
+	 * a sliding unit, the hinge line at the head for a top-hung sash - and the caller places it.
+	 * The leaf runs along local +X from the pivot, its thickness on local Y and its height on
+	 * local Z from zero at the sill.
+	 */
+	static void BuildOpeningParts(const FHFOpening& Opening, const FHFWall& Wall, TArray<FHFMeshPart>& OutParts,
+		const FHFOpeningBuildParams& Params = FHFOpeningBuildParams());
+
+	/**
+	 * A door leaf in its own local space: +X from the hinge, +Z from the sill.
+	 *
+	 * @param SwingSign  sign of the hinge rotation this leaf will be given. The leaf body hangs on
+	 *                   the face it swings towards, so its back edge sweeps out of the reveal
+	 *                   instead of through the masonry beside the jamb. Zero centres it on the wall.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateDoorLeaf(const FHFOpening& Opening, double SwingSign = 0.0,
+		const FHFDoorParams& Params = FHFDoorParams());
 
 	/** Centre point of an opening along its wall, in plan. */
 	static FVector2D OpeningCentre(const FHFOpening& Opening, const FHFWall& Wall);

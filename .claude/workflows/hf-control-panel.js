@@ -27,6 +27,21 @@ The user is a solo developer and artist. Favour a panel that is pleasant to use 
 exposes everything. An unpleasant panel gets abandoned and the plugin gets driven by MCP alone.
 `
 
+// Budget per item, never across the array. Slicing a serialised array at a fixed length lets a
+// long first item push every later one out of the prompt, silently - a design workflow did exactly
+// that, delivered one of three designs to its judges, and produced a "winner" that was really the
+// only candidate. Truncation should cost an item its own tail and say so.
+const summarise = (items, perItem = 3000) => (items ?? [])
+  .map((item, index) => {
+    const text = typeof item === 'string' ? item : JSON.stringify(item ?? null, null, 1)
+    if (!text) return `[${index + 1}] (empty - that agent returned nothing)`
+    const body = text.length > perItem
+      ? `${text.slice(0, perItem)}\n[...truncated, ${text.length - perItem} chars omitted]`
+      : text
+    return `[${index + 1}] ${body}`
+  })
+  .join('\n\n')
+
 phase('Audit')
 
 const audit = await parallel([
@@ -180,7 +195,7 @@ const verdicts = await parallel([
     `${CONTEXT}
 
 Sections built:
-${JSON.stringify(sections.filter(Boolean), null, 1).slice(0, 10000)}
+${summarise(sections, 2500)}
 
 Judge the panel as a whole, which per-section review cannot.
 

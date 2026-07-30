@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Actors/HFElementActors.h"
 #include "Actors/HFHouseActor.h"
 #include "Editor.h"
 #include "EngineUtils.h"
@@ -144,6 +145,65 @@ bool FHFApplyAndReadBackTest::RunTest(const FString& Parameters)
 }
 
 /** A spec with errors must be refused outright, not built half-way. */
+/**
+ * Re-applying a spec must replace the house, not stack a second one on top of it.
+ *
+ * UWorld::DestroyActor DETACHES attached children rather than destroying them and does not touch
+ * owned actors either, so destroying the house actor alone leaves every wall, floor, ceiling and
+ * opening from the previous run orphaned in the level. Nothing about that is visible: the build log
+ * reports the new house's element count, GetSpec reads back from the new house only, and a top-down
+ * ortho capture of two coincident houses is identical to a capture of one. This bites the plugin's
+ * central workflow - read drawing, build, screenshot, correct, rebuild.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFReapplyReplacesHouseTest,
+	"HouseForge.Editor.ReapplyReplacesTheHouse", HF_TEST_FLAGS)
+
+bool FHFReapplyReplacesHouseTest::RunTest(const FString& Parameters)
+{
+	UHFEditorSubsystem* Editor = Subsystem();
+	if (!TestNotNull(TEXT("Editor subsystem exists"), Editor))
+	{
+		return false;
+	}
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	auto CountElements = [World]()
+	{
+		int32 Count = 0;
+		for (TActorIterator<AHFElementActor> It(World); It; ++It)
+		{
+			Count += IsValid(*It) ? 1 : 0;
+		}
+		return Count;
+	};
+
+	// Counted as a difference rather than against an absolute, so leftovers from any other test in
+	// the same world cannot make this pass or fail for the wrong reason.
+	if (!TestTrue(TEXT("The spec applies"), Editor->ApplySpecJson(MinimalSpecJson(), FString()).bSuccess))
+	{
+		return false;
+	}
+	const int32 AfterFirst = CountElements();
+	TestTrue(TEXT("Applying a spec builds elements"), AfterFirst > 0);
+
+	if (!TestTrue(TEXT("The same spec applies again"),
+		Editor->ApplySpecJson(MinimalSpecJson(), FString()).bSuccess))
+	{
+		return false;
+	}
+	const int32 AfterSecond = CountElements();
+
+	TestEqual(TEXT("Re-applying a spec leaves one house's worth of elements, not two"),
+		AfterSecond, AfterFirst);
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFRefusesInvalidSpecTest,
 	"HouseForge.Editor.RefusesInvalidSpec", HF_TEST_FLAGS)
 

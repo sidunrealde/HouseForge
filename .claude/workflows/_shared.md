@@ -22,6 +22,26 @@ Workflow({ name: 'hf-joinery-kit' })
 Workflow({ scriptPath: '<plugin>/.claude/workflows/hf-joinery-kit.js' })
 ```
 
+## Budget prompt context per item, never across an array
+
+`JSON.stringify(results).slice(0, N)` on an **array** is a silent data-loss bug. A long first item
+consumes the whole budget and every later item is cut off entirely — and the cut usually lands
+mid-object, so what does arrive is invalid JSON.
+
+This already happened. A design workflow generated three panel designs, serialised all three and
+sliced at 24,000 characters. Design A's ASCII wireframe filled it, B and C never reached the
+judges, and the run produced a confident "winner" that was really the only candidate. The judges
+noticed; nothing in the workflow did.
+
+Use the `summarise(items, perItem)` helper each script defines: it budgets each item separately,
+numbers them, marks empty results explicitly, and states how much it dropped. Truncation then costs
+one item its own tail instead of deleting the rest of the array.
+
+Slicing a **single** object or string is fine — it can only truncate itself.
+
+Where a stage's output feeds a comparison or a judgement, also tell the receiving agent to report
+missing or visibly-cut-off inputs rather than quietly working with what arrived.
+
 ## Non-negotiables every workflow must respect
 
 These come from `.claude/rules/` and have already been earned:

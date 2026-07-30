@@ -27,6 +27,11 @@ public class HouseForge : ModuleRules
 				// ceilings. Naive per-edge offsetting collapses on the concave corners these
 				// layouts are full of.
 				"GeometryAlgorithms",
+
+				// UHFSettings derives from UDeveloperSettings, which is what puts the plugin's
+				// construction figures on a Project Settings page. Public rather than private
+				// because UHFSettings is itself public API.
+				"DeveloperSettings",
 			}
 			);
 

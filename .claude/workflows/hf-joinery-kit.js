@@ -34,6 +34,21 @@ Also:
   transform. Never on triangle counts; they pass for the wrong reasons.
 `
 
+// Budget per item, never across the array. Slicing a serialised array at a fixed length lets a
+// long first item push every later one out of the prompt, silently - a design workflow did exactly
+// that, delivered one of three designs to its judges, and produced a "winner" that was really the
+// only candidate. Truncation should cost an item its own tail and say so.
+const summarise = (items, perItem = 3000) => (items ?? [])
+  .map((item, index) => {
+    const text = typeof item === 'string' ? item : JSON.stringify(item ?? null, null, 1)
+    if (!text) return `[${index + 1}] (empty - that agent returned nothing)`
+    const body = text.length > perItem
+      ? `${text.slice(0, perItem)}\n[...truncated, ${text.length - perItem} chars omitted]`
+      : text
+    return `[${index + 1}] ${body}`
+  })
+  .join('\n\n')
+
 phase('Articulation')
 
 // The framework has to exist first: getting it wrong means redoing every part.
@@ -177,7 +192,7 @@ const retrofit = await agent(
   `${CONTEXT}
 
 Parts built:
-${JSON.stringify(built.filter(Boolean), null, 1).slice(0, 6000)}
+${summarise(built, 1500)}
 
 The existing door leaves and window glazing were generated as static geometry, before the
 requirement that anything which moves must move. Retrofit them onto the articulation framework.
@@ -206,7 +221,7 @@ const review = await parallel([
     `${CONTEXT}
 
 Per-part results:
-${JSON.stringify(built.filter(Boolean), null, 1).slice(0, 8000)}
+${summarise(built, 2000)}
 
 Openings retrofit:
 ${String(retrofit).slice(0, 5000)}

@@ -22,11 +22,70 @@ EHFSurfaceRole FHFMeshOps::RoleForGroup(int32 GroupId)
 	return (Index >= 0 && Index <= Max) ? static_cast<EHFSurfaceRole>(Index) : EHFSurfaceRole::WallPaint;
 }
 
+EHFSurfaceRole FHFMeshOps::RoleForMaterialId(int32 MaterialId)
+{
+	const int32 Max = static_cast<int32>(EHFSurfaceRole::Structure);
+	return (MaterialId >= 0 && MaterialId <= Max) ? static_cast<EHFSurfaceRole>(MaterialId) : EHFSurfaceRole::WallPaint;
+}
+
 void FHFMeshOps::InitialiseMesh(FDynamicMesh3& Mesh)
 {
 	Mesh.Clear();
 	Mesh.EnableTriangleGroups();
 	Mesh.EnableAttributes();
+}
+
+void FHFMeshOps::AssignMaterialIdsFromRoles(FDynamicMesh3& Mesh)
+{
+	if (!Mesh.HasAttributes())
+	{
+		Mesh.EnableAttributes();
+	}
+
+	// Reparent before touching an overlay - see AdoptAttributes. A mesh that has been carried in a
+	// TArray has an attribute set pointing at a freed buffer, and EnableMaterialID sizes the new
+	// attribute from ParentMesh->MaxTriangleID().
+	AdoptAttributes(Mesh);
+
+	FDynamicMeshAttributeSet* Attributes = Mesh.Attributes();
+	if (Attributes == nullptr)
+	{
+		return;
+	}
+
+	if (!Attributes->HasMaterialID())
+	{
+		Attributes->EnableMaterialID();
+	}
+
+	FDynamicMeshMaterialAttribute* MaterialIds = Attributes->GetMaterialID();
+	if (MaterialIds == nullptr)
+	{
+		return;
+	}
+
+	// Triangle groups are read, never written. If a mesh somehow arrived without them every
+	// triangle falls to WallPaint, which is the same fallback RoleForGroup already applies.
+	for (const int32 Tid : Mesh.TriangleIndicesItr())
+	{
+		const int32 Group = Mesh.HasTriangleGroups() ? Mesh.GetTriangleGroup(Tid) : 0;
+		MaterialIds->SetValue(Tid, MaterialIdForRole(RoleForGroup(Group)));
+	}
+}
+
+TSet<EHFSurfaceRole> FHFMeshOps::RolesPresent(const FDynamicMesh3& Mesh)
+{
+	TSet<EHFSurfaceRole> Roles;
+	if (!Mesh.HasTriangleGroups())
+	{
+		return Roles;
+	}
+
+	for (const int32 Tid : Mesh.TriangleIndicesItr())
+	{
+		Roles.Add(RoleForGroup(Mesh.GetTriangleGroup(Tid)));
+	}
+	return Roles;
 }
 
 double FHFMeshOps::SignedArea(const TArray<FVector2D>& Polygon)
@@ -107,6 +166,12 @@ bool FHFMeshOps::AppendPrism(FDynamicMesh3& Mesh, const TArray<FVector2D>& Polyg
 {
 	if (Polygon.Num() < 3 || FMath::IsNearlyEqual(BottomZ, TopZ))
 	{
+		// Logged, because a silent no-op is indistinguishable from geometry that was never asked
+		// for: the caller gets an empty mesh, the actor still exists, and the element count in the
+		// build log is right. See the triangulation failure below for how ordinary input gets here.
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Prism not built: %d boundary points over a height of %.4f; no geometry emitted."),
+			Polygon.Num(), TopZ - BottomZ);
 		return false;
 	}
 
@@ -126,10 +191,24 @@ bool FHFMeshOps::AppendPrism(FDynamicMesh3& Mesh, const TArray<FVector2D>& Polyg
 	}
 
 	// Handles concave boundaries, which is the whole reason for not fanning from a centroid.
+	//
+	// bOrientAsHoleFill=false, and it is not optional: the default is TRUE, which winds the output
+	// triangles OPPOSITE to the input polygon because the usual caller is patching a hole and wants
+	// the patch facing back the other way. Taking that default gives caps facing into the solid while
+	// the side walls below face out of it, and nothing catches it - GetVolumeArea integrates along X
+	// only, so a Z-extruded prism's caps contribute exactly zero to the volume it reports.
 	TArray<FIndex3i> Triangles;
-	PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles);
+	PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles, /*bOrientAsHoleFill*/ false);
 	if (Triangles.IsEmpty())
 	{
+		// The reachable case, and it is reachable from ordinary user input rather than from abuse:
+		// the triangulator produces nothing for a polygon that is not simple, and a bow-tie room
+		// boundary is an everyday mis-read of a plan. The floor then comes back empty while the
+		// walls around it generate perfectly, so a top-down view still shows the room outline and
+		// the hole reads as an unfinished floor rather than as a failure.
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Prism not built: a %d-point boundary could not be triangulated - it is probably self-intersecting."),
+			Boundary.Num());
 		return false;
 	}
 
@@ -169,6 +248,9 @@ bool FHFMeshOps::AppendPrismWithHoles(FDynamicMesh3& Mesh, const TArray<FVector2
 {
 	if (Outer.Num() < 3 || FMath::IsNearlyEqual(BottomZ, TopZ))
 	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Prism with holes not built: %d outer points over a height of %.4f; no geometry emitted."),
+			Outer.Num(), TopZ - BottomZ);
 		return false;
 	}
 
@@ -233,6 +315,9 @@ bool FHFMeshOps::AppendPrismWithHoles(FDynamicMesh3& Mesh, const TArray<FVector2
 
 	if (!Triangulator.Triangulate() || Triangulator.Triangles.IsEmpty())
 	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Prism with holes not built: a %d-point outer boundary with %d holes could not be triangulated."),
+			Outer.Num(), UsedHoles.Num());
 		return false;
 	}
 
@@ -288,12 +373,283 @@ bool FHFMeshOps::AppendPrismWithHoles(FDynamicMesh3& Mesh, const TArray<FVector2
 	return true;
 }
 
+bool FHFMeshOps::AppendExtrudedSection(FDynamicMesh3& Mesh, const TArray<FVector2D>& Section,
+	const FVector3d& Origin, const FVector3d& SectionU, const FVector3d& SweepDir,
+	double SweepLength, EHFSurfaceRole Role)
+{
+	if (Section.Num() < 3 || FMath::Abs(SweepLength) <= UE_KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	FVector3d W = SweepDir;
+	double Length = SweepLength;
+	if (Length < 0.0)
+	{
+		// Sweeping backwards is a legitimate request - a profile run along a panel edge picks its
+		// direction from the panel's frame, not from the caller's convenience.
+		W = -W;
+		Length = -Length;
+	}
+	if (!W.Normalize())
+	{
+		return false;
+	}
+
+	// (U, V, W) right-handed by construction: V = W x U gives U x V = W for any U perpendicular to
+	// W. Deriving V rather than taking it is what makes an inside-out sweep impossible to ask for.
+	FVector3d U = SectionU - W * SectionU.Dot(W);
+	if (!U.Normalize())
+	{
+		return false;
+	}
+	const FVector3d V = W.Cross(U);
+
+	// Same winding normalisation as AppendPrism: sections are authored in whichever direction reads
+	// naturally, and the caps have to come out facing the same way regardless.
+	TArray<FVector2D> Boundary = Section;
+	if (SignedArea(Boundary) < 0.0)
+	{
+		Algo::Reverse(Boundary);
+	}
+
+	TArray<FVector2d> Flat;
+	Flat.Reserve(Boundary.Num());
+	for (const FVector2D& Point : Boundary)
+	{
+		Flat.Add(FVector2d(Point.X, Point.Y));
+	}
+
+	// Concave sections are the norm here - a J-profile cutter is an L with a chamfer taken off it.
+	// bOrientAsHoleFill=false for the reason spelled out in AppendPrism: the default reverses the
+	// winding. A swept section is where that bites hardest, because its caps are the faces that carry
+	// the whole of the volume integral.
+	TArray<FIndex3i> Triangles;
+	PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles, /*bOrientAsHoleFill*/ false);
+	if (Triangles.IsEmpty())
+	{
+		return false;
+	}
+
+	const int32 Count = Boundary.Num();
+	const int32 Group = GroupForRole(Role);
+
+	TArray<int32> StartVerts;
+	TArray<int32> EndVerts;
+	StartVerts.Reserve(Count);
+	EndVerts.Reserve(Count);
+	for (const FVector2D& Point : Boundary)
+	{
+		const FVector3d InPlane = Origin + U * Point.X + V * Point.Y;
+		StartVerts.Add(Mesh.AppendVertex(InPlane));
+		EndVerts.Add(Mesh.AppendVertex(InPlane + W * Length));
+	}
+
+	// Identical winding to AppendPrism, with (U, V, W) standing in for (X, Y, Z).
+	for (const FIndex3i& Tri : Triangles)
+	{
+		Mesh.AppendTriangle(StartVerts[Tri.A], StartVerts[Tri.B], StartVerts[Tri.C], Group);
+		Mesh.AppendTriangle(EndVerts[Tri.C], EndVerts[Tri.B], EndVerts[Tri.A], Group);
+	}
+
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const int32 Next = (i + 1) % Count;
+		Mesh.AppendTriangle(StartVerts[i], EndVerts[Next], StartVerts[Next], Group);
+		Mesh.AppendTriangle(StartVerts[i], EndVerts[i], EndVerts[Next], Group);
+	}
+
+	return true;
+}
+
+bool FHFMeshOps::AppendRevolvedProfile(FDynamicMesh3& Mesh, const TArray<FVector2D>& Profile,
+	const FVector3d& Origin, const FVector3d& Axis, int32 SideCount, EHFSurfaceRole Role)
+{
+	if (Profile.Num() < 2)
+	{
+		return false;
+	}
+
+	// Rounded up rather than rejected: the caller asked for a smoothness, not for a vertex count,
+	// and a multiple of four is what puts vertices on both in-plane axes so the bounds come out at
+	// the full diameter.
+	const int32 Sides = FMath::Max(4, ((FMath::Max(SideCount, 3) + 3) / 4) * 4);
+
+	FVector3d W = Axis;
+	if (!W.Normalize())
+	{
+		return false;
+	}
+
+	// Any perpendicular does; a surface of revolution does not care where its seam falls. Picked
+	// deterministically so the same profile always produces the same mesh.
+	FVector3d U = (FMath::Abs(W.Z) < 0.9) ? FVector3d::UnitZ().Cross(W) : FVector3d::UnitX().Cross(W);
+	if (!U.Normalize())
+	{
+		return false;
+	}
+	const FVector3d V = W.Cross(U);
+
+	// Consecutive duplicates would emit a band of zero-area triangles, which is not a closed solid
+	// so much as a closed solid with rubbish welded into it.
+	TArray<FVector2D> Points;
+	Points.Reserve(Profile.Num());
+	for (const FVector2D& Point : Profile)
+	{
+		const FVector2D Clamped(Point.X, FMath::Max(Point.Y, 0.0));
+		if (Points.IsEmpty() || !Points.Last().Equals(Clamped, UE_KINDA_SMALL_NUMBER))
+		{
+			Points.Add(Clamped);
+		}
+	}
+	if (Points.Num() < 2)
+	{
+		return false;
+	}
+
+	for (int32 i = 1; i < Points.Num() - 1; ++i)
+	{
+		if (Points[i].Y <= UE_KINDA_SMALL_NUMBER)
+		{
+			// A zero radius in the middle pinches the solid into two lobes joined at a point. That
+			// is non-manifold, so refuse it rather than emit something IsClosed would call fine.
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("Revolved profile has a zero radius at interior point %d; refusing to pinch the solid."), i);
+			return false;
+		}
+	}
+
+	const int32 Group = GroupForRole(Role);
+
+	TArray<TArray<int32>> Rings;
+	Rings.SetNum(Points.Num());
+	for (int32 r = 0; r < Points.Num(); ++r)
+	{
+		const FVector3d Centre = Origin + W * Points[r].X;
+		const double Radius = Points[r].Y;
+
+		if (Radius <= UE_KINDA_SMALL_NUMBER)
+		{
+			Rings[r].Add(Mesh.AppendVertex(Centre));
+			continue;
+		}
+
+		Rings[r].Reserve(Sides);
+		for (int32 s = 0; s < Sides; ++s)
+		{
+			const double Theta = (2.0 * UE_DOUBLE_PI * s) / Sides;
+			Rings[r].Add(Mesh.AppendVertex(Centre + (U * FMath::Cos(Theta) + V * FMath::Sin(Theta)) * Radius));
+		}
+	}
+
+	// Outward-facing under the same convention AppendBox uses: Quad(A, B, C, D) winds as (A, C, B)
+	// and (A, D, C).
+	auto Quad = [&](int32 A, int32 B, int32 C, int32 D)
+	{
+		Mesh.AppendTriangle(A, C, B, Group);
+		Mesh.AppendTriangle(A, D, C, Group);
+	};
+
+	for (int32 r = 0; r + 1 < Points.Num(); ++r)
+	{
+		const TArray<int32>& Lower = Rings[r];
+		const TArray<int32>& Upper = Rings[r + 1];
+
+		for (int32 s = 0; s < Sides; ++s)
+		{
+			const int32 Next = (s + 1) % Sides;
+
+			if (Lower.Num() == 1)
+			{
+				Mesh.AppendTriangle(Lower[0], Upper[s], Upper[Next], Group);
+			}
+			else if (Upper.Num() == 1)
+			{
+				Mesh.AppendTriangle(Lower[s], Upper[0], Lower[Next], Group);
+			}
+			else
+			{
+				Quad(Lower[s], Lower[Next], Upper[Next], Upper[s]);
+			}
+		}
+	}
+
+	// Cap whichever ends are discs. An apex needs no cap; a disc left open is a hole, and a mesh
+	// with a hole silently defeats every boolean it is ever handed to.
+	if (Rings[0].Num() > 1)
+	{
+		const int32 Centre = Mesh.AppendVertex(Origin + W * Points[0].X);
+		for (int32 s = 0; s < Sides; ++s)
+		{
+			Mesh.AppendTriangle(Centre, Rings[0][s], Rings[0][(s + 1) % Sides], Group);
+		}
+	}
+	if (Rings.Last().Num() > 1)
+	{
+		const TArray<int32>& Ring = Rings.Last();
+		const int32 Centre = Mesh.AppendVertex(Origin + W * Points.Last().X);
+		for (int32 s = 0; s < Sides; ++s)
+		{
+			Mesh.AppendTriangle(Centre, Ring[(s + 1) % Sides], Ring[s], Group);
+		}
+	}
+
+	return true;
+}
+
+void FHFMeshOps::AppendPreservingRoles(FDynamicMesh3& Target, const FDynamicMesh3& Source)
+{
+	if (Source.TriangleCount() == 0)
+	{
+		return;
+	}
+
+	// Without these the append drops the source's groups and UVs on the floor rather than failing,
+	// and a caller handed a bare mesh would get untagged, unwrapped geometry back.
+	if (!Target.HasTriangleGroups())
+	{
+		Target.EnableTriangleGroups();
+	}
+	if (!Target.HasAttributes())
+	{
+		Target.EnableAttributes();
+	}
+
+	// Target is somebody else's mesh and may have been relocated by the array holding it.
+	AdoptAttributes(Target);
+
+	Target.EnableMatchingAttributes(Source, /*bClearExisting*/ false, /*bDiscardExtraAttributes*/ false);
+
+	FDynamicMesh3::FAppendInfo Info;
+	Target.AppendWithOffsets(Source, &Info);
+
+	if (Info.GroupOffset == 0)
+	{
+		return;
+	}
+
+	// Put the roles back. The offset the append applied is exactly what has to come off again; the
+	// group counter is left where the append moved it, which costs nothing and keeps any later
+	// AllocateTriangleGroup from colliding with a role id.
+	for (int32 Tid = Info.TriangleOffset; Tid < Target.MaxTriangleID(); ++Tid)
+	{
+		if (Target.IsTriangle(Tid))
+		{
+			Target.SetTriangleGroup(Tid, Target.GetTriangleGroup(Tid) - Info.GroupOffset);
+		}
+	}
+}
+
 bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Tool)
 {
 	if (Tool.TriangleCount() == 0 || Target.TriangleCount() == 0)
 	{
 		return false;
 	}
+
+	// Same reason as AppendPreservingRoles: Target arrives from the caller, and a part mesh living
+	// in a TArray has had its attribute back-pointer left behind by the array's last reallocation.
+	AdoptAttributes(Target);
 
 	const bool bInputsClosed = IsClosed(Target) && IsClosed(Tool);
 
@@ -305,6 +661,11 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 		&Tool, FTransformSRT3d::Identity(),
 		&Result, FMeshBoolean::EBooleanOp::Difference);
 	Boolean.bPutResultInInputSpace = true;
+
+	// The one thing standing between a cut face and the material panel. The tool's triangles are
+	// appended into the result with freshly allocated group ids, so ask for the map back and undo
+	// the renumbering below - the group IS the surface role here, not an arbitrary partition.
+	Boolean.bPopulateSecondMeshGroupMap = true;
 
 	// Compute() returns false whenever it could not resolve every intersection perfectly, which it
 	// reports even for cuts that came out clean - a through-hole in a box comes back "invalid"
@@ -325,8 +686,45 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 		return false;
 	}
 
+	// Put the tool's own groups back on the faces it left behind. The map runs tool group -> result
+	// group, and every face the cut exposed has to come back the other way; anything that came from
+	// the target kept its group and is not in the map at all.
+	const TMap<int32, int32>& ToolToResult = Boolean.SecondMeshGroupMap.GetForwardMap();
+	if (Result.HasTriangleGroups() && ToolToResult.Num() > 0)
+	{
+		TMap<int32, int32> ResultToTool;
+		ResultToTool.Reserve(ToolToResult.Num());
+		for (const TPair<int32, int32>& Renumbered : ToolToResult)
+		{
+			ResultToTool.Add(Renumbered.Value, Renumbered.Key);
+		}
+
+		for (const int32 Tid : Result.TriangleIndicesItr())
+		{
+			if (const int32* ToolGroup = ResultToTool.Find(Result.GetTriangleGroup(Tid)))
+			{
+				Result.SetTriangleGroup(Tid, *ToolGroup);
+			}
+		}
+	}
+
 	Target = MoveTemp(Result);
 	return true;
+}
+
+void FHFMeshOps::AdoptAttributes(FDynamicMesh3& Mesh)
+{
+	if (!Mesh.HasAttributes() || Mesh.Attributes()->GetParentMesh() == &Mesh)
+	{
+		return;
+	}
+
+	// FDynamicMeshAttributeSet::Reparent is private to FDynamicMesh3, and the two places it runs are
+	// the move constructor and the move assignment - neither of which dereferences the stale pointer
+	// on the way past, which is what makes this round trip safe on a mesh that has been relocated.
+	// It is a handful of container moves, and it only runs when the back-pointer is actually wrong.
+	FDynamicMesh3 Rehomed(MoveTemp(Mesh));
+	Mesh = MoveTemp(Rehomed);
 }
 
 void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
@@ -340,6 +738,10 @@ void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 	{
 		Mesh.EnableAttributes();
 	}
+
+	// Every generator funnels through here, which is the only reason this is cheap enough to be a
+	// guarantee rather than a rule somebody has to remember. See AdoptAttributes for what it repairs.
+	AdoptAttributes(Mesh);
 
 	FDynamicMeshUVOverlay* UVs = Mesh.Attributes()->PrimaryUV();
 	if (UVs == nullptr)
@@ -380,6 +782,56 @@ void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 		UVs->SetTriangle(Tid, FIndex3i(Elements[0], Elements[1], Elements[2]));
 	}
 
+	ComputeShadingNormals(Mesh);
+}
+
+void FHFMeshOps::ComputeShadingNormals(FDynamicMesh3& Mesh, double HardEdgeAngleDegrees)
+{
+	if (Mesh.TriangleCount() == 0)
+	{
+		return;
+	}
+
+	if (!Mesh.HasAttributes())
+	{
+		Mesh.EnableAttributes();
+	}
+
+	FDynamicMeshNormalOverlay* Normals = Mesh.Attributes()->PrimaryNormals();
+	if (Normals == nullptr)
+	{
+		return;
+	}
+
+	// The split has to happen FIRST, and calling the recompute on its own is a silent no-op.
+	//
+	// EnableAttributes creates the normal overlay empty, and every AppendTriangle routes through
+	// TDynamicMeshOverlay::InitializeNewTriangle, which writes InvalidID into all three of that
+	// triangle's normal slots. So on a mesh built purely from AppendVertex/AppendTriangle - which is
+	// every mesh this plugin generates - the overlay has zero elements. QuickRecomputeOverlayNormals
+	// only RE-computes elements that already exist: it sizes its accumulator from MaxElementID and
+	// skips any triangle whose first element is InvalidID, so it touches nothing and returns true.
+	//
+	// The cost is total and invisible. FMeshRenderBufferSetConversionUtil falls back to
+	// FDynamicMesh3::GetVertexNormal when a triangle has no normal elements, and that returns the
+	// constant FVector3f::UnitY() when per-vertex normals are not enabled - which they never are.
+	// Every wall, floor, shutter, drawer and handle then shades as though it faced +Y. Nothing in the
+	// gate can see it: volume, bounds, watertightness, roles and UVs are all exactly right, and an
+	// unlit or wireframe capture is pixel-identical to correct output.
+	//
+	// Split by opening angle rather than by polygroup, and the choice is deliberate both ways:
+	//
+	//   - by polygroup would smooth a box, whose six faces all share one surface role, into a blob,
+	//     and would smooth straight across a cornice's springing arris, where the arc and the front
+	//     face are both ShutterLaminate;
+	//   - per-triangle everywhere would facet the rail tube, the knob dome and the cove arc, which
+	//     exist precisely to read as curved.
+	//
+	// At 40 degrees the kit's real geometry lands the right way round: box arrises (90) and chamfer
+	// facets (45) stay hard, while a 12-facet rail tube (30), a 16-sided knob (22.5) and a cove at
+	// its default 8 segments (11.25) all weld smooth. See .claude/rules/04-conventions.md, which asks
+	// for hard and soft edges chosen deliberately rather than left to a blanket recompute.
+	FMeshNormals::InitializeOverlayTopologyFromOpeningAngle(&Mesh, Normals, HardEdgeAngleDegrees);
 	FMeshNormals::QuickRecomputeOverlayNormals(Mesh);
 }
 

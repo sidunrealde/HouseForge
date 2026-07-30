@@ -1,4 +1,4 @@
-// Copyright Siddartha G. All Rights Reserved.
+﻿// Copyright Siddartha G. All Rights Reserved.
 
 #include "HFEditorSubsystem.h"
 
@@ -20,7 +20,11 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Model/HFSpecSerializer.h"
+#include "Model/HFBuildDefaults.h"
 #include "Model/HFSpecValidator.h"
+#include "Model/HFSettings.h"
+#include "Actors/HFElementActors.h"
+#include "Actors/HFOpeningActor.h"
 #include "UnrealEdGlobals.h"
 
 #include "Dom/JsonObject.h"
@@ -29,6 +33,25 @@
 #include "Serialization/JsonSerializer.h"
 
 #define LOCTEXT_NAMESPACE "HouseForgeEditor"
+
+namespace
+{
+	/**
+	 * What this project judges a spec against.
+	 *
+	 * Resolved here, in the composing layer, for the same reason the construction figures are: the
+	 * validator takes its limits as an argument and never looks them up, so something has to do the
+	 * looking up, and the subsystem is the outermost thing that knows a project exists.
+	 *
+	 * Every entry point that validates has to go through this. A limit only some of them honour is
+	 * worse than no limit at all - a spec would be refused by the MCP validate tool and then accepted
+	 * by the apply tool that follows it, or the other way round.
+	 */
+	FHFValidationLimits ProjectValidationLimits()
+	{
+		return FHFBuildDefaults::FromProjectSettings().Validation;
+	}
+}
 
 FHFOperationResult FHFOperationResult::Ok(const FString& InMessage)
 {
@@ -252,7 +275,7 @@ FHFOperationResult UHFEditorSubsystem::ValidateSpecJson(const FString& SpecJson)
 		return FHFOperationResult::Fail(Error);
 	}
 
-	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec);
+	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec, ProjectValidationLimits());
 	if (Validation.HasErrors())
 	{
 		return FHFOperationResult::Fail(Validation.ToString());
@@ -270,7 +293,7 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 		return FHFOperationResult::Fail(Error);
 	}
 
-	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec);
+	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec, ProjectValidationLimits());
 	if (Validation.HasErrors())
 	{
 		// Refusing here matters: a half-built house would screenshot plausibly while the spec
@@ -324,8 +347,14 @@ FHFOperationResult UHFEditorSubsystem::SpawnHouse(const FHFHouseSpec& Spec)
 	}
 
 	// One house per level. Replacing rather than adding keeps GetSpecJson unambiguous.
+	//
+	// The elements go first, explicitly. AHFHouseActor::Destroyed does this too, but saying it here
+	// as well is what makes the central workflow - read drawing, build, screenshot, correct, rebuild
+	// - safe to read: without it the level ends up holding the wrong house and the right one,
+	// superimposed, while the log line reports the new house's element count and reads correct.
 	for (TActorIterator<AHFHouseActor> It(World); It; ++It)
 	{
+		It->ClearGeometry();
 		World->DestroyActor(*It);
 	}
 
@@ -544,7 +573,7 @@ FHFOperationResult UHFEditorSubsystem::ModifyElement(const FString& Category, co
 		return FHFOperationResult::Fail(Error);
 	}
 
-	const FHFValidationResult Validation = FHFSpecValidator::Validate(Working);
+	const FHFValidationResult Validation = FHFSpecValidator::Validate(Working, ProjectValidationLimits());
 	if (Validation.HasErrors())
 	{
 		return FHFOperationResult::Fail(FString::Printf(
@@ -782,6 +811,98 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 
 	return FHFOperationResult::Ok(FString::Printf(
 		TEXT("Captured %dx%d top-down view to %s"), ToSave->SizeX, ToSave->SizeY, *OutPath));
+}
+
+// ------------------------------------------------------------------------------- settings
+
+void UHFEditorSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	// A settings page nothing listens to is a settings page that appears to do nothing. UDeveloperSettings
+	// broadcasts this from its own PostEditChangeProperty, so an edit in Project Settings reaches the
+	// open level immediately rather than waiting for somebody to rebuild the house by hand.
+	if (UHFSettings* Settings = GetMutableDefault<UHFSettings>())
+	{
+		SettingsChangedHandle = Settings->OnSettingChanged().AddUObject(
+			this, &UHFEditorSubsystem::HandleSettingsChanged);
+	}
+}
+
+void UHFEditorSubsystem::Deinitialize()
+{
+	if (SettingsChangedHandle.IsValid())
+	{
+		if (UHFSettings* Settings = GetMutableDefault<UHFSettings>())
+		{
+			Settings->OnSettingChanged().Remove(SettingsChangedHandle);
+		}
+		SettingsChangedHandle.Reset();
+	}
+
+	Super::Deinitialize();
+}
+
+void UHFEditorSubsystem::HandleSettingsChanged(UObject* Settings, FPropertyChangedEvent& Event)
+{
+	ApplyProjectSettingsToLevel();
+}
+
+int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return 0;
+	}
+
+	int32 Rebuilt = 0;
+	int32 Preserved = 0;
+
+	// Every house in the level, not just the first. FindHouseActor answers "the house" for the tools,
+	// which is the right answer there; a project-wide setting change is different - a level holding
+	// two houses would otherwise leave the second one built to the old figures with nothing saying so.
+	TArray<AActor*> Elements;
+	for (TActorIterator<AHFHouseActor> It(World); It; ++It)
+	{
+		Elements.Append(It->ElementActors);
+	}
+
+	for (AActor* Element : Elements)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (!IsValid(Typed))
+		{
+			continue;
+		}
+
+		// Asked before anything is touched. Regenerate would refuse on its own, but re-seeding the
+		// construction figures first would still change what a later Revert To Generated produced -
+		// so a hand-edited element is left alone completely, parameters included.
+		if (Typed->ShouldPreserveOnRebuild())
+		{
+			++Preserved;
+			continue;
+		}
+
+		// Only elements whose construction the settings actually feed. Re-seeding is the composing
+		// layer's job and is done HERE, not inside any generator.
+		if (AHFOpeningActor* Opening = Cast<AHFOpeningActor>(Typed))
+		{
+			Opening->ApplyProjectDefaults();
+			Opening->Regenerate();
+			++Rebuilt;
+		}
+	}
+
+	if (Rebuilt > 0 || Preserved > 0)
+	{
+		UE_LOG(LogHouseForgeEditor, Log,
+			TEXT("HouseForge settings applied: %d element(s) rebuilt, %d preserved as hand-edited."),
+			Rebuilt, Preserved);
+	}
+
+	return Rebuilt;
 }
 
 #undef LOCTEXT_NAMESPACE

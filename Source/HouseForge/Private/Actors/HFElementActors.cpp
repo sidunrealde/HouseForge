@@ -6,6 +6,7 @@
 #include "Geometry/HFGenerators.h"
 #include "Geometry/HFMeshOps.h"
 #include "HouseForge.h"
+#include "Materials/HFMaterialLibrary.h"
 
 using namespace UE::Geometry;
 
@@ -18,15 +19,48 @@ AHFElementActor::AHFElementActor()
 
 	// Complex collision only: these are thin boxed shapes, and simple collision would fill the
 	// door openings back in - you could not walk through a doorway that had been cut out.
+	//
+	// Both flags, and they are not the same flag. CollisionType says which collision to use;
+	// bEnableComplexCollision says whether to build any. Setting only the first asks for complex
+	// collision that was never cooked, and a component with no simple shapes either then has no
+	// collision at all - it renders correctly and a walkthrough falls straight through it.
 	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Mesh->SetCollisionProfileName(TEXT("BlockAll"));
 	Mesh->CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
+	Mesh->bEnableComplexCollision = true;
 	Mesh->SetGenerateOverlapEvents(false);
+
+	// Tangents derived from the mesh's own UVs and normals rather than taken from it.
+	//
+	// The default is "From Dynamic Mesh", and nothing here ever calls EnableTangents, so
+	// HasTangentSpace() is false and the component silently falls back to MakePerpVectors - an
+	// arbitrary basis with no relationship to the surface's UVs. Nothing fails and nothing logs;
+	// with the flat colours that exist today the output is indistinguishable from correct, and it
+	// only becomes visible when the materials milestone puts normal maps on top of it, at which
+	// point it reads as a material bug rather than a geometry-attribute one.
+	Mesh->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
 }
 
 void AHFElementActor::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
+	WatchForEdits();
+}
+
+void AHFElementActor::PostRegisterAllComponents()
+{
+	Super::PostRegisterAllComponents();
+
+	// Edit detection has to be armed here, not only in PostInitializeComponents.
+	//
+	// AActor::PostActorConstruction gates PostInitializeComponents on World->AreActorsInitialized(),
+	// which is false for an editor world - so that path runs in PIE only. Element actors are also
+	// deliberately not regenerated on load, so CommitMesh does not run either. Between the two,
+	// an element that came back from a saved level had no binding at all: take the Modeling Tools
+	// to a wall, press Build Geometry, and the modelling work is gone without a word. That is the
+	// silent, unrecoverable loss .claude/rules/04-conventions.md calls out.
+	//
+	// WatchForEdits is idempotent, so this sits safely alongside the CommitMesh path.
 	WatchForEdits();
 }
 
@@ -90,7 +124,14 @@ void AHFElementActor::CommitMesh(FDynamicMesh3&& Generated)
 	// Our own write must not look like an artist edit.
 	TGuardValue<bool> Guard(bGenerating, true);
 
+	// The last thing done to a generated mesh, after every boolean and every append. The material
+	// id is a pure function of the polygroup, so deriving it here rather than inside the generators
+	// means no mesh operation has to be trusted to carry it - and no generator has to reach for an
+	// asset to know what it is being materialled with.
+	FHFMeshOps::AssignMaterialIdsFromRoles(Generated);
+
 	Mesh->SetMesh(MoveTemp(Generated));
+	FHFMaterialLibrary::ApplyPlaceholders(Mesh);
 	Mesh->NotifyMeshUpdated();
 	Mesh->UpdateCollision(false);
 }
@@ -128,7 +169,7 @@ FDynamicMesh3 AHFRoomActor::BuildMesh() const
 
 	if (bGenerateCeilingSlab)
 	{
-		Result.AppendWithOffsets(FHFGenerators::GenerateCeilingSlab(Room, SlabThickness));
+		FHFMeshOps::AppendPreservingRoles(Result, FHFGenerators::GenerateCeilingSlab(Room, SlabThickness));
 	}
 
 	return Result;
@@ -147,9 +188,4 @@ FDynamicMesh3 AHFBeamActor::BuildMesh() const
 FDynamicMesh3 AHFColumnActor::BuildMesh() const
 {
 	return FHFGenerators::GenerateColumn(Column);
-}
-
-FDynamicMesh3 AHFOpeningActor::BuildMesh() const
-{
-	return FHFGenerators::GenerateOpeningInfill(Opening, HostWall);
 }

@@ -1,0 +1,17 @@
+# core.autocrlf is on for this machine, which rewrites checked-out files to CRLF.
+# That is fine for C++ and PowerShell, but the Workflow tool refuses to run a
+# script containing CR - the approval dialog would hide the control characters,
+# so it rejects the input rather than show the user something other than what
+# runs. Without this, every branch switch silently re-breaks the workflows.
+.claude/workflows/*.js text eol=lf
+
+# Written by hf_draw.py and consumed by it again; keep them byte-identical
+# across platforms so regenerating a drawing set produces no spurious diff.
+*.svg text eol=lf
+*.py text eol=lf
+
+# Never let line-ending conversion near binary content.
+*.png binary
+*.pdf binary
+*.uasset binary
+*.umap binary

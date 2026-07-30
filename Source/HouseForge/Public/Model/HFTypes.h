@@ -647,6 +647,19 @@ struct HOUSEFORGE_API FHFHouseSpec
 	double TotalFloorArea() const;
 };
 
+/**
+ * Even-odd point-in-polygon, for any closed boundary in this model.
+ *
+ * A room is not the only thing in a spec with a polygon: a bulkhead carries its own, and asking
+ * whether a beam runs under one is the same question as asking whether a fixture stands in a room.
+ * FHFRoom::ContainsPoint is this function applied to FHFRoom::Boundary.
+ *
+ * The closing edge is implicit, as everywhere else here - do not repeat the first point. Even-odd
+ * rather than a convex test because half these layouts are L-shaped, and a convex-only test places
+ * points inside re-entrant corners that are plainly outside the room.
+ */
+HOUSEFORGE_API bool HFPolygonContainsPoint(const TArray<FVector2D>& Polygon, const FVector2D& Point);
+
 /** Unit conversion. The single place a drawing's units become Unreal centimetres. */
 class HOUSEFORGE_API FHFUnits
 {

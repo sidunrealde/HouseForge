@@ -29,6 +29,10 @@ public class HouseForgeEditor : ModuleRules
 				"Projects",
 				"InputCore",
 
+				// UDeveloperSettings::OnSettingChanged, which is how an edit on the HouseForge
+				// settings page reaches the elements already built in the open level.
+				"DeveloperSettings",
+
 				// Panel UI.
 				"Slate",
 				"SlateCore",

@@ -20,11 +20,11 @@ double FHFRoom::SignedArea() const
 	return Twice * 0.5;
 }
 
-bool FHFRoom::ContainsPoint(const FVector2D& Point) const
+bool HFPolygonContainsPoint(const TArray<FVector2D>& Polygon, const FVector2D& Point)
 {
 	// Even-odd ray cast along +X. Handles the concave L-shaped rooms these layouts are full of;
 	// a convex-only test would wrongly place fixtures inside re-entrant corners.
-	const int32 Count = Boundary.Num();
+	const int32 Count = Polygon.Num();
 	if (Count < 3)
 	{
 		return false;
@@ -33,8 +33,8 @@ bool FHFRoom::ContainsPoint(const FVector2D& Point) const
 	bool bInside = false;
 	for (int32 i = 0, j = Count - 1; i < Count; j = i++)
 	{
-		const FVector2D& A = Boundary[i];
-		const FVector2D& B = Boundary[j];
+		const FVector2D& A = Polygon[i];
+		const FVector2D& B = Polygon[j];
 
 		const bool bStraddles = (A.Y > Point.Y) != (B.Y > Point.Y);
 		if (!bStraddles)
@@ -56,6 +56,11 @@ bool FHFRoom::ContainsPoint(const FVector2D& Point) const
 	}
 
 	return bInside;
+}
+
+bool FHFRoom::ContainsPoint(const FVector2D& Point) const
+{
+	return HFPolygonContainsPoint(Boundary, Point);
 }
 
 const FHFWall* FHFHouseSpec::FindWall(const FName& WallId) const

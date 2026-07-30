@@ -1,21 +1,25 @@
-// Copyright Siddartha G. All Rights Reserved.
+﻿// Copyright Siddartha G. All Rights Reserved.
 
 #include "Geometry/HFGenerators.h"
 
+#include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFMeshOps.h"
+#include "Geometry/HFSlidingSetOut.h"
+#include "HouseForge.h"
 
 using namespace UE::Geometry;
 
 namespace
 {
+	// Everything an artist can override now arrives in an FHFOpeningBuildParams. What is left here is
+	// the generator's own business: numerical margins that exist to keep the boolean and the mesh
+	// well-formed, and which mean nothing outside this file.
+
 	/** How far an opening cutter overshoots the wall faces, in centimetres. */
 	constexpr double CutterOvershoot = 5.0;
 
-	/** Door leaf and window frame thicknesses. */
-	constexpr double DoorLeafThickness = 4.0;
-	constexpr double WindowFrameDepth = 6.0;
-	constexpr double WindowFrameWidth = 5.0;
-	constexpr double GlassThickness = 0.8;
+	/** Below this a member has no useful volume and is skipped rather than emitted degenerate. */
+	constexpr double MinMemberSize = 1.0;
 
 	struct FWallFrame
 	{
@@ -110,7 +114,18 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 	}
 
 	// The slab sits below the finished floor level, so FloorZ stays the walkable surface.
-	FHFMeshOps::AppendPrism(Mesh, Room.Boundary, Room.FloorZ - SlabThickness, Room.FloorZ, Room.FloorRole);
+	//
+	// Checked, not dropped. A boundary the triangulator refuses - a bow-tie, which is an everyday
+	// mis-read of a plan and which the validator does now reject - would otherwise leave a room
+	// whose floor has no triangles at all while its skirting, emitted per edge below, generates
+	// perfectly. The room outline still reads correctly from above and the missing floor looks like
+	// an unfinished one.
+	if (!FHFMeshOps::AppendPrism(Mesh, Room.Boundary, Room.FloorZ - SlabThickness, Room.FloorZ, Room.FloorRole))
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Room '%s' has no floor slab: its boundary could not be triangulated."), *Room.Id.ToString());
+		return Mesh;
+	}
 
 	if (Room.SkirtingHeight > 0.0)
 	{
@@ -189,7 +204,11 @@ FDynamicMesh3 FHFGenerators::GenerateCeilingSlab(const FHFRoom& Room, double Sla
 
 	// The visible underside sits at the room's ceiling height; the slab thickens upward from there.
 	const double SoffitZ = Room.FloorZ + Room.CeilingHeight;
-	FHFMeshOps::AppendPrism(Mesh, Room.Boundary, SoffitZ, SoffitZ + SlabThickness, EHFSurfaceRole::CeilingSoffit);
+	if (!FHFMeshOps::AppendPrism(Mesh, Room.Boundary, SoffitZ, SoffitZ + SlabThickness, EHFSurfaceRole::CeilingSoffit))
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Room '%s' has no ceiling slab: its boundary could not be triangulated."), *Room.Id.ToString());
+	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
 	return Mesh;
@@ -243,6 +262,16 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 		}
 	}
 
+	// Every piece of a false ceiling is a triangulation that can decline, and a ceiling missing one
+	// of its pieces is still an actor with a plausible element count and a correct outline from
+	// above. Counted rather than dropped, and reported once at the end.
+	int32 Refused = 0;
+	auto Checked = [&Refused](bool bBuilt)
+	{
+		Refused += bBuilt ? 0 : 1;
+		return bBuilt;
+	};
+
 	/**
 	 * Builds a band between an outer loop and its inset.
 	 *
@@ -275,33 +304,33 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 	{
 		// A flat panel across the whole outline, plus a fascia dropping from the structure to it
 		// so the edge reads as a boxed soffit rather than a floating sheet.
-		FHFMeshOps::AppendPrismWithHoles(Mesh, Outline, FanHoles, SoffitZ, SoffitZ + PanelThickness,
-			EHFSurfaceRole::CeilingSoffit);
+		Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Outline, FanHoles, SoffitZ, SoffitZ + PanelThickness,
+			EHFSurfaceRole::CeilingSoffit));
 
 		if (Ceiling.Style == EHFCeilingStyle::Bulkhead)
 		{
 			// Hollow, so only the perimeter face remains - a bulkhead is a box, not a plug.
-			AppendBand(Outline, PanelThickness, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+			Checked(AppendBand(Outline, PanelThickness, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 		}
 		break;
 	}
 
 	case EHFCeilingStyle::Peripheral:
 	{
-		AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+		Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 		break;
 	}
 
 	case EHFCeilingStyle::Tray:
 	{
 		// Outer band at the full drop, inner region stepped back up to half of it.
-		AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+		Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 
 		const double InnerSoffitZ = StructuralZ - Ceiling.Drop * 0.5;
 		for (const TArray<FVector2D>& Loop : FHFMeshOps::InsetPolygon(Outline, Ceiling.BandWidth))
 		{
-			FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, InnerSoffitZ,
-				InnerSoffitZ + PanelThickness, EHFSurfaceRole::CeilingSoffit);
+			Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, InnerSoffitZ,
+				InnerSoffitZ + PanelThickness, EHFSurfaceRole::CeilingSoffit));
 		}
 		break;
 	}
@@ -316,7 +345,7 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 
 		const double BandInner = FMath::Max(Ceiling.BandWidth - ChannelWidth - Setback, 1.0);
 
-		AppendBand(Outline, BandInner, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit);
+		Checked(AppendBand(Outline, BandInner, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 
 		// The channel floor sits above the band soffit, behind the lip.
 		for (const TArray<FVector2D>& Lip : FHFMeshOps::InsetPolygon(Outline, BandInner))
@@ -324,12 +353,12 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 			const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(Lip, ChannelWidth);
 			if (Inner.IsEmpty())
 			{
-				FHFMeshOps::AppendPrism(Mesh, Lip, SoffitZ + LipHeight, StructuralZ, EHFSurfaceRole::CoveInterior);
+				Checked(FHFMeshOps::AppendPrism(Mesh, Lip, SoffitZ + LipHeight, StructuralZ, EHFSurfaceRole::CoveInterior));
 			}
 			else
 			{
-				FHFMeshOps::AppendPrismWithHoles(Mesh, Lip, Inner, SoffitZ + LipHeight, StructuralZ,
-					EHFSurfaceRole::CoveInterior);
+				Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Lip, Inner, SoffitZ + LipHeight, StructuralZ,
+					EHFSurfaceRole::CoveInterior));
 			}
 		}
 		break;
@@ -337,6 +366,13 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 
 	default:
 		break;
+	}
+
+	if (Refused > 0)
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("False ceiling '%s' is missing %d of its pieces: their outlines could not be triangulated."),
+			*Ceiling.Id.ToString(), Refused);
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
@@ -385,7 +421,442 @@ FDynamicMesh3 FHFGenerators::GenerateColumn(const FHFColumn& Column)
 	return Mesh;
 }
 
-FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, const FHFWall& Wall)
+FDynamicMesh3 FHFGenerators::GenerateDoorLeaf(const FHFOpening& Opening, double SwingSign,
+	const FHFDoorParams& InParams)
+{
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	if (Opening.Width <= 0.0 || Opening.Height <= 0.0)
+	{
+		return Mesh;
+	}
+
+	// Reconciled against this opening before anything is measured from them, because a gap wider
+	// than the opening does not thin the leaf, it deletes it.
+	const FHFDoorParams Params = InParams.Sanitised(Opening.Width, Opening.Height);
+
+	// Leaf-local space: the pivot is the origin, the leaf runs along +X to the far jamb, its
+	// thickness sits on Y and its height on Z from the sill. Generating it here rather than in
+	// place is what lets the actor swing it without the generator knowing anything about the
+	// house - see .claude/rules/04-conventions.md.
+	//
+	// The leaf hangs on the face it swings towards rather than on the wall centreline. A leaf
+	// centred in the reveal pivots its own back edge into the masonry beside the jamb - half the
+	// leaf thickness at the limit, which a walkthrough camera on the hinge side sees as the door
+	// vanishing into the wall. Hanging it on the swing face sweeps that edge out into the room,
+	// which is where a real butt hinge puts it.
+	const double LeafY = -FMath::Sign(SwingSign) * Params.LeafThickness * 0.5;
+
+	// The inset all round is the gap a real leaf leaves in its frame; without it the leaf shares
+	// faces with the reveal and the two z-fight.
+	const double Gap = Params.LeafFrameGap;
+
+	FHFMeshOps::AppendBox(Mesh,
+		FVector3d(Opening.Width * 0.5, LeafY, Opening.Height * 0.5),
+		FVector3d(Opening.Width * 0.5 - Gap, Params.LeafThickness * 0.5, Opening.Height * 0.5 - Gap),
+		0.0, EHFSurfaceRole::DoorLeaf);
+
+	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+	return Mesh;
+}
+
+namespace
+{
+	/**
+	 * One panel of a sliding unit, in the unit's local space.
+	 *
+	 * X is measured from the near jamb, Y is the track the panel runs in. Panels are generated
+	 * where they sit rather than each about its own origin, so both share the unit's pivot and the
+	 * only difference between them is that one of them moves.
+	 */
+	FDynamicMesh3 MakeSlidingPanel(double XMin, double XMax, double TrackY, double Height,
+		const FHFDoorParams& Params)
+	{
+		FDynamicMesh3 Mesh;
+		FHFMeshOps::InitialiseMesh(Mesh);
+
+		if (XMax - XMin <= MinMemberSize || Height <= MinMemberSize)
+		{
+			return Mesh;
+		}
+
+		FHFMeshOps::AppendBox(Mesh,
+			FVector3d((XMin + XMax) * 0.5, TrackY, Height * 0.5),
+			FVector3d((XMax - XMin) * 0.5, Params.LeafThickness * 0.5, Height * 0.5 - Params.LeafFrameGap),
+			0.0, EHFSurfaceRole::DoorLeaf);
+
+		FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+		return Mesh;
+	}
+
+	/**
+	 * One sash of a sliding window, in the unit's local space.
+	 *
+	 * X is measured from the near jamb, Y is the track the sash rides in and Z runs up from the
+	 * sill. Like the sliding door's panels, both sashes are generated where they sit rather than
+	 * each about its own origin, so they share the unit's pivot and the only difference between
+	 * them is that one of them moves.
+	 *
+	 * Built as a picture frame - two stiles full height with the rails let in between them - so no
+	 * two members share a volume and the sash measures exactly its section times its perimeter. The
+	 * pane then engages into the glazing groove of all four, which is where a real one sits and why
+	 * it is a solid rather than a plane.
+	 */
+	FDynamicMesh3 MakeSlidingSash(double XMin, double XMax, double TrackY, double ZMin, double ZMax,
+		bool bWithHandle, const FHFSlidingWindowParams& Params)
+	{
+		FDynamicMesh3 Mesh;
+		FHFMeshOps::InitialiseMesh(Mesh);
+
+		const double Face = Params.SashFaceWidth;
+		const double Width = XMax - XMin;
+		const double Height = ZMax - ZMin;
+		if (Width <= Face * 2.0 || Height <= Face * 2.0)
+		{
+			return Mesh;
+		}
+
+		auto AppendMember = [&Mesh, TrackY, &Params](double MemberXMin, double MemberXMax,
+			double MemberZMin, double MemberZMax)
+		{
+			FHFMeshOps::AppendBox(Mesh,
+				FVector3d((MemberXMin + MemberXMax) * 0.5, TrackY, (MemberZMin + MemberZMax) * 0.5),
+				FVector3d((MemberXMax - MemberXMin) * 0.5, Params.SashDepth * 0.5,
+					(MemberZMax - MemberZMin) * 0.5),
+				0.0, EHFSurfaceRole::WindowFrame);
+		};
+
+		AppendMember(XMin, XMin + Face, ZMin, ZMax);            // stile
+		AppendMember(XMax - Face, XMax, ZMin, ZMax);            // stile
+
+		// The bottom rail is deeper than the track upstand it comes to rest over, and the two
+		// interpenetrate. A real bottom rail is hollow and the upstand runs up inside it, so that is
+		// the section rather than a clash - and it is hidden inside the rail either way.
+		AppendMember(XMin + Face, XMax - Face, ZMin, ZMin + Face);
+		AppendMember(XMin + Face, XMax - Face, ZMax - Face, ZMax);
+
+		// The pane, engaged into the glazing groove of all four members.
+		const double GlassInset = Face - Params.GlassRebate;
+		FHFMeshOps::AppendBox(Mesh,
+			FVector3d((XMin + XMax) * 0.5, TrackY, (ZMin + ZMax) * 0.5),
+			FVector3d(Width * 0.5 - GlassInset, Params.GlassThickness * 0.5, Height * 0.5 - GlassInset),
+			0.0, EHFSurfaceRole::Glass);
+
+		if (bWithHandle)
+		{
+			// On the meeting stile, projecting away from the other sash's track - which is the face
+			// a hand can reach and the side the catch is fitted on.
+			const double Side = TrackY >= 0.0 ? 1.0 : -1.0;
+
+			FHFMeshOps::AppendBox(Mesh,
+				FVector3d(XMax - Face * 0.5,
+					TrackY + Side * (Params.SashDepth + Params.HandleProjection) * 0.5,
+					(ZMin + ZMax) * 0.5),
+				FVector3d(Params.HandleWidth * 0.5, Params.HandleProjection * 0.5, Params.HandleHeight * 0.5),
+				0.0, EHFSurfaceRole::MetalHardware);
+		}
+
+		FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+		return Mesh;
+	}
+
+	/**
+	 * A top-hung ventilator sash, in the part's own local space.
+	 *
+	 * The origin is on the hinge line at the near jamb: +X runs along the hinge, the sash hangs down
+	 * in -Z and its thickness lies on Y.
+	 *
+	 * The body hangs on the side AWAY from the direction it opens, for the same reason a door leaf
+	 * hangs on its swing face rather than on the wall centreline. Rotating about the hinge, the
+	 * corner nearest the axis sweeps a quarter circle of the sash's own thickness; put the body on
+	 * the opening side and that corner sweeps UP into the head masonry, and the sash disappears into
+	 * the lintel as it opens. Hung this way it sweeps down into the opening instead, and no point of
+	 * the sash ever rises above the hinge line.
+	 *
+	 * @param OpenSign  +1 to open along the wall normal, -1 to open against it.
+	 */
+	FDynamicMesh3 MakeVentilatorSash(double Width, double Height, double OpenSign,
+		const FHFVentilatorParams& Params)
+	{
+		FDynamicMesh3 Mesh;
+		FHFMeshOps::InitialiseMesh(Mesh);
+
+		const double F = Params.SashFaceWidth;
+		if (Width <= F * 2.0 || Height <= F * 2.0)
+		{
+			return Mesh;
+		}
+
+		const double Side = OpenSign >= 0.0 ? 1.0 : -1.0;
+		const double SashY = -Side * Params.SashThickness * 0.5;
+
+		auto AppendMember = [&Mesh, SashY, &Params](double MemberXMin, double MemberXMax,
+			double MemberZMin, double MemberZMax)
+		{
+			FHFMeshOps::AppendBox(Mesh,
+				FVector3d((MemberXMin + MemberXMax) * 0.5, SashY, (MemberZMin + MemberZMax) * 0.5),
+				FVector3d((MemberXMax - MemberXMin) * 0.5, Params.SashThickness * 0.5,
+					(MemberZMax - MemberZMin) * 0.5),
+				0.0, EHFSurfaceRole::WindowFrame);
+		};
+
+		AppendMember(0.0, F, -Height, 0.0);              // stile
+		AppendMember(Width - F, Width, -Height, 0.0);    // stile
+		AppendMember(F, Width - F, -Height, -Height + F);// bottom rail
+		AppendMember(F, Width - F, -F, 0.0);             // top rail
+
+		const double GlassInset = F - Params.GlassRebate;
+		FHFMeshOps::AppendBox(Mesh,
+			FVector3d(Width * 0.5, SashY, -Height * 0.5),
+			FVector3d(Width * 0.5 - GlassInset, Params.GlassThickness * 0.5, Height * 0.5 - GlassInset),
+			0.0, EHFSurfaceRole::Glass);
+
+		// The pull, on the face somebody stands in front of - which is the face it opens towards.
+		FHFMeshOps::AppendBox(Mesh,
+			FVector3d(Width * 0.5, Side * Params.PullProjection * 0.5, -Height + F * 0.5),
+			FVector3d(Params.PullWidth * 0.5, Params.PullProjection * 0.5, Params.PullHeight * 0.5),
+			0.0, EHFSurfaceRole::MetalHardware);
+
+		FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+		return Mesh;
+	}
+
+	/**
+	 * Two sashes on two tracks: one fixed, one running.
+	 *
+	 * The same shape of answer the sliding DOOR arrived at the hard way, and for the same reason. A
+	 * single sash the width of the opening has nowhere to go - sliding it its own width buries it in
+	 * the masonry beside the jamb - so each sash takes half the clear opening, and the running one
+	 * travels until its far edge meets the fixed one's. That keeps every sash wholly inside the
+	 * reveal at every open amount, and it is also what a sliding window is.
+	 */
+	void BuildSlidingWindowSashes(const FHFOpening& Opening, const FTransform& UnitPivot,
+		TArray<FHFMeshPart>& OutParts, const FHFSlidingWindowParams& Params)
+	{
+		// The clear opening between the outer frame's members - what the sashes actually fill.
+		const double ClearWidth = Params.ClearWidth(Opening.Width);
+		const double Near = Params.FrameFace;
+		const double ZMin = Params.FrameFace;
+		const double ZMax = Opening.Height - Params.FrameFace;
+
+		const double Half = ClearWidth * 0.5;
+		const double HalfOverlap = Params.InterlockOverlap * 0.5;
+		const double TrackY = Params.TrackPitch * 0.5;
+
+		FHFMeshPart Fixed;
+		Fixed.PartId = TEXT("SashFixed");
+		Fixed.Mesh = MakeSlidingSash(Near + Half - HalfOverlap, Near + ClearWidth, -TrackY, ZMin, ZMax,
+			/*bWithHandle*/ false, Params);
+		Fixed.PivotTransform = UnitPivot;
+		OutParts.Add(MoveTemp(Fixed));
+
+		FHFMeshPart Sash;
+		Sash.PartId = TEXT("Sash");
+		Sash.Mesh = MakeSlidingSash(Near, Near + Half + HalfOverlap, TrackY, ZMin, ZMax,
+			/*bWithHandle*/ true, Params);
+		Sash.PivotTransform = UnitPivot;
+		Sash.Motion.Type = EHFMotionType::Slide;
+		Sash.Motion.Axis = FVector::XAxisVector;
+
+		// Far edge to far edge: the running sash comes to rest exactly over its fixed partner, so it
+		// is still wholly inside the reveal at full travel.
+		Sash.Motion.MaxTravelCm = FMath::Max(0.0, Half - HalfOverlap);
+		OutParts.Add(MoveTemp(Sash));
+	}
+
+	/** One top-hung sash, hinged along the head of the clear opening. */
+	void BuildVentilatorSash(const FHFOpening& Opening, const FTransform& UnitPivot,
+		TArray<FHFMeshPart>& OutParts, const FHFVentilatorParams& Params)
+	{
+		const double ClearWidth = Opening.Width - Params.FrameFace * 2.0;
+		const double ClearHeight = Opening.Height - Params.FrameFace * 2.0;
+
+		// Which way it opens. A ventilator carries no swing arc on a plan, so the wall normal is the
+		// default and an explicitly outward swing turns it around.
+		const double OpenSign =
+			(Opening.Swing == EHFSwing::OutwardLeft || Opening.Swing == EHFSwing::OutwardRight) ? -1.0 : 1.0;
+
+		FHFMeshPart Sash;
+		Sash.PartId = TEXT("Sash");
+		Sash.Mesh = MakeVentilatorSash(ClearWidth, ClearHeight, OpenSign, Params);
+
+		// The hinge line: along the head of the clear opening, starting at the near jamb.
+		Sash.PivotTransform =
+			FTransform(FVector(Params.FrameFace, 0.0, Opening.Height - Params.FrameFace)) * UnitPivot;
+
+		Sash.Motion.Type = EHFMotionType::Hinge;
+		Sash.Motion.Axis = FVector::XAxisVector;
+		Sash.Motion.MaxAngleDegrees = Params.OpenAngleDegrees * OpenSign;
+		OutParts.Add(MoveTemp(Sash));
+	}
+}
+
+void FHFGenerators::BuildOpeningParts(const FHFOpening& Opening, const FHFWall& Wall,
+	TArray<FHFMeshPart>& OutParts, const FHFOpeningBuildParams& InParams)
+{
+	const FWallFrame Frame = MakeWallFrame(Wall.Start, Wall.End);
+	if (!Frame.bValid || Opening.Width <= 0.0 || Opening.Height <= 0.0)
+	{
+		return;
+	}
+
+	// Sanitised against the same opening as GenerateOpeningFixedInfill, so the two agree about where
+	// the frame ends and whether this unit has sashes at all. They ask HasSashes separately, and a
+	// disagreement would leave a framed hole with no glass in it.
+	const FHFOpeningBuildParams Params = InParams.Sanitised(Opening.Width, Opening.Height);
+
+	const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
+	const bool bHasSash =
+		Opening.Kind == EHFOpeningKind::SlidingWindow || Opening.Kind == EHFOpeningKind::Ventilator;
+
+	// A fixed window and an archway have nothing that moves, and saying so is the whole answer -
+	// the rule is that anything which moves must be able to move, not that everything must move.
+	if (!bIsDoor && !bHasSash)
+	{
+		return;
+	}
+
+	const FVector2D Centre = Wall.Start + Frame.Direction * Opening.OffsetAlongWall;
+	const double SillZ = Wall.BaseZ + Opening.SillHeight;
+	const double HalfWidth = Opening.Width * 0.5;
+
+	if (bHasSash)
+	{
+		// Sashes all measure from the near jamb along the wall, so they share one frame: local +X
+		// runs to the far jamb, +Y is the wall normal and +Z runs up from the sill.
+		const FVector2D NearJamb = Centre - Frame.Direction * HalfWidth;
+		const FTransform UnitPivot(FRotator(0.0, Frame.YawDegrees, 0.0),
+			FVector(NearJamb.X, NearJamb.Y, SillZ));
+
+		if (Opening.Kind == EHFOpeningKind::SlidingWindow)
+		{
+			if (Params.SlidingWindow.HasSashes(Opening.Width, Opening.Height))
+			{
+				BuildSlidingWindowSashes(Opening, UnitPivot, OutParts, Params.SlidingWindow);
+			}
+			else
+			{
+				// Too small to divide, so it is honestly fixed glazing rather than a unit with sashes
+				// too narrow to be anything. GenerateOpeningFixedInfill asks the same question and
+				// glazes it, so the pair cannot disagree and leave a framed hole.
+				UE_LOG(LogHouseForge, Warning,
+					TEXT("Sliding window '%s' is %.0f x %.0f cm, too small to divide into two sashes; it is built as fixed glazing."),
+					*Opening.Id.ToString(), Opening.Width, Opening.Height);
+			}
+			return;
+		}
+
+		if (Params.Ventilator.HasSash(Opening.Width, Opening.Height))
+		{
+			BuildVentilatorSash(Opening, UnitPivot, OutParts, Params.Ventilator);
+		}
+		else
+		{
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("Ventilator '%s' is %.0f x %.0f cm, too small to carry an opening sash; it is built as fixed glazing."),
+				*Opening.Id.ToString(), Opening.Width, Opening.Height);
+		}
+		return;
+	}
+
+	// Which jamb the leaf hangs on, matching the swing arc the plan preview draws. A door hung on
+	// the wrong jamb is invisible in elevation and wrong in every walkthrough.
+	const bool bHingeAtNear =
+		Opening.Swing == EHFSwing::InwardLeft ||
+		Opening.Swing == EHFSwing::OutwardLeft ||
+		Opening.Swing == EHFSwing::None;
+
+	const FVector2D HingePlan = bHingeAtNear
+		? Centre - Frame.Direction * HalfWidth
+		: Centre + Frame.Direction * HalfWidth;
+
+	// Local +X points from the pivot towards the other jamb, so the leaf mesh is the same whichever
+	// jamb it hangs on and only the pivot rotation differs.
+	const FVector2D LeafDirection = bHingeAtNear ? Frame.Direction : -Frame.Direction;
+	const double LeafYaw = FMath::RadiansToDegrees(FMath::Atan2(LeafDirection.Y, LeafDirection.X));
+
+	const FTransform Pivot(FRotator(0.0, LeafYaw, 0.0), FVector(HingePlan.X, HingePlan.Y, SillZ));
+
+	if (Opening.Kind == EHFOpeningKind::SlidingDoor)
+	{
+		// A sliding unit is two panels on two tracks, not one leaf that slides into the wall.
+		//
+		// One leaf the full width of the opening has nowhere to go: sliding it its own width buries
+		// it in the masonry beside the jamb, or drives it through the next window along, which is
+		// what the 1800 balcony units in the reference flat did. Half the opening each, and the
+		// moving panel travelling until its far edge meets the fixed panel's, keeps every panel
+		// inside the reveal at every open amount - and is what a sliding unit actually is.
+		const FHFDoorParams& Door = Params.Door;
+
+		const double TrackY = (Door.LeafThickness + Door.SlidingTrackGap) * 0.5;
+
+		// The set-out rule itself lives in FHFSlidingSetOut, because a sliding wardrobe shutter is
+		// the same problem and must not grow a second copy of the answer.
+		const FHFSlidingSetOut Running =
+			FHFSlidingSetOut::Leaf(Opening.Width * 0.5, Door.SlidingPanelOverlap, Door.LeafFrameGap);
+		const FHFSlidingSetOut Standing = Running.MirroredIn(Opening.Width);
+
+		FHFMeshPart Fixed;
+		Fixed.PartId = TEXT("PanelFixed");
+		Fixed.Mesh = MakeSlidingPanel(Standing.NearEdge, Standing.FarEdge, -TrackY, Opening.Height, Door);
+		Fixed.PivotTransform = Pivot;
+		OutParts.Add(MoveTemp(Fixed));
+
+		FHFMeshPart Slider;
+		Slider.PartId = TEXT("Leaf");
+		Slider.Mesh = MakeSlidingPanel(Running.NearEdge, Running.FarEdge, TrackY, Opening.Height, Door);
+		Slider.PivotTransform = Pivot;
+		Slider.Motion.Type = EHFMotionType::Slide;
+		Slider.Motion.Axis = FVector::XAxisVector;
+
+		// Far edge to far edge: the panel comes to rest exactly over its fixed partner, so it is
+		// still wholly inside the opening at full travel.
+		Slider.Motion.MaxTravelCm = Running.Travel;
+		OutParts.Add(MoveTemp(Slider));
+		return;
+	}
+
+	// Local +Y is up-cross-leaf-direction, which is the wall normal when the leaf hangs on the
+	// near jamb and its opposite when it hangs on the far one. Inward swings follow the wall
+	// normal, outward swings oppose it, so the sign flips with both choices.
+	const double InwardSign =
+		(Opening.Swing == EHFSwing::OutwardLeft || Opening.Swing == EHFSwing::OutwardRight) ? -1.0 : 1.0;
+	const double HingeSign = bHingeAtNear ? InwardSign : -InwardSign;
+
+	FHFMeshPart Part;
+	Part.PartId = TEXT("Leaf");
+	Part.Mesh = GenerateDoorLeaf(Opening, HingeSign, Params.Door);
+	Part.PivotTransform = Pivot;
+	Part.Motion.Type = EHFMotionType::Hinge;
+	Part.Motion.Axis = FVector::ZAxisVector;
+	Part.Motion.MaxAngleDegrees = 90.0 * HingeSign;
+
+	OutParts.Add(MoveTemp(Part));
+}
+
+FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, const FHFWall& Wall,
+	const FHFOpeningBuildParams& Params)
+{
+	FDynamicMesh3 Mesh = GenerateOpeningFixedInfill(Opening, Wall, Params);
+
+	// Every moving part in its closed pose. Composing the snapshot from the same parts the actor
+	// hangs is what guarantees a closed door looks identical to the one-piece infill it replaced.
+	TArray<FHFMeshPart> Parts;
+	BuildOpeningParts(Opening, Wall, Parts, Params);
+
+	for (const FHFMeshPart& Part : Parts)
+	{
+		FDynamicMesh3 Posed = Part.Mesh;
+		MeshTransforms::ApplyTransform(Posed, FTransformSRT3d(Part.PivotTransform), /*bReverseOrientationIfNeeded*/ true);
+		FHFMeshOps::AppendPreservingRoles(Mesh, Posed);
+	}
+
+	return Mesh;
+}
+
+FDynamicMesh3 FHFGenerators::GenerateOpeningFixedInfill(const FHFOpening& Opening, const FHFWall& Wall,
+	const FHFOpeningBuildParams& InParams)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -396,8 +867,14 @@ FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, co
 		return Mesh;
 	}
 
-	// An archway is a hole and nothing else.
-	if (Opening.Kind == EHFOpeningKind::Archway)
+	// The same reconciliation BuildOpeningParts does, on the same opening, so the pair cannot
+	// disagree about the frame face or about whether the sashes carry the glass.
+	const FHFOpeningBuildParams Params = InParams.Sanitised(Opening.Width, Opening.Height);
+
+	// An archway is a hole and nothing else, and a door's only infill is its leaf, which moves.
+	if (Opening.Kind == EHFOpeningKind::Archway ||
+		Opening.Kind == EHFOpeningKind::Door ||
+		Opening.Kind == EHFOpeningKind::SlidingDoor)
 	{
 		return Mesh;
 	}
@@ -406,47 +883,81 @@ FDynamicMesh3 FHFGenerators::GenerateOpeningInfill(const FHFOpening& Opening, co
 	const double SillZ = Wall.BaseZ + Opening.SillHeight;
 	const double CentreZ = SillZ + Opening.Height * 0.5;
 
-	const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
+	{
+		// Window: a frame around the reveal. What goes inside it depends on whether the opening has
+		// sashes of its own - a sliding window's glazing rides in them, so putting glazing here too
+		// would double it, and a closed sash in front of a fixed pane is invisible.
+		const bool bSliding = Opening.Kind == EHFOpeningKind::SlidingWindow;
+		const bool bVentilator = Opening.Kind == EHFOpeningKind::Ventilator;
 
-	if (bIsDoor)
-	{
-		// The leaf, sitting in the plane of the wall. It is drawn closed: an open leaf would be
-		// modelled at whatever angle, and the swing is already legible from the plan.
-		FHFMeshOps::AppendBox(Mesh,
-			FVector3d(Plan.X, Plan.Y, CentreZ),
-			FVector3d(Opening.Width * 0.5 - 0.5, DoorLeafThickness * 0.5, Opening.Height * 0.5 - 0.5),
-			Frame.YawDegrees, EHFSurfaceRole::DoorLeaf);
-	}
-	else
-	{
-		// Window: a frame around the reveal, with glazing inside it.
+		const bool bSashesCarryTheGlass =
+			(bSliding && Params.SlidingWindow.HasSashes(Opening.Width, Opening.Height)) ||
+			(bVentilator && Params.Ventilator.HasSash(Opening.Width, Opening.Height));
+
+		const double FaceWidth = bSliding
+			? Params.SlidingWindow.FrameFace
+			: (bVentilator ? Params.Ventilator.FrameFace : Params.FixedWindow.FrameFace);
+		const double FrameDepth = bSliding
+			? Params.SlidingWindow.FrameDepth
+			: (bVentilator ? Params.Ventilator.FrameDepth : Params.FixedWindow.FrameDepth);
+
 		const double HalfWidth = Opening.Width * 0.5;
 		const double HalfHeight = Opening.Height * 0.5;
 
-		auto AppendFrameMember = [&](double OffsetAlong, double OffsetUp, double HalfAlong, double HalfUp)
+		auto AppendMember = [&](double OffsetAlong, double OffsetAcross, double OffsetUp,
+			double HalfAlong, double HalfAcross, double HalfUp, EHFSurfaceRole Role)
 		{
-			const FVector2D MemberPlan = Plan + Frame.Direction * OffsetAlong;
+			const FVector2D MemberPlan = Plan + Frame.Direction * OffsetAlong + Frame.Normal * OffsetAcross;
 			FHFMeshOps::AppendBox(Mesh,
 				FVector3d(MemberPlan.X, MemberPlan.Y, CentreZ + OffsetUp),
-				FVector3d(HalfAlong, WindowFrameDepth * 0.5, HalfUp),
-				Frame.YawDegrees, EHFSurfaceRole::WindowFrame);
+				FVector3d(HalfAlong, HalfAcross, HalfUp),
+				Frame.YawDegrees, Role);
 		};
 
-		AppendFrameMember(0.0, HalfHeight - WindowFrameWidth * 0.5, HalfWidth, WindowFrameWidth * 0.5);   // head
-		AppendFrameMember(0.0, -HalfHeight + WindowFrameWidth * 0.5, HalfWidth, WindowFrameWidth * 0.5);  // sill
-		AppendFrameMember(-HalfWidth + WindowFrameWidth * 0.5, 0.0, WindowFrameWidth * 0.5, HalfHeight);  // jamb
-		AppendFrameMember(HalfWidth - WindowFrameWidth * 0.5, 0.0, WindowFrameWidth * 0.5, HalfHeight);   // jamb
-
-		// A central mullion, once the opening is wide enough to need one.
-		if (Opening.Width > 120.0)
+		auto AppendFrameMember = [&](double OffsetAlong, double OffsetUp, double HalfAlong, double HalfUp)
 		{
-			AppendFrameMember(0.0, 0.0, WindowFrameWidth * 0.5, HalfHeight - WindowFrameWidth);
+			AppendMember(OffsetAlong, 0.0, OffsetUp, HalfAlong, FrameDepth * 0.5, HalfUp,
+				EHFSurfaceRole::WindowFrame);
+		};
+
+		AppendFrameMember(0.0, HalfHeight - FaceWidth * 0.5, HalfWidth, FaceWidth * 0.5);   // head
+		AppendFrameMember(0.0, -HalfHeight + FaceWidth * 0.5, HalfWidth, FaceWidth * 0.5);  // sill
+		AppendFrameMember(-HalfWidth + FaceWidth * 0.5, 0.0, FaceWidth * 0.5, HalfHeight);  // jamb
+		AppendFrameMember(HalfWidth - FaceWidth * 0.5, 0.0, FaceWidth * 0.5, HalfHeight);   // jamb
+
+		if (bSliding && bSashesCarryTheGlass)
+		{
+			// The two tracks, standing proud of the sill member. They are what makes a sliding
+			// window read as one at rest, and they are fixed - only the sash on them moves.
+			const FHFSlidingWindowParams& Sliding = Params.SlidingWindow;
+
+			for (const double Side : { -1.0, 1.0 })
+			{
+				AppendMember(0.0, Side * Sliding.TrackPitch * 0.5,
+					-HalfHeight + FaceWidth + Sliding.TrackUpstand * 0.5,
+					HalfWidth - FaceWidth, Sliding.TrackWidth * 0.5, Sliding.TrackUpstand * 0.5,
+					EHFSurfaceRole::MetalHardware);
+			}
 		}
 
-		FHFMeshOps::AppendBox(Mesh,
-			FVector3d(Plan.X, Plan.Y, CentreZ),
-			FVector3d(HalfWidth - WindowFrameWidth, GlassThickness * 0.5, HalfHeight - WindowFrameWidth),
-			Frame.YawDegrees, EHFSurfaceRole::Glass);
+		if (!bSashesCarryTheGlass)
+		{
+			// A central mullion, once the opening is wide enough to need one. A sliding unit never
+			// gets one: its meeting stiles ARE the mullion, and a second one down the middle would
+			// sit in the running sash's way.
+			if (Opening.Width > Params.FixedWindow.MullionAboveWidth && !bSliding)
+			{
+				AppendFrameMember(0.0, 0.0, FaceWidth * 0.5, HalfHeight - FaceWidth);
+			}
+
+			// The pane. Deliberately the fixed window's thickness even when a sliding or ventilator
+			// opening reaches here, which it only does when it was too small for sashes: what is being
+			// built at that point IS a fixed window, and glazing it as one is what the code did before
+			// any of this was overridable. Changing it to each section's own pane would be a real
+			// change of output, and this refactor is meant to be a no-op.
+			AppendMember(0.0, 0.0, 0.0, HalfWidth - FaceWidth, Params.FixedWindow.GlassThickness * 0.5,
+				HalfHeight - FaceWidth, EHFSurfaceRole::Glass);
+		}
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);

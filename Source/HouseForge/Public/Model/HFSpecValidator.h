@@ -66,6 +66,82 @@ struct HOUSEFORGE_API FHFValidationResult
 };
 
 /**
+ * The thresholds the validator judges a spec against.
+ *
+ * Separated out because these are project conventions rather than laws of geometry: a developer
+ * building to a 2.7 m slab-to-slab wants a different headroom floor from one building to 3.0, and
+ * neither is wrong. Everything the validator checks that is genuinely structural - an opening wider
+ * than its wall, a boundary that crosses itself - stays hardcoded, because those are not opinions.
+ *
+ * Plain and copyable, and passed in as a DEFAULTED argument whose defaults are exactly the figures
+ * that were compiled in. A test that wants a specific threshold builds one of these by hand and no
+ * settings object need exist.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFValidationLimits
+{
+	GENERATED_BODY()
+
+	/**
+	 * Minimum clear height under a beam or a false ceiling, in centimetres.
+	 *
+	 * Below this a room is oppressive to stand in rather than unbuildable, which is why breaching it
+	 * is a warning and not an error. 210 matches a door head, so a ceiling that clears it is a
+	 * ceiling you do not duck under.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "120.0", UIMin = "180.0", UIMax = "260.0"))
+	double MinHeadroomCm = 210.0;
+
+	/**
+	 * How much two fixtures may overlap in plan before it is called a clash, as a fraction of the
+	 * smaller footprint.
+	 *
+	 * Not zero, because fixtures in a real drawing touch: a hob sits in a counter and a wardrobe
+	 * stands against a bed. This is the band where a shared edge read off a plan is treated as
+	 * contact rather than as two things in the same place.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.25"))
+	double FixtureOverlapToleranceRatio = 0.05;
+
+	/**
+	 * How far a fixture may reach across an opening before it is called an obstruction, in centimetres.
+	 *
+	 * Measured in both directions at once: joinery drawn hard against a jamb or a head shares an edge
+	 * with the opening and is normal construction, so a bite has to have real extent along the wall
+	 * AND up it before anything is said. 5 cm is about a shutter's thickness - below that it is a
+	 * shared line read off a plan rather than a wardrobe in front of a window.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "30.0"))
+	double MinOpeningObstructionCm = 5.0;
+
+	/**
+	 * How far in front of a doorway counts as standing in it, in centimetres.
+	 *
+	 * A window can have a dining table in front of it and be perfectly usable; a door cannot. What
+	 * blocks a door is rarely IN the opening - it is the refrigerator 19 cm in front of it - so a
+	 * doorway is judged on the floor either side of it rather than on the plane of the wall. 75 cm
+	 * is about the depth of a person turning through a door, which is what the strip is for.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "0.0", UIMin = "30.0", UIMax = "150.0"))
+	double DoorApproachDepthCm = 75.0;
+
+	/**
+	 * The narrowest gap a person will actually walk through, in centimetres.
+	 *
+	 * The test on a doorway is not whether anything overlaps it - joinery clips the corner of a wide
+	 * sliding door all the time and nobody notices - but how much unbroken width is left. 60 cm is
+	 * the usual figure for a passage; below it the door is decoration.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "30.0", UIMin = "45.0", UIMax = "90.0"))
+	double MinClearPassageCm = 60.0;
+};
+
+/**
  * Checks a spec before anything is built from it.
  *
  * Runs every rule rather than stopping at the first failure: a misread drawing usually has
@@ -74,5 +150,10 @@ struct HOUSEFORGE_API FHFValidationResult
 class HOUSEFORGE_API FHFSpecValidator
 {
 public:
-	static FHFValidationResult Validate(const FHFHouseSpec& Spec);
+	/**
+	 * @param Limits The project's thresholds. Defaulted, so every existing caller and test is
+	 *               unaffected and gets the figures that were compiled in.
+	 */
+	static FHFValidationResult Validate(const FHFHouseSpec& Spec,
+		const FHFValidationLimits& Limits = FHFValidationLimits());
 };
