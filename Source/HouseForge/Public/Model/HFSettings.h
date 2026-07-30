@@ -44,19 +44,30 @@
  * visible is the only one of the three that is honest, and HFSettingsTests holds the marking in
  * place so it cannot quietly come off.
  *
- * Every figure in the section now reaches the kit. Four of them used to stop short of even that -
- * ShelfThicknessPly, ShelfThicknessGlass, MaxShelfSpanPly and MaxShelfSpanGlass - because a shelf's
- * thickness and span follow its MATERIAL, resolved from a zero sentinel that ApplyTo cannot write
- * to without choosing ply or glass before the composing layer has decided which the bay is. They
- * travel separately instead, as FHFShelfMaterialFigures, handed to SanitiseShelfStack and
- * GenerateShelfStack at the point the sentinel is resolved:
+ * Every figure in the section now reaches the kit, and getting there took two rounds because two
+ * separate things stop a figure short of ApplyTo.
+ *
+ * Four were stopped by a SENTINEL. ShelfThicknessPly, ShelfThicknessGlass, MaxShelfSpanPly and
+ * MaxShelfSpanGlass follow a shelf's MATERIAL, resolved from a zero that ApplyTo cannot write to
+ * without choosing ply or glass before the composing layer has decided which the bay is. They travel
+ * separately, as FHFShelfMaterialFigures, handed over where the sentinel is resolved:
  *
  *     FHFJoineryKit::GenerateShelfStack(Bay, Defaults.ShelfFigures())
  *
+ * Two were stopped by having NOWHERE TO BE WRITTEN. TargetShelfSpacing and MinUsefulCompartment are
+ * not properties of a shelf stack at all - FHFShelfStackParams has no field for either - they are
+ * the rule for deciding how many shelves a stack gets, applied before the stack exists. They were
+ * copied into FHFJoineryDefaults and then read by nobody: the one consumer took its own compiled-in
+ * constants whenever a caller passed zero, and every caller passed zero. Both dials moved nothing.
+ * They travel as a call instead:
+ *
+ *     Defaults.ShelfCountFor(ClearHeight)
+ *
  * So the distinction that remains is a single one - the whole section waits on fixtures - rather
- * than a section that waits on fixtures plus four that would not work even then.
- * HouseForge.Settings.ShelfMaterialFiguresReachTheGeometry measures both materials from one
- * settings object, which is the assertion a stamped-on value could not pass.
+ * than a section that waits on fixtures plus some that would not work even then.
+ * HouseForge.Settings.ShelfMaterialFiguresReachTheGeometry measures both materials from one settings
+ * object, and HouseForge.Settings.ShelfLadderFiguresReachTheKit measures that changing the spacing
+ * changes a count. Both are assertions a stamped-on or ignored value could not pass.
  *
  *
  * WHERE THE VALUES LIVE, and why this specifier
@@ -243,12 +254,23 @@ public:
 
 	// ============================================================ joinery: shelving and hanging
 
-	/** Compartment height the shelf ladder aims for, in centimetres. A shoe rack wants 18. */
+	/**
+	 * Compartment height the shelf ladder aims for, in centimetres. A shoe rack wants 18.
+	 *
+	 * Reaches the kit through FHFJoineryDefaults::ShelfCountFor rather than through ApplyTo: it is
+	 * the rule for choosing a shelf count, not a property of a stack, so there is no field on
+	 * FHFShelfStackParams to stamp it onto.
+	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery - takes effect when fixtures land|Shelving",
 		meta = (ClampMin = "1.0", ClampMax = "60.0", UIMin = "15.0", UIMax = "60.0"))
 	double TargetShelfSpacing = 37.5;
 
-	/** Below this a compartment holds nothing a wardrobe is for, in centimetres. */
+	/**
+	 * Below this a compartment holds nothing a wardrobe is for, in centimetres.
+	 *
+	 * The floor under TargetShelfSpacing: raise it and the ladder drops a shelf rather than leaving
+	 * a slot too shallow to fold a shirt into. Reaches the kit by the same call.
+	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery - takes effect when fixtures land|Shelving",
 		meta = (ClampMin = "1.0", ClampMax = "60.0", UIMin = "10.0", UIMax = "60.0"))
 	double MinUsefulCompartment = 30.0;

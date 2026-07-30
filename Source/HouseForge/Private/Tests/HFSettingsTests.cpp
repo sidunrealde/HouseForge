@@ -505,10 +505,15 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// The whole page ships, not a subset of it. A control quietly dropped between milestones is
 	// exactly what this number is here to catch.
 	//
-	// 70 leaves: 4 door + 15 sliding window + 12 ventilator + 4 fixed window under Openings, 32
-	// under Joinery, and 3 validation limits. The struct properties themselves are headings in the
+	// 72 leaves: 4 door + 15 sliding window + 12 ventilator + 4 fixed window under Openings, 32
+	// under Joinery, and 5 validation limits. The struct properties themselves are headings in the
 	// details panel rather than things anybody drags, so they are recursed through, not counted.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 70);
+	//
+	// 5, not 3: DoorApproachDepthCm and MinClearPassageCm are what the DoorwayNotClear rule is
+	// judged against, and a doorway blockage is a project's own call - how far in front of a door
+	// counts as being in the way, and how narrow a gap that project will let somebody squeeze
+	// through - so they belong on the page beside MinHeadroomCm rather than compiled in.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 72);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
 	return true;
@@ -605,6 +610,84 @@ bool FHFSettingsShelfFiguresReachGeometryTest::RunTest(const FString& Parameters
 }
 
 /**
+ * The other two shelving figures, which reached nothing at all.
+ *
+ * TargetShelfSpacing and MinUsefulCompartment were copied out of the settings into
+ * FHFJoineryDefaults and then read by nobody. Unlike the four material figures they were not held
+ * back by a sentinel - they had nowhere to go: FHFShelfStackParams has no field for either, because
+ * neither is a property of a stack. They are the rule for deciding how many shelves a stack gets,
+ * applied before there is a stack.
+ *
+ * Their only consumer, FHFJoineryKit::ShelfCountForClearHeight, falls back to its own compiled-in
+ * constants when a caller passes zero, and every caller passed zero. Both dials on the page moved
+ * nothing whatsoever, including once fixtures land.
+ *
+ * The assertion is therefore that CHANGING the setting changes a count. Comparing the setting to the
+ * constant it was seeded from - which is what the shipped defaults test does - cannot tell a figure
+ * that is wired up from one that is merely stored.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsShelfLadderReachesKitTest,
+	"HouseForge.Settings.ShelfLadderFiguresReachTheKit", HF_TEST_FLAGS)
+
+bool FHFSettingsShelfLadderReachesKitTest::RunTest(const FString& Parameters)
+{
+	// A 200 cm clear bay, which the shipped ladder fills with 4 shelves at 37.5 spacing.
+	constexpr double ClearHeight = 200.0;
+
+	FHFJoineryDefaults Shipped;
+	const int32 ShippedCount = Shipped.ShelfCountFor(ClearHeight);
+
+	TestEqual(TEXT("The shipped ladder still gives the count it always gave"), ShippedCount,
+		FHFJoineryKit::ShelfCountForClearHeight(ClearHeight, FHFJoineryKit::DefaultTargetShelfSpacing,
+			FHFJoineryKit::PlyShelfThickness, FHFJoineryKit::MinUsefulCompartment));
+	TestTrue(TEXT("And it is a real ladder rather than an empty bay"), ShippedCount > 0);
+
+	// ------------------------------------------------------------------- the spacing has to bite
+	// A project that wants shallower compartments gets MORE shelves in the same height. Nothing
+	// about this could have passed before: the project figure never left FHFJoineryDefaults.
+	FHFJoineryDefaults Tight;
+	Tight.TargetShelfSpacing = 25.0;
+	const int32 TightCount = Tight.ShelfCountFor(ClearHeight);
+
+	TestTrue(*FString::Printf(TEXT("A 25 cm target gives more shelves than 37.5 (%d vs %d)"),
+		TightCount, ShippedCount), TightCount > ShippedCount);
+
+	// And deeper compartments give fewer, so the figure is being used rather than merely perturbing
+	// something in one direction.
+	FHFJoineryDefaults Loose;
+	Loose.TargetShelfSpacing = 60.0;
+	const int32 LooseCount = Loose.ShelfCountFor(ClearHeight);
+
+	TestTrue(*FString::Printf(TEXT("A 60 cm target gives fewer shelves than 37.5 (%d vs %d)"),
+		LooseCount, ShippedCount), LooseCount < ShippedCount);
+
+	// -------------------------------------------------------- and so does the compartment floor
+	// Raising the smallest useful compartment above the target forces the ladder to drop shelves
+	// rather than leave slots too shallow to fold a shirt into.
+	FHFJoineryDefaults Roomy;
+	Roomy.TargetShelfSpacing = 25.0;
+	Roomy.MinUsefulCompartment = 45.0;
+
+	TestTrue(*FString::Printf(TEXT("A 45 cm floor overrides a 25 cm target (%d vs %d)"),
+		Roomy.ShelfCountFor(ClearHeight), TightCount),
+		Roomy.ShelfCountFor(ClearHeight) < TightCount);
+
+	// ------------------------------------------------------------------ the board thickness too
+	// Thicker board eats the height the compartments came out of, so a project building in 25 mm
+	// ply cannot fit as many as one building in 18.
+	FHFJoineryDefaults Thick;
+	Thick.ShelfThicknessPly = 6.0;
+	TestTrue(TEXT("Thicker project board can only reduce the count"),
+		Thick.ShelfCountFor(ClearHeight) <= ShippedCount);
+
+	// A caller that names its own board is answered with that board rather than the project's.
+	TestEqual(TEXT("An explicit thickness overrides the project's ply"),
+		Shipped.ShelfCountFor(ClearHeight, 6.0), Thick.ShelfCountFor(ClearHeight));
+
+	return true;
+}
+
+/**
  * Every number on the page says what unit it is in.
  *
  * This project converts millimetres to centimetres exactly once, at spec ingest, and has been bitten
@@ -688,7 +771,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 70);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 72);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

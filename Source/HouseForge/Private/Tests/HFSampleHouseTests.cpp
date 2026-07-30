@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Algo/AnyOf.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Model/HFSampleHouse.h"
@@ -139,11 +140,29 @@ bool FHFSampleHouseWindowsAreClearTest::RunTest(const FString& Parameters)
 	const FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 	const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
 
+	// Every way an opening can be unusable, not only the two this test started with.
+	//
+	// It counted OpeningBlockedByFixture and OpeningBlockedByColumn, and passed on a flat with two
+	// rooms nobody could walk into. Both of those rules ask whether something is IN the opening, and
+	// nothing in the flat was: the refrigerator stood 19 cm in front of the utility door and the
+	// shower 33 cm in front of the balcony door, and the common bathroom's leaf could not open past
+	// its own WC. A doorway is unusable in three separate ways and this asks about all of them.
+	static const TCHAR* const Obstructions[] = {
+		TEXT("OpeningBlockedByFixture"),		// something built across a window
+		TEXT("OpeningBlockedByColumn"),			// a column in the reveal
+		TEXT("DoorwayNotClear"),				// no walkable width left in front of a door
+		TEXT("DoorSwingHitsFixture"),			// the width is fine; the leaf cannot swing
+		TEXT("FixtureClashesWithStructure"),	// a fitting built into a column or a beam
+	};
+
 	int32 Blocked = 0;
 
 	for (const FHFValidationIssue& Issue : Result.Issues)
 	{
-		if (Issue.Code == TEXT("OpeningBlockedByFixture") || Issue.Code == TEXT("OpeningBlockedByColumn"))
+		const bool bIsObstruction = Algo::AnyOf(Obstructions,
+			[&Issue](const TCHAR* Code) { return Issue.Code == Code; });
+
+		if (bIsObstruction)
 		{
 			++Blocked;
 			AddError(Issue.Message);

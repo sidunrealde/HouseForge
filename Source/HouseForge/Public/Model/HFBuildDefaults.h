@@ -216,6 +216,26 @@ struct HOUSEFORGE_API FHFJoineryDefaults
 	 */
 	FHFShelfMaterialFigures ShelfFigures() const;
 
+	/**
+	 * How many shelves this project wants in a given clear height.
+	 *
+	 * The other pair that ApplyTo cannot carry, and for a blunter reason than the material figures:
+	 * FHFShelfStackParams has no field for either of them. TargetShelfSpacing and MinUsefulCompartment
+	 * are not properties of a stack, they are the rule for choosing how many shelves a stack gets, and
+	 * that rule is applied before there is a stack to write them on.
+	 *
+	 * So they were copied out of the settings into this struct and then read by nobody at all. The
+	 * only consumer, FHFJoineryKit::ShelfCountForClearHeight, resolves both from its own compiled-in
+	 * constants when a caller passes zero, and every caller passed zero. Turning the dial on the
+	 * settings page moved nothing - not the geometry, and not even the kit.
+	 *
+	 * This is the one call that carries them. The composing layer asks the project how many shelves,
+	 * rather than asking the kit and getting the kit's opinion back.
+	 *
+	 * @param ShelfThickness Zero to take the project's ply thickness.
+	 */
+	int32 ShelfCountFor(double ClearHeight, double ShelfThickness = 0.0) const;
+
 	/** A parameter struct with the project's figures already on it, ready for dimensions. */
 	template <typename ParamsType>
 	ParamsType Make() const

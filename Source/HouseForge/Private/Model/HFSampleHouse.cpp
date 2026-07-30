@@ -266,8 +266,8 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddWall(TEXT("W_Kitchen_Util"),   FVector2D(XU, YU), FVector2D(XU, Y3), false);
 	B.AddWall(TEXT("W_Kitchen_Util_S"), FVector2D(XU, YU), FVector2D(X2, YU), false);
 
-	// Balcony parapets. Three balconies: living (south), master bedroom (north) and a wash area
-	// off the utility (east), which is the usual arrangement in a flat of this size.
+	// Balcony parapets. Three balconies: living (south), master bedroom (north) and a service
+	// balcony off the master bathroom (east).
 	B.AddParapet(TEXT("W_Balc_South"), FVector2D(X0, YB), FVector2D(X2, YB));
 	B.AddParapet(TEXT("W_Balc_West"),  FVector2D(X0, YB), FVector2D(X0, Y0));
 	B.AddParapet(TEXT("W_Balc_East"),  FVector2D(X2, YB), FVector2D(X2, Y0));
@@ -377,8 +377,8 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddWindow(TEXT("Win_Utility"), TEXT("W_North"), X5 - 3400.0, 600.0,
 		EHFOpeningKind::SlidingWindow, /*Height*/ 900.0, /*Sill*/ 1200.0);
 
-	// Balcony access. Master bedroom to the north balcony; master bathroom to the east wash area,
-	// which the master bath now backs onto since the utility left the service band.
+	// Balcony access. Master bedroom to the north balcony; master bathroom to the east service
+	// balcony, which the master bath now backs onto since the utility left the service band.
 	B.AddOpening(TEXT("D_BalcN"), TEXT("W_North"), X5 - 9300.0, 1800.0, 2100.0, 0.0,
 		EHFOpeningKind::SlidingDoor);
 	B.AddDoor(TEXT("D_BalcE"), TEXT("W_East"), 4500.0, EHFSwing::OutwardLeft);
@@ -410,7 +410,17 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddDoor(TEXT("D_Bed2"),    TEXT("W_Mid_Lower"), 7400.0, EHFSwing::OutwardLeft);
 	B.AddDoor(TEXT("D_Kitchen"), TEXT("W_Mid_Upper"), 1200.0, EHFSwing::InwardRight);
 	B.AddDoor(TEXT("D_MBed"),    TEXT("W_Mid_Upper"), 4850.0, EHFSwing::InwardLeft);
-	B.AddDoor(TEXT("D_MBath"),   TEXT("W_Mid_Upper"), 8700.0, EHFSwing::OutwardLeft, 750.0);
+	// 9575, not 8700. The master bathroom has TWO doors - this one from the bedroom in its north
+	// wall, and D_BalcE onto the service balcony in its east wall - and at 8700 they fought over the
+	// same 1685 of room depth. A 900 shower has to stand somewhere, and with the bedroom door at the
+	// west end the only corner left for it was the east one, directly in front of D_BalcE; the last
+	// pass moved the shower there to clear this door and walled the balcony door in doing it.
+	//
+	// Moving this door east instead settles both at once: it frees the whole west end of the bath for
+	// the shower and leaves the east end clear as the approach to the balcony. 9200..9950 is as far
+	// east as it can go - F_MBed_Wardrobe stands at X 10085..10685 on the bedroom side, so anything
+	// beyond this puts a 2400 wardrobe across the doorway from the other room.
+	B.AddDoor(TEXT("D_MBath"),   TEXT("W_Mid_Upper"), 9575.0, EHFSwing::OutwardLeft, 750.0);
 	B.AddDoor(TEXT("D_CBath"),   TEXT("W_CBath_Corr"), 900.0, EHFSwing::InwardLeft, 750.0);
 	B.AddDoor(TEXT("D_Utility"), TEXT("W_Kitchen_Util_S"), 600.0, EHFSwing::InwardLeft, 750.0);
 
@@ -433,7 +443,10 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddRoom(TEXT("R_MBed"),     TEXT("Master Bedroom"),   EHFRoomType::MasterBedroom, X2, Y2, X5, Y3);
 	B.AddRoom(TEXT("R_Balcony"),   TEXT("Balcony"),           EHFRoomType::Balcony,      X0, YB, X2, Y0, 0.0);
 	B.AddRoom(TEXT("R_BalconyN"),  TEXT("Balcony 2"),         EHFRoomType::Balcony,      X3, Y3, X5, YN, 0.0);
-	B.AddRoom(TEXT("R_BalconyE"),  TEXT("Wash Area Balcony"), EHFRoomType::Balcony,      X5, Y1, XE, Y2, 0.0);
+	// Not "Wash Area Balcony" any more. The wash area is the utility, which is where the machine is;
+	// this one is reached only through the master bathroom, so it is that bathroom's service balcony
+	// and nothing else can honestly be put on it.
+	B.AddRoom(TEXT("R_BalconyE"),  TEXT("Service Balcony"),   EHFRoomType::Balcony,      X5, Y1, XE, Y2, 0.0);
 
 	// ------------------------------------------------------------------------ false ceilings
 	// Living gets the full cove treatment; bedrooms a peripheral band; wet areas a full drop to
@@ -589,9 +602,25 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			TEXT("Chimney"), FVector2D(415.0, 6300.0), FVector2D(600.0, 500.0), 700.0, 90.0, 1500.0);
 		Chimney.AnchorWallId = TEXT("W_West");
 
+		// On the kitchen's south wall, not in the corner by the utility.
+		//
+		// The redraw boxed the utility out of the kitchen's north-east corner and put D_Utility in the
+		// new partition at Y 6600, X 3225..3975. The refrigerator was left where it had always been,
+		// at (3800, 6000) against W_Kitchen_MBed - which is now 192 mm in front of that doorway,
+		// across 525 of its 750 width, for the whole 1800 of its height. It left a 225 mm slot into
+		// the room the redraw had just created: the utility could not be walked into.
+		//
+		// It cannot be nudged clear. The doorway has 750 of wall to sit in and the fridge is 700
+		// deep, so anywhere on W_Kitchen_MBed north of the notch is behind the partition and anywhere
+		// south of it is still square in front of the door. The fridge has to leave that corner.
+		//
+		// X 1750..2450 on W_Mid_Upper is clear of D_Kitchen's leaf (which sweeps X 750..1650) by 100,
+		// clear of the west run of base units by a metre, and leaves the whole notch free as the
+		// approach to the utility. It also makes a better kitchen: sink north, hob west, fridge
+		// south is the work triangle those three want to be in.
 		FHFFixture& Fridge = B.AddFixture(TEXT("F_Kitchen_Fridge"), TEXT("R_Kitchen"), EHFFixtureType::Refrigerator,
-			TEXT("Refrigerator"), FVector2D(3800.0, 6000.0), FVector2D(700.0, 700.0), 1800.0);
-		Fridge.AnchorWallId = TEXT("W_Kitchen_MBed");
+			TEXT("Refrigerator"), FVector2D(2100.0, 5810.0), FVector2D(700.0, 700.0), 1800.0);
+		Fridge.AnchorWallId = TEXT("W_Mid_Upper");
 	}
 
 	// Master bedroom
@@ -661,12 +690,25 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Bathrooms
 	{
-		// Both bathrooms keep their fit-out exactly as it was and travel with the room: the common
-		// bath 2400 west to X 1800..4200, the master 1800 east to X 8100..10800. Nothing here was
-		// ever in the wrong place - the two bedroom doors were hung on the wrong walls, and these
-		// fittings were simply standing behind them.
+		// Both bathrooms are laid out around their doors rather than beside them, which is what the
+		// last pass got wrong in both rooms. It moved each room's fittings with the room and checked
+		// them against the walls; it never checked them against the door leaf that has to sweep past
+		// them or the floor somebody has to stand on to reach the handle.
+		//
+		// Common bath, X 1800..4200 clear 1857.5..4142.5, door in the EAST wall at Y 4125..4875
+		// hinged on its south jamb and opening in. So the whole quadrant X 3450..4200, Y 4125..4875
+		// is leaf, and nothing may stand in it.
+		//
+		// F_CBath_WC did. At X 3710..4090 it reached 75 mm past the hinge jamb into that quadrant -
+		// only 75, but a swept arc is not a doorway and a leaf does not care how little of it is in
+		// the way. It fouled the pan at 56 degrees open and lay across it at 90: the door could not
+		// be opened. It reads as an obvious mistake now and did not before, because the room was
+		// mirrored about its own door when the band was re-cut - the WC that used to sit at the far
+		// end from the doorway ended up beside the hinge without moving relative to the room.
+		//
+		// 2900 puts it 360 clear of the arc, with the basin 235 west of it and the shower north.
 		B.AddFixture(TEXT("F_CBath_WC"), TEXT("R_CBath"), EHFFixtureType::WC,
-			TEXT("Wall-hung WC"), FVector2D(3900.0, 3900.0), FVector2D(380.0, 600.0), 400.0);
+			TEXT("Wall-hung WC"), FVector2D(2900.0, 3960.0), FVector2D(380.0, 600.0), 400.0);
 		B.AddFixture(TEXT("F_CBath_Basin"), TEXT("R_CBath"), EHFFixtureType::Basin,
 			TEXT("Counter basin"), FVector2D(2200.0, 3900.0), FVector2D(550.0, 450.0), 200.0, 0.0, 800.0);
 		// The service band runs Y 3600..5400, so a 900-deep shower must centre at 4900 to keep
@@ -675,35 +717,58 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		B.AddFixture(TEXT("F_CBath_Shower"), TEXT("R_CBath"), EHFFixtureType::Shower,
 			TEXT("Shower area"), FVector2D(2900.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
 
-		B.AddFixture(TEXT("F_MBath_WC"), TEXT("R_MBath"), EHFFixtureType::WC,
-			TEXT("Wall-hung WC"), FVector2D(10200.0, 3900.0), FVector2D(380.0, 600.0), 400.0);
+		// Master bath, X 8100..10800 clear 8157.5..10685, Y 3600..5400 clear 3657.5..5342.5. Two
+		// doors: D_MBath in the north wall at X 9200..9950, and D_BalcE in the east wall at
+		// Y 4050..4950 onto the service balcony.
+		//
+		// The east end belongs to D_BalcE and nothing else. Keeping the strip X 9935..10685 clear
+		// across the door's full width is the whole of the fix here: last pass the shower stood at
+		// X 9450..10350 - 335 mm in front of that door, 500 of its 900 blocked, 2100 tall - and the
+		// WC took another 150, so the only way to the balcony door was a 250 mm slot between them.
+		// Nobody passes through 250.
+		//
+		// So the shower goes to the WEST end, which moving D_MBath east has now freed, and the two
+		// doors face each other across an open floor instead of fighting over one corner.
+		B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"), EHFFixtureType::Shower,
+			TEXT("Shower area"), FVector2D(8610.0, 4890.0), FVector2D(900.0, 900.0), 2100.0);
 
-		// Master bath spans X 8100..10800; a 900-wide vanity centres at 8900 to clear the
-		// partition it shares with the corridor.
 		FHFFixture& Vanity = B.AddFixture(TEXT("F_MBath_Vanity"), TEXT("R_MBath"), EHFFixtureType::Vanity,
-			TEXT("Vanity unit"), FVector2D(8900.0, 3900.0), FVector2D(900.0, 500.0), 800.0);
+			TEXT("Vanity unit"), FVector2D(8700.0, 3910.0), FVector2D(900.0, 500.0), 800.0);
 		Vanity.AnchorWallId = TEXT("W_Mid_Lower");
 		Vanity.Params.ShutterCount = 2;
 		Vanity.Params.DrawerCount = 1;
 		Vanity.Params.HandleStyle = EHFHandleStyle::Knob;
 
 		B.AddFixture(TEXT("F_MBath_Basin"), TEXT("R_MBath"), EHFFixtureType::Basin,
-			TEXT("Counter basin"), FVector2D(8900.0, 3900.0), FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
-		// The one fitting in either bathroom that could not simply travel with its room. The master
-		// bath's door is in its north wall now, and a shower enclosure against that same wall put
-		// 75 mm of itself across the doorway - the enclosure is 2100 tall, so unlike a vanity or a
-		// mirror it is in the opening for the whole height of it. It goes to the east end, under the
-		// geyser, which is where the geyser was always drawn anyway.
-		B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"), EHFFixtureType::Shower,
-			TEXT("Shower area"), FVector2D(9900.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
+			TEXT("Counter basin"), FVector2D(8700.0, 3910.0), FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
+
+		// On the south wall between the vanity and the balcony door's approach, 350 clear of the one
+		// and 55 clear of the other.
+		B.AddFixture(TEXT("F_MBath_WC"), TEXT("R_MBath"), EHFFixtureType::WC,
+			TEXT("Wall-hung WC"), FVector2D(9690.0, 3960.0), FVector2D(380.0, 600.0), 400.0);
 	}
 
 	// Utility, off the kitchen, with the machine under its own window and against the outside wall
 	// the drain runs down.
 	{
 		FHFFixture& Washer = B.AddFixture(TEXT("F_Util_Washer"), TEXT("R_Utility"), EHFFixtureType::WashingMachine,
-			TEXT("Washing machine"), FVector2D(3400.0, 7985.0), FVector2D(600.0, 600.0), 850.0);
+			TEXT("Washing machine"), FVector2D(3370.0, 7985.0), FVector2D(600.0, 600.0), 850.0);
 		Washer.AnchorWallId = TEXT("W_North");
+
+		// The wash sink belongs beside the machine, and this is where it has come from.
+		//
+		// It used to be F_Wash_Sink, out on the east balcony, and that was already true before the
+		// redraw for a different reason: the balcony was the wash area and the utility was next to it
+		// in the service band. The redraw moved the utility to the kitchen's far corner and left the
+		// sink where it was, which made the trip from the washing machine to the sink run utility ->
+		// kitchen -> foyer -> living -> corridor -> master bedroom -> master bathroom -> balcony,
+		// the last leg of it through somebody's en-suite. Wet laundry does not go that way.
+		//
+		// North of Y 7420 so it stays out of the 750 approach to D_Utility, and turned onto the east
+		// wall so the machine keeps the window.
+		FHFFixture& Sink = B.AddFixture(TEXT("F_Util_Sink"), TEXT("R_Utility"), EHFFixtureType::Sink,
+			TEXT("Utility sink"), FVector2D(3917.5, 7720.0), FVector2D(600.0, 450.0), 250.0, 90.0, 600.0);
+		Sink.AnchorWallId = TEXT("W_Kitchen_MBed");
 	}
 
 	// Foyer
@@ -789,41 +854,86 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		// The extract goes with the utility. The kitchen has a chimney over its hob, which is what
 		// actually clears a kitchen; a utility with a washing machine in it has nothing else.
+		//
+		// Above the window rather than beside it. At X 3950 this fan was cored 125 x 45 straight
+		// through COL_N1, whose west face is at 3975 - and it could never have fitted there, because
+		// the free strip between Win_Utility's east jamb at 3700 and that column face is 275 mm and
+		// the fan is 300 wide. It was moved east with the room and nobody looked at what it landed
+		// in; a column is 3000 of concrete and a duct does not get cored through one.
+		//
+		// The wall's free width is spent, so the fan takes the height instead: the window head is at
+		// 2100 and the fan sits at 2200..2500, directly over it and clear of the column entirely.
+		// That is where an extract goes in a room this size anyway - high, and on the outside wall.
 		FHFFixture& UtilityExhaust = B.AddFixture(TEXT("F_Exh_Utility"), TEXT("R_Utility"),
 			EHFFixtureType::ExhaustFan, TEXT("Exhaust fan"),
-			FVector2D(3950.0, 8280.0), FVector2D(300.0, 100.0), 300.0, 0.0, 2200.0);
+			FVector2D(3400.0, 8280.0), FVector2D(300.0, 100.0), 300.0, 0.0, 2200.0);
 		UtilityExhaust.AnchorWallId = TEXT("W_North");
 
-		// Bathrooms: geyser, exhaust, mirror and towel rail in each.
-		auto FitOutBathroom = [&B](const FName& Prefix, const FName& RoomId, double CentreX,
+		// Bathrooms: geyser, mirror and towel rail in each. The geyser goes over the shower and the
+		// mirror over the basin, so both follow the fitting they belong to rather than the room's
+		// centre line - at a shared CentreX the common bath's mirror hung 300 off its basin and,
+		// once the WC moved clear of the door leaf, over the WC instead.
+		//
+		// The extract is NOT in here. It was, on NorthWall, and that is what put both of them in the
+		// wrong wall: see below.
+		auto FitOutBathroom = [&B](const FName& Prefix, const FName& RoomId,
+			double ShowerX, double BasinX, double TowelX,
 			const FName& NorthWall, const FName& SouthWall)
 		{
 			FHFFixture& Geyser = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Geyser"))), RoomId,
 				EHFFixtureType::Geyser, TEXT("Storage water heater"),
-				FVector2D(CentreX, 5250.0), FVector2D(450.0, 400.0), 450.0, 0.0, 2100.0);
+				FVector2D(ShowerX, 5250.0), FVector2D(450.0, 400.0), 450.0, 0.0, 2100.0);
 			Geyser.AnchorWallId = NorthWall;
-
-			FHFFixture& Exhaust = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Exhaust"))), RoomId,
-				EHFFixtureType::ExhaustFan, TEXT("Exhaust fan"),
-				FVector2D(CentreX - 700.0, 5300.0), FVector2D(250.0, 100.0), 250.0, 0.0, 2400.0);
-			Exhaust.AnchorWallId = NorthWall;
 
 			FHFFixture& Mirror = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Mirror"))), RoomId,
 				EHFFixtureType::Mirror, TEXT("Mirror"),
-				FVector2D(CentreX - 500.0, 3720.0), FVector2D(600.0, 30.0), 800.0, 0.0, 1000.0);
+				FVector2D(BasinX, 3720.0), FVector2D(600.0, 30.0), 800.0, 0.0, 1000.0);
 			Mirror.AnchorWallId = SouthWall;
 
 			FHFFixture& Towel = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Towel"))), RoomId,
 				EHFFixtureType::TowelRail, TEXT("Towel rail"),
-				FVector2D(CentreX + 500.0, 3700.0), FVector2D(500.0, 40.0), 60.0, 0.0, 1200.0);
+				FVector2D(TowelX, 3700.0), FVector2D(500.0, 40.0), 60.0, 0.0, 1200.0);
 			Towel.AnchorWallId = SouthWall;
 		};
 
-		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 3000.0, TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
-		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 9450.0, TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
+		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 2900.0, 2200.0, 3500.0,
+			TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
+		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 8610.0, 8700.0, 9950.0,
+			TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
 
-		// Utility: the machine point, at machine height on the wall behind it.
-		AddSocket(TEXT("F_Soc_Util"), TEXT("R_Utility"), FVector2D(3950.0, 8250.0), TEXT("W_North"))->BaseZ = 1000.0;
+		// ------------------------------------------------------ where a bathroom fan actually blows
+		// Both of these hung on W_Mid_Upper, because the fit-out took one "north wall" argument and
+		// used it for the geyser, which only has to be screwed to something, and for the extract,
+		// which has to blow somewhere. W_Mid_Upper is an internal partition along the whole plan, so
+		// F_CBath_Exhaust discharged into the KITCHEN and F_MBath_Exhaust into the MASTER BEDROOM.
+		//
+		// The master bath has an external wall it was not using. The fan goes in it, over D_BalcE,
+		// at 2300..2550 - under the 2600 soffit of FC_MBath and clear of BM_East's 2550 soffit.
+		FHFFixture& MBathExhaust = B.AddFixture(TEXT("F_MBath_Exhaust"), TEXT("R_MBath"),
+			EHFFixtureType::ExhaustFan, TEXT("Exhaust fan"),
+			FVector2D(10635.0, 4500.0), FVector2D(250.0, 100.0), 250.0, 90.0, 2300.0);
+		MBathExhaust.AnchorWallId = TEXT("W_East");
+
+		// The common bath has no external wall at all, and this shell cannot give it one. Its band
+		// runs foyer | common bath | corridor | master bath between two external faces, the foyer
+		// needs the west one for the front door and the master bath has the east one, so the common
+		// bath is landlocked whichever way the band is cut. What it actually wants is a vertical
+		// shaft, and there is nowhere in this footprint to put one.
+		//
+		// So the fan moves to the corridor wall, alongside Vent_CBath, which already discharges
+		// there. That is not ventilation to outside air and it is not pretending to be; it is the
+		// difference between a WC extract blowing into circulation space and one blowing into the
+		// room the food is cooked in. The shaft is an outstanding item against this plan, not a
+		// solved one - see Docs for the note.
+		FHFFixture& CBathExhaust = B.AddFixture(TEXT("F_CBath_Exhaust"), TEXT("R_CBath"),
+			EHFFixtureType::ExhaustFan, TEXT("Exhaust fan"),
+			FVector2D(4100.0, 5100.0), FVector2D(250.0, 100.0), 250.0, 90.0, 2300.0);
+		CBathExhaust.AnchorWallId = TEXT("W_CBath_Corr");
+
+		// Utility: the machine point, at machine height on the wall behind it. X 3800, not 3950,
+		// which put it 55 into COL_N1's west face once it was set flush with the wall like its
+		// siblings; and Y 8280 so it is on the wall rather than floating 25 mm in front of it.
+		AddSocket(TEXT("F_Soc_Util"), TEXT("R_Utility"), FVector2D(3800.0, 8280.0), TEXT("W_North"))->BaseZ = 1000.0;
 	}
 
 	// ------------------------------------------------------------------------- balconies
@@ -851,11 +961,13 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			FVector2D(10200.0, 9400.0), FVector2D(800.0, 350.0), 600.0, 90.0);
 		OutdoorMBed.AnchorWallId = TEXT("W_BalcN_East");
 
-		// Wash area: the utility balcony's whole purpose.
-		FHFFixture& WashSink = B.AddFixture(TEXT("F_Wash_Sink"), TEXT("R_BalconyE"),
-			EHFFixtureType::Sink, TEXT("Utility sink"),
-			FVector2D(11500.0, 3800.0), FVector2D(600.0, 450.0), 250.0, 0.0, 600.0);
-		WashSink.AnchorWallId = TEXT("W_BalcE_South");
+		// F_Wash_Sink has gone to the utility, and with it the last thing that made this a wash area.
+		//
+		// This balcony opens off the master bathroom and nothing else can reach it, so a sink here
+		// was one the washing machine's owner could only get to through somebody's en-suite. It is
+		// now what its position makes it - the master bathroom's own service balcony - and it is
+		// deliberately left with nothing on it but its railing. Anything put here is a thing that
+		// has to be serviced through a private bathroom, which is the mistake the sink was.
 	}
 
 	// ------------------------------------------------------- pelmets over the main windows

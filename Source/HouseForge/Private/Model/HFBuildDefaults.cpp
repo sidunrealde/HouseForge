@@ -2,6 +2,8 @@
 
 #include "Model/HFBuildDefaults.h"
 
+#include "Geometry/HFJoineryKit.h"
+
 // Stamping, not copying. Each overload writes the construction figures and leaves everything else
 // exactly as the caller had it - dimensions above all, because those are what the composing layer
 // has just worked out and a blanket copy would wipe them.
@@ -67,6 +69,18 @@ FHFShelfMaterialFigures FHFJoineryDefaults::ShelfFigures() const
 	Figures.GlassMaxSpan = MaxShelfSpanGlass;
 
 	return Figures;
+}
+
+int32 FHFJoineryDefaults::ShelfCountFor(double ClearHeight, double ShelfThickness) const
+{
+	// The whole point of this function: both figures come from the project rather than being left
+	// zero for the kit to fill in from its own constants, which is what every caller did before and
+	// is why the two controls moved nothing.
+	return FHFJoineryKit::ShelfCountForClearHeight(
+		ClearHeight,
+		TargetShelfSpacing,
+		ShelfThickness > 0.0 ? ShelfThickness : ShelfThicknessPly,
+		MinUsefulCompartment);
 }
 
 void FHFJoineryDefaults::ApplyTo(FHFDrawerParams& Params) const

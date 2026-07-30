@@ -1006,9 +1006,34 @@ def room_wall_segments(room):
     ]
 
 
-def openings_on_segment(spec, seg, tol=200.0):
-    """Openings hosted on a wall collinear with this room side and overlapping its span."""
-    letter, axis, fixed, (r0, r1), _ = seg
+def _point_in_boundary(boundary, px, py):
+    """Even-odd ray cast. The rooms here are rectangles and one L, and the L is the point."""
+    pts = [pt(p) for p in boundary]
+    inside = False
+    n = len(pts)
+    for i in range(n):
+        ax, ay = pts[i]
+        bx, by = pts[i - 1]
+        if (ay > py) != (by > py):
+            if px < (bx - ax) * (py - ay) / (by - ay) + ax:
+                inside = not inside
+    return inside
+
+
+def openings_on_segment(spec, room, seg, tol=200.0):
+    """Openings hosted on a wall collinear with this room side and overlapping its span.
+
+    The span comes from the room's BOUNDING BOX, which is not the same thing as the room's wall
+    once a room is not a rectangle. The kitchen lost its north-east corner to the utility and is
+    now an L: its box still runs X 0..4200 while its north wall stops at 3000, so this picked up
+    Win_Utility - a window in another room, behind a partition - and drew it on sheet 10 as though
+    it were the kitchen's. The sheet had already been corrected to label the box as a box; this is
+    the content the label was describing.
+
+    So each candidate is checked against the boundary itself: step off the opening's centre into
+    the room, and if the point is not inside the polygon, the wall there is somebody else's.
+    """
+    letter, axis, fixed, (r0, r1), (nx, ny) = seg
     lo, hi = min(r0, r1), max(r0, r1)
     found = []
 
@@ -1029,8 +1054,15 @@ def openings_on_segment(spec, seg, tol=200.0):
         cy = sy + (ey - sy) * t
         along = cx if axis == "h" else cy
 
-        if lo - o["width"] / 2.0 <= along <= hi + o["width"] / 2.0:
-            found.append((along, o))
+        if not (lo - o["width"] / 2.0 <= along <= hi + o["width"] / 2.0):
+            continue
+
+        # A step inward off the wall face, far enough to clear the wall's own thickness.
+        step = wall.get("thickness", 115.0) / 2.0 + 50.0
+        if not _point_in_boundary(room["boundary"], cx - nx * step, cy - ny * step):
+            continue
+
+        found.append((along, o))
 
     return found
 
@@ -1319,7 +1351,7 @@ def sheet_elevations(spec, room, sheet_no, total):
             if b - a > 2:
                 draw_fixture_elevation(c, fx, a, b, floor_y, px_per_mm)
 
-        for along, o in openings_on_segment(spec, seg):
+        for along, o in openings_on_segment(spec, room, seg):
             a, b = sorted((to_px(along - o["width"] / 2.0), to_px(along + o["width"] / 2.0)))
             a, b = max(a, x0), min(b, x0 + ew)
             if b - a <= 2:

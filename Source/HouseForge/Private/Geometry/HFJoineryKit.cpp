@@ -2367,3 +2367,153 @@ bool FHFJoineryKit::BuildDrawerBank(const FHFDrawerBankParams& Bank, TArray<FHFM
 
 	return true;
 }
+
+// ------------------------------------------------------------------------------------ carcasses
+
+namespace
+{
+	/**
+	 * X range a bay's clear volume occupies, in carcass-local space.
+	 *
+	 * Bounded by a side board at the ends of the run and by half a partition inboard, because a
+	 * partition straddles the boundary between two bays and each of them gets half of it. Working it
+	 * out in one place is what stops the shelf placement and the partition placement disagreeing by
+	 * half a board - an error small enough to look like a fitting gap and large enough to z-fight.
+	 */
+	void CarcassBayClearX(const FHFCarcassParams& P, int32 Bay, double& OutX0, double& OutX1)
+	{
+		const int32 Count = P.Bays();
+		const int32 Index = FMath::Clamp(Bay, 0, Count - 1);
+		const double Module = P.ModuleWidth();
+		const double HalfPartition = P.BoardThickness * 0.5;
+
+		OutX0 = (Index == 0) ? P.BoardThickness : Index * Module + HalfPartition;
+		OutX1 = (Index == Count - 1) ? P.Width - P.BoardThickness : (Index + 1) * Module - HalfPartition;
+	}
+}
+
+FHFCarcassParams FHFJoineryKit::SanitiseCarcass(const FHFCarcassParams& Params)
+{
+	FHFCarcassParams Out = Params;
+
+	Out.Width = FMath::Max(Out.Width, 0.0);
+	Out.Depth = FMath::Max(Out.Depth, 0.0);
+	Out.Height = FMath::Max(Out.Height, 0.0);
+
+	// A board can be at most half the smallest dimension of the box, or the two sides pass through
+	// each other and the mesh reports more material than the carcass contains.
+	const double Smallest = FMath::Min3(Out.Width, Out.Depth, Out.Height);
+	Out.BoardThickness = FMath::Clamp(Out.BoardThickness, MinBoardThickness,
+		FMath::Max(MinBoardThickness, Smallest * 0.5));
+
+	// The back cannot be deeper than the box, and cannot be so deep that nothing is left in front of
+	// it: a carcass whose back has eaten its own depth has no inside.
+	Out.BackThickness = FMath::Clamp(Out.BackThickness, MinBoardThickness,
+		FMath::Max(MinBoardThickness, Out.Depth * 0.5));
+
+	// Bays are only worth having while each one still has clear width to be a bay. Asking for more is
+	// asking for partitions standing in each other, so the count comes down to what fits and the
+	// caller can read back how many it actually got.
+	Out.BayCount = FMath::Max(1, Out.BayCount);
+
+	const double ClearRun = Out.Width - 2.0 * Out.BoardThickness;
+	if (ClearRun <= 0.0)
+	{
+		Out.BayCount = 1;
+	}
+	else
+	{
+		// Each bay past the first costs a partition and needs somewhere to put a shutter behind it.
+		const double MinBay = FMath::Max(Out.BoardThickness, MinBoardThickness);
+		const int32 Fits = FMath::FloorToInt32((ClearRun + Out.BoardThickness) / (MinBay + Out.BoardThickness));
+		Out.BayCount = FMath::Clamp(Out.BayCount, 1, FMath::Max(1, Fits));
+	}
+
+	return Out;
+}
+
+FDynamicMesh3 FHFJoineryKit::GenerateCarcass(const FHFCarcassParams& Params)
+{
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	const FHFCarcassParams P = SanitiseCarcass(Params);
+
+	// No carcass is a real answer for a run of zero length, and an honest one: an empty mesh appends
+	// into a shell harmlessly, where a degenerate box would be a sliver nothing could see and every
+	// volume measurement would carry.
+	if (!P.IsValid())
+	{
+		return Mesh;
+	}
+
+	constexpr EHFSurfaceRole Carc = EHFSurfaceRole::JoineryCarcass;
+
+	const double T = P.BoardThickness;
+	const double W = P.Width;
+	const double D = P.Depth;
+	const double H = P.Height;
+	const double BackY = P.BackFaceY();
+
+	// Too small to frame: a filler this size is a solid packer on site as well, so building it as one
+	// is honest rather than a fallback, and it keeps the boards from overlapping.
+	if (W <= 2.0 * T || H <= 2.0 * T)
+	{
+		AppendRail(Mesh, FVector3d(0.0, 0.0, 0.0), FVector3d(W, D, H), Carc);
+		FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+		return Mesh;
+	}
+
+	// Sides full height and full depth; top and bottom running between them; the back behind both.
+	// Exactly the lay-up the composition tests build by hand, so their clearances keep measuring the
+	// same boards in the same places.
+	AppendRail(Mesh, FVector3d(0.0, 0.0, 0.0), FVector3d(T, D, H), Carc);
+	AppendRail(Mesh, FVector3d(W - T, 0.0, 0.0), FVector3d(W, D, H), Carc);
+	AppendRail(Mesh, FVector3d(T, 0.0, 0.0), FVector3d(W - T, D, T), Carc);
+	AppendRail(Mesh, FVector3d(T, 0.0, H - T), FVector3d(W - T, D, H), Carc);
+
+	if (P.bHasBack && D - BackY > UE_KINDA_SMALL_NUMBER)
+	{
+		AppendRail(Mesh, FVector3d(T, BackY, T), FVector3d(W - T, D, H - T), Carc);
+	}
+
+	// Mid partitions on the internal bay boundaries, butted between the bottom and the top and
+	// stopping at the back panel rather than running through it.
+	const double Module = P.ModuleWidth();
+	for (int32 Boundary = 1; Boundary < P.Bays(); ++Boundary)
+	{
+		const double Centre = Boundary * Module;
+		AppendRail(Mesh, FVector3d(Centre - T * 0.5, 0.0, T),
+			FVector3d(Centre + T * 0.5, BackY, H - T), Carc);
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+	return Mesh;
+}
+
+FBox FHFJoineryKit::CarcassBayClearVolume(const FHFCarcassParams& Params, int32 Bay)
+{
+	const FHFCarcassParams P = SanitiseCarcass(Params);
+
+	if (!P.IsValid())
+	{
+		return FBox(ForceInit);
+	}
+
+	double X0 = 0.0;
+	double X1 = 0.0;
+	CarcassBayClearX(P, Bay, X0, X1);
+
+	const double Z0 = P.BoardThickness;
+	const double Z1 = P.Height - P.BoardThickness;
+
+	// A bay whose partitions have eaten it has no clear volume, and saying so is what stops a caller
+	// placing a shelf stack into a negative width and getting geometry inside out.
+	if (X1 - X0 <= UE_KINDA_SMALL_NUMBER || Z1 - Z0 <= UE_KINDA_SMALL_NUMBER
+		|| P.BackFaceY() <= UE_KINDA_SMALL_NUMBER)
+	{
+		return FBox(ForceInit);
+	}
+
+	return FBox(FVector(X0, 0.0, Z0), FVector(X1, P.BackFaceY(), Z1));
+}

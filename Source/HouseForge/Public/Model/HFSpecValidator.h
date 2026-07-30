@@ -116,6 +116,29 @@ struct HOUSEFORGE_API FHFValidationLimits
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
 		meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "30.0"))
 	double MinOpeningObstructionCm = 5.0;
+
+	/**
+	 * How far in front of a doorway counts as standing in it, in centimetres.
+	 *
+	 * A window can have a dining table in front of it and be perfectly usable; a door cannot. What
+	 * blocks a door is rarely IN the opening - it is the refrigerator 19 cm in front of it - so a
+	 * doorway is judged on the floor either side of it rather than on the plane of the wall. 75 cm
+	 * is about the depth of a person turning through a door, which is what the strip is for.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "0.0", UIMin = "30.0", UIMax = "150.0"))
+	double DoorApproachDepthCm = 75.0;
+
+	/**
+	 * The narrowest gap a person will actually walk through, in centimetres.
+	 *
+	 * The test on a doorway is not whether anything overlaps it - joinery clips the corner of a wide
+	 * sliding door all the time and nobody notices - but how much unbroken width is left. 60 cm is
+	 * the usual figure for a passage; below it the door is decoration.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "30.0", UIMin = "45.0", UIMax = "90.0"))
+	double MinClearPassageCm = 60.0;
 };
 
 /**

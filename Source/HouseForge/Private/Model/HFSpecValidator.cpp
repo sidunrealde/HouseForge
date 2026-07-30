@@ -207,6 +207,57 @@ namespace
 		return true;
 	}
 
+	/** A half-open interval along some axis. Used for the runs of a doorway a fixture eats into. */
+	struct FInterval
+	{
+		double Min = 0.0;
+		double Max = 0.0;
+	};
+
+	/**
+	 * Whether two rotated rectangles overlap in plan, by separating axis.
+	 *
+	 * Four axes suffice for two boxes - the two edge normals of each - and finding any one that
+	 * separates them settles it. Bounding boxes would be wrong here in the direction that matters:
+	 * they report clashes that are not there, and a rule that cries wolf about a fixture touching a
+	 * column is one whose real reports stop being read.
+	 */
+	bool OrientedBoxesOverlap(
+		const FVector2D& CentreA, const FVector2D& SizeA, double RotationA,
+		const FVector2D& CentreB, const FVector2D& SizeB, double RotationB)
+	{
+		const double RadiansA = FMath::DegreesToRadians(RotationA);
+		const double RadiansB = FMath::DegreesToRadians(RotationB);
+
+		const FVector2D AxisA0(FMath::Cos(RadiansA), FMath::Sin(RadiansA));
+		const FVector2D AxisA1(-AxisA0.Y, AxisA0.X);
+		const FVector2D AxisB0(FMath::Cos(RadiansB), FMath::Sin(RadiansB));
+		const FVector2D AxisB1(-AxisB0.Y, AxisB0.X);
+
+		const FVector2D Between = CentreB - CentreA;
+		const FVector2D Axes[4] = { AxisA0, AxisA1, AxisB0, AxisB1 };
+
+		for (const FVector2D& Axis : Axes)
+		{
+			// Each box's extent along this axis is the sum of its half-sizes projected onto it.
+			const double ReachA =
+				FMath::Abs(FVector2D::DotProduct(AxisA0, Axis)) * SizeA.X * 0.5 +
+				FMath::Abs(FVector2D::DotProduct(AxisA1, Axis)) * SizeA.Y * 0.5;
+			const double ReachB =
+				FMath::Abs(FVector2D::DotProduct(AxisB0, Axis)) * SizeB.X * 0.5 +
+				FMath::Abs(FVector2D::DotProduct(AxisB1, Axis)) * SizeB.Y * 0.5;
+
+			// Touching is not overlapping: a fixture set flush against a column shares a face with
+			// it by design, and every wall-anchored fixture in a plan does exactly that.
+			if (FMath::Abs(FVector2D::DotProduct(Between, Axis)) >= ReachA + ReachB - UE_KINDA_SMALL_NUMBER)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	/** A stretch of a beam that has something under it, measured along the beam from its Start. */
 	struct FSupportedRun
 	{
@@ -684,11 +735,19 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 				FString::Printf(TEXT("Beam '%s' hangs %.1f below a soffit at %.1f; it would reach the floor."),
 					*Describe(Beam.Id), Beam.Depth, Beam.SoffitZ));
 		}
-		else if (Beam.ClearHeight() < Limits.MinHeadroomCm)
+		// In CENTIMETRES on both sides. MinHeadroomCm is a centimetre figure and ClearHeight() is in
+		// whatever the spec declares, and until now they were compared raw - so on a millimetre spec
+		// the rule asked whether a beam left less than 21 cm beneath it and never fired, while on a
+		// metre spec 2.8 was below 210 and every beam in the file was reported. The reference flat is
+		// in millimetres, so this rule has been inert for its whole life.
+		//
+		// The column and fixture rules further down already scale; these two were simply missed.
+		else if (Beam.ClearHeight() * FHFUnits::ToCentimeterScale(Spec.Units) < Limits.MinHeadroomCm)
 		{
 			Result.Add(EHFValidationSeverity::Warning, TEXT("BeamLowHeadroom"), Beam.Id,
-				FString::Printf(TEXT("Beam '%s' leaves %.1f clear beneath it, below the %.0f usually treated as minimum headroom."),
-					*Describe(Beam.Id), Beam.ClearHeight(), Limits.MinHeadroomCm));
+				FString::Printf(TEXT("Beam '%s' leaves %.1f cm clear beneath it, below the %.0f cm usually treated as minimum headroom."),
+					*Describe(Beam.Id), Beam.ClearHeight() * FHFUnits::ToCentimeterScale(Spec.Units),
+					Limits.MinHeadroomCm));
 		}
 	}
 
@@ -937,7 +996,7 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 		}
 	}
 
-	// A fixture standing in front of an opening.
+	// A fixture standing in front of a WINDOW.
 	//
 	// The same misread as a column in a doorway, one layer out: a wardrobe against the east wall and
 	// a window in the east wall are drawn as separate things and read as separate things, and until
@@ -947,12 +1006,24 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 	// It matters more since a window became a sliding unit with a catch somebody reaches for. Fixed
 	// glazing behind a wardrobe merely looks odd; a sash behind one cannot be opened at all, and the
 	// window photographs as a cabinet.
+	//
+	// DOORS ARE NOT IN HERE, and that is the correction. This rule gates on the fixture being against
+	// the opening's own wall, which is right for a window - a dining table out in the middle of the
+	// room is in front of the window in a photograph and in nobody's way in fact - and exactly wrong
+	// for a door, where the thing in the way is almost never touching the wall. It is the fridge 19 cm
+	// in front of the doorway. Doors are judged by DoorwayNotClear below, on the floor either side of
+	// them rather than on the plane of the wall.
 	{
 		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
 		const double Obstruction = (ScaleToCm > 0.0) ? Limits.MinOpeningObstructionCm / ScaleToCm : 0.0;
 
 		for (const FHFOpening& Opening : Spec.Openings)
 		{
+			if (Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor)
+			{
+				continue;
+			}
+
 			const FHFWall* Wall = Spec.FindWall(Opening.WallId);
 			if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER ||
 				Opening.Width <= 0.0 || Opening.Height <= 0.0)
@@ -1033,6 +1104,299 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 						*Describe(Fixture.Id), Covered * 100.0, *Describe(Opening.Id),
 						AlongOverlap * ScaleToCm, Opening.Width * ScaleToCm,
 						UpOverlap * ScaleToCm, Opening.Height * ScaleToCm));
+			}
+		}
+	}
+
+	// ------------------------------------------------------------------ can you walk through it
+	//
+	// The rule the flat needed and did not have. Every genuine obstruction in the reference plan was
+	// invisible to the window rule above, because that rule asks whether the fixture is against the
+	// opening's wall and the things that block doors are not: the refrigerator standing 19 cm in
+	// front of the utility door, anchored to a wall at right angles to it; the shower and the WC 33
+	// and 29 cm in front of the balcony door, anchored to nothing. Both rooms could not be entered,
+	// and the suite reported a clean flat.
+	//
+	// So a doorway is measured on the floor rather than on the plane of the wall: anything standing
+	// within DoorApproachDepth of either face, at the height of the opening, takes width off it. What
+	// is then judged is not how much is blocked but how much unbroken width is LEFT - a wardrobe
+	// clipping 11 cm off the end of an 1800 sliding door leaves 1685 and is nothing, while 50 cm out
+	// of the middle of a 900 door leaves two 200 slots and is a wall.
+	{
+		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+		const double Approach = (ScaleToCm > 0.0) ? Limits.DoorApproachDepthCm / ScaleToCm : 0.0;
+		const double MinPassage = (ScaleToCm > 0.0) ? Limits.MinClearPassageCm / ScaleToCm : 0.0;
+
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			if (Opening.Kind != EHFOpeningKind::Door && Opening.Kind != EHFOpeningKind::SlidingDoor)
+			{
+				continue;
+			}
+
+			const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+			if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER ||
+				Opening.Width <= 0.0 || Opening.Height <= 0.0)
+			{
+				continue;
+			}
+
+			const FVector2D Direction = (Wall->End - Wall->Start) / Wall->Length();
+			const FVector2D Normal(-Direction.Y, Direction.X);
+			const double HalfThickness = Wall->Thickness * 0.5;
+
+			const double OpeningMin = Opening.OffsetAlongWall - Opening.Width * 0.5;
+			const double OpeningMax = Opening.OffsetAlongWall + Opening.Width * 0.5;
+			const double SillZ = Wall->BaseZ + Opening.SillHeight;
+			const double HeadZ = SillZ + Opening.Height;
+
+			// Every bite taken out of the opening's width, and who took it.
+			TArray<FInterval> Bites;
+			TSet<FName> Blockers;
+
+			for (const FHFFixture& Fixture : Spec.Fixtures)
+			{
+				if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0 || Fixture.Height <= 0.0
+					|| Fixture.IsCeilingMounted())
+				{
+					continue;
+				}
+
+				if (FMath::Min(Fixture.BaseZ + Fixture.Height, HeadZ) - FMath::Max(Fixture.BaseZ, SillZ) <= 0.0)
+				{
+					continue;
+				}
+
+				double AlongMin = TNumericLimits<double>::Max();
+				double AlongMax = -TNumericLimits<double>::Max();
+				double AcrossMin = TNumericLimits<double>::Max();
+				double AcrossMax = -TNumericLimits<double>::Max();
+
+				for (const FVector2D& Corner : FootprintCorners(Fixture))
+				{
+					const FVector2D Relative = Corner - Wall->Start;
+					AlongMin = FMath::Min(AlongMin, FVector2D::DotProduct(Relative, Direction));
+					AlongMax = FMath::Max(AlongMax, FVector2D::DotProduct(Relative, Direction));
+					AcrossMin = FMath::Min(AcrossMin, FVector2D::DotProduct(Relative, Normal));
+					AcrossMax = FMath::Max(AcrossMax, FVector2D::DotProduct(Relative, Normal));
+				}
+
+				// Within the approach strip on one side or the other. Both sides, because a door is
+				// blocked just as thoroughly from the room it opens out of.
+				if (AcrossMin > HalfThickness + Approach || AcrossMax < -HalfThickness - Approach)
+				{
+					continue;
+				}
+
+				const double Lo = FMath::Max(AlongMin, OpeningMin);
+				const double Hi = FMath::Min(AlongMax, OpeningMax);
+				if (Hi > Lo)
+				{
+					Bites.Add({ Lo, Hi });
+					Blockers.Add(Fixture.Id);
+				}
+			}
+
+			if (Bites.IsEmpty())
+			{
+				// A doorway with nothing in front of it is not blocked. It may still be too narrow to
+				// use, but that is a property of the door and ImplausibleDoorSize says so - reporting
+				// it here would name no fixture and give whoever reads it nothing to move.
+				continue;
+			}
+
+			// The widest unbroken run left between the bites.
+			Bites.Sort([](const FInterval& A, const FInterval& B) { return A.Min < B.Min; });
+
+			double Widest = 0.0;
+			double Reached = OpeningMin;
+			for (const FInterval& Bite : Bites)
+			{
+				Widest = FMath::Max(Widest, Bite.Min - Reached);
+				Reached = FMath::Max(Reached, Bite.Max);
+			}
+			Widest = FMath::Max(Widest, OpeningMax - Reached);
+
+			if (Widest >= MinPassage)
+			{
+				continue;
+			}
+
+			TArray<FString> Names;
+			for (const FName& Id : Blockers)
+			{
+				Names.Add(Describe(Id));
+			}
+			Names.Sort();
+
+			Result.Add(EHFValidationSeverity::Error, TEXT("DoorwayNotClear"), Opening.Id,
+				FString::Printf(TEXT("Doorway '%s' has only %.1f cm of unbroken width left of its %.1f cm: %s stand within %.0f cm of it. Nobody walks through %.1f cm - move the fixture or the door."),
+					*Describe(Opening.Id), Widest * ScaleToCm, Opening.Width * ScaleToCm,
+					*FString::Join(Names, TEXT(", ")), Limits.DoorApproachDepthCm, Widest * ScaleToCm));
+		}
+	}
+
+	// ------------------------------------------------------------------ and can the leaf get past
+	//
+	// A door that is clear straight ahead can still be unopenable, because the leaf does not travel
+	// straight ahead - it sweeps a quarter circle of its own width off the hinge jamb, and anything
+	// standing in that quadrant stops it.
+	//
+	// D_CBath in the reference flat was the case: the WC reached 7.5 cm past the hinge jamb, which is
+	// nothing in plan and left 675 of the 750 doorway clear, so no rule about width could ever have
+	// seen it. The leaf fouled the pan at 56 degrees and lay across it at 90. Nothing looked - the
+	// SwingBlocked rule above asks only where the leaf's TIP lands, and the tip lands in open floor.
+	{
+		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+		constexpr int32 Steps = 18;			// every 5 degrees
+
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			if (Opening.Kind != EHFOpeningKind::Door || Opening.Swing == EHFSwing::None ||
+				Opening.Width <= 0.0 || Opening.Height <= 0.0)
+			{
+				continue;
+			}
+
+			const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+			if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const FVector2D Direction = (Wall->End - Wall->Start) / Wall->Length();
+			const FVector2D Normal(-Direction.Y, Direction.X);
+
+			// Same convention as AHFHouseActor::DrawSwing, so the rule and the drawn arc agree.
+			const bool bHingeAtNear =
+				Opening.Swing == EHFSwing::InwardLeft || Opening.Swing == EHFSwing::OutwardLeft;
+			const double Side =
+				(Opening.Swing == EHFSwing::InwardLeft || Opening.Swing == EHFSwing::InwardRight) ? 1.0 : -1.0;
+
+			const double HalfWidth = Opening.Width * 0.5;
+			const FVector2D Hinge = Wall->Start +
+				Direction * (Opening.OffsetAlongWall + (bHingeAtNear ? -HalfWidth : HalfWidth));
+			const FVector2D Closed = bHingeAtNear ? Direction : -Direction;
+			const FVector2D Open = Normal * Side;
+
+			const double SillZ = Wall->BaseZ + Opening.SillHeight;
+			const double HeadZ = SillZ + Opening.Height;
+
+			for (const FHFFixture& Fixture : Spec.Fixtures)
+			{
+				if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0 || Fixture.Height <= 0.0
+					|| Fixture.IsCeilingMounted())
+				{
+					continue;
+				}
+
+				if (FMath::Min(Fixture.BaseZ + Fixture.Height, HeadZ) - FMath::Max(Fixture.BaseZ, SillZ) <= 0.0)
+				{
+					continue;
+				}
+
+				// From just off closed, so a fixture sitting IN the opening is DoorwayNotClear's to
+				// report rather than being called a swing problem as well.
+				double FirstFoul = -1.0;
+				for (int32 Step = 1; Step <= Steps; ++Step)
+				{
+					const double Angle = (static_cast<double>(Step) / Steps) * HALF_PI;
+					const FVector2D Leaf = Hinge +
+						(Closed * FMath::Cos(Angle) + Open * FMath::Sin(Angle)) * Opening.Width;
+
+					if (SegmentHitsRect(Hinge, Leaf, Fixture.Position, Fixture.Footprint, Fixture.RotationDegrees))
+					{
+						FirstFoul = FMath::RadiansToDegrees(Angle);
+						break;
+					}
+				}
+
+				if (FirstFoul < 0.0)
+				{
+					continue;
+				}
+
+				Result.Add(EHFValidationSeverity::Error, TEXT("DoorSwingHitsFixture"), Opening.Id,
+					FString::Printf(TEXT("The leaf of door '%s' sweeps into fixture '%s' at about %.0f degrees open; its %.1f cm quadrant off the hinge is not clear. The doorway itself measures fine - it is the arc that is blocked."),
+						*Describe(Opening.Id), *Describe(Fixture.Id), FirstFoul,
+						Opening.Width * ScaleToCm));
+			}
+		}
+	}
+
+	// ---------------------------------------------------------- fixtures against the frame itself
+	//
+	// Nothing compared a fixture with a column or a beam. The column rule looks at columns against
+	// openings, the overlap rule looks at fixtures against each other, and the articulation sweep
+	// builds wall, column and beam solids but only sweeps the moving parts of OPENINGS against them.
+	// A fixture could be, and was, built straight through the frame: F_Exh_Utility had 125 x 45 mm
+	// of a 300 mm extract fan cored through COL_N1, and both bathroom fans sat 100 mm up inside
+	// BM_Mid_Upper.
+	//
+	// A beam warns and a column errors, and the difference is real rather than a hedge. Services are
+	// routinely dropped under a beam and a beam can be boxed in with them; an RCC column is not
+	// something a duct gets cut through on site, whatever the drawing says.
+	{
+		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+
+		for (const FHFFixture& Fixture : Spec.Fixtures)
+		{
+			if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0 || Fixture.Height <= 0.0
+				|| Fixture.IsCeilingMounted())
+			{
+				continue;	// A ceiling-mounted fixture measures its base from a ceiling, not the floor.
+			}
+
+			const double FixtureBottom = Fixture.BaseZ;
+			const double FixtureTop = Fixture.BaseZ + Fixture.Height;
+
+			for (const FHFColumn& Column : Spec.Columns)
+			{
+				if (Column.Size.X <= 0.0 || Column.Size.Y <= 0.0 || Column.Height <= 0.0)
+				{
+					continue;
+				}
+
+				if (FMath::Min(FixtureTop, Column.Height) - FMath::Max(FixtureBottom, 0.0) <= 0.0 ||
+					!OrientedBoxesOverlap(Fixture.Position, Fixture.Footprint, Fixture.RotationDegrees,
+						Column.Position, Column.Size, Column.RotationDegrees))
+				{
+					continue;
+				}
+
+				Result.Add(EHFValidationSeverity::Error, TEXT("FixtureClashesWithStructure"), Fixture.Id,
+					FString::Printf(TEXT("Fixture '%s' is built into column '%s' at (%.1f, %.1f). A column is not something a fixture gets cut into on site; move the fixture off it."),
+						*Describe(Fixture.Id), *Describe(Column.Id), Column.Position.X, Column.Position.Y));
+			}
+
+			for (const FHFBeam& Beam : Spec.Beams)
+			{
+				const double Length = Beam.Length();
+				if (Length <= UE_KINDA_SMALL_NUMBER || Beam.Width <= 0.0 || Beam.Depth <= 0.0)
+				{
+					continue;
+				}
+
+				const double Overlap =
+					FMath::Min(FixtureTop, Beam.SoffitZ) - FMath::Max(FixtureBottom, Beam.SoffitZ - Beam.Depth);
+				if (Overlap <= 0.0)
+				{
+					continue;
+				}
+
+				const FVector2D Centre = (Beam.Start + Beam.End) * 0.5;
+				const FVector2D Along = (Beam.End - Beam.Start) / Length;
+				const double Rotation = FMath::RadiansToDegrees(FMath::Atan2(Along.Y, Along.X));
+
+				if (!OrientedBoxesOverlap(Fixture.Position, Fixture.Footprint, Fixture.RotationDegrees,
+					Centre, FVector2D(Length, Beam.Width), Rotation))
+				{
+					continue;
+				}
+
+				Result.Add(EHFValidationSeverity::Warning, TEXT("FixtureClashesWithStructure"), Fixture.Id,
+					FString::Printf(TEXT("Fixture '%s' runs %.1f cm up inside beam '%s'. Services are dropped below a beam rather than through it - lower the fixture, or box the beam in with it."),
+						*Describe(Fixture.Id), Overlap * ScaleToCm, *Describe(Beam.Id)));
 			}
 		}
 	}
@@ -1237,11 +1601,16 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 				FString::Printf(TEXT("False ceiling '%s' drops %.1f but room '%s' is only %.1f tall; it would land at or below the floor."),
 					*Describe(Ceiling.Id), Ceiling.Drop, *Describe(Room->Id), Room->CeilingHeight));
 		}
-		else if (Room->CeilingHeight - Ceiling.Drop < Limits.MinHeadroomCm)
+		// Scaled to centimetres, for the same reason BeamLowHeadroom above is: the limit is a
+		// centimetre figure and the spec is in whatever it declares.
+		else if ((Room->CeilingHeight - Ceiling.Drop) * FHFUnits::ToCentimeterScale(Spec.Units)
+			< Limits.MinHeadroomCm)
 		{
 			Result.Add(EHFValidationSeverity::Warning, TEXT("LowHeadroom"), Ceiling.Id,
-				FString::Printf(TEXT("False ceiling '%s' leaves %.1f clear in room '%s', below the %.0f usually treated as minimum headroom."),
-					*Describe(Ceiling.Id), Room->CeilingHeight - Ceiling.Drop, *Describe(Room->Id), Limits.MinHeadroomCm));
+				FString::Printf(TEXT("False ceiling '%s' leaves %.1f cm clear in room '%s', below the %.0f cm usually treated as minimum headroom."),
+					*Describe(Ceiling.Id),
+					(Room->CeilingHeight - Ceiling.Drop) * FHFUnits::ToCentimeterScale(Spec.Units),
+					*Describe(Room->Id), Limits.MinHeadroomCm));
 		}
 
 		const bool bNeedsBand =

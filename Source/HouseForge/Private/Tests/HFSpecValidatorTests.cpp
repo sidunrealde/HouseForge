@@ -1062,6 +1062,379 @@ bool FHFValidatorBulkheadOverBeamTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * Can you actually walk through the doorway.
+ *
+ * Every real obstruction in the reference flat was invisible to OpeningBlockedByFixture, and it was
+ * invisible for a reason that rule states out loud: it only considers a fixture standing against the
+ * opening's OWN wall. That is right for a window and exactly wrong for a door. What blocks a door is
+ * not in the wall - it is the refrigerator 19 cm in front of it, anchored to a wall at right angles,
+ * or the shower 33 cm in front of it, anchored to nothing at all. Two rooms in the flat could not be
+ * entered and the suite reported it clean.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorDoorwayClearanceTest,
+	"HouseForge.Validation.DoorwayIsWalkable", HF_TEST_FLAGS)
+
+bool FHFValidatorDoorwayClearanceTest::RunTest(const FString& Parameters)
+{
+	// MakeValidSpec's door: 90 wide, centred at 200 along the south wall, so it spans 155..245.
+	auto SpecWithBlocker = [](const FVector2D& Position, const FVector2D& Footprint,
+		double Height = 180.0, const FName& Anchor = NAME_None)
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		FHFFixture Blocker = MakeFixture(TEXT("F_Blocker"), EHFFixtureType::Refrigerator, Position);
+		Blocker.Footprint = Footprint;
+		Blocker.Height = Height;
+		Blocker.AnchorWallId = Anchor;
+		Spec.Fixtures.Add(Blocker);
+
+		return Spec;
+	};
+
+	// The reference flat's defect in miniature: a tall box standing clear of the wall, square in
+	// front of the doorway, anchored to nothing. The old rule could not see this at all - the
+	// fixture never touches the door's wall and never names it.
+	{
+		FHFHouseSpec Spec = SpecWithBlocker(FVector2D(200.0, 45.0), FVector2D(70.0, 70.0));
+		ExpectIssue(*this, Spec, TEXT("DoorwayNotClear"), EHFValidationSeverity::Error);
+
+		// And the rule it slipped past still does not see it, which is the point of splitting them.
+		TestFalse(TEXT("The window rule does not claim this one"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("OpeningBlockedByFixture")));
+	}
+
+	// Anchored to a PERPENDICULAR wall, which is how the refrigerator was declared. The anchor gate
+	// admits a fixture that names this wall; naming another one must not buy it a pass.
+	ExpectIssue(*this, SpecWithBlocker(FVector2D(200.0, 45.0), FVector2D(70.0, 70.0), 180.0, TEXT("W_East")),
+		TEXT("DoorwayNotClear"), EHFValidationSeverity::Error);
+
+	// The same fixture, twice, to show that what counts is WHERE the gap falls rather than how much
+	// is covered. A 30-wide box across the middle of a 90 door leaves two 30 slots and is a wall; the
+	// identical box at the end of the same door leaves 75 unbroken and is furniture.
+	//
+	// This is why the rule measures the widest remaining run and not the overlap. One that fired on
+	// any overlap at all would report the reference flat's shoe rack, 44 cm back and clipping the
+	// last 22 cm of a doorway with 67 clear beside it, and reports nobody can act on stop being read.
+	ExpectIssue(*this, SpecWithBlocker(FVector2D(200.0, 45.0), FVector2D(30.0, 70.0)),
+		TEXT("DoorwayNotClear"), EHFValidationSeverity::Error);
+
+	TestFalse(TEXT("The same box at the end of the doorway leaves a walkable width"),
+		FHFSpecValidator::Validate(SpecWithBlocker(FVector2D(245.0, 45.0), FVector2D(30.0, 70.0)))
+			.Contains(TEXT("DoorwayNotClear")));
+
+	// Far enough back to be furniture rather than an obstruction. The default approach depth is 75,
+	// and the wall face is at 5.75, so a fixture whose near face is beyond 80.75 is out of the strip.
+	TestFalse(TEXT("A fixture beyond the approach depth is not reported"),
+		FHFSpecValidator::Validate(SpecWithBlocker(FVector2D(200.0, 150.0), FVector2D(70.0, 70.0)))
+			.Contains(TEXT("DoorwayNotClear")));
+
+	// Above the door head. A pelmet or a high-level cupboard over a doorway is normal construction.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+		FHFFixture Overhead = MakeFixture(TEXT("F_Overhead"), EHFFixtureType::KitchenWallCabinet,
+			FVector2D(200.0, 45.0));
+		Overhead.Footprint = FVector2D(70.0, 70.0);
+		Overhead.BaseZ = 215.0;
+		Overhead.Height = 60.0;
+		Spec.Fixtures.Add(Overhead);
+
+		TestFalse(TEXT("A fixture above the door head is not in the doorway"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("DoorwayNotClear")));
+	}
+
+	// Both limits are project figures rather than constants, and each has to be shown to bite.
+	{
+		const FHFHouseSpec Spec = SpecWithBlocker(FVector2D(200.0, 45.0), FVector2D(30.0, 70.0));
+
+		// A project willing to accept a 30 cm squeeze can say so.
+		FHFValidationLimits Lenient;
+		Lenient.MinClearPassageCm = 25.0;
+		TestFalse(TEXT("A lower minimum passage lets the same spec through"),
+			FHFSpecValidator::Validate(Spec, Lenient).Contains(TEXT("DoorwayNotClear")));
+
+		// And a project that only counts what is hard against the wall can say that too, which is
+		// the old behaviour and proves the approach depth is what admits this fixture at all.
+		FHFValidationLimits NoApproach;
+		NoApproach.DoorApproachDepthCm = 0.0;
+		TestFalse(TEXT("A zero approach depth stops seeing a fixture standing off the wall"),
+			FHFSpecValidator::Validate(Spec, NoApproach).Contains(TEXT("DoorwayNotClear")));
+	}
+
+	// And the flat itself, which is the assertion that matters.
+	TestFalse(TEXT("Every doorway in the reference flat is walkable"),
+		FHFSpecValidator::Validate(FHFSampleHouse::Make2BHK()).Contains(TEXT("DoorwayNotClear")));
+
+	return true;
+}
+
+/**
+ * And can the leaf get past.
+ *
+ * A doorway can measure perfectly and still not open. D_CBath in the reference flat left 675 of its
+ * 750 clear - no width rule could ever have complained - but the WC reached 7.5 cm past the hinge
+ * jamb into the quadrant the leaf sweeps, and the door fouled it at 56 degrees and lay across it at
+ * 90. SwingBlocked did not catch it either: that rule asks where the leaf's TIP lands, and the tip
+ * lands in open floor on the far side of the pan.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorSwingArcTest,
+	"HouseForge.Validation.DoorLeafSweepsClear", HF_TEST_FLAGS)
+
+bool FHFValidatorSwingArcTest::RunTest(const FString& Parameters)
+{
+	// The door is 90 wide, centred at 200 on the south wall, InwardLeft - so it hinges at 155 and
+	// sweeps the quadrant x 155..245, y 0..90.
+	auto SpecWithFixtureAt = [](const FVector2D& Position, const FVector2D& Footprint)
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		FHFFixture Fitting = MakeFixture(TEXT("F_WC"), EHFFixtureType::WC, Position);
+		Fitting.Footprint = Footprint;
+		Fitting.Height = 40.0;
+		Spec.Fixtures.Add(Fitting);
+
+		return Spec;
+	};
+
+	// Reaching 4 cm past the hinge jamb, which is the D_CBath case almost to scale: nearly all of the
+	// fitting is behind the hinge and out of the way, and the sliver that is not stops the door.
+	ExpectIssue(*this, SpecWithFixtureAt(FVector2D(140.0, 40.0), FVector2D(38.0, 60.0)),
+		TEXT("DoorSwingHitsFixture"), EHFValidationSeverity::Error);
+
+	// Pulled 21 cm west so it is wholly behind the hinge, and the same fitting is fine. The margin
+	// between these two is the whole rule - a width check cannot tell them apart, because neither
+	// takes a millimetre off the doorway itself.
+	TestFalse(TEXT("A fitting behind the hinge is not in the arc"),
+		FHFSpecValidator::Validate(SpecWithFixtureAt(FVector2D(119.0, 40.0), FVector2D(38.0, 60.0)))
+			.Contains(TEXT("DoorSwingHitsFixture")));
+
+	TestFalse(TEXT("And neither fitting touches the doorway's own width"),
+		FHFSpecValidator::Validate(SpecWithFixtureAt(FVector2D(140.0, 40.0), FVector2D(38.0, 60.0)))
+			.Contains(TEXT("DoorwayNotClear")));
+
+	// Beyond the leaf's reach. The arc is only as deep as the door is wide, so a fitting at 100 from
+	// a 90 leaf is clear - the rule must not simply report everything near the door.
+	TestFalse(TEXT("A fitting beyond the leaf's reach is not in the arc"),
+		FHFSpecValidator::Validate(SpecWithFixtureAt(FVector2D(200.0, 130.0), FVector2D(38.0, 30.0)))
+			.Contains(TEXT("DoorSwingHitsFixture")));
+
+	// Straight in front of the door, well inside the quadrant.
+	ExpectIssue(*this, SpecWithFixtureAt(FVector2D(200.0, 50.0), FVector2D(38.0, 60.0)),
+		TEXT("DoorSwingHitsFixture"), EHFValidationSeverity::Error);
+
+	// A sliding door does not sweep, so nothing standing beside it is a swing problem.
+	{
+		FHFHouseSpec Spec = SpecWithFixtureAt(FVector2D(135.0, 40.0), FVector2D(38.0, 60.0));
+		Spec.Openings[0].Kind = EHFOpeningKind::SlidingDoor;
+		Spec.Openings[0].Swing = EHFSwing::None;
+
+		TestFalse(TEXT("A sliding door has no arc to block"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("DoorSwingHitsFixture")));
+	}
+
+	// And the flat.
+	TestFalse(TEXT("Every door leaf in the reference flat sweeps clear"),
+		FHFSpecValidator::Validate(FHFSampleHouse::Make2BHK()).Contains(TEXT("DoorSwingHitsFixture")));
+
+	return true;
+}
+
+/**
+ * A fixture built into the frame.
+ *
+ * Nothing compared a fixture with a column or a beam - the column rule looks at columns against
+ * openings, the overlap rule at fixtures against each other, and the articulation sweep builds
+ * column and beam solids but only sweeps the moving parts of OPENINGS against them. So the utility's
+ * 300 mm extract fan had 125 x 45 of itself cored through COL_N1, and both bathroom fans sat 100 mm
+ * up inside BM_Mid_Upper, and nothing said a word.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorFixtureStructureTest,
+	"HouseForge.Validation.FixtureClashesWithStructure", HF_TEST_FLAGS)
+
+bool FHFValidatorFixtureStructureTest::RunTest(const FString& Parameters)
+{
+	auto SpecWithFanAt = [](const FVector2D& Position, double BaseZ)
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		FHFFixture Fan = MakeFixture(TEXT("F_Fan"), EHFFixtureType::ExhaustFan, Position);
+		Fan.Footprint = FVector2D(30.0, 10.0);
+		Fan.Height = 30.0;
+		Fan.BaseZ = BaseZ;
+		Spec.Fixtures.Add(Fan);
+
+		FHFColumn Column;
+		Column.Id = TEXT("COL_1");
+		Column.Position = FVector2D(200.0, 150.0);
+		Column.Size = FVector2D(45.0, 23.0);
+		Column.Height = 300.0;
+		Spec.Columns.Add(Column);
+
+		FHFBeam Beam;
+		Beam.Id = TEXT("BM_1");
+		Beam.Start = FVector2D(0.0, 300.0);
+		Beam.End = FVector2D(400.0, 300.0);
+		Beam.Width = 23.0;
+		Beam.Depth = 45.0;
+		Beam.SoffitZ = 300.0;
+		Spec.Beams.Add(Beam);
+
+		return Spec;
+	};
+
+	// Through the column: an error, because nobody cores an RCC column for a duct.
+	{
+		FHFHouseSpec Spec = SpecWithFanAt(FVector2D(200.0, 150.0), 220.0);
+		ExpectIssue(*this, Spec, TEXT("FixtureClashesWithStructure"), EHFValidationSeverity::Error);
+
+		const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
+		const FHFValidationIssue* Issue = Result.Issues.FindByPredicate(
+			[](const FHFValidationIssue& I) { return I.Code == TEXT("FixtureClashesWithStructure"); });
+		if (TestNotNull(TEXT("The clash is reported"), Issue))
+		{
+			TestTrue(TEXT("The message names the column"), Issue->Message.Contains(TEXT("COL_1")));
+		}
+	}
+
+	// Into the beam: a warning, because services are dropped under one all the time and a bulkhead
+	// can take them. The beam occupies z 255..300 at y 288.5..311.5.
+	ExpectIssue(*this, SpecWithFanAt(FVector2D(200.0, 300.0), 260.0),
+		TEXT("FixtureClashesWithStructure"), EHFValidationSeverity::Warning);
+
+	// Under the beam rather than in it, which is where a fan belongs.
+	TestFalse(TEXT("A fixture below the beam soffit is not a clash"),
+		FHFSpecValidator::Validate(SpecWithFanAt(FVector2D(200.0, 300.0), 220.0))
+			.Contains(TEXT("FixtureClashesWithStructure")));
+
+	// Beside the column, at the same height. Touching is not overlapping: the column spans
+	// x 177.5..222.5, so a 30-wide fan centred at 240 shares no ground with it.
+	TestFalse(TEXT("A fixture beside the column is not a clash"),
+		FHFSpecValidator::Validate(SpecWithFanAt(FVector2D(240.0, 150.0), 220.0))
+			.Contains(TEXT("FixtureClashesWithStructure")));
+
+	// And the flat, which had three of these in it.
+	TestFalse(TEXT("Nothing in the reference flat is built into the frame"),
+		FHFSpecValidator::Validate(FHFSampleHouse::Make2BHK()).Contains(TEXT("FixtureClashesWithStructure")));
+
+	return true;
+}
+
+/**
+ * Headroom is a centimetre figure and a spec is in whatever it declares.
+ *
+ * MinHeadroomCm was compared against raw spec coordinates. On the millimetre spec this plugin's
+ * reference flat is written in, that asked whether a beam left less than 21 cm beneath it - so the
+ * rule never fired, on any millimetre drawing, ever. On a metre spec it fired on every ceiling in
+ * the file. The shipped test passed because its spec was in centimetres, which is the one unit where
+ * the bug is invisible.
+ *
+ * Built in all three units from the same physical room, so the assertion is that the report does not
+ * depend on the unit it was drawn in.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorHeadroomUnitsTest,
+	"HouseForge.Validation.HeadroomIsUnitIndependent", HF_TEST_FLAGS)
+
+bool FHFValidatorHeadroomUnitsTest::RunTest(const FString& Parameters)
+{
+	// One room, 3 m walls, with a false ceiling dropped by the given number of centimetres.
+	auto MakeRoom = [](EHFUnits Units, double Scale, double CeilingDropCm)
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Units = Units;
+
+		for (FHFWall& Wall : Spec.Walls)
+		{
+			Wall.Start *= Scale;
+			Wall.End *= Scale;
+			Wall.Thickness *= Scale;
+			Wall.Height *= Scale;
+		}
+		for (FHFOpening& Opening : Spec.Openings)
+		{
+			Opening.OffsetAlongWall *= Scale;
+			Opening.Width *= Scale;
+			Opening.Height *= Scale;
+		}
+		for (FHFRoom& Room : Spec.Rooms)
+		{
+			for (FVector2D& Point : Room.Boundary)
+			{
+				Point *= Scale;
+			}
+			Room.CeilingHeight *= Scale;
+			Room.SkirtingHeight *= Scale;
+		}
+		Spec.DefaultWallThickness *= Scale;
+		Spec.DefaultWallHeight *= Scale;
+
+		FHFFalseCeiling Ceiling;
+		Ceiling.Id = TEXT("FC_1");
+		Ceiling.RoomId = TEXT("R_Bedroom");
+		Ceiling.Style = EHFCeilingStyle::FullDrop;
+		Ceiling.Drop = CeilingDropCm * Scale;
+		Spec.FalseCeilings.Add(Ceiling);
+
+		return Spec;
+	};
+
+	struct FCase
+	{
+		EHFUnits Units;
+		double Scale;
+		const TCHAR* Name;
+	};
+
+	const FCase Cases[] = {
+		{ EHFUnits::Centimeters, 1.0,   TEXT("centimetres") },
+		{ EHFUnits::Millimeters, 10.0,  TEXT("millimetres") },
+		{ EHFUnits::Meters,      0.01,  TEXT("metres") },
+	};
+
+	for (const FCase& Case : Cases)
+	{
+		// 300 - 40 = 260 clear, comfortably over the 210 default. Nothing should be said, and on a
+		// millimetre or metre spec the old rule got this wrong in one direction or the other.
+		TestFalse(*FString::Printf(TEXT("A 260 cm ceiling is not low headroom in %s"), Case.Name),
+			FHFSpecValidator::Validate(MakeRoom(Case.Units, Case.Scale, 40.0))
+				.Contains(TEXT("LowHeadroom")));
+
+		// 300 - 120 = 180 clear, below the 210 default. This is the case a millimetre spec could
+		// never report.
+		TestTrue(*FString::Printf(TEXT("A 180 cm ceiling IS low headroom in %s"), Case.Name),
+			FHFSpecValidator::Validate(MakeRoom(Case.Units, Case.Scale, 120.0))
+				.Contains(TEXT("LowHeadroom")));
+
+		// And the same for a beam: soffit at 300, 120 deep, so 180 clear beneath it.
+		{
+			FHFHouseSpec Spec = MakeRoom(Case.Units, Case.Scale, 40.0);
+
+			FHFBeam Beam;
+			Beam.Id = TEXT("BM_Low");
+			Beam.Start = FVector2D(0.0, 300.0 * Case.Scale);
+			Beam.End = FVector2D(400.0 * Case.Scale, 300.0 * Case.Scale);
+			Beam.Width = 23.0 * Case.Scale;
+			Beam.Depth = 120.0 * Case.Scale;
+			Beam.SoffitZ = 300.0 * Case.Scale;
+			Spec.Beams.Add(Beam);
+
+			TestTrue(*FString::Printf(TEXT("A beam leaving 180 cm IS low headroom in %s"), Case.Name),
+				FHFSpecValidator::Validate(Spec).Contains(TEXT("BeamLowHeadroom")));
+		}
+
+		// The project figure still governs: raise the floor to 270 and the comfortable room reports.
+		{
+			FHFValidationLimits Tall;
+			Tall.MinHeadroomCm = 270.0;
+
+			TestTrue(*FString::Printf(TEXT("Raising the limit reports the 260 cm ceiling in %s"), Case.Name),
+				FHFSpecValidator::Validate(MakeRoom(Case.Units, Case.Scale, 40.0), Tall)
+					.Contains(TEXT("LowHeadroom")));
+		}
+	}
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -956,6 +956,112 @@ struct HOUSEFORGE_API FHFDrawerBankParams
 };
 
 /**
+ * The box everything else in this kit is specified against.
+ *
+ * THE DATUM. Every other part here documents itself against "the carcass front plane", and until now
+ * that plane existed only in test code - the composition tests laid up a carcass by hand out of
+ * boards, and no production caller could reach it. This is that carcass, lifted out of
+ * HFJoineryCompositionTests unchanged so the clearances those tests measure keep measuring the same
+ * thing.
+ *
+ * Centimetres, in the carcass's own local space: the origin lies at the bottom-front-left corner of
+ * the carcass footprint, +X runs along the run, +Y runs back into the unit, +Z is up. Y = 0 IS THE
+ * CARCASS FRONT PLANE, which is what lets a plinth, a shelf stack, a shutter and a drawer all be
+ * placed in this frame without re-basing anything.
+ *
+ * The bottom of the box is Z = 0 rather than the top of a plinth. A carcass does not know what it
+ * stands on - it might be a plinth, a wall bracket, or the carcass below it in a tall unit - so the
+ * composer translates it up by whatever that is. That is one addition at the call site and it is the
+ * difference between a generator that can be reused and one that has a plinth built into it.
+ *
+ * ## Construction
+ *
+ * Sides run the full height and the full depth. Top and bottom run BETWEEN the sides. The back sits
+ * behind both, in the last BackThickness of depth. Mid partitions are butted between the top and the
+ * bottom and stop at the back panel's inner face.
+ *
+ * Butted rather than lapped, exactly as it is on the bench, and that is not cosmetic: overlapping
+ * boards would occupy the same space twice, put a false volume on any quantity taken off the model,
+ * and give every interpenetration measurement in the composition tests a baseline to hide inside.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFCarcassParams
+{
+	GENERATED_BODY()
+
+	/** Overall width of the box, along +X. Bays divide this, not the clear width inside it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double Width = 0.0;
+
+	/** Front plane to the back of the back panel, along +Y. 60 for a wardrobe, 58 for a base unit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double Depth = 0.0;
+
+	/** Overall height of the box. What it stands on is the composer's business, not the carcass's. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double Height = 0.0;
+
+	/** Sides, top, bottom and partitions. 18 mm BWP ply is what this joinery is built from. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double BoardThickness = 1.8;
+
+	/**
+	 * The back panel, which is genuinely a different board from the rest.
+	 *
+	 * A carcass back is 6 to 12 mm ply pinned into a rebate, not the 18 the sides are cut from - it
+	 * carries nothing but itself. Kept separate rather than folded into BoardThickness because it is
+	 * the one figure that changes the CLEAR DEPTH a shelf and a hanging rail get, and a wardrobe built
+	 * with an 18 mm back is 12 mm shallower inside than the one that was ordered.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double BackThickness = 1.8;
+
+	/**
+	 * Bays the run is divided into, by mid partitions on the internal boundaries.
+	 *
+	 * The bays are equal divisions of the OVERALL width, so bay N's module is the bay a shutter
+	 * closes and the two are set out from the same number. Dividing the clear width instead would
+	 * leave the shutters a partition's thickness out of step with the boxes behind them, and the
+	 * error only shows once a run is placed next to another one.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "1", ClampMax = "12"))
+	int32 BayCount = 1;
+
+	/** A back panel. Off for a unit built against a finished wall that is itself the back. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	bool bHasBack = true;
+
+	/** Bays, never less than one: a carcass with no bay is a carcass with one. */
+	int32 Bays() const { return FMath::Max(1, BayCount); }
+
+	/** Width of one bay's module - what a shutter closes and what a drawer front is cut to. */
+	double ModuleWidth() const { return Width / static_cast<double>(Bays()); }
+
+	/** Inner face of the back panel: how far back the inside of the carcass actually goes. */
+	double BackFaceY() const { return bHasBack ? Depth - BackThickness : Depth; }
+
+	/** Clear height between the bottom and the top boards. */
+	double ClearHeight() const { return Height - 2.0 * BoardThickness; }
+
+	/**
+	 * Bottom-left corner of a bay's module, on the front plane, in carcass-local space.
+	 *
+	 * The frame a shutter's pivot and a drawer's module are expressed in. Placing either is this plus
+	 * wherever the composer has put the carcass, and nothing else.
+	 */
+	FVector ModuleOrigin(int32 Bay) const
+	{
+		return FVector(FMath::Clamp(Bay, 0, Bays() - 1) * ModuleWidth(), 0.0, 0.0);
+	}
+
+	/** False when the parameters do not describe a box that can be built. */
+	bool IsValid() const
+	{
+		return Width > 0.0 && Depth > 0.0 && Height > 0.0 && BoardThickness > 0.0;
+	}
+};
+
+/**
  * Shared sub-generators for joinery: the pieces every cabinet is assembled from.
  *
  * Pure like every other generator - parameters in, FDynamicMesh3 out, no world, no actor, no asset
@@ -1035,7 +1141,7 @@ public:
 	 * @param ShelfThickness Zero to assume 18 ply.
 	 * @param MinCompartment Smallest compartment worth leaving. Zero takes MinUsefulCompartment.
 	 */
-	static int32 ShelfCountForClearHeight(double ClearHeight, double TargetSpacing = 37.5,
+	static int32 ShelfCountForClearHeight(double ClearHeight, double TargetSpacing = DefaultTargetShelfSpacing,
 		double ShelfThickness = 0.0, double MinCompartment = 0.0);
 
 	/** 1.8 for ply, 0.8 for toughened glass, unless the project says otherwise. */
@@ -1497,4 +1603,43 @@ public:
 	 */
 	static bool BuildDrawerBank(const FHFDrawerBankParams& Bank, TArray<FHFMeshPart>& OutParts,
 		UE::Geometry::FDynamicMesh3* OutFixedMounts = nullptr);
+
+	// --------------------------------------------------------------------------------- carcasses
+	//
+	// The box the rest of the kit is specified against. Nothing in a carcass moves, so it is not a
+	// part: it goes into the fixed mesh of whatever element owns it, and the shutters, drawers and
+	// shelves are placed in the frame it establishes.
+	//
+	// Everything a composer needs to place those is answered off FHFCarcassParams itself - the module
+	// origin, the module width, the clear depth, the clear height - so a caller never re-derives them
+	// from board thicknesses and never gets a partition's thickness out of step with the leaves in
+	// front of it.
+
+	/** The parameters actually used, clamped so the box they describe can be built. */
+	static FHFCarcassParams SanitiseCarcass(const FHFCarcassParams& Params);
+
+	/**
+	 * A carcass, in the local space described by FHFCarcassParams, with roles and UVs applied.
+	 *
+	 * Sides, top, bottom, back and the mid partitions between the bays - butted, not lapped, so the
+	 * mesh contains the board the carcass is really made of. This is the hand-laid carcass out of
+	 * HFJoineryCompositionTests, made reachable: at the composition's own figures it produces the same
+	 * boards in the same places, which is what keeps those tests measuring what they were written to.
+	 *
+	 * @return An empty mesh when the parameters describe no box, never a degenerate one.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateCarcass(const FHFCarcassParams& Params);
+
+	/**
+	 * The clear volume inside one bay: what a shelf stack fills and a drawer bank has to fit within.
+	 *
+	 * In carcass-local space, so it can be handed straight to a shelf stack's placement. Bounded by
+	 * the sides or the partitions either side of the bay, by the top and bottom boards, and at the
+	 * back by the back panel's inner face - the front stays open at Y = 0, because a bay's front is
+	 * where the shutter goes and is not part of the clear volume.
+	 *
+	 * @return An invalid box when the bay has no clear volume - a carcass whose partitions have eaten
+	 *         it - which a caller must check rather than placing shelves in a negative space.
+	 */
+	static FBox CarcassBayClearVolume(const FHFCarcassParams& Params, int32 Bay);
 };
