@@ -120,6 +120,11 @@ public:
 	 * This is the tool to compare against the source drawing. It is a section, not a view of the
 	 * roof, so walls read as walls, doorways as gaps and rooms as rooms. The house is not modified.
 	 * Works with the editor window minimised or covered.
+	 *
+	 * ORIENTATION: world +X runs right across the image and world +Y runs DOWN it. The drawing
+	 * sheets under Reference/Drawings are laid out with +Y UP, so a captured plan and a drawing
+	 * sheet of the same flat are mirrored vertically. Compare accordingly - a room that is
+	 * top-left on the sheet is bottom-left here.
 	 * @param FileName Output file name.
 	 * @param Resolution Longest edge in pixels. The short edge follows the plan's proportions.
 	 * @param SectionHeightCm Height of the cut. Leave at 0 for 120 cm, which is where plans are cut.

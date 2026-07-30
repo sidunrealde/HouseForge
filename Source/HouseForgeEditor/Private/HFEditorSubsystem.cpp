@@ -764,10 +764,9 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 	Request.bOrthographic = true;
 	Request.OrthoWidth = WorldWidth;
 
-	// Straight down, from above everything in the section. Yaw -90 puts world +X across the image
-	// and world +Y up it, which is the orientation the drawing set is laid out in - a plan that
-	// disagrees with the drawing it is meant to be compared against is worse than no plan.
-	Request.Rotation = FRotator(-90.0f, -90.0f, 0.0f);
+	// Straight down, from above everything in the section. See FHFPlanSection::PlanCameraRotation
+	// for why this puts world +Y DOWN the image and why that is not flipped afterwards.
+	Request.Rotation = FHFPlanSection::PlanCameraRotation();
 	Request.Location = FVector(Centre.X, Centre.Y, Bounds.Max.Z + 500.0);
 
 	Request.Width = ImageSize.X;
@@ -789,8 +788,13 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 
 	OutPath = Request.OutputPath;
 
+	// The orientation is part of the answer, not trivia. A plan is captured in order to be
+	// compared against a drawing, the drawing sheets run +Y up the page, and this runs +Y down -
+	// so a reader who does not know that will conclude the flat was built mirrored.
 	return FHFOperationResult::Ok(FString::Printf(
-		TEXT("Captured a %dx%d plan, sectioned at %.0f cm, spanning %.0f x %.0f cm, to %s"),
+		TEXT("Captured a %dx%d plan, sectioned at %.0f cm, spanning %.0f x %.0f cm, to %s. ")
+		TEXT("World +X runs right across the image and world +Y runs DOWN it; the drawing sheets in ")
+		TEXT("Reference/Drawings are laid out with +Y UP, so the two are mirrored vertically."),
 		Written.X, Written.Y, CutZ, WorldWidth, WorldHeight, *OutPath));
 }
 

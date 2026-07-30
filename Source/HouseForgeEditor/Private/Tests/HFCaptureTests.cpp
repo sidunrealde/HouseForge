@@ -455,6 +455,68 @@ bool FHFCaptureNeedsNoViewportTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * The plan is oriented the way its own message claims, and that orientation mirrors the drawings.
+ *
+ * This exists because the fact is surprising enough to be "corrected" by somebody who has not
+ * measured it. A camera's screen axes satisfy Forward x Right = Up, so a camera looking straight
+ * down with its right vector on world +X necessarily has an up vector of world -Y. The only other
+ * rotation available puts +Y up and +X to the LEFT - a horizontal mirror in place of a vertical
+ * one. There is no rotation that agrees with an architectural sheet.
+ *
+ * And the sheets do disagree: Scripts/gen_sample_drawings.py maps plan millimetres to the page
+ * "flipping Y so north is up". So a captured plan and a drawing sheet of the same flat are mirror
+ * images, and the capture says so in its result rather than flipping the pixels. Flipping would
+ * make the plan agree with the sheet and disagree with every perspective view of the same level,
+ * which is a worse failure than an honest mirror: it would hide the disagreement instead of
+ * reporting it.
+ *
+ * So this asserts the axes, and it asserts that the message tells the reader about them.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCapturePlanOrientationTest,
+	"HouseForge.Capture.APlanIsOrientedTheWayItSays", HF_TEST_FLAGS)
+
+bool FHFCapturePlanOrientationTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeCapture;
+
+	const FRotator Plan = FHFPlanSection::PlanCameraRotation();
+	const FVector Forward = Plan.Vector();
+	const FVector Right = FRotationMatrix(Plan).GetScaledAxis(EAxis::Y);
+	const FVector Up = FRotationMatrix(Plan).GetScaledAxis(EAxis::Z);
+
+	TestTrue(TEXT("The plan camera looks straight down"),
+		Forward.Equals(FVector(0.0, 0.0, -1.0), 0.001));
+	TestTrue(TEXT("World +X runs right across the image"),
+		Right.Equals(FVector(1.0, 0.0, 0.0), 0.001));
+	TestTrue(TEXT("Which forces world +Y to run DOWN the image, mirroring the drawing sheets"),
+		Up.Equals(FVector(0.0, -1.0, 0.0), 0.001));
+
+	// A camera cannot do better than this, and the arithmetic says so: the cross product that
+	// defines a camera's basis leaves no third option.
+	TestTrue(TEXT("The camera basis is the one the cross product forces, not a preference"),
+		FVector::CrossProduct(Forward, Right).Equals(Up, 0.001));
+
+	// And the reader is told. A mirrored plan that does not announce itself is how somebody
+	// concludes the flat was built back to front.
+	UHFEditorSubsystem* Editor = Subsystem();
+	if (!TestNotNull(TEXT("There is a subsystem"), Editor) || !TestNotNull(TEXT("The test flat was built"), BuildFlat(*this)))
+	{
+		return false;
+	}
+
+	FString Out;
+	const FHFOperationResult Result = Editor->CaptureTopDown(TEXT("HFTest_Orientation"), 256, 0.0, Out);
+
+	if (Result.bSuccess)
+	{
+		TestTrue(TEXT("The result says which way the image is oriented"),
+			Result.Message.Contains(TEXT("mirrored")) && Result.Message.Contains(TEXT("+Y")));
+	}
+
+	return true;
+}
+
+/**
  * A view of nowhere is refused rather than rendered.
  *
  * A camera and its target in the same place has no direction to look in, and FVector::Rotation of a
