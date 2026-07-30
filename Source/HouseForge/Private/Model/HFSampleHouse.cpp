@@ -15,13 +15,13 @@ namespace
 	// keeps the numbers legible on the drawings.
 
 	constexpr double X0 = 0.0;			// west external
-	constexpr double X1 = 1800.0;		// foyer | corridor
-	constexpr double X2 = 4200.0;		// corridor | common bath, and kitchen | master bedroom
-	constexpr double X3 = 6600.0;		// living | bedroom 2, and common bath | master bath
-	constexpr double X4 = 8700.0;		// master bath | utility
+	constexpr double X1 = 1800.0;		// foyer | common bath
+	constexpr double X2 = 4200.0;		// common bath | corridor, and kitchen | master bedroom
+	constexpr double X3 = 6600.0;		// living | bedroom 2
+	constexpr double X4 = 8100.0;		// corridor | master bath
 	constexpr double X5 = 10800.0;		// east external
 
-	constexpr double XE = 12300.0;		// east balcony (utility wash area) parapet
+	constexpr double XE = 12300.0;		// east balcony (wash area) parapet
 
 	constexpr double YB = -1500.0;		// south balcony parapet
 	constexpr double YN = 9900.0;		// north balcony parapet
@@ -29,6 +29,25 @@ namespace
 	constexpr double Y1 = 3600.0;		// living/bedroom2 | service band
 	constexpr double Y2 = 5400.0;		// service band | kitchen/master bedroom
 	constexpr double Y3 = 8400.0;		// north external
+
+	// The utility, carved out of the kitchen's north-east corner. Both lines land on the 300 module
+	// the rest of the plan is set out on.
+	constexpr double XU = 3000.0;		// kitchen | utility
+	constexpr double YU = 6600.0;		// kitchen | utility
+
+	// -------------------------------------------------------------------- why the band is cut here
+	// The service band (Y 3600..5400) used to read foyer | corridor | common bath | master bath |
+	// utility, and it could not work. Both bedrooms front this band, and with the corridor only
+	// 1800..4200 neither bedroom had a corridor wall to hang its door on: D_Bed2 opened bedroom 2
+	// into the master bathroom and D_MBed opened the master bedroom into the common one. The
+	// bathroom fittings standing in those doorways were where a bathroom's fittings belong.
+	//
+	// Bedroom 2 starts at X 6600 and COL_M1's east face is at 6825, so a 900 door needs the corridor
+	// to reach about 8100. The corridor cannot start east of 4200 without sealing the foyer off. That
+	// is a 3900 corridor, which leaves 5100 of band for what used to be three wet rooms - enough for
+	// two. So one room leaves the band, and it is the utility, because a utility belongs off the
+	// kitchen anyway. The band is now foyer | common bath | corridor | master bath, every door opens
+	// into the room it serves, and nothing swings into the corridor at all.
 
 	constexpr double ExternalThickness = 230.0;
 	constexpr double InternalThickness = 115.0;
@@ -41,8 +60,18 @@ namespace
 	constexpr double DoorHeight    = 2100.0;
 	constexpr double MainDoorWidth = 1050.0;
 
-	constexpr double WindowHeight = 1350.0;
+	// 1200 on a 900 sill puts every window head on 2100, which is the door head, and that is how
+	// Indian practice sets a flat out - one line round the whole plan that the pelmets, the wall
+	// units and the false ceiling all measure from. At 1350 the four habitable-room windows sat 150
+	// above the door heads for no reason anybody could point at, and only the kitchen window - which
+	// had to be worked out from its worktop - was on the line.
+	constexpr double WindowHeight = 1200.0;
 	constexpr double WindowSill   = 900.0;
+	constexpr double HeadHeight   = 2100.0;	// door head, and every window head with it
+
+	static_assert(DoorHeight == HeadHeight, "Door heads define the head line; keep them on it.");
+	static_assert(WindowSill + WindowHeight == HeadHeight,
+		"Window heads line up with the door heads. Change the sill and the height together.");
 
 	struct FSampleBuilder
 	{
@@ -107,25 +136,36 @@ namespace
 			AddOpening(Id, WallId, Offset, Width, Height, Sill, Kind);
 		}
 
-		/** Rooms in this plan are all rectangles, so a corner pair is enough to describe them. */
-		void AddRoom(const FName& Id, const FString& Name, EHFRoomType Type,
-			double MinX, double MinY, double MaxX, double MaxY,
-			double SkirtingHeight = 100.0)
+		/**
+		 * A room from its boundary, counter-clockwise. The closing edge is implicit.
+		 *
+		 * Every room here is a rectangle except the kitchen, which lost its north-east corner to the
+		 * utility and is now an L.
+		 */
+		FHFRoom& AddRoomPoly(const FName& Id, const FString& Name, EHFRoomType Type,
+			const TArray<FVector2D>& Boundary, double SkirtingHeight = 100.0)
 		{
 			FHFRoom Room;
 			Room.Id = Id;
 			Room.Name = Name;
 			Room.Type = Type;
-			// Counter-clockwise; the closing edge is implicit.
-			Room.Boundary = {
+			Room.Boundary = Boundary;
+			Room.CeilingHeight = WallHeight;
+			Room.SkirtingHeight = SkirtingHeight;
+			return Spec.Rooms.Add_GetRef(Room);
+		}
+
+		/** A rectangular room, from a corner pair. */
+		FHFRoom& AddRoom(const FName& Id, const FString& Name, EHFRoomType Type,
+			double MinX, double MinY, double MaxX, double MaxY,
+			double SkirtingHeight = 100.0)
+		{
+			return AddRoomPoly(Id, Name, Type, {
 				FVector2D(MinX, MinY),
 				FVector2D(MaxX, MinY),
 				FVector2D(MaxX, MaxY),
 				FVector2D(MinX, MaxY)
-			};
-			Room.CeilingHeight = WallHeight;
-			Room.SkirtingHeight = SkirtingHeight;
-			Spec.Rooms.Add(Room);
+			}, SkirtingHeight);
 		}
 
 		void AddCeiling(const FName& Id, const FName& RoomId, EHFCeilingStyle Style,
@@ -213,14 +253,18 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// Vertical internal partitions, south band.
 	B.AddWall(TEXT("W_Living_Bed2"), FVector2D(X3, Y0), FVector2D(X3, Y1), false);
 
-	// Vertical internal partitions, service band.
-	B.AddWall(TEXT("W_Foyer_Corr"),  FVector2D(X1, Y1), FVector2D(X1, Y2), false);
-	B.AddWall(TEXT("W_Corr_CBath"),  FVector2D(X2, Y1), FVector2D(X2, Y2), false);
-	B.AddWall(TEXT("W_CBath_MBath"), FVector2D(X3, Y1), FVector2D(X3, Y2), false);
-	B.AddWall(TEXT("W_MBath_Util"),  FVector2D(X4, Y1), FVector2D(X4, Y2), false);
+	// Vertical internal partitions, service band: foyer | common bath | corridor | master bath.
+	B.AddWall(TEXT("W_Foyer_CBath"), FVector2D(X1, Y1), FVector2D(X1, Y2), false);
+	B.AddWall(TEXT("W_CBath_Corr"),  FVector2D(X2, Y1), FVector2D(X2, Y2), false);
+	B.AddWall(TEXT("W_Corr_MBath"),  FVector2D(X4, Y1), FVector2D(X4, Y2), false);
 
 	// Vertical internal partition, north band.
 	B.AddWall(TEXT("W_Kitchen_MBed"), FVector2D(X2, Y2), FVector2D(X2, Y3), false);
+
+	// The utility, boxed out of the kitchen's north-east corner. Two partitions, no beam: neither
+	// line is load bearing, and BM_Kitchen_MBed already runs down X2 beside it.
+	B.AddWall(TEXT("W_Kitchen_Util"),   FVector2D(XU, YU), FVector2D(XU, Y3), false);
+	B.AddWall(TEXT("W_Kitchen_Util_S"), FVector2D(XU, YU), FVector2D(X2, YU), false);
 
 	// Balcony parapets. Three balconies: living (south), master bedroom (north) and a wash area
 	// off the utility (east), which is the usual arrangement in a flat of this size.
@@ -266,6 +310,9 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// ------------------------------------------------------------------------------ openings
 	// Main entrance, in the west wall at the foyer. W_West runs north to south from (X0,Y3), so
 	// offsets are measured down from the north-west corner.
+	//
+	// It used to be the only opening the foyer had: nothing led out of it, so no room in the flat
+	// was reachable from the front door at all. D_Foyer, below, is the way out of it.
 	B.AddOpening(TEXT("D_Main"), TEXT("W_West"), Y3 - 4500.0, MainDoorWidth, DoorHeight, 0.0,
 		EHFOpeningKind::Door, EHFSwing::InwardRight);
 
@@ -301,40 +348,72 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// 1200 x 900 on a 1200 sill is what a kitchen window is, and it puts the head on 2100 - the
 	// same line as every door head in the flat, which is the convention Indian practice follows.
 	// The wall units are split around it below.
-	B.AddWindow(TEXT("Win_Kitchen"), TEXT("W_North"), X5 - 2100.0, 1200.0,
+	//
+	// Centred on X 1800 rather than 2100: the utility now takes the kitchen's north-east corner, so
+	// the kitchen's run of north wall ends at X 3000 instead of 4200 and the window moves with the
+	// worktop under it.
+	B.AddWindow(TEXT("Win_Kitchen"), TEXT("W_North"), X5 - 1800.0, 1200.0,
 		EHFOpeningKind::SlidingWindow, /*Height*/ 900.0, /*Sill*/ 1200.0);
 
-	// Balcony access. Master bedroom to the north balcony; utility to the east wash area.
+	// The utility's own window, in the same north wall east of the kitchen's. A utility with a
+	// washing machine in it and no window is a room nobody would draw; the old one had none because
+	// it was landlocked in the service band, and moving it here is what pays for the corridor.
+	B.AddWindow(TEXT("Win_Utility"), TEXT("W_North"), X5 - 3400.0, 600.0,
+		EHFOpeningKind::SlidingWindow, /*Height*/ 900.0, /*Sill*/ 1200.0);
+
+	// Balcony access. Master bedroom to the north balcony; master bathroom to the east wash area,
+	// which the master bath now backs onto since the utility left the service band.
 	B.AddOpening(TEXT("D_BalcN"), TEXT("W_North"), X5 - 9300.0, 1800.0, 2100.0, 0.0,
 		EHFOpeningKind::SlidingDoor);
 	B.AddDoor(TEXT("D_BalcE"), TEXT("W_East"), 4500.0, EHFSwing::OutwardLeft);
-	// Ventilators sit directly on the head of each bathroom door, which is where they go when the
-	// bathroom has no external wall. Stacking them on the door rather than putting them in
-	// W_Mid_Upper also keeps them clear of the master bedroom doorway.
-	//
-	// Top-hung pivot sashes rather than fixed louvres: a bathroom with no external wall and no
-	// exhaust running needs a ventilator somebody can actually open.
-	B.AddOpening(TEXT("Vent_CBath"), TEXT("W_Corr_CBath"), 900.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
-	B.AddOpening(TEXT("Vent_MBath"), TEXT("W_CBath_MBath"), 900.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
 
-	// Internal doors. W_Mid_Lower and W_Mid_Upper both run west to east from X0.
-	B.AddDoor(TEXT("D_Living"),  TEXT("W_Mid_Lower"), 3000.0, EHFSwing::InwardLeft);
-	B.AddDoor(TEXT("D_Bed2"),    TEXT("W_Mid_Lower"), 7200.0, EHFSwing::InwardRight);
-	B.AddDoor(TEXT("D_Kitchen"), TEXT("W_Mid_Upper"), 3000.0, EHFSwing::InwardLeft);
-	B.AddDoor(TEXT("D_MBed"),    TEXT("W_Mid_Upper"), 5100.0, EHFSwing::InwardRight);
-	B.AddDoor(TEXT("D_CBath"),   TEXT("W_Corr_CBath"), 900.0, EHFSwing::InwardLeft, 750.0);
-	B.AddDoor(TEXT("D_MBath"),   TEXT("W_CBath_MBath"), 900.0, EHFSwing::InwardLeft, 750.0);
-	B.AddDoor(TEXT("D_Utility"), TEXT("W_MBath_Util"), 900.0, EHFSwing::InwardLeft, 750.0);
+	// The common bathroom is the only room in the flat with no external wall, so it keeps its
+	// ventilator: a top-hung pivot sash rather than a fixed louvre, because a bathroom with no
+	// window and no exhaust running needs one somebody can actually open. It sits directly on the
+	// head of its own door, which is where a ventilator goes when there is nowhere else for it.
+	//
+	// The master bathroom's is gone. It has D_BalcE onto the wash area now, and a ventilator into a
+	// corridor is a poor second to a door onto outside air.
+	B.AddOpening(TEXT("Vent_CBath"), TEXT("W_CBath_Corr"), 900.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
+
+	// ----------------------------------------------------------------------------- internal doors
+	// W_Mid_Lower and W_Mid_Upper both run west to east from X0, so on both of them a swing declared
+	// Inward opens north and Outward opens south, and Left hangs the leaf on the western jamb.
+	//
+	// Every one of these opens into the room it serves and none of them opens into the corridor. The
+	// two bedroom doors are hung on the jamb nearest their own side wall, so an open leaf lies flat
+	// against that wall instead of standing in the middle of the room.
+	B.AddDoor(TEXT("D_Foyer"),   TEXT("W_Mid_Lower"), 900.0,  EHFSwing::OutwardLeft, MainDoorWidth);
+	B.AddDoor(TEXT("D_Living"),  TEXT("W_Mid_Lower"), 5400.0, EHFSwing::OutwardLeft);
+	// 7400, not 7200. COL_M1 stands on the junction at (6600, 3600) where W_Living_Bed2 and
+	// W_Mid_Lower meet and BM_Living_Bed2 lands on BM_Mid_Lower, and its east face is at 6825; at
+	// 7200 the clear opening started at 6750 and the door leaf was built 75 mm inside the column.
+	// The column is not free to move - sliding it leaves a 3600 beam unsupported and puts an RCC
+	// member mid-span in the living room - and the doorway has 4200 of bedroom wall to sit anywhere
+	// in, so the doorway moved. 125 clear to the column, 192 to the corridor's east wall.
+	B.AddDoor(TEXT("D_Bed2"),    TEXT("W_Mid_Lower"), 7400.0, EHFSwing::OutwardLeft);
+	B.AddDoor(TEXT("D_Kitchen"), TEXT("W_Mid_Upper"), 1200.0, EHFSwing::InwardRight);
+	B.AddDoor(TEXT("D_MBed"),    TEXT("W_Mid_Upper"), 4850.0, EHFSwing::InwardLeft);
+	B.AddDoor(TEXT("D_MBath"),   TEXT("W_Mid_Upper"), 8700.0, EHFSwing::OutwardLeft, 750.0);
+	B.AddDoor(TEXT("D_CBath"),   TEXT("W_CBath_Corr"), 900.0, EHFSwing::InwardLeft, 750.0);
+	B.AddDoor(TEXT("D_Utility"), TEXT("W_Kitchen_Util_S"), 600.0, EHFSwing::InwardLeft, 750.0);
 
 	// --------------------------------------------------------------------------------- rooms
+	// The order matters beyond readability: the drawing generator numbers its elevation sheets from
+	// it, so the eleven committed sheet filenames follow this list. Re-order it and the set renames.
 	B.AddRoom(TEXT("R_Living"),   TEXT("Living / Dining"),  EHFRoomType::Living,        X0, Y0, X3, Y1);
 	B.AddRoom(TEXT("R_Bed2"),     TEXT("Bedroom 2"),        EHFRoomType::Bedroom,       X3, Y0, X5, Y1);
 	B.AddRoom(TEXT("R_Foyer"),    TEXT("Foyer"),            EHFRoomType::Foyer,         X0, Y1, X1, Y2);
-	B.AddRoom(TEXT("R_Corridor"), TEXT("Corridor"),         EHFRoomType::Corridor,      X1, Y1, X2, Y2);
-	B.AddRoom(TEXT("R_CBath"),    TEXT("Common Bathroom"),  EHFRoomType::Bathroom,      X2, Y1, X3, Y2, 0.0);
-	B.AddRoom(TEXT("R_MBath"),    TEXT("Master Bathroom"),  EHFRoomType::Bathroom,      X3, Y1, X4, Y2, 0.0);
-	B.AddRoom(TEXT("R_Utility"),  TEXT("Utility"),          EHFRoomType::Utility,       X4, Y1, X5, Y2, 0.0);
-	B.AddRoom(TEXT("R_Kitchen"),  TEXT("Kitchen"),          EHFRoomType::Kitchen,       X0, Y2, X2, Y3);
+	B.AddRoom(TEXT("R_Corridor"), TEXT("Corridor"),         EHFRoomType::Corridor,      X2, Y1, X4, Y2);
+	B.AddRoom(TEXT("R_CBath"),    TEXT("Common Bathroom"),  EHFRoomType::Bathroom,      X1, Y1, X2, Y2, 0.0);
+	B.AddRoom(TEXT("R_MBath"),    TEXT("Master Bathroom"),  EHFRoomType::Bathroom,      X4, Y1, X5, Y2, 0.0);
+	B.AddRoom(TEXT("R_Utility"),  TEXT("Utility"),          EHFRoomType::Utility,       XU, YU, X2, Y3, 0.0);
+	// The one room in the plan that is not a rectangle: the utility is boxed out of its north-east
+	// corner, so it wraps round it as an L. Listed counter-clockwise like every other boundary.
+	B.AddRoomPoly(TEXT("R_Kitchen"), TEXT("Kitchen"), EHFRoomType::Kitchen, {
+		FVector2D(X0, Y2), FVector2D(X2, Y2), FVector2D(X2, YU),
+		FVector2D(XU, YU), FVector2D(XU, Y3), FVector2D(X0, Y3)
+	});
 	B.AddRoom(TEXT("R_MBed"),     TEXT("Master Bedroom"),   EHFRoomType::MasterBedroom, X2, Y2, X5, Y3);
 	B.AddRoom(TEXT("R_Balcony"),   TEXT("Balcony"),           EHFRoomType::Balcony,      X0, YB, X2, Y0, 0.0);
 	B.AddRoom(TEXT("R_BalconyN"),  TEXT("Balcony 2"),         EHFRoomType::Balcony,      X3, Y3, X5, YN, 0.0);
@@ -356,10 +435,10 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		{ FVector2D(900.0, 6300.0), FVector2D(2700.0, 6300.0), FVector2D(900.0, 7800.0), FVector2D(2700.0, 7800.0) });
 
 	B.AddCeiling(TEXT("FC_CBath"), TEXT("R_CBath"), EHFCeilingStyle::FullDrop, 400.0, 0.0,
-		{ FVector2D(5400.0, 4500.0) });
+		{ FVector2D(3000.0, 4500.0) });
 
 	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 400.0, 0.0,
-		{ FVector2D(7650.0, 4500.0) });
+		{ FVector2D(9450.0, 4500.0) });
 
 	{
 		// The living room's cove leaves its centre at slab height, so the beam crossing at
@@ -386,24 +465,45 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Bulkhead.Drop = 300.0;
 		Bulkhead.BandWidth = 0.0;
 		Bulkhead.ExplicitPolygon = {
-			FVector2D(X1, Y1), FVector2D(X2, Y1), FVector2D(X2, Y2), FVector2D(X1, Y2)
+			FVector2D(X2, Y1), FVector2D(X4, Y1), FVector2D(X4, Y2), FVector2D(X2, Y2)
 		};
-		Bulkhead.LightPositions = { FVector2D(2400.0, 4500.0), FVector2D(3600.0, 4500.0) };
+		Bulkhead.LightPositions = { FVector2D(5400.0, 4500.0), FVector2D(6900.0, 4500.0) };
 		B.Spec.FalseCeilings.Add(Bulkhead);
 	}
 
 	// ------------------------------------------------------------------------------ fixtures
 	// Living / dining
 	{
+		// The seating faces the south wall, clear of both doorways: D_Foyer's leaf sweeps X 375..1425
+		// and D_Living's X 4950..5850, and the sofa sits between them.
 		FHFFixture& Sofa = B.AddFixture(TEXT("F_Sofa"), TEXT("R_Living"), EHFFixtureType::Sofa,
-			TEXT("3-seater sofa"), FVector2D(2100.0, 2900.0), FVector2D(2100.0, 900.0), 800.0, 180.0);
+			TEXT("3-seater sofa"), FVector2D(3800.0, 2900.0), FVector2D(2100.0, 900.0), 800.0, 180.0);
 		Sofa.AnchorWallId = TEXT("W_Mid_Lower");
 
 		B.AddFixture(TEXT("F_CoffeeTable"), TEXT("R_Living"), EHFFixtureType::CoffeeTable,
-			TEXT("Coffee table"), FVector2D(2100.0, 1800.0), FVector2D(1100.0, 600.0), 400.0);
+			TEXT("Coffee table"), FVector2D(3800.0, 1800.0), FVector2D(1100.0, 600.0), 400.0);
 
-		FHFFixture& TVUnit = B.AddFixture(TEXT("F_TVUnit"), TEXT("R_Living"), EHFFixtureType::TVUnit,
-			TEXT("TV unit with drawers"), FVector2D(2100.0, 400.0), FVector2D(1800.0, 450.0), 600.0);
+		// The TV run, built around the balcony door rather than beside it.
+		//
+		// One 1800 unit centred on X 2100 stood across the whole of D_Balcony - not partly, all of
+		// it - because the door and the joinery were drawn on different layers and read as separate
+		// things. A wall unit on the wall an opening is in is split around the opening: a tall
+		// storage column in the pier west of the door, and the console carrying the television in
+		// the 1650 pier between the door's east jamb at 3000 and Win_Living's west jamb at 4650.
+		// That is how the kitchen's wall units already deal with the window over the sink, and it is
+		// what the joinery in front of a balcony door actually is.
+		FHFFixture& TallUnit = B.AddFixture(TEXT("F_TVUnit_W"), TEXT("R_Living"), EHFFixtureType::TVUnit,
+			TEXT("TV wall unit, tall storage west of the balcony door"),
+			FVector2D(690.0, 400.0), FVector2D(900.0, 450.0), 1800.0);
+		TallUnit.AnchorWallId = TEXT("W_South");
+		TallUnit.Params.ShutterCount = 2;
+		TallUnit.Params.ShelfCount = 4;
+		TallUnit.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
+		TallUnit.Params.PlinthHeight = 80.0;
+
+		FHFFixture& TVUnit = B.AddFixture(TEXT("F_TVUnit_E"), TEXT("R_Living"), EHFFixtureType::TVUnit,
+			TEXT("TV console with drawers, east of the balcony door"),
+			FVector2D(3800.0, 400.0), FVector2D(1200.0, 450.0), 600.0);
 		TVUnit.AnchorWallId = TEXT("W_South");
 		TVUnit.Params.DrawerCount = 3;
 		TVUnit.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
@@ -429,8 +529,9 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		BaseWest.Params.PlinthHeight = 100.0;
 		BaseWest.Params.HandleStyle = EHFHandleStyle::JProfile;
 
+		// 2300, not 3000: the north run now dies into W_Kitchen_Util, whose west face is at 2942.5.
 		FHFFixture& BaseNorth = B.AddFixture(TEXT("F_Kitchen_BaseN"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, north run"), FVector2D(2100.0, 7985.0), FVector2D(3000.0, 600.0), 850.0);
+			TEXT("Base units, north run"), FVector2D(1750.0, 7985.0), FVector2D(2300.0, 600.0), 850.0);
 		BaseNorth.AnchorWallId = TEXT("W_North");
 		BaseNorth.Params.ShutterCount = 3;
 		BaseNorth.Params.DrawerCount = 2;
@@ -444,7 +545,7 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		CounterW.Params.UpstandHeight = 100.0;
 
 		FHFFixture& CounterN = B.AddFixture(TEXT("F_Kitchen_CounterN"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, north"), FVector2D(2100.0, 7985.0), FVector2D(3000.0, 600.0), 40.0, 0.0, 850.0);
+			TEXT("Granite counter, north"), FVector2D(1750.0, 7985.0), FVector2D(2300.0, 600.0), 40.0, 0.0, 850.0);
 		CounterN.AnchorWallId = TEXT("W_North");
 		CounterN.Params.UpstandHeight = 100.0;
 
@@ -452,25 +553,27 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		//
 		// A single 3000 run centred on the same X as the window put 700 mm of cabinet across the
 		// whole width of it. A real kitchen splits the wall units around the window over the sink,
-		// which is exactly where this window is, and each half then carries two shutters instead of
-		// four. X 600..1500 and 2700..3600, with the window's 1500..2700 clear between them.
+		// which is exactly where this window is. Re-cut now the window has moved with the shortened
+		// north wall: X 600..1200 and 2400..2900, with the window's 1200..2400 clear between them.
+		// One shutter each at these widths - two would be 300 wide leaves, which is a cupboard
+		// nobody builds.
 		auto AddWallUnits = [&B](const FName& Id, const FString& Label, double CentreX, double Length)
 		{
 			FHFFixture& Units = B.AddFixture(Id, TEXT("R_Kitchen"), EHFFixtureType::KitchenWallCabinet,
 				Label, FVector2D(CentreX, 8135.0), FVector2D(Length, 300.0), 700.0, 0.0, 1400.0);
 			Units.AnchorWallId = TEXT("W_North");
-			Units.Params.ShutterCount = 2;
+			Units.Params.ShutterCount = 1;
 			Units.Params.ShelfCount = 2;
 			Units.Params.CorniceHeight = 60.0;
 			Units.Params.bHasGlassInsert = true;
 			Units.Params.HandleStyle = EHFHandleStyle::Bar;
 		};
 
-		AddWallUnits(TEXT("F_Kitchen_WallW"), TEXT("Wall units, north run west of the window"), 1050.0, 900.0);
-		AddWallUnits(TEXT("F_Kitchen_WallE"), TEXT("Wall units, north run east of the window"), 3150.0, 900.0);
+		AddWallUnits(TEXT("F_Kitchen_WallW"), TEXT("Wall units, north run west of the window"), 900.0, 600.0);
+		AddWallUnits(TEXT("F_Kitchen_WallE"), TEXT("Wall units, north run east of the window"), 2650.0, 500.0);
 
 		B.AddFixture(TEXT("F_Kitchen_Sink"), TEXT("R_Kitchen"), EHFFixtureType::Sink,
-			TEXT("Double-bowl sink"), FVector2D(2100.0, 7985.0), FVector2D(800.0, 450.0), 200.0, 0.0, 690.0);
+			TEXT("Double-bowl sink"), FVector2D(1800.0, 7985.0), FVector2D(800.0, 450.0), 200.0, 0.0, 690.0);
 
 		// Set into the west counter, so they turn with it.
 		B.AddFixture(TEXT("F_Kitchen_Hob"), TEXT("R_Kitchen"), EHFFixtureType::Hob,
@@ -513,8 +616,9 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			TEXT("Ceiling fan"), FVector2D(6300.0, 6900.0), FVector2D(1200.0, 1200.0), 300.0);
 		Fan.Params.Diameter = 1200.0;
 
+		// Beside D_MBed's handle jamb at X 5300, which is where a hand reaches for it on the way in.
 		FHFFixture& Switches = B.AddFixture(TEXT("F_Sw_MBed"), TEXT("R_MBed"), EHFFixtureType::SwitchPlate,
-			TEXT("6-gang switch plate"), FVector2D(5200.0, 5500.0), FVector2D(220.0, 20.0), 150.0, 0.0, 1200.0);
+			TEXT("6-gang switch plate"), FVector2D(5500.0, 5500.0), FVector2D(220.0, 20.0), 150.0, 0.0, 1200.0);
 		Switches.AnchorWallId = TEXT("W_Mid_Upper");
 		Switches.Params.GangCount = 6;
 	}
@@ -535,9 +639,13 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Wardrobe.Params.PlinthHeight = 100.0;
 		Wardrobe.Params.HandleStyle = EHFHandleStyle::Bar;
 
+		// Turned onto the room's west wall. It stood against W_Mid_Lower at (7000, 3300), which is
+		// now the corridor wall carrying D_Bed2, and the desk was across a third of the doorway.
+		// W_Living_Bed2 is 3600 of blank wall with nothing else on it, which is where a study table
+		// wants to be anyway - out of the circulation and lit from the side.
 		FHFFixture& Study = B.AddFixture(TEXT("F_Bed2_Study"), TEXT("R_Bed2"), EHFFixtureType::StudyTable,
-			TEXT("Study table"), FVector2D(7000.0, 3300.0), FVector2D(1200.0, 550.0), 750.0);
-		Study.AnchorWallId = TEXT("W_Mid_Lower");
+			TEXT("Study table"), FVector2D(6950.0, 1200.0), FVector2D(1200.0, 550.0), 750.0, 90.0);
+		Study.AnchorWallId = TEXT("W_Living_Bed2");
 		Study.Params.DrawerCount = 2;
 
 		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_Bed2"), TEXT("R_Bed2"), EHFFixtureType::CeilingFan,
@@ -547,54 +655,63 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Bathrooms
 	{
+		// Both bathrooms keep their fit-out exactly as it was and travel with the room: the common
+		// bath 2400 west to X 1800..4200, the master 1800 east to X 8100..10800. Nothing here was
+		// ever in the wrong place - the two bedroom doors were hung on the wrong walls, and these
+		// fittings were simply standing behind them.
 		B.AddFixture(TEXT("F_CBath_WC"), TEXT("R_CBath"), EHFFixtureType::WC,
-			TEXT("Wall-hung WC"), FVector2D(6300.0, 3900.0), FVector2D(380.0, 600.0), 400.0);
+			TEXT("Wall-hung WC"), FVector2D(3900.0, 3900.0), FVector2D(380.0, 600.0), 400.0);
 		B.AddFixture(TEXT("F_CBath_Basin"), TEXT("R_CBath"), EHFFixtureType::Basin,
-			TEXT("Counter basin"), FVector2D(4600.0, 3900.0), FVector2D(550.0, 450.0), 200.0, 0.0, 800.0);
+			TEXT("Counter basin"), FVector2D(2200.0, 3900.0), FVector2D(550.0, 450.0), 200.0, 0.0, 800.0);
 		// The service band runs Y 3600..5400, so a 900-deep shower must centre at 4900 to keep
-		// its far edge at 5350 rather than pushing through the partition.
+		// its far edge at 5350 rather than pushing through the partition. 2900 rather than the
+		// room's centre at 3000 leaves 100 clear of D_CBath's leaf tip at 3450.
 		B.AddFixture(TEXT("F_CBath_Shower"), TEXT("R_CBath"), EHFFixtureType::Shower,
-			TEXT("Shower area"), FVector2D(5400.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
+			TEXT("Shower area"), FVector2D(2900.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
 
 		B.AddFixture(TEXT("F_MBath_WC"), TEXT("R_MBath"), EHFFixtureType::WC,
-			TEXT("Wall-hung WC"), FVector2D(8400.0, 3900.0), FVector2D(380.0, 600.0), 400.0);
+			TEXT("Wall-hung WC"), FVector2D(10200.0, 3900.0), FVector2D(380.0, 600.0), 400.0);
 
-		// Master bath spans X 6600..8700; a 900-wide vanity centres at 7100 to clear the
-		// partition it shares with the common bathroom.
+		// Master bath spans X 8100..10800; a 900-wide vanity centres at 8900 to clear the
+		// partition it shares with the corridor.
 		FHFFixture& Vanity = B.AddFixture(TEXT("F_MBath_Vanity"), TEXT("R_MBath"), EHFFixtureType::Vanity,
-			TEXT("Vanity unit"), FVector2D(7100.0, 3900.0), FVector2D(900.0, 500.0), 800.0);
+			TEXT("Vanity unit"), FVector2D(8900.0, 3900.0), FVector2D(900.0, 500.0), 800.0);
 		Vanity.AnchorWallId = TEXT("W_Mid_Lower");
 		Vanity.Params.ShutterCount = 2;
 		Vanity.Params.DrawerCount = 1;
 		Vanity.Params.HandleStyle = EHFHandleStyle::Knob;
 
 		B.AddFixture(TEXT("F_MBath_Basin"), TEXT("R_MBath"), EHFFixtureType::Basin,
-			TEXT("Counter basin"), FVector2D(7100.0, 3900.0), FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
+			TEXT("Counter basin"), FVector2D(8900.0, 3900.0), FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
 		B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"), EHFFixtureType::Shower,
-			TEXT("Shower area"), FVector2D(7650.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
+			TEXT("Shower area"), FVector2D(9450.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
 	}
 
-	// Utility
+	// Utility, off the kitchen, with the machine under its own window and against the outside wall
+	// the drain runs down.
 	{
 		FHFFixture& Washer = B.AddFixture(TEXT("F_Util_Washer"), TEXT("R_Utility"), EHFFixtureType::WashingMachine,
-			TEXT("Washing machine"), FVector2D(9100.0, 3950.0), FVector2D(600.0, 600.0), 850.0);
-		Washer.AnchorWallId = TEXT("W_Mid_Lower");
+			TEXT("Washing machine"), FVector2D(3400.0, 7985.0), FVector2D(600.0, 600.0), 850.0);
+		Washer.AnchorWallId = TEXT("W_North");
 	}
 
 	// Foyer
 	{
+		// Beside D_Foyer's handle jamb at X 1425, not at X 1000 where the doorway now is.
 		FHFFixture& Switches = B.AddFixture(TEXT("F_Sw_Foyer"), TEXT("R_Foyer"), EHFFixtureType::SwitchPlate,
-			TEXT("4-gang switch plate"), FVector2D(1000.0, 3700.0), FVector2D(160.0, 20.0), 120.0, 0.0, 1200.0);
+			TEXT("4-gang switch plate"), FVector2D(1565.0, 3700.0), FVector2D(160.0, 20.0), 120.0, 0.0, 1200.0);
 		Switches.AnchorWallId = TEXT("W_Mid_Lower");
 		Switches.Params.GangCount = 4;
 
 		FHFFixture& DB = B.AddFixture(TEXT("F_DB"), TEXT("R_Foyer"), EHFFixtureType::DistributionBoard,
-			TEXT("Distribution board"), FVector2D(1600.0, 4900.0), FVector2D(300.0, 60.0), 350.0, 90.0, 1800.0);
-		DB.AnchorWallId = TEXT("W_Foyer_Corr");
+			TEXT("Distribution board"), FVector2D(1600.0, 5150.0), FVector2D(300.0, 60.0), 350.0, 90.0, 1800.0);
+		DB.AnchorWallId = TEXT("W_Foyer_CBath");
 
+		// Turned onto the foyer's east wall. The foyer's north wall is now the kitchen doorway, and
+		// it was against that; the east wall is 1800 of blank partition with the DB high up on it.
 		FHFFixture& Shoes = B.AddFixture(TEXT("F_ShoeRack"), TEXT("R_Foyer"), EHFFixtureType::ShoeRack,
-			TEXT("Shoe rack"), FVector2D(900.0, 5250.0), FVector2D(1200.0, 350.0), 900.0);
-		Shoes.AnchorWallId = TEXT("W_Mid_Upper");
+			TEXT("Shoe rack"), FVector2D(1600.0, 4300.0), FVector2D(1200.0, 350.0), 900.0, 90.0);
+		Shoes.AnchorWallId = TEXT("W_Foyer_CBath");
 		Shoes.Params.ShutterCount = 2;
 		Shoes.Params.ShelfCount = 3;
 		Shoes.Params.PlinthHeight = 80.0;
@@ -635,11 +752,12 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			return &Unit;
 		};
 
-		// Living / dining
-		AddSocket(TEXT("F_Soc_Living_TV"), TEXT("R_Living"), FVector2D(2100.0, 120.0), TEXT("W_South"));
+		// Living / dining. The switch plate sits beside D_Living's handle jamb at X 5850, and the
+		// TV point follows the console it feeds.
+		AddSocket(TEXT("F_Soc_Living_TV"), TEXT("R_Living"), FVector2D(3800.0, 120.0), TEXT("W_South"));
 		AddSocket(TEXT("F_Soc_Living_1"),  TEXT("R_Living"), FVector2D(5900.0, 1800.0), TEXT("W_Living_Bed2"), 90.0);
-		AddSwitchPlate(TEXT("F_Sw_Living"), TEXT("R_Living"), FVector2D(3300.0, 3480.0), TEXT("W_Mid_Lower"), 8);
-		AddSplitAC(TEXT("F_AC_Living"), TEXT("R_Living"), FVector2D(4800.0, 3480.0), TEXT("W_Mid_Lower"));
+		AddSwitchPlate(TEXT("F_Sw_Living"), TEXT("R_Living"), FVector2D(6060.0, 3480.0), TEXT("W_Mid_Lower"), 8);
+		AddSplitAC(TEXT("F_AC_Living"), TEXT("R_Living"), FVector2D(3300.0, 3480.0), TEXT("W_Mid_Lower"));
 
 		// Master bedroom
 		AddSocket(TEXT("F_Soc_MBed_1"), TEXT("R_MBed"), FVector2D(5100.0, 8280.0), TEXT("W_North"));
@@ -648,18 +766,22 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		// Bedroom 2
 		AddSocket(TEXT("F_Soc_Bed2_1"), TEXT("R_Bed2"), FVector2D(7000.0, 120.0), TEXT("W_South"));
-		AddSwitchPlate(TEXT("F_Sw_Bed2"), TEXT("R_Bed2"), FVector2D(7100.0, 3480.0), TEXT("W_Mid_Lower"), 6);
+		// Beside D_Bed2's handle jamb at X 7850.
+		AddSwitchPlate(TEXT("F_Sw_Bed2"), TEXT("R_Bed2"), FVector2D(8050.0, 3480.0), TEXT("W_Mid_Lower"), 6);
 		AddSplitAC(TEXT("F_AC_Bed2"), TEXT("R_Bed2"), FVector2D(8700.0, 3480.0), TEXT("W_Mid_Lower"));
 
-		// Kitchen: counter-height sockets plus the exhaust over the hob.
-		AddSocket(TEXT("F_Soc_Kit_1"), TEXT("R_Kitchen"), FVector2D(1200.0, 8280.0), TEXT("W_North"))->BaseZ = 1100.0;
-		AddSocket(TEXT("F_Soc_Kit_2"), TEXT("R_Kitchen"), FVector2D(3000.0, 8280.0), TEXT("W_North"))->BaseZ = 1100.0;
-		AddSwitchPlate(TEXT("F_Sw_Kitchen"), TEXT("R_Kitchen"), FVector2D(3900.0, 5520.0), TEXT("W_Mid_Upper"), 6);
+		// Kitchen: counter-height sockets each side of the window, and the switch plate beside
+		// D_Kitchen's handle jamb at X 750 rather than in the far corner of the room.
+		AddSocket(TEXT("F_Soc_Kit_1"), TEXT("R_Kitchen"), FVector2D(700.0, 8280.0), TEXT("W_North"))->BaseZ = 1100.0;
+		AddSocket(TEXT("F_Soc_Kit_2"), TEXT("R_Kitchen"), FVector2D(2700.0, 8280.0), TEXT("W_North"))->BaseZ = 1100.0;
+		AddSwitchPlate(TEXT("F_Sw_Kitchen"), TEXT("R_Kitchen"), FVector2D(550.0, 5520.0), TEXT("W_Mid_Upper"), 6);
 
-		FHFFixture& KitchenExhaust = B.AddFixture(TEXT("F_Exh_Kitchen"), TEXT("R_Kitchen"),
+		// The extract goes with the utility. The kitchen has a chimney over its hob, which is what
+		// actually clears a kitchen; a utility with a washing machine in it has nothing else.
+		FHFFixture& UtilityExhaust = B.AddFixture(TEXT("F_Exh_Utility"), TEXT("R_Utility"),
 			EHFFixtureType::ExhaustFan, TEXT("Exhaust fan"),
-			FVector2D(3600.0, 8280.0), FVector2D(300.0, 100.0), 300.0, 0.0, 2200.0);
-		KitchenExhaust.AnchorWallId = TEXT("W_North");
+			FVector2D(3950.0, 8280.0), FVector2D(300.0, 100.0), 300.0, 0.0, 2200.0);
+		UtilityExhaust.AnchorWallId = TEXT("W_North");
 
 		// Bathrooms: geyser, exhaust, mirror and towel rail in each.
 		auto FitOutBathroom = [&B](const FName& Prefix, const FName& RoomId, double CentreX,
@@ -686,11 +808,11 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			Towel.AnchorWallId = SouthWall;
 		};
 
-		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 5400.0, TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
-		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 7650.0, TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
+		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 3000.0, TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
+		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 9450.0, TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
 
-		// Utility
-		AddSocket(TEXT("F_Soc_Util"), TEXT("R_Utility"), FVector2D(9100.0, 5300.0), TEXT("W_Mid_Upper"))->BaseZ = 1000.0;
+		// Utility: the machine point, at machine height on the wall behind it.
+		AddSocket(TEXT("F_Soc_Util"), TEXT("R_Utility"), FVector2D(3950.0, 8250.0), TEXT("W_North"))->BaseZ = 1000.0;
 	}
 
 	// ------------------------------------------------------------------------- balconies

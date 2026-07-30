@@ -471,8 +471,23 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 	// drawing invites, because a column on a grid line and a door beside it are drawn as separate
 	// things and read as separate things.
 	//
-	// The reference 2BHK has one: D_Bed2's doorway overlaps COL_M1 by 75 mm, which reached the
-	// geometry as a leaf embedded in a column and was visible only in a sweep test's warning.
+	// The reference 2BHK carried one for thirty-four commits: D_Bed2's doorway overlapped COL_M1 by
+	// 75 mm and reached the geometry as a door leaf built inside a column. Two things let it
+	// through, and both are fixed here.
+	//
+	// It was reported as a WARNING. Nothing in the suite fails on a warning - SampleHouseValidates
+	// only asks HasErrors() and prints the rest - so the golden fixture every later milestone
+	// measures against was allowed to carry an unbuildable doorway and say so quietly on every run.
+	// A column in a doorway is not a judgement call with two defensible answers; there is nothing
+	// for a reader to weigh up, because the doorway cannot be built and cannot be walked through. So
+	// a door is now an error. A window keeps the warning: a pier across a glazing line is bad
+	// practice rather than an impossibility, and the frame can be made to fit round it.
+	//
+	// And it only ever looked inside the wall's own thickness, which is not where a column that
+	// blocks a doorway usually is. A column deeper than the partition it belongs to is built flush
+	// with one face of it rather than centred on it - that is how a 450 x 230 column on a 115 wall
+	// is actually set out - and its bulk then lies wholly outside the wall's slab. The old test
+	// excluded exactly the construction it existed to catch, and did so silently.
 	{
 		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
 
@@ -533,9 +548,16 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 					}
 				}
 
-				// It has to be in this wall's thickness, in the opening's span, and at its height.
-				const double HalfThickness = Wall->Thickness * 0.5;
-				if (AcrossMax <= -HalfThickness || AcrossMin >= HalfThickness)
+				// It has to be in this wall's line, in the opening's span, and at its height.
+				//
+				// "In the wall's line" is a whole thickness either side of the centreline, not half.
+				// Half is the wall's own slab, and a column packed out against either face of it -
+				// which is where a column bigger than its partition goes - falls outside that and
+				// was never looked at. A whole thickness covers the column flush on either face and
+				// still stops well short of a pier standing free in the room, which belongs to
+				// whoever placed the furniture rather than to this rule.
+				const double ObstructionBand = Wall->Thickness;
+				if (AcrossMax <= -ObstructionBand || AcrossMin >= ObstructionBand)
 				{
 					continue;
 				}
@@ -550,10 +572,17 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 
 				if (Overlap > TouchTolerance)
 				{
-					Result.Add(EHFValidationSeverity::Warning, TEXT("OpeningBlockedByColumn"), Opening.Id,
-						FString::Printf(TEXT("Opening '%s' overlaps column '%s' by %.1f cm of its %.1f cm width; the column stands inside the clear opening. Move the opening clear of the column, or the column off the opening."),
+					const bool bIsDoorway = Opening.Kind == EHFOpeningKind::Door
+						|| Opening.Kind == EHFOpeningKind::SlidingDoor;
+
+					Result.Add(
+						bIsDoorway ? EHFValidationSeverity::Error : EHFValidationSeverity::Warning,
+						TEXT("OpeningBlockedByColumn"), Opening.Id,
+						FString::Printf(TEXT("%s '%s' overlaps column '%s' by %.1f cm of its %.1f cm width; the column stands inside the clear opening%s. Move the opening clear of the column, or the column off the opening."),
+							bIsDoorway ? TEXT("Doorway") : TEXT("Opening"),
 							*Describe(Opening.Id), *Describe(Column.Id),
-							Overlap * ScaleToCm, Opening.Width * ScaleToCm));
+							Overlap * ScaleToCm, Opening.Width * ScaleToCm,
+							bIsDoorway ? TEXT(" and nothing can be built or walked through it") : TEXT("")));
 				}
 			}
 		}

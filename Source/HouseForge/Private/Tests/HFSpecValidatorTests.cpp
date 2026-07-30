@@ -533,8 +533,19 @@ bool FHFValidatorReportsAllIssuesTest::RunTest(const FString& Parameters)
  *
  * Nothing else catches this: OpeningsOverlap compares openings with each other, and SwingBlocked
  * asks where the leaf ends up rather than whether the hole it swings out of is clear. It reached
- * the reference 2BHK - D_Bed2 overlaps COL_M1 by 75 mm - and survived to geometry as a door leaf
- * embedded in a column, visible only as a warning buried in a sweep test's report.
+ * the reference 2BHK - D_Bed2 overlapped COL_M1 by 75 mm - and survived to geometry as a door leaf
+ * built inside a column, visible only as a warning buried in a sweep test's report.
+ *
+ * Two things about the rule let that happen, and both are asserted below.
+ *
+ * It reported a doorway at warning severity, so nothing failed. A door with a column in it cannot
+ * be built and cannot be walked through; there is no second reading to weigh up, and it is an error
+ * now. A window keeps the warning, because glazing can be made to fit round a pier.
+ *
+ * And it only looked inside the wall's own thickness. A column deeper than its partition is set out
+ * flush with one face of it rather than centred on it - the ordinary way a 450 x 230 column stands
+ * in a 115 wall - and its whole bulk is then outside the wall's slab, so the rule excluded exactly
+ * the construction it existed to catch.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorColumnInOpeningTest,
 	"HouseForge.Validation.ColumnStandingInAnOpening", HF_TEST_FLAGS)
@@ -557,9 +568,33 @@ bool FHFValidatorColumnInOpeningTest::RunTest(const FString& Parameters)
 		return Spec;
 	};
 
-	// Biting 37.5 cm out of a 90 cm doorway.
+	// Biting 37.5 cm out of a 90 cm doorway. An error, not a warning: nothing about that is a
+	// judgement call, and a warning is what let the reference flat keep one for thirty-four commits.
 	ExpectIssue(*this, SpecWithColumnAt(FVector2D(170.0, 0.0)),
-		TEXT("OpeningBlockedByColumn"), EHFValidationSeverity::Warning);
+		TEXT("OpeningBlockedByColumn"), EHFValidationSeverity::Error);
+
+	// The same column against a window is a warning. A pier across a glazing line is bad practice
+	// and buildable; a pier in a doorway is neither.
+	{
+		FHFHouseSpec Spec = SpecWithColumnAt(FVector2D(170.0, 0.0));
+		Spec.Openings[0].Kind = EHFOpeningKind::SlidingWindow;
+		Spec.Openings[0].Swing = EHFSwing::None;
+		Spec.Openings[0].SillHeight = 90.0;
+		Spec.Openings[0].Height = 120.0;
+
+		ExpectIssue(*this, Spec, TEXT("OpeningBlockedByColumn"), EHFValidationSeverity::Warning);
+	}
+
+	// A column packed out flush against the wall's face, standing squarely in the doorway.
+	//
+	// This is the case the rule used to miss entirely, and it is not an exotic one - it is how a
+	// column bigger than the partition it stands in is built. W_South is 11.5 thick, so its north
+	// face is at Y 5.75; a 23-deep column centred at 17.25 has its front face exactly on that line
+	// and every millimetre of it in the room. The old band test - anything at or beyond half the
+	// wall's thickness is not this wall's problem - skipped it without a word, while the door it
+	// blocks is a 90 opening with 37.5 of concrete across it.
+	ExpectIssue(*this, SpecWithColumnAt(FVector2D(170.0, 17.25)),
+		TEXT("OpeningBlockedByColumn"), EHFValidationSeverity::Error);
 
 	// The message has to be actionable: which opening, which column, and how much.
 	{
@@ -585,8 +620,10 @@ bool FHFValidatorColumnInOpeningTest::RunTest(const FString& Parameters)
 		FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(50.0, 0.0)))
 			.Contains(TEXT("OpeningBlockedByColumn")));
 
-	// Lined up with the opening in plan but standing well off the wall.
-	TestFalse(TEXT("A column clear of the wall's thickness is not reported"),
+	// Lined up with the opening in plan but standing free in the room, a metre off the wall. That is
+	// a pier somebody has to walk round, not a column in a doorway, and it belongs to whoever laid
+	// the room out. The widened band has to stop somewhere, and this is where.
+	TestFalse(TEXT("A column standing free of the wall is not reported"),
 		FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(170.0, 100.0)))
 			.Contains(TEXT("OpeningBlockedByColumn")));
 

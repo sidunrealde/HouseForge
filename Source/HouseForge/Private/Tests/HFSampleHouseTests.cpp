@@ -30,12 +30,21 @@ bool FHFSampleHouseValidatesTest::RunTest(const FString& Parameters)
 	}
 	TestFalse(TEXT("Sample 2BHK has no validation errors"), Result.HasErrors());
 
-	// Warnings are allowed - overlapping counters and sinks are legitimate - but they should be
-	// visible in the log rather than silently accumulating.
+	// Warnings fail too, and that is the change.
+	//
+	// This test used to print them and pass. That is how a doorway built across a column, two
+	// bedroom doors opening into bathrooms, and six fixtures standing in openings all lived in the
+	// golden fixture at once: every one of them was reported on every run, by name, with the
+	// millimetres, and nothing failed. A reference flat is not a place to keep known defects -
+	// everything downstream measures against it, and a warning nobody has to clear is a warning
+	// nobody reads.
 	if (Result.HasWarnings())
 	{
-		AddInfo(FString::Printf(TEXT("Sample 2BHK validation warnings:\n%s"), *Result.ToString()));
+		AddError(FString::Printf(
+			TEXT("Sample 2BHK validates with warnings, which the reference flat is not allowed to carry:\n%s"),
+			*Result.ToString()));
 	}
+	TestFalse(TEXT("Sample 2BHK has no validation warnings either"), Result.HasWarnings());
 
 	return true;
 }
@@ -49,7 +58,9 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Spec is authored in millimetres"), Spec.Units, EHFUnits::Millimeters);
 	TestEqual(TEXT("Sample has 12 rooms"), Spec.Rooms.Num(), 12);
-	TestEqual(TEXT("Sample has 21 walls"), Spec.Walls.Num(), 21);
+	// 22, not 21. The service band lost W_CBath_MBath when the utility left it, and the utility
+	// gained W_Kitchen_Util and W_Kitchen_Util_S where it now sits in the kitchen's corner.
+	TestEqual(TEXT("Sample has 22 walls"), Spec.Walls.Num(), 22);
 	TestEqual(TEXT("Sample has 8 false ceilings"), Spec.FalseCeilings.Num(), 8);
 	TestEqual(TEXT("Sample has 9 beams"), Spec.Beams.Num(), 9);
 	TestEqual(TEXT("Sample has 11 columns"), Spec.Columns.Num(), 11);
@@ -100,7 +111,7 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 }
 
 /**
- * Nothing in the reference flat stands in front of a window.
+ * Nothing in the reference flat stands in front of any opening - window or doorway.
  *
  * A window used to be fixed glazing: a wardrobe in front of one looked odd and nothing more, and
  * both of the flat's blocked windows survived every test in the suite because no test looked. A
@@ -108,10 +119,11 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
  * mid-height in the middle of the opening, and a wardrobe or a run of kitchen wall units across that
  * is a window that cannot be opened - the one failure a screenshot of a closed window will not show.
  *
- * Doors are reported rather than failed. The obstructions in front of them are a circulation problem
- * in the plan - two bedroom doors open into bathrooms, and the fittings behind them are where a
- * bathroom's fittings belong - and redrawing the flat's circulation is not this test's business. It
- * says so on every run instead of letting it go quiet.
+ * Doorways used to be reported and allowed. They were symptoms of a plan that could not work: the
+ * corridor had no wall onto either bedroom, so both bedroom doors were hung on bathroom walls and
+ * the bathroom fittings behind them were exactly where a bathroom's fittings belong. The circulation
+ * has been redrawn since, the doors open into the rooms they serve, and a fixture standing in a
+ * doorway is now what it always should have been: a failure, in a flat somebody has to walk through.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSampleHouseWindowsAreClearTest, "HouseForge.Model.SampleHouseWindowsAreClear", HF_TEST_FLAGS)
 
@@ -120,41 +132,141 @@ bool FHFSampleHouseWindowsAreClearTest::RunTest(const FString& Parameters)
 	const FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 	const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
 
-	int32 Windows = 0;
-	int32 Doorways = 0;
+	int32 Blocked = 0;
 
 	for (const FHFValidationIssue& Issue : Result.Issues)
 	{
-		if (Issue.Code != TEXT("OpeningBlockedByFixture"))
+		if (Issue.Code == TEXT("OpeningBlockedByFixture") || Issue.Code == TEXT("OpeningBlockedByColumn"))
+		{
+			++Blocked;
+			AddError(Issue.Message);
+		}
+	}
+
+	TestEqual(TEXT("No opening in the reference flat is obstructed"), Blocked, 0);
+
+	// The plan has to hold together as circulation, not only as geometry: a door that opens into
+	// masonry passes every dimensional check in the file above.
+	TestFalse(TEXT("No door in the reference flat swings into solid construction"),
+		Result.Contains(TEXT("SwingBlocked")));
+
+	return true;
+}
+
+/**
+ * Every room in the flat can be reached from the front door.
+ *
+ * Not a dimension - a plan that fails this validates perfectly, because a room with no door is a
+ * room with one opening fewer and nothing else. The reference flat failed it for thirty-four
+ * commits: D_Main was the only opening the foyer had, so the front door led into a sealed 1800 x
+ * 1800 box and no room in the dwelling was reachable from it at all. Nothing looked, because every
+ * test here asked about sizes.
+ *
+ * Rooms are joined where an opening's wall separates them, walked breadth-first from the room the
+ * entrance door opens into, and balconies count - a balcony reached through nothing is a slab in
+ * mid-air.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSampleHouseIsConnectedTest, "HouseForge.Model.SampleHouseIsConnected", HF_TEST_FLAGS)
+
+bool FHFSampleHouseIsConnectedTest::RunTest(const FString& Parameters)
+{
+	const FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
+
+	// Which rooms each opening joins: the two the wall runs between, found by stepping off the
+	// opening's centre to either side of its wall.
+	TMap<FName, TSet<FName>> Neighbours;
+	for (const FHFRoom& Room : Spec.Rooms)
+	{
+		Neighbours.Add(Room.Id);
+	}
+
+	auto RoomAt = [&Spec](const FVector2D& Point) -> FName
+	{
+		const FHFRoom* Found = Spec.Rooms.FindByPredicate(
+			[&Point](const FHFRoom& Room) { return Room.Boundary.Num() >= 3 && Room.ContainsPoint(Point); });
+		return Found != nullptr ? Found->Id : NAME_None;
+	};
+
+	for (const FHFOpening& Opening : Spec.Openings)
+	{
+		const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
+		if (!bIsDoor)
 		{
 			continue;
 		}
 
-		const FHFOpening* Opening = Spec.Openings.FindByPredicate(
-			[&Issue](const FHFOpening& O) { return O.Id == Issue.ElementId; });
-
-		const bool bIsWindow = Opening != nullptr &&
-			(Opening->Kind == EHFOpeningKind::Window ||
-			 Opening->Kind == EHFOpeningKind::SlidingWindow ||
-			 Opening->Kind == EHFOpeningKind::Ventilator);
-
-		if (bIsWindow)
+		const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+		if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER)
 		{
-			++Windows;
-			AddError(Issue.Message);
+			continue;
 		}
-		else
+
+		const FVector2D Direction = (Wall->End - Wall->Start) / Wall->Length();
+		const FVector2D Normal(-Direction.Y, Direction.X);
+		const FVector2D Centre = Wall->Start + Direction * Opening.OffsetAlongWall;
+
+		// Far enough off the wall to be clear of its own thickness, near enough to stay in the room.
+		const double Step = Wall->Thickness + 100.0;
+		const FName A = RoomAt(Centre + Normal * Step);
+		const FName Bside = RoomAt(Centre - Normal * Step);
+
+		if (!A.IsNone() && !Bside.IsNone())
 		{
-			++Doorways;
-			AddWarning(Issue.Message);
+			Neighbours[A].Add(Bside);
+			Neighbours[Bside].Add(A);
 		}
 	}
 
-	TestEqual(TEXT("No window in the reference flat has a fixture in front of it"), Windows, 0);
+	// The front door: the one that opens off the outside world into the flat.
+	const FHFOpening* Entrance = Spec.Openings.FindByPredicate(
+		[](const FHFOpening& O) { return O.Id == FName(TEXT("D_Main")); });
+	if (!TestNotNull(TEXT("The flat has a main entrance"), Entrance))
+	{
+		return false;
+	}
 
-	AddInfo(FString::Printf(
-		TEXT("%d doorway obstruction(s) remain in the reference flat; they belong to its circulation, not to its windows."),
-		Doorways));
+	const FHFWall* EntranceWall = Spec.FindWall(Entrance->WallId);
+	if (!TestNotNull(TEXT("The entrance hangs on a real wall"), EntranceWall))
+	{
+		return false;
+	}
+
+	const FVector2D EntranceDir = (EntranceWall->End - EntranceWall->Start) / EntranceWall->Length();
+	const FVector2D EntranceNormal(-EntranceDir.Y, EntranceDir.X);
+	const FVector2D EntranceCentre = EntranceWall->Start + EntranceDir * Entrance->OffsetAlongWall;
+	const FName Start = RoomAt(EntranceCentre + EntranceNormal * (EntranceWall->Thickness + 100.0));
+
+	if (!TestFalse(TEXT("The entrance opens into a room"), Start.IsNone()))
+	{
+		return false;
+	}
+
+	TSet<FName> Reached = { Start };
+	TArray<FName> Queue = { Start };
+	while (!Queue.IsEmpty())
+	{
+		const FName Current = Queue.Pop();
+		for (const FName& Next : Neighbours[Current])
+		{
+			if (!Reached.Contains(Next))
+			{
+				Reached.Add(Next);
+				Queue.Add(Next);
+			}
+		}
+	}
+
+	for (const FHFRoom& Room : Spec.Rooms)
+	{
+		if (!Reached.Contains(Room.Id))
+		{
+			AddError(FString::Printf(
+				TEXT("Room '%s' (%s) cannot be reached from the front door. No sequence of doorways leads to it."),
+				*Room.Id.ToString(), *Room.Name));
+		}
+	}
+
+	TestEqual(TEXT("Every room is reachable from the front door"), Reached.Num(), Spec.Rooms.Num());
 
 	return true;
 }
