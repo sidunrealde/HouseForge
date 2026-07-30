@@ -50,6 +50,11 @@ public class HouseForgeEditor : ModuleRules
 				"ImageCore",
 				"ImageWrapper",
 
+				// Offscreen capture: a scene capture into a render target, read back on the
+				// game thread. RenderCore is what FTextureRenderTargetResource::ReadPixels
+				// lives in - the editor viewport read this replaces needed none of it.
+				"RenderCore",
+
 				// Geometry, for baking and level construction.
 				"GeometryCore",
 				"GeometryFramework",

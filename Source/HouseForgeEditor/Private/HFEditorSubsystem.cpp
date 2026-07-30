@@ -3,9 +3,11 @@
 #include "HFEditorSubsystem.h"
 
 #include "Actors/HFHouseActor.h"
+#include "Capture/HFPlanSection.h"
+#include "Capture/HFSceneCapture.h"
+#include "Capture/HFViewingLight.h"
 #include "Editor.h"
 #include "Editor/UnrealEdEngine.h"
-#include "EditorViewportClient.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -15,7 +17,6 @@
 #include "HouseForgeEditor.h"
 #include "ImageUtils.h"
 #include "Interfaces/IPluginManager.h"
-#include "LevelEditorViewport.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
@@ -324,6 +325,11 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 	{
 		return SpawnResult;
 	}
+
+	// A freshly created level has no lights in it at all, so the house that was just built is
+	// invisible until something puts one there. Idempotent, so building into an existing level -
+	// or building the same spec twice - does not accumulate suns.
+	EnsureViewingLight();
 
 	FString Message = FString::Printf(
 		TEXT("Built '%s': %d walls, %d openings, %d rooms, %d beams, %d columns, %d false ceilings, %d fixtures."),
@@ -652,9 +658,59 @@ FHFOperationResult UHFEditorSubsystem::DeleteElement(const FString& Category, co
 		: FString::Printf(TEXT("Deleted %s '%s'."), *Category, *ElementId));
 }
 
-FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, int32 Resolution, FString& OutPath)
+namespace
+{
+	/** Where captures are written. Under the plugin's Saved folder: user output, not plugin source. */
+	FString CaptureDirectory()
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HouseForge"));
+		const FString Base = Plugin.IsValid() ? Plugin->GetBaseDir() : FPaths::ProjectDir();
+		return FPaths::Combine(Base, TEXT("Saved"), TEXT("Screenshots"));
+	}
+
+	FString CapturePath(const FString& FileName, const TCHAR* Fallback)
+	{
+		FString Name = FileName.IsEmpty() ? FString(Fallback) : FileName;
+		if (!Name.EndsWith(TEXT(".png")))
+		{
+			Name += TEXT(".png");
+		}
+
+		// A name, not a path. Otherwise a tool call could write anywhere on the disk.
+		Name = FPaths::GetCleanFilename(Name);
+
+		return FPaths::Combine(CaptureDirectory(), Name);
+	}
+
+	/**
+	 * Image size for a plan of a given world footprint, with the longest edge at Resolution.
+	 *
+	 * A flat is not square and neither is its drawing. Forcing a square image would put a 12 x 9 m
+	 * plan in the middle of a frame that is a third empty, at two thirds of the pixels across the
+	 * part that matters.
+	 */
+	FIntPoint PlanImageSize(double WorldWidth, double WorldHeight, int32 Resolution)
+	{
+		const double Ratio = (WorldWidth > 0.0) ? (WorldHeight / WorldWidth) : 1.0;
+
+		if (Ratio <= 1.0)
+		{
+			return FIntPoint(Resolution, FMath::Max(64, FMath::RoundToInt(Resolution * Ratio)));
+		}
+		return FIntPoint(FMath::Max(64, FMath::RoundToInt(Resolution / Ratio)), Resolution);
+	}
+}
+
+FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, int32 Resolution,
+	double SectionHeight, FString& OutPath)
 {
 	OutPath.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("There is no editor world to capture."));
+	}
 
 	const AHFHouseActor* House = FindHouseActor();
 	if (House == nullptr)
@@ -662,155 +718,155 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 		return FHFOperationResult::Fail(TEXT("No HouseForge house in the current level."));
 	}
 
-	// Take a viewport that is actually on screen. Looking for an existing orthographic one finds
-	// the hidden members of a four-pane layout, which have no size and cannot be read from - so
-	// pick whatever is visible and point it downward instead.
-	FLevelEditorViewportClient* Viewport = nullptr;
-	for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
+	FString WhyNot;
+	if (!FHFSceneCapture::CanRender(WhyNot))
 	{
-		if (Client == nullptr || Client->Viewport == nullptr)
-		{
-			continue;
-		}
-
-		const FIntPoint ClientSize = Client->Viewport->GetSizeXY();
-		if (ClientSize.X > 0 && ClientSize.Y > 0)
-		{
-			Viewport = Client;
-			if (Client->IsVisible())
-			{
-				break;
-			}
-		}
-	}
-	if (Viewport == nullptr || Viewport->Viewport == nullptr)
-	{
-		return FHFOperationResult::Fail(
-			TEXT("No editor viewport is available to capture from. A level editor viewport must be open and visible."));
+		return FHFOperationResult::Fail(FString::Printf(TEXT("Cannot capture: %s"), *WhyNot));
 	}
 
-	// Frame the whole house.
+	const double CutZ = (SectionHeight > 0.0) ? SectionHeight : FHFPlanSection::DefaultCutHeight();
+
+	EnsureViewingLight();
+
+	// The house is READ into a separate sectioned copy, never altered. See FHFPlanSection.
 	FBox Bounds(ForceInit);
-	for (const FHFWall& Wall : House->Spec.Walls)
-	{
-		Bounds += FVector(Wall.Start.X, Wall.Start.Y, 0.0);
-		Bounds += FVector(Wall.End.X, Wall.End.Y, Wall.BaseZ + Wall.Height);
-	}
-	if (!Bounds.IsValid)
-	{
-		return FHFOperationResult::Fail(TEXT("The house has no walls to frame."));
-	}
-
-	const FVector Centre = Bounds.GetCenter();
-
-	// Frame the plan. Deriving the zoom from FEditorViewportClient::GetOrthoUnitsPerPixel rather
-	// than guessing: units per pixel is (OrthoZoom / (SizeX * 15)) * ComputeOrthoZoomFactor(SizeX),
-	// and with r.Editor.AlignedOrthoZoom on - the default - that factor is SizeX / 500, so the
-	// viewport width cancels and the world width across the screen is OrthoZoom * SizeX / 7500.
-	const FIntPoint ViewSize = Viewport->Viewport->GetSizeXY();
-	const double AspectRatio = (ViewSize.Y > 0)
-		? static_cast<double>(ViewSize.X) / static_cast<double>(ViewSize.Y)
-		: 1.0;
-
-	constexpr double Padding = 1.12;
-
-	// Use the larger plan dimension for both axes: a top-down yaw can map world X or Y onto the
-	// screen's horizontal, and over-framing slightly is far better than cropping the house.
-	const double LargestSpan = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y) * 2.0 * Padding;
-	const double WorldWidth = LargestSpan * FMath::Max(1.0, AspectRatio);
-
-	static const IConsoleVariable* AlignedOrthoZoom =
-		IConsoleManager::Get().FindConsoleVariable(TEXT("r.Editor.AlignedOrthoZoom"));
-	const bool bAligned = (AlignedOrthoZoom == nullptr) || (AlignedOrthoZoom->GetInt() != 0);
-
-	const double Zoom = bAligned
-		? (WorldWidth * 7500.0 / FMath::Max(1, ViewSize.X))
-		: (WorldWidth * 15.0);
-
-	// Borrow the viewport, then hand it back. Leaving the user staring at a top-down ortho view
-	// they did not ask for would make this tool obnoxious to use interactively.
-	const ELevelViewportType PreviousType = Viewport->ViewportType;
-	const FVector PreviousLocation = Viewport->GetViewLocation();
-	const FRotator PreviousRotation = Viewport->GetViewRotation();
-	const float PreviousZoom = Viewport->GetOrthoZoom();
-
-	Viewport->SetViewportType(LVT_OrthoXY);
-	Viewport->SetViewLocation(FVector(Centre.X, Centre.Y, Bounds.Max.Z + 1000.0));
-	Viewport->SetViewRotation(FRotator(-90.0f, -90.0f, 0.0f));
-	Viewport->SetOrthoZoom(static_cast<float>(FMath::Max(Zoom, 100.0)));
-	Viewport->Invalidate();
+	TArray<AActor*> Section = FHFPlanSection::Build(World, House, CutZ, Bounds);
 
 	ON_SCOPE_EXIT
 	{
-		Viewport->SetViewportType(PreviousType);
-		Viewport->SetViewLocation(PreviousLocation);
-		Viewport->SetViewRotation(PreviousRotation);
-		Viewport->SetOrthoZoom(PreviousZoom);
-		Viewport->Invalidate();
+		FHFPlanSection::DestroyAll(World, Section);
 	};
 
-	const FString Directory = FPaths::Combine(PluginDir(), TEXT("Saved"), TEXT("Screenshots"));
-	FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*Directory);
-
-	FString Name = FileName.IsEmpty() ? TEXT("TopDown") : FileName;
-	if (!Name.EndsWith(TEXT(".png")))
+	if (Section.IsEmpty() || !Bounds.IsValid)
 	{
-		Name += TEXT(".png");
-	}
-	OutPath = FPaths::Combine(Directory, Name);
-
-	const int32 Size = FMath::Clamp(Resolution <= 0 ? 2048 : Resolution, 256, 8192);
-
-	FViewport* RenderTarget = Viewport->Viewport;
-
-	// Invalidate only marks the view dirty. Without forcing a frame here the back buffer still
-	// holds whatever was on screen before the camera moved - or nothing at all - and ReadPixels
-	// fails outright. This is what made the first capture attempt return no pixels.
-	RenderTarget->Draw(/*bShouldPresent*/ false);
-
-	TArray<FColor> Pixels;
-	const FIntRect Rect(0, 0, RenderTarget->GetSizeXY().X, RenderTarget->GetSizeXY().Y);
-	if (Rect.Width() <= 0 || Rect.Height() <= 0)
-	{
-		return FHFOperationResult::Fail(TEXT("The editor viewport has no size to capture."));
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("Nothing survives a section cut at %.0f cm. Every element of this house is above that ")
+			TEXT("height, which usually means the house was built on a raised floor level - pass a section ")
+			TEXT("height inside the walls instead."), CutZ));
 	}
 
-	if (!RenderTarget->ReadPixels(Pixels, FReadSurfaceDataFlags(), Rect))
+	// Framing. The padding and the world-span-to-image relationship are the ones worked out for the
+	// old viewport capture and they were right; what has gone is the conversion into an editor
+	// viewport's OrthoZoom, which existed only because a viewport expresses its framing that way.
+	// A scene capture takes the world width directly, so the derivation that used to be needed -
+	// units per pixel, ComputeOrthoZoomFactor, the viewport width cancelling - collapses into
+	// OrthoWidth being the number itself.
+	constexpr double Padding = 1.06;
+
+	const FVector Centre = Bounds.GetCenter();
+	const double WorldWidth = FMath::Max(Bounds.GetSize().X, 1.0) * Padding;
+	const double WorldHeight = FMath::Max(Bounds.GetSize().Y, 1.0) * Padding;
+
+	const int32 Longest = FMath::Clamp(Resolution <= 0 ? 2048 : Resolution, 256, 8192);
+	const FIntPoint ImageSize = PlanImageSize(WorldWidth, WorldHeight, Longest);
+
+	FHFCaptureRequest Request;
+	Request.bOrthographic = true;
+	Request.OrthoWidth = WorldWidth;
+
+	// Straight down, from above everything in the section. Yaw -90 puts world +X across the image
+	// and world +Y up it, which is the orientation the drawing set is laid out in - a plan that
+	// disagrees with the drawing it is meant to be compared against is worse than no plan.
+	Request.Rotation = FRotator(-90.0f, -90.0f, 0.0f);
+	Request.Location = FVector(Centre.X, Centre.Y, Bounds.Max.Z + 500.0);
+
+	Request.Width = ImageSize.X;
+	Request.Height = ImageSize.Y;
+	Request.ShowOnly = Section;
+
+	// No sky. A plan is compared against a line drawing on white paper; a bright sky wrapped around
+	// the flat only makes the comparison harder.
+	Request.bShowSky = false;
+
+	Request.OutputPath = CapturePath(FileName, TEXT("Plan"));
+
+	FIntPoint Written = FIntPoint::ZeroValue;
+	FString Error;
+	if (!FHFSceneCapture::Render(World, Request, Written, Error))
 	{
-		return FHFOperationResult::Fail(TEXT("Could not read pixels from the viewport."));
+		return FHFOperationResult::Fail(FString::Printf(TEXT("Capture failed: %s"), *Error));
 	}
 
-	// The viewport renders without alpha; leaving it at zero would save a fully transparent PNG.
-	for (FColor& Pixel : Pixels)
-	{
-		Pixel.A = 255;
-	}
-
-	FImage Captured;
-	Captured.Init(Rect.Width(), Rect.Height(), ERawImageFormat::BGRA8, EGammaSpace::sRGB);
-	FMemory::Memcpy(Captured.RawData.GetData(), Pixels.GetData(), Pixels.Num() * sizeof(FColor));
-
-	// The viewport is whatever size the user left it, so scale to the requested longest edge -
-	// otherwise the returned image resolution would depend on the editor's window layout.
-	FImage Scaled;
-	const FImage* ToSave = &Captured;
-	const int32 Longest = FMath::Max(Rect.Width(), Rect.Height());
-	if (Longest > 0 && Longest != Size)
-	{
-		const double Scale = static_cast<double>(Size) / static_cast<double>(Longest);
-		const int32 NewWidth = FMath::Max(1, FMath::RoundToInt(Rect.Width() * Scale));
-		const int32 NewHeight = FMath::Max(1, FMath::RoundToInt(Rect.Height() * Scale));
-		Captured.ResizeTo(Scaled, NewWidth, NewHeight, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
-		ToSave = &Scaled;
-	}
-
-	if (!FImageUtils::SaveImageByExtension(*OutPath, *ToSave))
-	{
-		return FHFOperationResult::Fail(FString::Printf(TEXT("Could not write '%s'."), *OutPath));
-	}
+	OutPath = Request.OutputPath;
 
 	return FHFOperationResult::Ok(FString::Printf(
-		TEXT("Captured %dx%d top-down view to %s"), ToSave->SizeX, ToSave->SizeY, *OutPath));
+		TEXT("Captured a %dx%d plan, sectioned at %.0f cm, spanning %.0f x %.0f cm, to %s"),
+		Written.X, Written.Y, CutZ, WorldWidth, WorldHeight, *OutPath));
+}
+
+FHFOperationResult UHFEditorSubsystem::CaptureView(const FString& FileName, int32 Resolution,
+	FVector CameraLocation, FVector LookAt, double FieldOfViewDegrees, FString& OutPath)
+{
+	OutPath.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("There is no editor world to capture."));
+	}
+
+	FString WhyNot;
+	if (!FHFSceneCapture::CanRender(WhyNot))
+	{
+		return FHFOperationResult::Fail(FString::Printf(TEXT("Cannot capture: %s"), *WhyNot));
+	}
+
+	const FVector Direction = LookAt - CameraLocation;
+	if (Direction.IsNearlyZero())
+	{
+		return FHFOperationResult::Fail(
+			TEXT("The camera and its target are in the same place, so there is no direction to look in."));
+	}
+
+	EnsureViewingLight();
+
+	FHFCaptureRequest Request;
+	Request.bOrthographic = false;
+	Request.Location = CameraLocation;
+	Request.Rotation = Direction.Rotation();
+	Request.FieldOfViewDegrees = (FieldOfViewDegrees > 0.0) ? FieldOfViewDegrees : 70.0;
+
+	// 16:9. An interior is judged on what is beside you as much as on what is in front, and a
+	// square frame of a 3 m room shows a great deal of floor and ceiling to get there.
+	const int32 Longest = FMath::Clamp(Resolution <= 0 ? 1920 : Resolution, 256, 8192);
+	Request.Width = Longest;
+	Request.Height = FMath::Max(64, FMath::RoundToInt(Longest * 9.0 / 16.0));
+
+	// The whole scene, uncut: this is a view of the flat as built, not a diagnostic drawing of it.
+	Request.bShowSky = true;
+
+	Request.OutputPath = CapturePath(FileName, TEXT("View"));
+
+	FIntPoint Written = FIntPoint::ZeroValue;
+	FString Error;
+	if (!FHFSceneCapture::Render(World, Request, Written, Error))
+	{
+		return FHFOperationResult::Fail(FString::Printf(TEXT("Capture failed: %s"), *Error));
+	}
+
+	OutPath = Request.OutputPath;
+
+	return FHFOperationResult::Ok(FString::Printf(
+		TEXT("Captured a %dx%d view from (%.0f, %.0f, %.0f) looking at (%.0f, %.0f, %.0f) at %.0f degrees to %s"),
+		Written.X, Written.Y, CameraLocation.X, CameraLocation.Y, CameraLocation.Z,
+		LookAt.X, LookAt.Y, LookAt.Z, Request.FieldOfViewDegrees, *OutPath));
+}
+
+int32 UHFEditorSubsystem::EnsureViewingLight()
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return 0;
+	}
+
+	return FHFViewingLight::EnsureIn(World).Num();
+}
+
+int32 UHFEditorSubsystem::RemoveViewingLight()
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	return (World != nullptr) ? FHFViewingLight::RemoveFrom(World) : 0;
 }
 
 // ------------------------------------------------------------------------------- settings

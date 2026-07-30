@@ -192,6 +192,113 @@ bool FHFGeneratorsDoNotReadSettingsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * Capturing may not touch an editor viewport.
+ *
+ * The whole point of the offscreen capture is that no human has to be sitting in front of the
+ * editor with the level visible on screen. The implementation it replaced opened by hunting for a
+ * visible FLevelEditorViewportClient, pointed it downward, forced a frame, read its back buffer and
+ * put the camera back - so it failed outright with the window minimised, and read the wrong pixels
+ * with the window covered.
+ *
+ * That is easy to reintroduce by accident, because reaching for the viewport is the obvious way to
+ * do almost anything visual in the editor and it compiles fine. It would also pass every functional
+ * test in the suite, since those all run in an editor that does happen to have a viewport when a
+ * human runs them - the failure only shows up on the machine of whoever is not watching.
+ *
+ * So the capture layer may not so much as name the types involved.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCaptureNeedsNoViewportSourceTest,
+	"HouseForge.Architecture.CaptureDoesNotTouchAViewport", HF_TEST_FLAGS)
+
+bool FHFCaptureNeedsNoViewportSourceTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HouseForge"));
+	if (!TestTrue(TEXT("HouseForge plugin is discoverable"), Plugin.IsValid()))
+	{
+		return false;
+	}
+
+	const FString SourceRoot = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source"));
+
+	TArray<FString> Sources;
+	IFileManager::Get().FindFilesRecursive(Sources, *SourceRoot, TEXT("*.cpp"), true, false, false);
+	IFileManager::Get().FindFilesRecursive(Sources, *SourceRoot, TEXT("*.h"), true, false, false);
+
+	// The capture layer and the subsystem that fronts it. Tests are excluded: this file itself has
+	// to be able to write the word to say what is forbidden.
+	auto IsCaptureCode = [](const FString& Path)
+	{
+		const FString Normalised = Path.Replace(TEXT("\\"), TEXT("/"));
+		if (Normalised.Contains(TEXT("/Tests/")))
+		{
+			return false;
+		}
+		return Normalised.Contains(TEXT("/Capture/"))
+			|| Normalised.EndsWith(TEXT("HFEditorSubsystem.cpp"))
+			|| Normalised.EndsWith(TEXT("HFEditorSubsystem.h"));
+	};
+
+	// The viewport client types, the include that brings them, and the engine-wide accessor that
+	// hands one over. Catching only the class name would miss code that took a viewport from
+	// GEditor and called it something else.
+	const TCHAR* Forbidden[] =
+	{
+		TEXT("FLevelEditorViewportClient"),
+		TEXT("FEditorViewportClient"),
+		TEXT("LevelEditorViewport.h"),
+		TEXT("EditorViewportClient.h"),
+		TEXT("GetLevelViewportClients"),
+		TEXT("GetActiveViewport"),
+	};
+
+	TArray<FString> Offenders;
+	int32 Scanned = 0;
+
+	for (const FString& Path : Sources)
+	{
+		if (!IsCaptureCode(Path))
+		{
+			continue;
+		}
+
+		FString Contents;
+		if (!FFileHelper::LoadFileToString(Contents, *Path))
+		{
+			continue;
+		}
+
+		++Scanned;
+
+		for (const TCHAR* Term : Forbidden)
+		{
+			if (Contents.Contains(Term))
+			{
+				FString Relative = Path;
+				FPaths::MakePathRelativeTo(Relative, *(SourceRoot / TEXT("")));
+				Offenders.Add(FString::Printf(TEXT("%s (%s)"), *Relative, Term));
+			}
+		}
+	}
+
+	// A scan that matched no files would pass while proving nothing.
+	TestTrue(TEXT("The scan actually found capture sources to check"), Scanned > 0);
+
+	if (!Offenders.IsEmpty())
+	{
+		AddError(FString::Printf(
+			TEXT("These files reach for an editor viewport: %s. Captures render offscreen through a ")
+			TEXT("USceneCaptureComponent2D into a render target, precisely so they work with the editor ")
+			TEXT("window minimised, covered or on another desktop - which is the only reason the tool is ")
+			TEXT("useful to Claude at all."),
+			*FString::Join(Offenders, TEXT(", "))));
+	}
+
+	TestTrue(TEXT("No capture code touches an editor viewport"), Offenders.IsEmpty());
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

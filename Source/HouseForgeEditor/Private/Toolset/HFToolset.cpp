@@ -154,7 +154,7 @@ FString UHFToolset::SaveSpec(const FString& FileName)
 	return Editor ? Report(Editor->SaveSpecToFile(FileName)) : NoEditor();
 }
 
-FString UHFToolset::CaptureTopDown(const FString& FileName, int32 Resolution)
+FString UHFToolset::CaptureTopDown(const FString& FileName, int32 Resolution, float SectionHeightCm)
 {
 	UHFEditorSubsystem* Editor = Subsystem();
 	if (Editor == nullptr)
@@ -163,6 +163,24 @@ FString UHFToolset::CaptureTopDown(const FString& FileName, int32 Resolution)
 	}
 
 	FString Path;
-	const FHFOperationResult Result = Editor->CaptureTopDown(FileName, Resolution, Path);
+	const FHFOperationResult Result = Editor->CaptureTopDown(FileName, Resolution, SectionHeightCm, Path);
+	return Report(Result);
+}
+
+FString UHFToolset::CaptureView(const FString& FileName, int32 Resolution,
+	float CameraX, float CameraY, float CameraZ,
+	float TargetX, float TargetY, float TargetZ,
+	float FieldOfViewDegrees)
+{
+	UHFEditorSubsystem* Editor = Subsystem();
+	if (Editor == nullptr)
+	{
+		return NoEditor();
+	}
+
+	FString Path;
+	const FHFOperationResult Result = Editor->CaptureView(FileName, Resolution,
+		FVector(CameraX, CameraY, CameraZ), FVector(TargetX, TargetY, TargetZ),
+		FieldOfViewDegrees, Path);
 	return Report(Result);
 }

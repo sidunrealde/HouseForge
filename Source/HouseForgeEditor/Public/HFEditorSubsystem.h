@@ -117,16 +117,63 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "HouseForge|Elements")
 	FHFOperationResult DeleteElement(const FString& Category, const FString& ElementId);
 
-	// ------------------------------------------------------------------------------ viewport
+	// ------------------------------------------------------------------------------- capture
 
 	/**
-	 * Top-down orthographic capture framed on the house, written under Saved/Screenshots.
+	 * A PLAN of the house: an orthographic view of a horizontal section, written under
+	 * Saved/Screenshots.
 	 *
 	 * This closes the loop. Without it Claude is building blind and cannot tell whether what it
-	 * read matches what it built.
+	 * read matches what it built - and for a long time it could not tell, because the top-down
+	 * view this replaces showed the top of the ceilings. A featureless slab is not a plan, and
+	 * comparing one against a drawing tells you nothing about the house underneath it.
+	 *
+	 * So the house is cut through at SectionHeight the way a real plan is cut, and the section is
+	 * what gets rendered. The house itself is never modified - a sectioned copy is built, captured
+	 * and thrown away.
+	 *
+	 * Renders offscreen. No editor viewport is used, borrowed or read from, so this works with the
+	 * editor window minimised, covered, or on another desktop.
+	 *
+	 * @param FileName       Name of the PNG. Any path on it is ignored.
+	 * @param Resolution     Longest edge in pixels. The other edge follows the plan's proportions.
+	 * @param SectionHeight  Height of the cut in centimetres. Zero or less takes the 120 cm a plan
+	 *                       is conventionally cut at.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "HouseForge|Viewport")
-	FHFOperationResult CaptureTopDown(const FString& FileName, int32 Resolution, FString& OutPath);
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Capture")
+	FHFOperationResult CaptureTopDown(const FString& FileName, int32 Resolution, double SectionHeight,
+		FString& OutPath);
+
+	/**
+	 * A perspective view from anywhere, looking at anything - an interior of one room, rather than
+	 * a drawing of the whole flat.
+	 *
+	 * The other half of being able to see the flat. A plan says whether the layout is right; only
+	 * a view from inside a room says whether the room is. Renders offscreen, like the plan, and
+	 * against the same placeholder lighting.
+	 *
+	 * @param CameraLocation      Where the camera is, in world centimetres. Eye height is about 160.
+	 * @param LookAt              What it points at, in world centimetres.
+	 * @param FieldOfViewDegrees  Horizontal field of view. Zero or less takes 70, which is close to
+	 *                            a 24 mm lens and is what interiors are normally shot on.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Capture")
+	FHFOperationResult CaptureView(const FString& FileName, int32 Resolution, FVector CameraLocation,
+		FVector LookAt, double FieldOfViewDegrees, FString& OutPath);
+
+	/**
+	 * Makes sure the level has the placeholder viewing light, and returns how many actors it has.
+	 *
+	 * Idempotent, and called by both captures - there are no materials and no lighting milestone
+	 * yet, so without it a render comes back black and says nothing about the geometry in it. The
+	 * rig is scaffolding and is labelled as such in the outliner; milestone 11 replaces it.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Capture")
+	int32 EnsureViewingLight();
+
+	/** Deletes the placeholder viewing light. Returns how many actors went. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Capture")
+	int32 RemoveViewingLight();
 
 	/** The house actor in the current level, or nullptr. */
 	AHFHouseActor* FindHouseActor() const;
