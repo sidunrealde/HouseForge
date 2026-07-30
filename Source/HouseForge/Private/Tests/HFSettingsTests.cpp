@@ -12,6 +12,8 @@
 #include "Model/HFBuildDefaults.h"
 #include "Model/HFSettings.h"
 #include "Model/HFSpecValidator.h"
+#include "Templates/Function.h"
+#include "UObject/UnrealType.h"
 
 using namespace UE::Geometry;
 
@@ -402,6 +404,112 @@ bool FHFSettingsValidationLimitsTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("The same house fails a 250 headroom limit"),
 		FHFSpecValidator::Validate(Spec, Tall).Contains(TEXT("LowHeadroom")));
+
+	return true;
+}
+
+/**
+ * Every figure on the page is visible, and the ones that reach nothing yet say so.
+ *
+ * The joinery figures resolve correctly and stamp themselves onto the kit's parameter structs -
+ * that is tested above - but nothing composes a fixture out of the kit yet, so changing one changes
+ * nothing an artist can see in a level until milestone 9 lands. There were three ways to ship that
+ * and only one of them is honest. Hiding them means the page silently grows a whole section one
+ * day. Shipping them bare means a page that lies to the person dragging the slider. Shipping them
+ * marked is the third, and it only stays true while something holds the marking on.
+ *
+ * So this walks the page by reflection rather than trusting the header: every leaf control under
+ * Joinery must carry the marker in its category, and nothing outside Joinery may carry it. A figure
+ * added to the section later without the marker fails here rather than reaching an artist unlabelled,
+ * and the marker being deleted wholesale fails here too.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsInertOnesAreMarkedTest,
+	"HouseForge.Settings.InertControlsAreMarkedOnThePage", HF_TEST_FLAGS)
+
+bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
+{
+	const UHFSettings* Settings = GetDefault<UHFSettings>();
+	if (!TestNotNull(TEXT("The settings page is registered"), Settings))
+	{
+		return false;
+	}
+
+	static const FName CategoryKey(TEXT("Category"));
+	static const FString Marker(TEXT("takes effect when fixtures land"));
+
+	int32 Controls = 0;
+	int32 Marked = 0;
+	int32 Joinery = 0;
+
+	// A struct property is a heading in the details panel; what an artist actually drags is the
+	// leaf inside it, so the leaves are what get counted and checked.
+	TFunction<void(const UStruct*, const FString&)> Walk =
+		[&](const UStruct* Struct, const FString& InheritedCategory)
+		{
+			for (TFieldIterator<FProperty> It(Struct); It; ++It)
+			{
+				const FProperty* Property = *It;
+
+				// Only what the page itself exposes. Parameter structs are shared with the
+				// generators, whose own members are not all editable here.
+				if (!Property->HasAnyPropertyFlags(CPF_Edit))
+				{
+					continue;
+				}
+
+				FString Category = Property->GetMetaData(CategoryKey);
+				if (Category.IsEmpty())
+				{
+					Category = InheritedCategory;
+				}
+
+				if (const FStructProperty* AsStruct = CastField<FStructProperty>(Property))
+				{
+					Walk(AsStruct->Struct, Category);
+					continue;
+				}
+
+				++Controls;
+
+				const bool bIsJoinery = Category.StartsWith(TEXT("Joinery"));
+				const bool bIsMarked = Category.Contains(Marker);
+
+				Joinery += bIsJoinery ? 1 : 0;
+				Marked += bIsMarked ? 1 : 0;
+
+				if (bIsJoinery && !bIsMarked)
+				{
+					AddError(FString::Printf(
+						TEXT("'%s' is a joinery figure under category '%s' but is not marked as taking effect when fixtures land. Nothing composes a fixture from the kit yet, so an artist changing it would see no difference and no explanation."),
+						*Property->GetName(), *Category));
+				}
+
+				if (bIsMarked && !bIsJoinery)
+				{
+					AddError(FString::Printf(
+						TEXT("'%s' is marked as taking effect when fixtures land, but it sits under '%s' rather than Joinery. Openings and Validation are wired end to end; marking one of those would be telling an artist a value does nothing when it does."),
+						*Property->GetName(), *Category));
+				}
+			}
+		};
+
+	Walk(UHFSettings::StaticClass(), FString());
+
+	AddInfo(FString::Printf(
+		TEXT("HouseForge settings page: %d controls, of which %d are joinery figures marked as taking effect when fixtures land."),
+		Controls, Joinery));
+
+	TestEqual(TEXT("Every joinery figure on the page carries the marker"), Marked, Joinery);
+	TestTrue(TEXT("The joinery section is still on the page rather than hidden"), Joinery > 0);
+
+	// The whole page ships, not a subset of it. A control quietly dropped between milestones is
+	// exactly what this number is here to catch.
+	//
+	// 70 leaves: 4 door + 15 sliding window + 12 ventilator + 4 fixed window under Openings, 32
+	// under Joinery, and 3 validation limits. The struct properties themselves are headings in the
+	// details panel rather than things anybody drags, so they are recursed through, not counted.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 70);
+	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
 	return true;
 }
