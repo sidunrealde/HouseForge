@@ -280,14 +280,27 @@ namespace
 	}
 }
 
-double FHFJoineryKit::DefaultShelfThickness(EHFShelfMaterial Material)
+// A default-constructed FHFShelfMaterialFigures has to BE the compiled-in constants, or every
+// caller that does not pass one silently changes behaviour. Held here at compile time rather than
+// in a test, because the two declarations sit in different places and are easy to edit apart.
+static_assert(FHFShelfMaterialFigures().PlyThickness == FHFJoineryKit::PlyShelfThickness,
+	"The default ply shelf thickness has drifted from FHFJoineryKit::PlyShelfThickness.");
+static_assert(FHFShelfMaterialFigures().GlassThickness == FHFJoineryKit::GlassShelfThickness,
+	"The default glass shelf thickness has drifted from FHFJoineryKit::GlassShelfThickness.");
+static_assert(FHFShelfMaterialFigures().PlyMaxSpan == FHFJoineryKit::PlyMaxSpan,
+	"The default ply span has drifted from FHFJoineryKit::PlyMaxSpan.");
+static_assert(FHFShelfMaterialFigures().GlassMaxSpan == FHFJoineryKit::GlassMaxSpan,
+	"The default glass span has drifted from FHFJoineryKit::GlassMaxSpan.");
+
+double FHFJoineryKit::DefaultShelfThickness(EHFShelfMaterial Material,
+	const FHFShelfMaterialFigures& Figures)
 {
-	return Material == EHFShelfMaterial::Glass ? GlassShelfThickness : PlyShelfThickness;
+	return Figures.ThicknessFor(Material);
 }
 
-double FHFJoineryKit::DefaultMaxSpan(EHFShelfMaterial Material)
+double FHFJoineryKit::DefaultMaxSpan(EHFShelfMaterial Material, const FHFShelfMaterialFigures& Figures)
 {
-	return Material == EHFShelfMaterial::Glass ? GlassMaxSpan : PlyMaxSpan;
+	return Figures.MaxSpanFor(Material);
 }
 
 int32 FHFJoineryKit::ShelfCountForClearHeight(double ClearHeight, double TargetSpacing,
@@ -315,7 +328,8 @@ int32 FHFJoineryKit::ShelfCountForClearHeight(double ClearHeight, double TargetS
 	return Count;
 }
 
-FHFShelfStackParams FHFJoineryKit::SanitiseShelfStack(const FHFShelfStackParams& Params)
+FHFShelfStackParams FHFJoineryKit::SanitiseShelfStack(const FHFShelfStackParams& Params,
+	const FHFShelfMaterialFigures& Figures)
 {
 	FHFShelfStackParams Out = Params;
 
@@ -324,16 +338,18 @@ FHFShelfStackParams FHFJoineryKit::SanitiseShelfStack(const FHFShelfStackParams&
 	Out.Height = FMath::Max(Out.Height, 0.0);
 
 	// Zero means "whatever this material is", which is the only sensible default: a glass shelf
-	// generated 18 mm thick would be a glass shelf nobody has ever seen.
+	// generated 18 mm thick would be a glass shelf nobody has ever seen. Resolving it HERE, against
+	// figures handed in, is what lets a project set its own board and span without the material
+	// having to be known before the stack is described - see FHFShelfMaterialFigures.
 	if (Out.ShelfThickness <= 0.0)
 	{
-		Out.ShelfThickness = DefaultShelfThickness(Out.ShelfMaterial);
+		Out.ShelfThickness = DefaultShelfThickness(Out.ShelfMaterial, Figures);
 	}
 	Out.ShelfThickness = FMath::Max(Out.ShelfThickness, MinBoardThickness);
 
 	if (Out.MaxSpan <= 0.0)
 	{
-		Out.MaxSpan = DefaultMaxSpan(Out.ShelfMaterial);
+		Out.MaxSpan = DefaultMaxSpan(Out.ShelfMaterial, Figures);
 	}
 	Out.PartitionThickness = FMath::Max(Out.PartitionThickness, MinBoardThickness);
 
@@ -403,12 +419,13 @@ FHFShelfStackParams FHFJoineryKit::SanitiseShelfStack(const FHFShelfStackParams&
 	return Out;
 }
 
-FDynamicMesh3 FHFJoineryKit::GenerateShelfStack(const FHFShelfStackParams& Params)
+FDynamicMesh3 FHFJoineryKit::GenerateShelfStack(const FHFShelfStackParams& Params,
+	const FHFShelfMaterialFigures& Figures)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
 
-	const FHFShelfStackParams P = SanitiseShelfStack(Params);
+	const FHFShelfStackParams P = SanitiseShelfStack(Params, Figures);
 
 	const double Y0 = P.FrontSetback;
 	const double Y1 = P.Depth - P.BackClearance;

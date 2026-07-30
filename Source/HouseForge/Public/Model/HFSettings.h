@@ -44,12 +44,19 @@
  * visible is the only one of the three that is honest, and HFSettingsTests holds the marking in
  * place so it cannot quietly come off.
  *
- * Four of them go further and are inert even against the kit: ShelfThicknessPly, ShelfThicknessGlass,
- * MaxShelfSpanPly and MaxShelfSpanGlass. SanitiseShelfStack resolves a shelf's material to its own
- * compiled-in figures through a zero sentinel, and ApplyTo deliberately leaves that sentinel alone -
- * writing the ply figure over it would generate an 18 mm glass shelf. Honouring these four means
- * giving SanitiseShelfStack the pair as an argument, which is a change to the kit rather than to
- * this page. Each of the four says so in its own tooltip.
+ * Every figure in the section now reaches the kit. Four of them used to stop short of even that -
+ * ShelfThicknessPly, ShelfThicknessGlass, MaxShelfSpanPly and MaxShelfSpanGlass - because a shelf's
+ * thickness and span follow its MATERIAL, resolved from a zero sentinel that ApplyTo cannot write
+ * to without choosing ply or glass before the composing layer has decided which the bay is. They
+ * travel separately instead, as FHFShelfMaterialFigures, handed to SanitiseShelfStack and
+ * GenerateShelfStack at the point the sentinel is resolved:
+ *
+ *     FHFJoineryKit::GenerateShelfStack(Bay, Defaults.ShelfFigures())
+ *
+ * So the distinction that remains is a single one - the whole section waits on fixtures - rather
+ * than a section that waits on fixtures plus four that would not work even then.
+ * HouseForge.Settings.ShelfMaterialFiguresReachTheGeometry measures both materials from one
+ * settings object, which is the assertion a stamped-on value could not pass.
  *
  *
  * WHERE THE VALUES LIVE, and why this specifier
@@ -249,10 +256,10 @@ public:
 	/**
 	 * Ply shelf board, in centimetres.
 	 *
-	 * Inert even against the joinery kit, not only against the missing fixtures:
-	 * SanitiseShelfStack resolves a shelf's material through a zero sentinel that ApplyTo
-	 * deliberately leaves alone, because writing the ply figure over it would produce an
-	 * 18 mm glass shelf. Honouring this one is a change to the kit, not to this page.
+	 * Reaches the kit as one of the four figures in FHFShelfMaterialFigures, which the composing
+	 * layer hands to GenerateShelfStack so the sentinel resolves against the material the bay
+	 * actually is. Like every figure in this section it needs a fixture to be built before an
+	 * artist sees it.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery - takes effect when fixtures land|Shelving",
 		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.6", UIMax = "3.0"))
@@ -261,10 +268,9 @@ public:
 	/**
 	 * Toughened glass shelf, in centimetres.
 	 *
-	 * Inert even against the joinery kit, not only against the missing fixtures:
-	 * SanitiseShelfStack resolves a shelf's material through a zero sentinel that ApplyTo
-	 * deliberately leaves alone, because writing the ply figure over it would produce an
-	 * 18 mm glass shelf. Honouring this one is a change to the kit, not to this page.
+	 * Reaches the kit as one of the four figures in FHFShelfMaterialFigures, so a glass bay takes
+	 * this and never the ply board above. Like every figure in this section it needs a fixture to
+	 * be built before an artist sees it.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery - takes effect when fixtures land|Shelving",
 		meta = (ClampMin = "0.1", ClampMax = "1.5", UIMin = "0.4", UIMax = "1.5"))
@@ -273,10 +279,9 @@ public:
 	/**
 	 * How far a ply shelf spans before it sags on camera, in centimetres.
 	 *
-	 * Inert even against the joinery kit, not only against the missing fixtures:
-	 * SanitiseShelfStack resolves a shelf's material through a zero sentinel that ApplyTo
-	 * deliberately leaves alone, because writing the ply figure over it would produce an
-	 * 18 mm glass shelf. Honouring this one is a change to the kit, not to this page.
+	 * Reaches the kit as one of the four figures in FHFShelfMaterialFigures. Past this width the
+	 * stack breaks itself with a mid partition rather than sagging. Like every figure in this
+	 * section it needs a fixture to be built before an artist sees it.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery - takes effect when fixtures land|Shelving",
 		meta = (ClampMin = "1.0", ClampMax = "150.0", UIMin = "40.0", UIMax = "150.0"))
@@ -285,10 +290,8 @@ public:
 	/**
 	 * The same for toughened glass, which sags sooner and more visibly, in centimetres.
 	 *
-	 * Inert even against the joinery kit, not only against the missing fixtures:
-	 * SanitiseShelfStack resolves a shelf's material through a zero sentinel that ApplyTo
-	 * deliberately leaves alone, because writing the ply figure over it would produce an
-	 * 18 mm glass shelf. Honouring this one is a change to the kit, not to this page.
+	 * Reaches the kit as one of the four figures in FHFShelfMaterialFigures. Like every figure in
+	 * this section it needs a fixture to be built before an artist sees it.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery - takes effect when fixtures land|Shelving",
 		meta = (ClampMin = "1.0", ClampMax = "120.0", UIMin = "30.0", UIMax = "120.0"))

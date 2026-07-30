@@ -50,8 +50,23 @@ void FHFJoineryDefaults::ApplyTo(FHFShelfStackParams& Params) const
 
 	// ShelfThickness and MaxSpan are left at their zero sentinel, which means "whatever this
 	// material is". Writing the ply figure over them would generate an 18 mm glass shelf, which is
-	// a glass shelf nobody has ever seen. The material's own figures reach the generator through
-	// SanitiseShelfStack instead.
+	// a glass shelf nobody has ever seen.
+	//
+	// That does NOT make the project's shelf figures unreachable - it makes them travel separately.
+	// Hand ShelfFigures() to SanitiseShelfStack or GenerateShelfStack and the sentinel resolves
+	// against the project's numbers for the material the bay actually turned out to be.
+}
+
+FHFShelfMaterialFigures FHFJoineryDefaults::ShelfFigures() const
+{
+	FHFShelfMaterialFigures Figures;
+
+	Figures.PlyThickness = ShelfThicknessPly;
+	Figures.GlassThickness = ShelfThicknessGlass;
+	Figures.PlyMaxSpan = MaxShelfSpanPly;
+	Figures.GlassMaxSpan = MaxShelfSpanGlass;
+
+	return Figures;
 }
 
 void FHFJoineryDefaults::ApplyTo(FHFDrawerParams& Params) const

@@ -200,6 +200,22 @@ struct HOUSEFORGE_API FHFJoineryDefaults
 	void ApplyTo(FHFShelfStackParams& Params) const;
 	void ApplyTo(FHFDrawerParams& Params) const;
 
+	/**
+	 * The shelf material figures, for the two calls that resolve a stack's zero sentinel.
+	 *
+	 * The exception to "ApplyTo stamps everything". A shelf's thickness and span follow its MATERIAL,
+	 * and the material is not known until the composing layer has decided what the bay is - so these
+	 * four cannot be written onto the params in advance without choosing ply or glass too early.
+	 * They travel separately and are resolved at the point of use instead:
+	 *
+	 *     FHFJoineryKit::GenerateShelfStack(Params, Defaults.ShelfFigures())
+	 *
+	 * Pass this to SanitiseShelfStack or GenerateShelfStack and the project's ShelfThicknessPly,
+	 * ShelfThicknessGlass, MaxShelfSpanPly and MaxShelfSpanGlass reach the geometry. Omit it and the
+	 * kit's own constants stand, which is what every test that does not care gets.
+	 */
+	FHFShelfMaterialFigures ShelfFigures() const;
+
 	/** A parameter struct with the project's figures already on it, ready for dimensions. */
 	template <typename ParamsType>
 	ParamsType Make() const

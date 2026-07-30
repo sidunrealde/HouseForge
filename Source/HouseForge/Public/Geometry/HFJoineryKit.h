@@ -112,6 +112,57 @@ enum class EHFShelfMaterial : uint8
 };
 
 /**
+ * What each shelf material is, in centimetres: how thick its board is and how far it spans.
+ *
+ * Exists so a project can change those four figures. A shelf stack says WHICH material it is made
+ * of and leaves ShelfThickness and MaxSpan at their zero sentinel, and the sentinel is resolved
+ * against one of these - so the pair that gets picked follows the material, which is the whole
+ * reason the sentinel exists. A single "shelf thickness" setting stamped onto the params would
+ * generate an 18 mm glass shelf.
+ *
+ * Passed in rather than read from a settings object, because everything it feeds is a pure function
+ * - see .claude/rules/04-conventions.md. The composing layer builds one of these from the project's
+ * settings via FHFJoineryDefaults::ShelfFigures(); a test builds one by hand or takes the default.
+ *
+ * Default-constructed it carries exactly FHFJoineryKit's compiled-in constants, which is what makes
+ * every existing caller and every existing test unchanged by its arrival. Static asserts in
+ * HFJoineryKit.cpp hold the two together so they cannot drift apart.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFShelfMaterialFigures
+{
+	GENERATED_BODY()
+
+	/** 18 mm faced ply, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double PlyThickness = 1.8;
+
+	/** 8 mm toughened glass, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double GlassThickness = 0.8;
+
+	/** How far a ply shelf spans before it sags on camera, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double PlyMaxSpan = 90.0;
+
+	/** The same for toughened glass, which sags sooner and more visibly, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double GlassMaxSpan = 60.0;
+
+	/** Board thickness for a material, in centimetres. */
+	double ThicknessFor(EHFShelfMaterial Material) const
+	{
+		return Material == EHFShelfMaterial::Glass ? GlassThickness : PlyThickness;
+	}
+
+	/** Span limit for a material, in centimetres. */
+	double MaxSpanFor(EHFShelfMaterial Material) const
+	{
+		return Material == EHFShelfMaterial::Glass ? GlassMaxSpan : PlyMaxSpan;
+	}
+};
+
+/**
  * A run of internal shelves in one bay, with a hanging rail under the top if it is a wardrobe.
  *
  * Describes the clear volume the shelves fill rather than the carcass around it. The carcass
@@ -806,8 +857,16 @@ public:
 	// with the part for free. That is the whole reason this returns a mesh in a local frame rather
 	// than placing anything itself.
 
-	/** The parameters actually used, with material defaults resolved and everything clamped to fit. */
-	static FHFShelfStackParams SanitiseShelfStack(const FHFShelfStackParams& Params);
+	/**
+	 * The parameters actually used, with material defaults resolved and everything clamped to fit.
+	 *
+	 * @param Figures What each shelf material is. This is where ShelfThickness and MaxSpan get their
+	 *   zero sentinel resolved, so it is the only place a project's shelf figures can reach a stack -
+	 *   they cannot be stamped onto the params in advance without picking a material too early.
+	 *   Defaulted to the kit's own constants, so a caller with no view gets what it always got.
+	 */
+	static FHFShelfStackParams SanitiseShelfStack(const FHFShelfStackParams& Params,
+		const FHFShelfMaterialFigures& Figures = FHFShelfMaterialFigures());
 
 	/**
 	 * Internal shelves, the mid partitions they need to not sag, and a hanging rail if asked for.
@@ -821,7 +880,8 @@ public:
 	 * Returns an empty mesh when the parameters describe no shelves and no rail, which an open bay
 	 * legitimately is.
 	 */
-	static UE::Geometry::FDynamicMesh3 GenerateShelfStack(const FHFShelfStackParams& Params);
+	static UE::Geometry::FDynamicMesh3 GenerateShelfStack(const FHFShelfStackParams& Params,
+		const FHFShelfMaterialFigures& Figures = FHFShelfMaterialFigures());
 
 	/**
 	 * How many shelves a clear height wants at a target compartment spacing.
@@ -839,11 +899,13 @@ public:
 	static int32 ShelfCountForClearHeight(double ClearHeight, double TargetSpacing = 37.5,
 		double ShelfThickness = 0.0, double MinCompartment = 0.0);
 
-	/** 1.8 for ply, 0.8 for toughened glass. */
-	static double DefaultShelfThickness(EHFShelfMaterial Material);
+	/** 1.8 for ply, 0.8 for toughened glass, unless the project says otherwise. */
+	static double DefaultShelfThickness(EHFShelfMaterial Material,
+		const FHFShelfMaterialFigures& Figures = FHFShelfMaterialFigures());
 
 	/** How far a shelf spans before it sags on camera: 90 for 18 ply, 60 for 8 mm toughened glass. */
-	static double DefaultMaxSpan(EHFShelfMaterial Material);
+	static double DefaultMaxSpan(EHFShelfMaterial Material,
+		const FHFShelfMaterialFigures& Figures = FHFShelfMaterialFigures());
 
 	/** Below this a compartment holds nothing a wardrobe is for. Folded clothes need 300 mm. */
 	static constexpr double MinUsefulCompartment = 30.0;

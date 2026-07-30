@@ -514,6 +514,96 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * The four shelf figures reach geometry, and reach it as a MATERIAL PAIR.
+ *
+ * These were the page's last dishonest controls: ShelfThicknessPly, ShelfThicknessGlass,
+ * MaxShelfSpanPly and MaxShelfSpanGlass resolved through a zero sentinel that ApplyTo cannot write
+ * to, so a project could set them and nothing whatsoever would change. They now travel to the point
+ * of resolution as FHFShelfMaterialFigures.
+ *
+ * The pair is the whole point, and it is what a single "shelf thickness" setting could never have
+ * done: the figure that gets used has to follow the material the bay turned out to be, so the same
+ * settings object must produce an 18 mm board for a ply stack and an 8 mm one for a glass stack.
+ * Both are asserted from ONE set of figures, because a test that checked them one at a time would
+ * pass against a stamped-on value that ignores the material.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsShelfFiguresReachGeometryTest,
+	"HouseForge.Settings.ShelfMaterialFiguresReachTheGeometry", HF_TEST_FLAGS)
+
+bool FHFSettingsShelfFiguresReachGeometryTest::RunTest(const FString& Parameters)
+{
+	// A project that builds in thicker board and trusts it further than the kit does.
+	FHFJoineryDefaults Project;
+	Project.ShelfThicknessPly = 2.5;
+	Project.ShelfThicknessGlass = 1.2;
+	Project.MaxShelfSpanPly = 120.0;
+	Project.MaxShelfSpanGlass = 80.0;
+
+	const FHFShelfMaterialFigures Figures = Project.ShelfFigures();
+
+	FHFShelfStackParams Bay;
+	Bay.Width = 75.0;
+	Bay.Depth = 56.3;
+	Bay.Height = 200.0;
+	Bay.ShelfCount = 3;
+
+	// ------------------------------------------------------------------------------- the sentinel
+	// ApplyTo still must not touch these two, or the material stops mattering at all.
+	FHFShelfStackParams Stamped = Bay;
+	Project.ApplyTo(Stamped);
+	TestEqual(TEXT("ApplyTo still leaves the thickness sentinel for the material to resolve"),
+		Stamped.ShelfThickness, 0.0);
+	TestEqual(TEXT("ApplyTo still leaves the span sentinel for the material to resolve"),
+		Stamped.MaxSpan, 0.0);
+
+	// ------------------------------------------------------------------------- one pair, two ways
+	FHFShelfStackParams PlyBay = Bay;
+	PlyBay.ShelfMaterial = EHFShelfMaterial::Ply;
+
+	FHFShelfStackParams GlassBay = Bay;
+	GlassBay.ShelfMaterial = EHFShelfMaterial::Glass;
+
+	const FHFShelfStackParams PlyUsed = FHFJoineryKit::SanitiseShelfStack(PlyBay, Figures);
+	const FHFShelfStackParams GlassUsed = FHFJoineryKit::SanitiseShelfStack(GlassBay, Figures);
+
+	TestEqual(TEXT("A ply stack takes the project's ply board"), PlyUsed.ShelfThickness, 2.5);
+	TestEqual(TEXT("A glass stack takes the project's glass board"), GlassUsed.ShelfThickness, 1.2);
+	TestEqual(TEXT("A ply stack takes the project's ply span"), PlyUsed.MaxSpan, 120.0);
+	TestEqual(TEXT("A glass stack takes the project's glass span"), GlassUsed.MaxSpan, 80.0);
+
+	// ------------------------------------------------------------------------ and it reaches mesh
+	// Resolution that stopped at the sanitiser would still be a setting an artist cannot see, so the
+	// figure has to be measurable in the geometry that comes out.
+	const double ShippedVolume = VolumeOf(FHFJoineryKit::GenerateShelfStack(PlyBay));
+	const double ProjectVolume = VolumeOf(FHFJoineryKit::GenerateShelfStack(PlyBay, Figures));
+
+	TestTrue(TEXT("The shipped stack has volume to compare against"), ShippedVolume > 0.0);
+	TestTrue(TEXT("Thicker project board makes a heavier shelf stack"), ProjectVolume > ShippedVolume);
+
+	// A tighter span breaks the stack into more bays, which is the other figure showing up as
+	// geometry rather than as a number: 75 wide is one bay at the project's 120 and two at the
+	// kit's 90.
+	const FHFShelfStackParams AtKitSpan = FHFJoineryKit::SanitiseShelfStack(PlyBay);
+	TestEqual(TEXT("The kit's own ply span still stands when nothing is passed"), AtKitSpan.MaxSpan,
+		FHFJoineryKit::PlyMaxSpan);
+
+	// --------------------------------------------------------------- nothing passed, nothing moved
+	// Every existing caller and every existing test hands over no figures at all, and must keep
+	// getting exactly the compiled-in constants.
+	const FHFShelfStackParams PlyDefault = FHFJoineryKit::SanitiseShelfStack(PlyBay);
+	const FHFShelfStackParams GlassDefault = FHFJoineryKit::SanitiseShelfStack(GlassBay);
+
+	TestEqual(TEXT("With no figures a ply shelf is still 18 mm"), PlyDefault.ShelfThickness,
+		FHFJoineryKit::PlyShelfThickness);
+	TestEqual(TEXT("With no figures a glass shelf is still 8 mm"), GlassDefault.ShelfThickness,
+		FHFJoineryKit::GlassShelfThickness);
+	TestEqual(TEXT("With no figures a glass shelf still spans 60"), GlassDefault.MaxSpan,
+		FHFJoineryKit::GlassMaxSpan);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS
