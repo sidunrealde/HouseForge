@@ -113,10 +113,10 @@
 <line x1="1070.14" y1="682.90" x2="1070.14" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
 <line x1="1158.95" y1="682.90" x2="1158.95" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
 <line x1="1070.14" y1="688.58" x2="1070.14" y2="599.76" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
-<polygon points="1457.48,682.71 1531.49,682.71 1531.49,694.45 1457.48,694.45" fill="#ffffff" stroke="none" stroke-width="1.00"/>
-<line x1="1457.48" y1="682.90" x2="1457.48" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
-<line x1="1531.49" y1="682.90" x2="1531.49" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
-<line x1="1457.48" y1="688.58" x2="1457.48" y2="762.59" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<polygon points="1543.83,682.71 1617.84,682.71 1617.84,694.45 1543.83,694.45" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1543.83" y1="682.90" x2="1543.83" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1617.84" y1="682.90" x2="1617.84" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1543.83" y1="688.58" x2="1543.83" y2="762.59" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
 <polygon points="1044.53,814.40 1044.53,740.39 1056.27,740.39 1056.27,814.40" fill="#ffffff" stroke="none" stroke-width="1.00"/>
 <line x1="1044.73" y1="814.40" x2="1056.07" y2="814.40" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
 <line x1="1044.73" y1="740.39" x2="1056.07" y2="740.39" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
@@ -296,7 +296,7 @@
 <text x="991.19" y="481.34" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">UTILITY</text>
 <text x="843.16" y="1295.49" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">BALCONY</text>
 <text x="1494.49" y="318.51" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">BALCONY 2</text>
-<text x="1775.74" y="777.39" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">WASH AREA BALCONY</text>
+<text x="1775.74" y="777.39" font-family="DejaVu Sans, Arial, sans-serif" font-size="15.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">SERVICE BALCONY</text>
 <circle cx="2310.00" cy="196.00" r="34.00" fill="none" stroke="#000000" stroke-width="1.60"/>
 <polygon points="2310.00,167.00 2299.00,218.00 2310.00,209.00 2321.00,218.00" fill="#000000" stroke="#000000" stroke-width="1.00"/>
 <text x="2310.00" y="250.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="18.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">N</text>

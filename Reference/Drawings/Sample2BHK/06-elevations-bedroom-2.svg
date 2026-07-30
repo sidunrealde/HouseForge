@@ -63,10 +63,10 @@
 <line x1="1835.16" y1="515.13" x2="1835.16" y2="547.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
 <polygon points="1896.48,394.52 1962.80,394.52 1962.80,667.75 1896.48,667.75" fill="none" stroke="#464646" stroke-width="1.00"/>
 <line x1="1951.80" y1="515.13" x2="1951.80" y2="547.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
-<polygon points="1748.84,385.29 1965.80,385.29 1965.80,392.52 1748.84,392.52" fill="none" stroke="#464646" stroke-width="1.40"/>
-<line x1="1821.16" y1="385.29" x2="1821.16" y2="392.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
-<line x1="1893.48" y1="385.29" x2="1893.48" y2="392.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
-<text x="1857.32" y="388.90" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOFT</text>
+<polygon points="1748.84,338.28 1965.80,338.28 1965.80,392.52 1748.84,392.52" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="1821.16" y1="338.28" x2="1821.16" y2="392.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="1893.48" y1="338.28" x2="1893.48" y2="392.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<text x="1857.32" y="365.40" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOFT</text>
 <polygon points="1611.43,428.68 1719.91,428.68 1719.91,573.32 1611.43,573.32" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <line x1="1665.67" y1="428.68" x2="1665.67" y2="573.32" stroke="#000000" stroke-width="1.80" stroke-linecap="round"/>
 <line x1="1623.43" y1="501.00" x2="1653.67" y2="501.00" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
@@ -95,10 +95,10 @@
 <line x1="493.85" y1="1137.13" x2="493.85" y2="1169.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
 <polygon points="506.95,1016.52 525.06,1016.52 525.06,1289.75 506.95,1289.75" fill="none" stroke="#464646" stroke-width="1.00"/>
 <line x1="514.06" y1="1137.13" x2="514.06" y2="1169.13" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
-<polygon points="455.74,1007.29 528.06,1007.29 528.06,1014.52 455.74,1014.52" fill="none" stroke="#464646" stroke-width="1.40"/>
-<line x1="479.85" y1="1007.29" x2="479.85" y2="1014.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
-<line x1="503.95" y1="1007.29" x2="503.95" y2="1014.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
-<text x="491.90" y="1010.90" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOFT</text>
+<polygon points="455.74,960.28 528.06,960.28 528.06,1014.52 455.74,1014.52" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="479.85" y1="960.28" x2="479.85" y2="1014.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<line x1="503.95" y1="960.28" x2="503.95" y2="1014.52" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
+<text x="491.90" y="987.40" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#787878" text-anchor="middle" dominant-baseline="central">LOFT</text>
 <polygon points="758.88,1141.08 787.81,1141.08 787.81,1159.16 758.88,1159.16" fill="none" stroke="#005aaa" stroke-width="1.40"/>
 <line x1="763.70" y1="1141.08" x2="763.70" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
 <line x1="768.53" y1="1141.08" x2="768.53" y2="1159.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>

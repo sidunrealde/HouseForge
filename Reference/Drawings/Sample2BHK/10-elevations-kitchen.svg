@@ -24,8 +24,8 @@
 <polygon points="441.88,669.75 948.12,669.75 948.12,681.80 441.88,681.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
 <polygon points="461.77,572.11 522.03,572.11 522.03,579.35 461.77,579.35" fill="none" stroke="#464646" stroke-width="1.30"/>
 <polygon points="461.77,416.63 522.03,416.63 522.03,501.00 461.77,501.00" fill="none" stroke="#464646" stroke-width="1.30"/>
-<polygon points="857.72,464.84 942.09,464.84 942.09,681.80 857.72,681.80" fill="none" stroke="#464646" stroke-width="1.30"/>
-<circle cx="899.91" cy="573.32" r="18.56" fill="none" stroke="#464646" stroke-width="1.00"/>
+<polygon points="652.81,464.84 737.19,464.84 737.19,681.80 652.81,681.80" fill="none" stroke="#464646" stroke-width="1.30"/>
+<circle cx="695.00" cy="573.32" r="18.56" fill="none" stroke="#464646" stroke-width="1.00"/>
 <polygon points="493.71,519.08 522.64,519.08 522.64,537.16 493.71,537.16" fill="none" stroke="#005aaa" stroke-width="1.40"/>
 <line x1="498.53" y1="519.08" x2="498.53" y2="537.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
 <line x1="503.35" y1="519.08" x2="503.35" y2="537.16" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
@@ -50,8 +50,6 @@
 <line x1="1604.20" y1="356.36" x2="1965.80" y2="356.36" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
 <text x="1973.80" y="356.36" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2700</text>
 <polygon points="1604.20,669.75 1965.80,669.75 1965.80,681.80 1604.20,681.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
-<polygon points="1634.33,464.84 1718.71,464.84 1718.71,681.80 1634.33,681.80" fill="none" stroke="#464646" stroke-width="1.30"/>
-<circle cx="1676.52" cy="573.32" r="18.56" fill="none" stroke="#464646" stroke-width="1.00"/>
 <line x1="1604.20" y1="721.80" x2="1965.80" y2="721.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1604.20" y1="681.80" x2="1604.20" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
 <line x1="1965.80" y1="681.80" x2="1965.80" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
@@ -103,12 +101,6 @@
 <line x1="719.16" y1="1104.92" x2="709.16" y2="1098.92" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
 <line x1="719.16" y1="1104.92" x2="709.16" y2="1110.92" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
 <text x="731.16" y="1036.68" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">Win_Kitchen</text>
-<polygon points="502.15,1050.68 574.47,1050.68 574.47,1159.16 502.15,1159.16" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
-<line x1="538.31" y1="1050.68" x2="538.31" y2="1159.16" stroke="#000000" stroke-width="1.80" stroke-linecap="round"/>
-<line x1="514.15" y1="1104.92" x2="526.31" y2="1104.92" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
-<line x1="526.31" y1="1104.92" x2="516.31" y2="1098.92" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
-<line x1="526.31" y1="1104.92" x2="516.31" y2="1110.92" stroke="#5a5a5a" stroke-width="1.00" stroke-linecap="round"/>
-<text x="538.31" y="1036.68" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">Win_Utility</text>
 <line x1="441.88" y1="1343.80" x2="948.12" y2="1343.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="441.88" y1="1303.80" x2="441.88" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
 <line x1="948.12" y1="1303.80" x2="948.12" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>

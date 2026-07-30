@@ -120,11 +120,11 @@
 <line x1="1158.95" y1="682.90" x2="1158.95" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
 <line x1="1070.14" y1="688.58" x2="1070.14" y2="599.76" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
 <path d="M 1070.14 599.76 A 88.82 88.82 0 0 1 1158.95 688.58" fill="none" stroke="#787878" stroke-width="1.00" stroke-dasharray="5 5"/>
-<polygon points="1457.48,682.71 1531.49,682.71 1531.49,694.45 1457.48,694.45" fill="#ffffff" stroke="none" stroke-width="1.00"/>
-<line x1="1457.48" y1="682.90" x2="1457.48" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
-<line x1="1531.49" y1="682.90" x2="1531.49" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
-<line x1="1457.48" y1="688.58" x2="1457.48" y2="762.59" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
-<path d="M 1531.49 688.58 A 74.01 74.01 0 0 1 1457.48 762.59" fill="none" stroke="#787878" stroke-width="1.00" stroke-dasharray="5 5"/>
+<polygon points="1543.83,682.71 1617.84,682.71 1617.84,694.45 1543.83,694.45" fill="#ffffff" stroke="none" stroke-width="1.00"/>
+<line x1="1543.83" y1="682.90" x2="1543.83" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1617.84" y1="682.90" x2="1617.84" y2="694.25" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
+<line x1="1543.83" y1="688.58" x2="1543.83" y2="762.59" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
+<path d="M 1617.84 688.58 A 74.01 74.01 0 0 1 1543.83 762.59" fill="none" stroke="#787878" stroke-width="1.00" stroke-dasharray="5 5"/>
 <polygon points="1044.53,814.40 1044.53,740.39 1056.27,740.39 1056.27,814.40" fill="#ffffff" stroke="none" stroke-width="1.00"/>
 <line x1="1044.73" y1="814.40" x2="1056.07" y2="814.40" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
 <line x1="1044.73" y1="740.39" x2="1056.07" y2="740.39" stroke="#000000" stroke-width="1.40" stroke-linecap="round"/>
@@ -201,7 +201,7 @@
 <text x="1494.49" y="305.51" font-family="DejaVu Sans, Arial, sans-serif" font-size="17.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">BALCONY 2</text>
 <text x="1494.49" y="330.51" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">6.30 SQM</text>
 <text x="1494.49" y="351.51" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#b9b9b9" text-anchor="middle" dominant-baseline="central">4200 x 1500</text>
-<text x="1775.74" y="764.39" font-family="DejaVu Sans, Arial, sans-serif" font-size="17.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">WASH AREA BALCONY</text>
+<text x="1775.74" y="764.39" font-family="DejaVu Sans, Arial, sans-serif" font-size="17.00" fill="#000000" text-anchor="middle" dominant-baseline="central" font-weight="bold">SERVICE BALCONY</text>
 <text x="1775.74" y="789.39" font-family="DejaVu Sans, Arial, sans-serif" font-size="14.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">2.70 SQM</text>
 <text x="1775.74" y="810.39" font-family="DejaVu Sans, Arial, sans-serif" font-size="13.00" fill="#b9b9b9" text-anchor="middle" dominant-baseline="central">1500 x 1800</text>
 <line x1="635.92" y1="1441.18" x2="813.55" y2="1441.18" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
