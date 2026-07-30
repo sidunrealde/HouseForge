@@ -411,17 +411,21 @@ bool FHFSettingsValidationLimitsTest::RunTest(const FString& Parameters)
 /**
  * Every figure on the page is visible, and the ones that reach nothing yet say so.
  *
- * The joinery figures resolve correctly and stamp themselves onto the kit's parameter structs -
- * that is tested above - but nothing composes a fixture out of the kit yet, so changing one changes
- * nothing an artist can see in a level until milestone 9 lands. There were three ways to ship that
- * and only one of them is honest. Hiding them means the page silently grows a whole section one
- * day. Shipping them bare means a page that lies to the person dragging the slider. Shipping them
- * marked is the third, and it only stays true while something holds the marking on.
+ * Most of Joinery is now wired: AHFWardrobeActor composes the kit into a wardrobe and seeds itself
+ * from this page, so twenty-five of these figures move geometry an artist can see. Seven do not, and
+ * for a reason rather than an omission - there is no fixture with drawers in it and none that builds
+ * a glass bay. Both land in milestone 9.
  *
- * So this walks the page by reflection rather than trusting the header: every leaf control under
- * Joinery must carry the marker in its category, and nothing outside Joinery may carry it. A figure
- * added to the section later without the marker fails here rather than reaching an artist unlabelled,
- * and the marker being deleted wholesale fails here too.
+ * There were three ways to ship those seven and only one of them is honest. Hiding them means the
+ * page silently grows a section one day. Shipping them bare means a page that lies to the person
+ * dragging the slider. Shipping them marked is the third, and it only stays true while something
+ * holds the marking on - and, now that figures are graduating off the list one milestone at a time,
+ * while something takes the marking OFF the ones that have.
+ *
+ * So this walks the page by reflection rather than trusting the header, and names the seven. A new
+ * joinery figure with no consumer that ships unmarked fails here; so does one that acquires a
+ * consumer and keeps its marking, which is the direction this milestone moved and the direction a
+ * marker-presence check on its own could never catch.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSettingsInertOnesAreMarkedTest,
 	"HouseForge.Settings.InertControlsAreMarkedOnThePage", HF_TEST_FLAGS)
@@ -435,11 +439,31 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	}
 
 	static const FName CategoryKey(TEXT("Category"));
-	static const FString Marker(TEXT("takes effect when fixtures land"));
+	static const FString Marker(TEXT("no fixture uses these yet"));
+
+	// The seven, by name. A list rather than a count, because the two ways this can go wrong are
+	// opposites and a count catches neither: a figure that gained a consumer and kept its label, and
+	// a figure that never had one and shipped without.
+	//
+	// The drawer five have no fixture with drawers in it. A drawer inside a wardrobe is an INTERLOCK -
+	// it cannot come out until the leaf in front of it is open, at a threshold somebody has to measure
+	// rather than guess - so it lands with the chest and the vanity rather than being bolted on here.
+	//
+	// The glass two are the shelf board and span that a bay of toughened glass takes. Every shelf in a
+	// wardrobe is ply; a crockery unit and a display bay behind a glazed shutter are what want glass.
+	static const TSet<FString> ExpectedInert = {
+		TEXT("DrawerFrontThickness"),
+		TEXT("DrawerBoxSideThickness"),
+		TEXT("DrawerBoxBottomThickness"),
+		TEXT("DrawerRevealGap"),
+		TEXT("DrawerBackClearance"),
+		TEXT("ShelfThicknessGlass"),
+		TEXT("MaxShelfSpanGlass")
+	};
 
 	int32 Controls = 0;
-	int32 Marked = 0;
 	int32 Joinery = 0;
+	TSet<FString> Marked;
 
 	// A struct property is a heading in the details panel; what an artist actually drags is the
 	// leaf inside it, so the leaves are what get counted and checked.
@@ -471,24 +495,35 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 
 				++Controls;
 
+				const FString Name = Property->GetName();
 				const bool bIsJoinery = Category.StartsWith(TEXT("Joinery"));
 				const bool bIsMarked = Category.Contains(Marker);
 
 				Joinery += bIsJoinery ? 1 : 0;
-				Marked += bIsMarked ? 1 : 0;
-
-				if (bIsJoinery && !bIsMarked)
+				if (bIsMarked)
 				{
-					AddError(FString::Printf(
-						TEXT("'%s' is a joinery figure under category '%s' but is not marked as taking effect when fixtures land. Nothing composes a fixture from the kit yet, so an artist changing it would see no difference and no explanation."),
-						*Property->GetName(), *Category));
+					Marked.Add(Name);
 				}
 
 				if (bIsMarked && !bIsJoinery)
 				{
 					AddError(FString::Printf(
-						TEXT("'%s' is marked as taking effect when fixtures land, but it sits under '%s' rather than Joinery. Openings and Validation are wired end to end; marking one of those would be telling an artist a value does nothing when it does."),
-						*Property->GetName(), *Category));
+						TEXT("'%s' is marked as reaching no fixture, but it sits under '%s' rather than Joinery. Openings and Validation are wired end to end; marking one of those would be telling an artist a value does nothing when it does."),
+						*Name, *Category));
+				}
+
+				if (bIsMarked && !ExpectedInert.Contains(Name))
+				{
+					AddError(FString::Printf(
+						TEXT("'%s' is marked as reaching no fixture but is not one of the seven that do not. Either a fixture now uses it - in which case take the marking off, because the page is telling an artist their change does nothing when it does - or this list needs it adding."),
+						*Name));
+				}
+
+				if (!bIsMarked && ExpectedInert.Contains(Name))
+				{
+					AddError(FString::Printf(
+						TEXT("'%s' is one of the figures no fixture uses, but its category '%s' does not say so. An artist dragging it would see no difference and no explanation."),
+						*Name, *Category));
 				}
 			}
 		};
@@ -496,10 +531,10 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	Walk(UHFSettings::StaticClass(), FString());
 
 	AddInfo(FString::Printf(
-		TEXT("HouseForge settings page: %d controls, of which %d are joinery figures marked as taking effect when fixtures land."),
-		Controls, Joinery));
+		TEXT("HouseForge settings page: %d controls, of which %d are joinery figures and %d of those reach no fixture yet."),
+		Controls, Joinery, Marked.Num()));
 
-	TestEqual(TEXT("Every joinery figure on the page carries the marker"), Marked, Joinery);
+	TestEqual(TEXT("Exactly the figures with no consumer are marked"), Marked.Num(), ExpectedInert.Num());
 	TestTrue(TEXT("The joinery section is still on the page rather than hidden"), Joinery > 0);
 
 	// The whole page ships, not a subset of it. A control quietly dropped between milestones is
