@@ -39,9 +39,13 @@
  * in the flat. The second kind all live in Joinery, which is a plain value with no UObject in it.
  *
  * That split is the settings architecture (see FHFBuildDefaults and .claude/rules/04-conventions.md):
- * the composing layer resolves UHFSettings into an FHFJoineryDefaults exactly once and hands it in
- * here, and nothing under Private/Geometry ever reaches for a settings object. A test builds one of
- * these by hand and gets the compiled-in figures.
+ * the composing layer resolves the project's settings into an FHFJoineryDefaults exactly once and
+ * hands it in here, and nothing in the geometry layer ever reaches for a settings object. A test
+ * builds one of these by hand and gets the compiled-in figures.
+ *
+ * HouseForge.Architecture.GeneratorsDoNotReadSettings enforces that by scanning the geometry sources
+ * for the settings class by NAME - which this comment was failing until it stopped naming it, and
+ * which is exactly the right amount of paranoia for a rule whose breach compiles silently.
  */
 USTRUCT(BlueprintType)
 struct HOUSEFORGE_API FHFWardrobeParams
@@ -77,9 +81,15 @@ struct HOUSEFORGE_API FHFWardrobeParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "1", ClampMax = "12"))
 	int32 BayCount = 4;
 
-	/** Height the carcass stands off the floor on its recessed base. */
+	/**
+	 * Height the carcass stands off the floor on its recessed base. Zero takes the project's figure.
+	 *
+	 * A sentinel rather than a plain dimension, for the same reason a shelf stack's board thickness is
+	 * one: a drawing that did not mark a toe kick has not asked for a wardrobe standing flat on the
+	 * floor, it has said nothing, and the project has a figure for exactly that case.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
-	double PlinthHeight = 10.0;
+	double PlinthHeight = 0.0;
 
 	/**
 	 * A loft: the storage box over a wardrobe, standard in an Indian bedroom.

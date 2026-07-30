@@ -87,6 +87,14 @@ FHFWardrobeParams FHFWardrobeKit::Sanitise(const FHFWardrobeParams& Params)
 	P.BayCount = P.Bays();
 	P.ShelfCount = FMath::Clamp(P.ShelfCount, 0, 30);
 	P.CorniceHeight = FMath::Max(P.CorniceHeight, 0.0);
+
+	// Zero means "whatever this project builds a plinth at", resolved here rather than at the call
+	// site - the same sentinel a shelf stack uses for its board. A drawing that did not state a toe
+	// kick has not asked for a wardrobe standing on the floor; it has not said, and the project has.
+	if (P.PlinthHeight <= 0.0)
+	{
+		P.PlinthHeight = P.Joinery.PlinthHeight;
+	}
 	P.PlinthHeight = FMath::Clamp(P.PlinthHeight, 0.0, P.Height);
 
 	const double Board = P.BoardThickness();
@@ -122,6 +130,21 @@ FHFWardrobeParams FHFWardrobeKit::Sanitise(const FHFWardrobeParams& Params)
 	if (P.LoftMotionKind == EHFShutterMotion::Sliding && P.Bays() < 2)
 	{
 		P.LoftMotionKind = EHFShutterMotion::SideHung;
+	}
+
+	// An applied handle cannot go on a sliding run, and the reason is measurable rather than
+	// stylistic: a bar stands 32 mm proud of the leaf it is screwed to, and the leaf on the track in
+	// front has 10 mm of running clearance to pass through. The bar is in its way. It reads perfectly
+	// well in a still of a closed wardrobe and drives one leaf through another the moment either
+	// moves.
+	//
+	// So the whole run is routed instead, which is what a sliding wardrobe actually has - a finger
+	// channel or a slim edge profile, on every leaf rather than on some of them. Converting only the
+	// inner track would leave a run whose leaves did not match, which is not a wardrobe anybody makes.
+	if (P.MotionKind == EHFShutterMotion::Sliding
+		&& (P.HandleStyle == EHFHandleStyle::Bar || P.HandleStyle == EHFHandleStyle::Knob))
+	{
+		P.HandleStyle = EHFHandleStyle::HandlelessGroove;
 	}
 
 	return P;

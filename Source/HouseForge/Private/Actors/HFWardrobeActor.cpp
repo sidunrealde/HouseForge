@@ -28,9 +28,9 @@ void AHFWardrobeActor::ApplyFixture(const FHFFixture& Fixture)
 		? Spec.ShutterCount
 		: FMath::Max(1, FMath::RoundToInt32(Wardrobe.Width / FMath::Max(Wardrobe.Joinery.ShutterModuleWidth, 1.0)));
 
-	// Zero means the drawing did not say, so the project's figure stands. A stated one is honoured
-	// even when it is unusual: a 60 mm kick under a wardrobe is a decision somebody made.
-	Wardrobe.PlinthHeight = Spec.PlinthHeight > 0.0 ? Spec.PlinthHeight : Wardrobe.Joinery.PlinthHeight;
+	// Copied straight through, zero included: zero is the sentinel the kit resolves against the
+	// project's own plinth height, and resolving it twice in two places is how the two answers drift.
+	Wardrobe.PlinthHeight = Spec.PlinthHeight;
 
 	Wardrobe.bHasLoft = Spec.bHasLoft;
 	Wardrobe.LoftHeight = Spec.LoftHeight;
