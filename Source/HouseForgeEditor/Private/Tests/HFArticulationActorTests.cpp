@@ -664,6 +664,224 @@ bool FHFGearedPartFollowsDriverTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A fan turns on the actor, past any number of revolutions, and "open everything" leaves it alone.
+ *
+ * Set up on a door's part rather than on a fan fixture, for the same reason the gearing test above
+ * is: what is under test is the ACTOR's plumbing - that a phase reaches the component, accumulates,
+ * survives a rebuild and is not trampled by the master control - and there is no fixture generator
+ * yet to produce a real fan. A ceiling fan will arrive as a part with exactly this motion.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSpinningPartTest,
+	"HouseForge.Editor.SpinningPartTurnsWithoutOpening", HF_TEST_FLAGS)
+
+bool FHFSpinningPartTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFOpeningActor* Door = SpawnTestDoor(World);
+	if (!TestNotNull(TEXT("A door actor spawns"), Door))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
+
+	const FName FanId = AHFOpeningActor::LeafPartId;
+
+	UDynamicMeshComponent* Fan = Door->GetPartComponent(FanId);
+	if (!TestNotNull(TEXT("The part has its own component"), Fan))
+	{
+		return false;
+	}
+
+	// A 1200 mm ceiling fan on speed 5, on the part that was a door leaf.
+	FHFPartState* State = Door->Parts.FindByPredicate(
+		[FanId](const FHFPartState& Part) { return Part.PartId == FanId; });
+	if (!TestNotNull(TEXT("The part is addressable"), State))
+	{
+		return false;
+	}
+
+	State->Motion.Type = EHFMotionType::Spin;
+	State->Motion.Axis = FVector::ZAxisVector;
+	State->Motion.RevolutionsPerMinute = 300.0;
+
+	TestTrue(TEXT("Setting a phase on a spinning part succeeds"), Door->SetPartSpinTurns(FanId, 0.25));
+	TestNearlyEqual(TEXT("The phase is what was set"), Door->GetPartSpinTurns(FanId), 0.25, 1e-9);
+
+	// Read off the component, not the number: a phase that never reached the transform leaves the
+	// fan drawn stopped while the details panel counts revolutions.
+	TestNearlyEqual(TEXT("A quarter turn reached the component"),
+		Fan->GetRelativeRotation().Yaw, 90.0, 0.01);
+
+	// -------------------------------------------------------------- past 360 degrees, and on
+	//
+	// Ten seconds at 300 rpm is fifty revolutions. Accumulated through the actor's own advance,
+	// which is what a walkthrough or a Sequencer event would call.
+	Door->SetPartSpinTurns(FanId, 0.0);
+	for (int32 Tick = 0; Tick < 600; ++Tick)
+	{
+		Door->AdvanceSpinningParts(1.0 / 60.0);
+	}
+
+	TestNearlyEqual(TEXT("Ten seconds at 300 rpm is fifty revolutions"),
+		Door->GetPartSpinTurns(FanId), 50.0, 0.01);
+	TestTrue(TEXT("A fan on an actor turns far past one revolution"), Door->GetPartSpinTurns(FanId) > 1.0);
+
+	// The pose is that phase, not a clamped version of it: fifty turns lands where fifty turns land.
+	TestTrue(TEXT("Fifty revolutions leaves the blade back at its start"),
+		Fan->GetRelativeRotation().Quaternion().Equals(FQuat::Identity, 0.001));
+
+	Door->AdvanceSpinningParts(0.05);   // a quarter turn more
+	TestNearlyEqual(TEXT("And it carries straight on from there"),
+		Door->GetPartSpinTurns(FanId), 50.25, 0.01);
+	TestNearlyEqual(TEXT("...with the blade a quarter turn round"),
+		Fan->GetRelativeRotation().Yaw, 90.0, 0.05);
+
+	// ------------------------------------------------------------- a fan is not an opening
+
+	// The master control drives everything that opens, and a fan is not one of those things.
+	const FQuat BeforeOpenAll = Fan->GetRelativeRotation().Quaternion();
+	Door->OpenAllParts();
+
+	TestNearlyEqual(TEXT("Open All does not give a fan an open amount"),
+		Door->GetPartOpenAmount(FanId), 0.0, 1e-9);
+	TestTrue(TEXT("Open All does not stop a fan somewhere arbitrary"),
+		Fan->GetRelativeRotation().Quaternion().Equals(BeforeOpenAll, 0.001));
+	TestNearlyEqual(TEXT("Open All leaves the phase exactly where it was"),
+		Door->GetPartSpinTurns(FanId), 50.25, 0.01);
+
+	// And a phase means nothing to a part that opens, so writing one to a door is refused rather
+	// than silently doing nothing.
+	State->Motion.Type = EHFMotionType::Hinge;
+	State->Motion.MaxAngleDegrees = 90.0;
+	TestFalse(TEXT("A part that does not spin refuses a phase"), Door->SetPartSpinTurns(FanId, 1.0));
+	TestFalse(TEXT("A part that does not exist refuses one too"),
+		Door->SetPartSpinTurns(TEXT("NoSuchPart"), 1.0));
+
+	// ------------------------------------------------------------------ and it survives a rebuild
+
+	State->Motion.Type = EHFMotionType::Spin;
+	State->Motion.RevolutionsPerMinute = 300.0;
+	Door->SetPartSpinTurns(FanId, 12.5);
+
+	const FHFPartPoses Poses = Door->CapturePartPoses();
+	TestTrue(TEXT("A stopped-somewhere fan is a pose worth carrying"),
+		Poses.SpinTurnsByPartId.Contains(FanId));
+	TestNearlyEqual(TEXT("The phase is carried whole, not clamped into an open amount"),
+		Poses.SpinTurnsByPartId[FanId], 12.5, 1e-9);
+	TestFalse(TEXT("A fan is not carried as something that was opened"),
+		Poses.OpenAmountsByPartId.Contains(FanId));
+
+	Door->SetPartSpinTurns(FanId, 0.0);
+	Door->RestorePartPoses(Poses);
+	TestNearlyEqual(TEXT("Restoring a pose puts the fan back where it was stopped"),
+		Door->GetPartSpinTurns(FanId), 12.5, 1e-9);
+
+	return true;
+}
+
+/**
+ * The ordering reaches the components, by every route into a pose.
+ *
+ * The maths is proved in HouseForge.Articulation.SequencedParts and the geometry in
+ * HouseForge.Joinery.InternalDrawerInterlock. What is left is the thing between them: that the
+ * actor resolves the ordering before it poses anything, so a drawer sequenced behind a shutter is
+ * actually DRAWN shut - not merely reported shut while its component stands out in the room.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSequencedPartOnActorTest,
+	"HouseForge.Editor.SequencedPartWaitsForItsBlocker", HF_TEST_FLAGS)
+
+bool FHFSequencedPartOnActorTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	// A sliding door gives two parts on one actor: the running panel stands in for the shutter, and
+	// the fixed one is made into the drawer sequenced behind it.
+	AHFOpeningActor* Door = SpawnTestDoor(World, EHFOpeningKind::SlidingDoor, EHFSwing::None);
+	if (!TestNotNull(TEXT("A two-part actor spawns"), Door))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
+
+	const FName BlockerId = AHFOpeningActor::LeafPartId;
+	const FName BlockedId = AHFOpeningActor::FixedPanelPartId;
+
+	FHFPartState* Blocked = Door->Parts.FindByPredicate(
+		[BlockedId](const FHFPartState& Part) { return Part.PartId == BlockedId; });
+	UDynamicMeshComponent* BlockedComponent = Door->GetPartComponent(BlockedId);
+	if (!TestNotNull(TEXT("The blocked part is addressable"), Blocked)
+		|| !TestNotNull(TEXT("The blocked part has a component"), BlockedComponent))
+	{
+		return false;
+	}
+
+	// It travels along the wall, and may not move until its blocker is half open.
+	Blocked->Motion.Type = EHFMotionType::Slide;
+	Blocked->Motion.Axis = FVector::XAxisVector;
+	Blocked->Motion.MaxTravelCm = 40.0;
+	Blocked->Motion.SequencedAfterPartId = BlockerId;
+	Blocked->Motion.SequenceThreshold = 0.5;
+
+	Door->SetAllPartsOpenAmount(0.0);
+	const FVector Shut = BlockedComponent->GetRelativeLocation();
+
+	// The load-bearing case: one master amount, below the threshold. The blocker has moved and the
+	// part behind it has not - which is the pose that used to be impossible to express.
+	Door->SetMasterOpenAmount(0.4);
+
+	TestNearlyEqual(TEXT("The blocker follows the master amount"),
+		Door->GetPartOpenAmount(BlockerId), 0.4, 1e-9);
+	TestNearlyEqual(TEXT("The part sequenced behind it is still shut"),
+		Door->GetPartOpenAmount(BlockedId), 0.0, 1e-9);
+	TestTrue(TEXT("And it is DRAWN shut, not merely reported shut"),
+		BlockedComponent->GetRelativeLocation().Equals(Shut, 1e-3));
+
+	// Past the threshold it moves, and by the share the ordering allows rather than by the master
+	// amount - which is what stops it jumping the moment the blocker clears.
+	Door->SetMasterOpenAmount(0.75);
+	TestNearlyEqual(TEXT("Past the threshold it starts to travel"),
+		Door->GetPartOpenAmount(BlockedId), 0.5, 1e-9);
+	TestNearlyEqual(TEXT("...by exactly the share it is allowed"),
+		FVector::Distance(BlockedComponent->GetRelativeLocation(), Shut), 20.0, 1e-3);
+
+	// Fully open is fully open: a valid pose of the whole assembly, not a diagnostic.
+	Door->OpenAllParts();
+	TestNearlyEqual(TEXT("Open All opens the blocker"), Door->GetPartOpenAmount(BlockerId), 1.0, 1e-9);
+	TestNearlyEqual(TEXT("Open All then opens what was waiting on it"),
+		Door->GetPartOpenAmount(BlockedId), 1.0, 1e-9);
+	TestNearlyEqual(TEXT("...all the way to its own travel"),
+		FVector::Distance(BlockedComponent->GetRelativeLocation(), Shut), 40.0, 1e-3);
+
+	// Posing it on its own is capped the same way. The interlock belongs to the assembly, not to
+	// the master slider.
+	Door->SetAllPartsOpenAmount(0.0);
+	Door->SetPartOpenAmount(BlockedId, 1.0);
+	TestNearlyEqual(TEXT("It cannot be posed out through a shut blocker"),
+		Door->GetPartOpenAmount(BlockedId), 0.0, 1e-9);
+	TestTrue(TEXT("And it stays where it was drawn"),
+		BlockedComponent->GetRelativeLocation().Equals(Shut, 1e-3));
+
+	// A restore after a rebuild goes through the same resolve, or a house rebuild would put a
+	// drawer back inside its own shutter.
+	FHFPartPoses Poses;
+	Poses.OpenAmountsByPartId.Add(BlockedId, 1.0);
+	Door->RestorePartPoses(Poses);
+	TestNearlyEqual(TEXT("Restoring a pose respects the ordering too"),
+		Door->GetPartOpenAmount(BlockedId), 0.0, 1e-9);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

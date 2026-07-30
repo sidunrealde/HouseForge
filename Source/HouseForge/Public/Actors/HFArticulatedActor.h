@@ -29,19 +29,15 @@ class UDynamicMeshComponent;
  * FHFMeshPart, resolved to the parent's component here - and adding it before there is a fixture to
  * test it against would be an untested mechanism, not a feature.
  *
- * **Open amounts are independent, and MasterOpenAmount ignores the order things really open in.**
- * This is the one worth being careful about, because the obvious fix is the wrong one. A drawer
- * inside a wardrobe cannot come out until its shutter is open, and driving both from one master
- * amount runs it straight through the closed leaf. Parenting the drawer to the leaf would NOT fix
- * that: an internal drawer's runners are screwed to the CARCASS, so a drawer riding on the leaf
- * would swing out of the cabinet with it - a worse lie than the one being corrected. The real
- * constraint is an ordering between two independent parts, not a parent-child relationship, and
- * nothing here expresses orderings.
- *
- * So MasterOpenAmount is a diagnostic - "does everything on this fixture actually move" - and not a
- * physically valid pose for a fixture whose parts occlude each other. Pose those in order, or in
- * Sequencer on separate tracks. HouseForge.Joinery.InternalDrawerInterlock measures exactly where
- * the boundary is and fails if any of this stops being true.
+ * **Parts declare their own orderings, and MasterOpenAmount honours them.** A drawer inside a
+ * wardrobe cannot come out until its shutter is open. Parenting the drawer to the leaf would NOT
+ * fix that, and it is worth being precise about why: an internal drawer's runners are screwed to
+ * the CARCASS, so a drawer riding on the leaf would swing out of the cabinet with it - a worse lie
+ * than the one being corrected. The constraint is an ORDERING between two independent parts, and it
+ * is expressed as one, on FHFPartMotion::SequencedAfterPartId. Every route into a pose resolves it,
+ * so opening everything on a wardrobe opens the leaves and then draws the drawers out behind them,
+ * which is a pose the wardrobe could really be in.
+ * HouseForge.Joinery.InternalDrawerInterlock builds that composition and measures it.
  *
  * A subclass provides:
  *   BuildMesh()   the fixed geometry, in actor space, exactly as any other element.
@@ -94,7 +90,35 @@ public:
 	UFUNCTION(BlueprintPure, Category = "HouseForge|Articulation")
 	double GetPartOpenAmount(FName PartId) const;
 
-	/** Sets every part to the same open amount. */
+	/**
+	 * Sets a spinning part's phase, in revolutions. Unbounded: 2.5 is two and a half turns.
+	 *
+	 * @return false if no part carries that id, and false if it carries one that does not spin - a
+	 *         phase means nothing to a door, and silently accepting it would hide the mix-up.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Articulation")
+	bool SetPartSpinTurns(FName PartId, double Turns);
+
+	/** Revolutions a part has turned, or 0 if there is no such part. */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Articulation")
+	double GetPartSpinTurns(FName PartId) const;
+
+	/**
+	 * Turns every spinning part on by however far its own rate carries it in that long.
+	 *
+	 * The entry point for anything that wants a fan actually running - a walkthrough pawn, a
+	 * Sequencer event, an editor preview - without these actors having to tick. Phases accumulate,
+	 * so calling it repeatedly keeps a fan turning past any number of revolutions.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Articulation")
+	void AdvanceSpinningParts(double DeltaSeconds);
+
+	/**
+	 * Asks every part for the same open amount, then lets the orderings between them settle it.
+	 *
+	 * Spinning parts are left alone: a fan has no open amount, and "open everything" must not stop
+	 * one at some arbitrary angle.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "HouseForge|Articulation")
 	void SetAllPartsOpenAmount(double OpenAmount);
 
@@ -176,7 +200,12 @@ protected:
 	 */
 	void RegenerateParts(bool bForce);
 
-	/** Pushes the current open amounts into the part components' relative transforms. */
+	/**
+	 * Settles gearing and sequencing across the parts, then pushes the result into the components.
+	 *
+	 * Every route into a pose ends here, which is what makes the orderings impossible to bypass. It
+	 * also carries the spinning parts' phases, since they are posed by the same components.
+	 */
 	void ApplyOpenAmounts();
 
 private:

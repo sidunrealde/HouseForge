@@ -83,6 +83,59 @@ double AHFArticulatedActor::GetPartOpenAmount(FName PartId) const
 	return Part != nullptr ? Part->OpenAmount : 0.0;
 }
 
+bool AHFArticulatedActor::SetPartSpinTurns(FName PartId, double Turns)
+{
+	for (FHFPartState& Part : Parts)
+	{
+		if (Part.PartId != PartId)
+		{
+			continue;
+		}
+
+		if (!Part.Motion.Revolves())
+		{
+			// Refused rather than silently ignored. A phase written to a door would do nothing at
+			// all, and a caller that had confused the two would have no way of finding out.
+			return false;
+		}
+
+		// Deliberately unclamped. Past a full turn is the whole point.
+		Part.SpinTurns = Turns;
+		ApplyOpenAmounts();
+		return true;
+	}
+	return false;
+}
+
+double AHFArticulatedActor::GetPartSpinTurns(FName PartId) const
+{
+	const FHFPartState* Part = FindPart(PartId);
+	return Part != nullptr ? Part->SpinTurns : 0.0;
+}
+
+void AHFArticulatedActor::AdvanceSpinningParts(double DeltaSeconds)
+{
+	bool bAnySpun = false;
+
+	for (FHFPartState& Part : Parts)
+	{
+		if (!Part.Motion.Revolves())
+		{
+			continue;
+		}
+
+		// Accumulated, never wrapped: this is what makes a fan turn past 360 degrees and keep going
+		// rather than snapping back to where it started every second.
+		Part.SpinTurns += Part.Motion.TurnsInSeconds(DeltaSeconds);
+		bAnySpun = true;
+	}
+
+	if (bAnySpun)
+	{
+		ApplyOpenAmounts();
+	}
+}
+
 void AHFArticulatedActor::SetMasterOpenAmount(double NewMasterOpenAmount)
 {
 	SetAllPartsOpenAmount(NewMasterOpenAmount);
@@ -95,8 +148,19 @@ void AHFArticulatedActor::SetAllPartsOpenAmount(double OpenAmount)
 
 	for (FHFPartState& Part : Parts)
 	{
+		// A fan has no open amount to set. Writing one would leave every fan on the fixture looking
+		// posed to CapturePartPoses while nothing about it had actually moved.
+		if (Part.Motion.Revolves())
+		{
+			continue;
+		}
+
 		Part.OpenAmount = Clamped;
 	}
+
+	// Every part ASKED for the same amount; what they are left holding is whatever the orderings
+	// between them allow. That is what makes "open everything" a pose a wardrobe could really be in
+	// rather than a diagnostic that drives a drawer through its own shutter.
 	ApplyOpenAmounts();
 }
 
@@ -117,6 +181,17 @@ FHFPartPoses AHFArticulatedActor::CapturePartPoses() const
 
 	for (const FHFPartState& Part : Parts)
 	{
+		if (Part.Motion.Revolves())
+		{
+			// A stopped fan is at phase 0 and has nothing to carry; one stopped anywhere else was
+			// stopped there deliberately, usually to photograph a blade in a particular place.
+			if (Part.SpinTurns != 0.0)
+			{
+				Poses.SpinTurnsByPartId.Add(Part.PartId, Part.SpinTurns);
+			}
+			continue;
+		}
+
 		if (Part.OpenAmount > 0.0)
 		{
 			Poses.OpenAmountsByPartId.Add(Part.PartId, Part.OpenAmount);
@@ -136,6 +211,13 @@ void AHFArticulatedActor::RestorePartPoses(const FHFPartPoses& Poses)
 		{
 			Part.OpenAmount = FMath::Clamp(*OpenAmount, 0.0, 1.0);
 		}
+
+		if (const double* Turns = Poses.SpinTurnsByPartId.Find(Part.PartId))
+		{
+			// Not clamped: a phase is a count of revolutions, and clamping it into 0..1 would put
+			// every fan back to its first turn.
+			Part.SpinTurns = *Turns;
+		}
 	}
 
 	ApplyOpenAmounts();
@@ -143,23 +225,26 @@ void AHFArticulatedActor::RestorePartPoses(const FHFPartPoses& Poses)
 
 void AHFArticulatedActor::ApplyOpenAmounts()
 {
-	// Geared parts take their driver's open amount before anything is posed.
-	//
-	// The gearing itself lives in the driven part's own travel - an intermediate runner member is
-	// half the drawer's - so all that is carried across is how far open the driver is. Done here
-	// rather than in the setters because every route into a pose ends up here: a details-panel edit,
-	// a master open, a rebuild, and a restore after one.
-	for (FHFPartState& Part : Parts)
+	// Gearing and sequencing are settled over the whole assembly before anything is posed: a geared
+	// part takes its driver's amount, and a sequenced part gets no further than the part in front of
+	// it allows. Done here rather than in the setters because every route into a pose ends up here -
+	// a details-panel edit, a master open, a rebuild, and a restore after one.
+	TArray<FName> Cyclic;
+	if (!FHFArticulation::ResolvePartAmounts(Parts, &Cyclic))
 	{
-		if (Part.Motion.DrivenByPartId.IsNone())
+		TArray<FString> Names;
+		Names.Reserve(Cyclic.Num());
+		for (const FName& Id : Cyclic)
 		{
-			continue;
+			Names.Add(Id.ToString());
 		}
 
-		if (const FHFPartState* Driver = FindPart(Part.Motion.DrivenByPartId))
-		{
-			Part.OpenAmount = Driver->OpenAmount;
-		}
+		// Named rather than hung on. A generator that geared two parts to each other produces a
+		// fixture that cannot be posed consistently, and the only useful thing to do about it is say
+		// which parts and carry on with the amounts they were asked for.
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("'%s' declares a circular relationship between its parts (%s); their gearing and sequencing were ignored. A part cannot drive, or wait for, something that waits for it."),
+			*GetName(), *FString::Join(Names, TEXT(", ")));
 	}
 
 	for (int32 Index = 0; Index < Parts.Num(); ++Index)
@@ -247,6 +332,7 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 		State.PivotTransform = Part.PivotTransform;
 		State.Motion = Part.Motion;
 		State.OpenAmount = FMath::Clamp(Part.DefaultOpenAmount, 0.0, 1.0);
+		State.SpinTurns = Part.DefaultSpinTurns;
 
 		UDynamicMeshComponent* Component = nullptr;
 
@@ -255,8 +341,9 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 			Reused.Add(*Index);
 
 			// A part the artist posed stays posed. Regeneration is a shape change, not a reason to
-			// slam every shutter shut.
+			// slam every shutter shut - or to jerk every fan back to its starting blade.
 			State.OpenAmount = Parts[*Index].OpenAmount;
+			State.SpinTurns = Parts[*Index].SpinTurns;
 			State.bArtistEdited = !bForce && Parts[*Index].bArtistEdited;
 
 			Component = PartComponents.IsValidIndex(*Index) ? PartComponents[*Index].Get() : nullptr;

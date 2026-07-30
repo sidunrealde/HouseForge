@@ -781,6 +781,517 @@ bool FHFVentilatorSashTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A fan revolves, which is not the same thing as opening.
+ *
+ * The defect this exists for: a ceiling fan expressed as a hinge could not turn past 180 degrees,
+ * because that is the clamp a hinge rightly carries. Three ceiling fans and two exhaust fans in the
+ * reference flat need continuous revolution, and continuous revolution is not an amount between two
+ * end stops - so it is its own motion with its own unbounded phase.
+ *
+ * Measured as ANGLE ACTUALLY SWEPT, summed along the path, rather than by reading the end pose. A
+ * rotation is periodic: two and a half turns and half a turn land a blade in exactly the same place,
+ * so any test that only looks at where the blade ended up cannot tell a fan that revolved from one
+ * that never left its first turn.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSpinMotionTest, "HouseForge.Articulation.SpinMotion", HF_TEST_FLAGS)
+
+bool FHFSpinMotionTest::RunTest(const FString& Parameters)
+{
+	// A 1200 mm ceiling fan on speed 5: three blades on a vertical axis, 300 rpm.
+	FHFPartMotion Spin;
+	Spin.Type = EHFMotionType::Spin;
+	Spin.Axis = FVector::ZAxisVector;
+	Spin.RevolutionsPerMinute = 300.0;
+
+	const FVector BladeTip(60.0, 0.0, 0.0);
+
+	TestTrue(TEXT("A fan is a moving part"), Spin.Moves());
+	TestTrue(TEXT("A fan revolves"), Spin.Revolves());
+	TestFalse(TEXT("A fan does not open"), Spin.Opens());
+
+	// Stopped is exactly where the generator put it, like every other closed part.
+	TestTrue(TEXT("A fan at phase 0 applies no offset at all"),
+		Spin.SpinOffsetAt(0.0).Equals(FTransform::Identity));
+
+	// A quarter turn is a quarter turn, in the direction the axis says.
+	TestTrue(TEXT("A quarter turn puts the blade a quarter of the way round"),
+		Spin.SpinOffsetAt(0.25).TransformPosition(BladeTip).Equals(FVector(0.0, 60.0, 0.0), 0.01));
+	TestTrue(TEXT("A whole turn brings the blade back to where it started"),
+		Spin.SpinOffsetAt(1.0).TransformPosition(BladeTip).Equals(BladeTip, 0.01));
+
+	// ---------------------------------------------------------------- past 360 degrees, and on
+	//
+	// The defect, as a measurement. Ten revolutions swept in small steps: the angle actually turned
+	// through has to come to ten turns' worth, which is 3600 degrees and twenty times the 180 a
+	// hinge is clamped to. A phase that wrapped, saturated, or clamped fails this while still
+	// putting the blade somewhere plausible.
+	constexpr double Revolutions = 10.0;
+	constexpr int32 Steps = 3600;
+
+	double SweptDegrees = 0.0;
+	FVector Previous = Spin.SpinOffsetAt(0.0).TransformPosition(BladeTip);
+
+	for (int32 Step = 1; Step <= Steps; ++Step)
+	{
+		const double Turns = Revolutions * Step / Steps;
+		const FVector Current = Spin.SpinOffsetAt(Turns).TransformPosition(BladeTip);
+
+		SweptDegrees += FMath::RadiansToDegrees(
+			FMath::Acos(FMath::Clamp(Previous.GetSafeNormal().Dot(Current.GetSafeNormal()), -1.0, 1.0)));
+
+		// A revolution is a rotation about the axis: the blade keeps its radius and its height the
+		// whole way round, however many turns in. A part translated into a convincing pose does not.
+		TestNearlyEqual(TEXT("A revolving blade keeps its radius"), FVector2D(Current.X, Current.Y).Size(), 60.0, 0.001);
+		TestNearlyEqual(TEXT("A revolving blade keeps its height"), Current.Z, 0.0, 0.001);
+
+		Previous = Current;
+	}
+
+	TestNearlyEqual(TEXT("Ten revolutions really is ten revolutions of swept angle"),
+		SweptDegrees, Revolutions * 360.0, 1.0);
+	TestTrue(TEXT("A fan turns far past the 180 degrees a hinge is clamped to"), SweptDegrees > 180.0);
+
+	// Both directions, and fractional phases beyond a turn, all of which a 0..1 amount cannot hold.
+	TestTrue(TEXT("A phase past a full turn is where that many turns lands"),
+		Spin.SpinOffsetAt(3.25).TransformPosition(BladeTip).Equals(FVector(0.0, 60.0, 0.0), 0.01));
+	TestTrue(TEXT("A negative phase turns the other way"),
+		Spin.SpinOffsetAt(-0.25).TransformPosition(BladeTip).Equals(FVector(0.0, -60.0, 0.0), 0.01));
+
+	// The rate is the thing an artist knows about a fan: 300 rpm is five turns a second.
+	TestNearlyEqual(TEXT("300 rpm turns five times a second"), Spin.TurnsInSeconds(1.0), 5.0, 1e-9);
+
+	FHFPartMotion Exhaust;
+	Exhaust.Type = EHFMotionType::Spin;
+	Exhaust.Axis = FVector::YAxisVector;
+	Exhaust.RevolutionsPerMinute = 1350.0;
+	TestNearlyEqual(TEXT("An exhaust fan turns at its own rate"), Exhaust.TurnsInSeconds(2.0), 45.0, 1e-9);
+
+	// An exhaust fan is set into a wall, so its axis is horizontal - and the phase turns it about
+	// that axis rather than about a vertical one it does not have.
+	TestTrue(TEXT("An exhaust fan revolves about the axis it was given"),
+		Exhaust.SpinOffsetAt(0.25).TransformPosition(FVector(7.5, 0.0, 0.0)).Equals(FVector(0.0, 0.0, -7.5), 0.01));
+
+	// ------------------------------------------------------------------- a fan is not an opening
+
+	// No open amount can move a fan. This is what stops "open everything" from stopping every fan
+	// in the flat at some arbitrary angle.
+	TestTrue(TEXT("An open amount does not turn a fan"),
+		Spin.OffsetAt(1.0).Equals(FTransform::Identity));
+	TestTrue(TEXT("Not even a half-open one"), Spin.OffsetAt(0.5).Equals(FTransform::Identity));
+
+	// And the pose comes from the phase, through the state, however the amount is set.
+	FHFPartState Fan;
+	Fan.PartId = TEXT("Fan");
+	Fan.Motion = Spin;
+	Fan.PivotTransform = FTransform(FRotator::ZeroRotator, FVector(300.0, 200.0, 280.0));
+	Fan.SpinTurns = 7.25;
+
+	TestTrue(TEXT("A fan is posed by its phase, about its own pivot"),
+		Fan.CurrentPose().TransformPosition(BladeTip).Equals(FVector(300.0, 260.0, 280.0), 0.01));
+	TestTrue(TEXT("An open amount cannot pose a fan at all"),
+		Fan.PoseAt(1.0).TransformPosition(BladeTip).Equals(Fan.PoseAt(0.0).TransformPosition(BladeTip), 1e-9));
+
+	// ------------------------------------------------------------ and a door is still a door
+	//
+	// The other half of the requirement. Whatever a fan needed, it must not have leaked into the
+	// motion every door in the flat uses.
+	FHFPartState Door;
+	Door.PartId = TEXT("Leaf");
+	Door.Motion.Type = EHFMotionType::Hinge;
+	Door.Motion.Axis = FVector::ZAxisVector;
+	Door.Motion.MaxAngleDegrees = 90.0;
+	Door.SpinTurns = 5.0;
+	Door.OpenAmount = 1.0;
+
+	TestFalse(TEXT("A door does not revolve"), Door.Motion.Revolves());
+	TestTrue(TEXT("A door opens"), Door.Motion.Opens());
+	TestTrue(TEXT("A stray phase does not turn a door"),
+		Door.CurrentPose().TransformPosition(FVector(100.0, 0.0, 0.0)).Equals(FVector(0.0, 100.0, 0.0), 0.01));
+
+	return true;
+}
+
+/**
+ * A part can be made to wait for another, and one master amount then respects the order.
+ *
+ * The composition this exists for is a drawer inside a wardrobe: its runners are screwed to the
+ * carcass so it cannot be parented to the leaf, but it still cannot come out through one that is
+ * shut. That is an ordering between two independent parts, and this is the ordering itself, tested
+ * on the numbers. HouseForge.Joinery.InternalDrawerInterlock tests it on the geometry.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSequencedPartsTest, "HouseForge.Articulation.SequencedParts", HF_TEST_FLAGS)
+
+bool FHFSequencedPartsTest::RunTest(const FString& Parameters)
+{
+	// Leaf, the drawer behind it, and the intermediate runner member geared to that drawer. Ordered
+	// in the array so that no single pass in array order could resolve it: the runner comes first.
+	auto MakeWardrobe = []()
+	{
+		TArray<FHFPartState> Parts;
+
+		FHFPartState Runner;
+		Runner.PartId = TEXT("DrawerRunner");
+		Runner.Motion.Type = EHFMotionType::Slide;
+		Runner.Motion.Axis = -FVector::YAxisVector;
+		Runner.Motion.MaxTravelCm = 22.5;
+		Runner.Motion.DrivenByPartId = TEXT("Drawer");
+		Parts.Add(Runner);
+
+		FHFPartState Drawer;
+		Drawer.PartId = TEXT("Drawer");
+		Drawer.Motion.Type = EHFMotionType::Slide;
+		Drawer.Motion.Axis = -FVector::YAxisVector;
+		Drawer.Motion.MaxTravelCm = 45.0;
+		Drawer.Motion.SequencedAfterPartId = TEXT("Leaf");
+		Drawer.Motion.SequenceThreshold = 0.5;
+		Parts.Add(Drawer);
+
+		FHFPartState Leaf;
+		Leaf.PartId = TEXT("Leaf");
+		Leaf.Motion.Type = EHFMotionType::Hinge;
+		Leaf.Motion.Axis = FVector::ZAxisVector;
+		Leaf.Motion.MaxAngleDegrees = -100.0;
+		Parts.Add(Leaf);
+
+		return Parts;
+	};
+
+	auto AmountOf = [](const TArray<FHFPartState>& Parts, const TCHAR* Id)
+	{
+		const FHFPartState* Part = Parts.FindByPredicate(
+			[Id](const FHFPartState& P) { return P.PartId == FName(Id); });
+		return Part != nullptr ? Part->OpenAmount : -1.0;
+	};
+
+	// Every part asked for the same amount, which is what MasterOpenAmount does.
+	auto AtMaster = [&MakeWardrobe](double Master)
+	{
+		TArray<FHFPartState> Parts = MakeWardrobe();
+		for (FHFPartState& Part : Parts)
+		{
+			Part.OpenAmount = Master;
+		}
+		FHFArticulation::ResolvePartAmounts(Parts);
+		return Parts;
+	};
+
+	// Below the threshold the drawer has not moved at all, however far the master has been driven.
+	for (const double Master : { 0.0, 0.1, 0.25, 0.4, 0.5 })
+	{
+		const TArray<FHFPartState> Parts = AtMaster(Master);
+
+		TestNearlyEqual(TEXT("The leaf follows the master amount"), AmountOf(Parts, TEXT("Leaf")), Master, 1e-9);
+		TestNearlyEqual(*FString::Printf(
+				TEXT("At %.2f open the leaf is not yet clear, so the drawer is still shut"), Master),
+			AmountOf(Parts, TEXT("Drawer")), 0.0, 1e-9);
+		TestNearlyEqual(TEXT("...and its runner has stayed with it"),
+			AmountOf(Parts, TEXT("DrawerRunner")), 0.0, 1e-9);
+	}
+
+	// Past it, the drawer comes out - proportionally, so it trails the leaf rather than jumping.
+	{
+		const TArray<FHFPartState> Parts = AtMaster(0.75);
+		TestNearlyEqual(TEXT("Once the leaf is clear the drawer starts to come out"),
+			AmountOf(Parts, TEXT("Drawer")), 0.5, 1e-9);
+		TestNearlyEqual(TEXT("And the geared runner follows it in the same call"),
+			AmountOf(Parts, TEXT("DrawerRunner")), 0.5, 1e-9);
+	}
+
+	{
+		const TArray<FHFPartState> Parts = AtMaster(1.0);
+		TestNearlyEqual(TEXT("Fully open, the leaf is fully open"), AmountOf(Parts, TEXT("Leaf")), 1.0, 1e-9);
+		TestNearlyEqual(TEXT("Fully open, the drawer is all the way out"),
+			AmountOf(Parts, TEXT("Drawer")), 1.0, 1e-9);
+		TestNearlyEqual(TEXT("Fully open, so is its runner"),
+			AmountOf(Parts, TEXT("DrawerRunner")), 1.0, 1e-9);
+	}
+
+	// The drawer never gets ahead of what the leaf allows, at any master amount at all.
+	for (int32 Step = 0; Step <= 100; ++Step)
+	{
+		const double Master = Step / 100.0;
+		const TArray<FHFPartState> Parts = AtMaster(Master);
+		const double Drawer = AmountOf(Parts, TEXT("Drawer"));
+
+		if (Drawer > AmountOf(Parts, TEXT("Leaf")) + 1e-9)
+		{
+			AddError(FString::Printf(
+				TEXT("At master %.2f the drawer is %.3f open while its leaf is only %.3f - it is coming out through the shutter."),
+				Master, Drawer, AmountOf(Parts, TEXT("Leaf"))));
+			break;
+		}
+	}
+
+	// Posing the drawer ON ITS OWN is capped the same way: the interlock is a property of the
+	// assembly, not a special case of the master control.
+	{
+		TArray<FHFPartState> Parts = MakeWardrobe();
+		Parts[1].OpenAmount = 1.0;   // the drawer, hauled all the way out
+		Parts[2].OpenAmount = 0.0;   // with the leaf shut
+		FHFArticulation::ResolvePartAmounts(Parts);
+
+		TestNearlyEqual(TEXT("A drawer cannot be pulled out through a shut leaf"),
+			AmountOf(Parts, TEXT("Drawer")), 0.0, 1e-9);
+	}
+
+	{
+		TArray<FHFPartState> Parts = MakeWardrobe();
+		Parts[1].OpenAmount = 1.0;
+		Parts[2].OpenAmount = 0.6;   // the leaf just past its threshold
+		FHFArticulation::ResolvePartAmounts(Parts);
+
+		// 0.6 is a fifth of the way from the 0.5 threshold to fully open, so that is as far as the
+		// drawer may travel however hard it is pulled.
+		TestNearlyEqual(TEXT("A part-open leaf lets its drawer out only that far"),
+			AmountOf(Parts, TEXT("Drawer")), 0.2, 1e-9);
+		TestNearlyEqual(TEXT("The runner is geared to what the drawer actually did"),
+			AmountOf(Parts, TEXT("DrawerRunner")), 0.2, 1e-9);
+	}
+
+	// A part that declares no ordering is not restricted by anything, which is what keeps every
+	// fixture built before this existed behaving exactly as it did.
+	{
+		TArray<FHFPartState> Parts = MakeWardrobe();
+		Parts[1].Motion.SequencedAfterPartId = NAME_None;
+		for (FHFPartState& Part : Parts)
+		{
+			Part.OpenAmount = 0.3;
+		}
+		FHFArticulation::ResolvePartAmounts(Parts);
+
+		TestNearlyEqual(TEXT("An unsequenced drawer opens as far as it was asked to"),
+			AmountOf(Parts, TEXT("Drawer")), 0.3, 1e-9);
+	}
+
+	// A threshold of 1 is the strictest ordering there is: nothing until the leaf is fully open.
+	{
+		TArray<FHFPartState> Parts = MakeWardrobe();
+		Parts[1].Motion.SequenceThreshold = 1.0;
+		Parts[1].OpenAmount = 1.0;
+		Parts[2].OpenAmount = 0.999;
+		FHFArticulation::ResolvePartAmounts(Parts);
+		TestNearlyEqual(TEXT("A threshold of 1 means not until it is all the way open"),
+			AmountOf(Parts, TEXT("Drawer")), 0.0, 1e-9);
+
+		Parts = MakeWardrobe();
+		Parts[1].Motion.SequenceThreshold = 1.0;
+		Parts[1].OpenAmount = 1.0;
+		Parts[2].OpenAmount = 1.0;
+		FHFArticulation::ResolvePartAmounts(Parts);
+		TestNearlyEqual(TEXT("...and lets it straight out once it is"),
+			AmountOf(Parts, TEXT("Drawer")), 1.0, 1e-9);
+	}
+
+	// An ordering naming a part that is not in the assembly is ignored rather than blocking
+	// everything: a fixture missing a part is already logged at generation, and freezing every
+	// drawer in it would be a second, more confusing failure.
+	{
+		TArray<FHFPartState> Parts = MakeWardrobe();
+		Parts[1].Motion.SequencedAfterPartId = TEXT("NoSuchLeaf");
+		Parts[1].OpenAmount = 1.0;
+		TestTrue(TEXT("An ordering naming a part that does not exist still resolves"),
+			FHFArticulation::ResolvePartAmounts(Parts));
+		TestNearlyEqual(TEXT("...and does not freeze the part that declared it"),
+			AmountOf(Parts, TEXT("Drawer")), 1.0, 1e-9);
+	}
+
+	return true;
+}
+
+/**
+ * A chain of geared parts resolves in one call, whatever order the parts are in.
+ *
+ * The gearing pass used to be a single sweep in array order, so A -> B -> C only worked if the
+ * array happened to be in that order and otherwise lagged one call behind. That is invisible in a
+ * still, shows up in motion as a part trailing its driver, and depends on nothing but the order a
+ * generator emitted its parts in.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFGearedChainTest, "HouseForge.Articulation.GearedChainResolvesAtOnce", HF_TEST_FLAGS)
+
+bool FHFGearedChainTest::RunTest(const FString& Parameters)
+{
+	// Deliberately in the WORST order: C is geared to B, B to A, and they are stored C, B, A. A
+	// single pass in array order leaves C on last call's answer and B on this one's.
+	auto MakeChain = []()
+	{
+		TArray<FHFPartState> Parts;
+
+		for (const TCHAR* Id : { TEXT("C"), TEXT("B"), TEXT("A") })
+		{
+			FHFPartState Part;
+			Part.PartId = Id;
+			Part.Motion.Type = EHFMotionType::Slide;
+			Part.Motion.Axis = FVector::XAxisVector;
+			Part.Motion.MaxTravelCm = 10.0;
+			Parts.Add(Part);
+		}
+
+		Parts[0].Motion.DrivenByPartId = TEXT("B");
+		Parts[1].Motion.DrivenByPartId = TEXT("A");
+		return Parts;
+	};
+
+	TArray<FHFPartState> Parts = MakeChain();
+	Parts[2].OpenAmount = 1.0;   // A, the only part anybody drives
+
+	TestTrue(TEXT("A chain of geared parts resolves"), FHFArticulation::ResolvePartAmounts(Parts));
+
+	// ONE call, not two. Both of the parts downstream have to be there already.
+	TestNearlyEqual(TEXT("The driver stands where it was put"), Parts[2].OpenAmount, 1.0, 1e-9);
+	TestNearlyEqual(TEXT("The part geared to it followed in the same call"), Parts[1].OpenAmount, 1.0, 1e-9);
+	TestNearlyEqual(TEXT("And so did the part geared to THAT one"), Parts[0].OpenAmount, 1.0, 1e-9);
+
+	// Partway, so this cannot pass on the endpoints alone, and back again, so nothing ratchets.
+	Parts = MakeChain();
+	Parts[2].OpenAmount = 0.4;
+	FHFArticulation::ResolvePartAmounts(Parts);
+	TestNearlyEqual(TEXT("The whole chain follows partway too"), Parts[0].OpenAmount, 0.4, 1e-9);
+
+	Parts[2].OpenAmount = 0.0;
+	FHFArticulation::ResolvePartAmounts(Parts);
+	TestNearlyEqual(TEXT("And all the way home again"), Parts[0].OpenAmount, 0.0, 1e-9);
+
+	// A longer chain, to make sure one call is one call and not "two happens to be enough".
+	{
+		TArray<FHFPartState> Long;
+		constexpr int32 Links = 12;
+
+		for (int32 Index = Links - 1; Index >= 0; --Index)
+		{
+			FHFPartState Part;
+			Part.PartId = FName(*FString::Printf(TEXT("Link%d"), Index));
+			Part.Motion.Type = EHFMotionType::Slide;
+			Part.Motion.Axis = FVector::XAxisVector;
+			Part.Motion.MaxTravelCm = 5.0;
+			if (Index > 0)
+			{
+				Part.Motion.DrivenByPartId = FName(*FString::Printf(TEXT("Link%d"), Index - 1));
+			}
+			Long.Add(Part);
+		}
+
+		Long.Last().OpenAmount = 1.0;   // Link0, at the far end of the array from everything it drives
+		TestTrue(TEXT("A twelve-link chain resolves"), FHFArticulation::ResolvePartAmounts(Long));
+
+		for (const FHFPartState& Part : Long)
+		{
+			TestNearlyEqual(*FString::Printf(TEXT("%s followed the chain in one call"), *Part.PartId.ToString()),
+				Part.OpenAmount, 1.0, 1e-9);
+		}
+	}
+
+	return true;
+}
+
+/**
+ * Parts that depend on each other are refused, not iterated forever.
+ *
+ * Resolving to a fixed point is what makes a chain work in one call, and a cycle is what turns a
+ * fixed-point solve into a hang. A generator that gears two parts to each other is a bug in the
+ * generator; an editor that stops responding because of it is a much worse one.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCircularArticulationTest,
+	"HouseForge.Articulation.CircularRelationshipRefused", HF_TEST_FLAGS)
+
+bool FHFCircularArticulationTest::RunTest(const FString& Parameters)
+{
+	auto MakePart = [](const TCHAR* Id)
+	{
+		FHFPartState Part;
+		Part.PartId = Id;
+		Part.Motion.Type = EHFMotionType::Slide;
+		Part.Motion.Axis = FVector::XAxisVector;
+		Part.Motion.MaxTravelCm = 10.0;
+		return Part;
+	};
+
+	// Two parts geared to each other. If this hangs, it hangs the editor.
+	{
+		TArray<FHFPartState> Parts = { MakePart(TEXT("A")), MakePart(TEXT("B")) };
+		Parts[0].Motion.DrivenByPartId = TEXT("B");
+		Parts[1].Motion.DrivenByPartId = TEXT("A");
+		Parts[0].OpenAmount = 0.25;
+		Parts[1].OpenAmount = 0.75;
+
+		TArray<FName> Cyclic;
+		TestFalse(TEXT("A pair of parts geared to each other is refused"),
+			FHFArticulation::ResolvePartAmounts(Parts, &Cyclic));
+		TestEqual(TEXT("Both of them are named"), Cyclic.Num(), 2);
+
+		// Refused means left alone, not zeroed: the amounts they were asked for are the best answer
+		// available, and quietly shutting a fixture would look like a posing bug rather than a
+		// generator one.
+		TestNearlyEqual(TEXT("A keeps what it was asked for"), Parts[0].OpenAmount, 0.25, 1e-9);
+		TestNearlyEqual(TEXT("B keeps what it was asked for"), Parts[1].OpenAmount, 0.75, 1e-9);
+	}
+
+	// A part naming itself, which no loop over back edges would see as a cycle unless it looked.
+	{
+		TArray<FHFPartState> Parts = { MakePart(TEXT("Solo")) };
+		Parts[0].Motion.DrivenByPartId = TEXT("Solo");
+		Parts[0].OpenAmount = 0.5;
+
+		TArray<FName> Cyclic;
+		TestFalse(TEXT("A part geared to itself is refused"),
+			FHFArticulation::ResolvePartAmounts(Parts, &Cyclic));
+		TestNearlyEqual(TEXT("...and keeps the amount it was asked for"), Parts[0].OpenAmount, 0.5, 1e-9);
+	}
+
+	// A longer loop, through the sequencing edge as well as the gearing one - both are dependencies
+	// and either can close a circle.
+	{
+		TArray<FHFPartState> Parts = { MakePart(TEXT("X")), MakePart(TEXT("Y")), MakePart(TEXT("Z")) };
+		Parts[0].Motion.DrivenByPartId = TEXT("Y");
+		Parts[1].Motion.SequencedAfterPartId = TEXT("Z");
+		Parts[1].Motion.SequenceThreshold = 0.5;
+		Parts[2].Motion.DrivenByPartId = TEXT("X");
+
+		TArray<FName> Cyclic;
+		TestFalse(TEXT("A three-part loop is refused too"),
+			FHFArticulation::ResolvePartAmounts(Parts, &Cyclic));
+		TestEqual(TEXT("All three are named"), Cyclic.Num(), 3);
+	}
+
+	// And a cycle in one corner does not freeze the parts that are perfectly well defined. A
+	// wardrobe with one bad relationship still has to open its other five shutters.
+	{
+		TArray<FHFPartState> Parts = {
+			MakePart(TEXT("LoopA")), MakePart(TEXT("LoopB")), MakePart(TEXT("Good")), MakePart(TEXT("GearedToGood"))
+		};
+		Parts[0].Motion.DrivenByPartId = TEXT("LoopB");
+		Parts[1].Motion.DrivenByPartId = TEXT("LoopA");
+		Parts[3].Motion.DrivenByPartId = TEXT("Good");
+		Parts[2].OpenAmount = 0.8;
+
+		TArray<FName> Cyclic;
+		TestFalse(TEXT("The cycle is still reported"), FHFArticulation::ResolvePartAmounts(Parts, &Cyclic));
+		TestEqual(TEXT("Only the parts on the loop are named"), Cyclic.Num(), 2);
+		TestNearlyEqual(TEXT("A sound part elsewhere in the fixture still resolves"),
+			Parts[3].OpenAmount, 0.8, 1e-9);
+	}
+
+	// A part geared to one that is itself blocked by an ordering is NOT a cycle, and must resolve.
+	{
+		TArray<FHFPartState> Parts = { MakePart(TEXT("Runner")), MakePart(TEXT("Drawer")), MakePart(TEXT("Leaf")) };
+		Parts[0].Motion.DrivenByPartId = TEXT("Drawer");
+		Parts[1].Motion.SequencedAfterPartId = TEXT("Leaf");
+		Parts[1].Motion.SequenceThreshold = 0.5;
+
+		for (FHFPartState& Part : Parts)
+		{
+			Part.OpenAmount = 1.0;
+		}
+
+		TestTrue(TEXT("Gearing and sequencing together are not a cycle"),
+			FHFArticulation::ResolvePartAmounts(Parts));
+		TestNearlyEqual(TEXT("The drawer opens fully behind a fully open leaf"), Parts[1].OpenAmount, 1.0, 1e-9);
+		TestNearlyEqual(TEXT("And its runner with it"), Parts[0].OpenAmount, 1.0, 1e-9);
+	}
+
+	return true;
+}
+
 /** Things that do not move must not pretend to. */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFixedOpeningPartsTest, "HouseForge.Articulation.FixedOpenings", HF_TEST_FLAGS)
 
