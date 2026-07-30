@@ -6,6 +6,7 @@
 #include "Geometry/HFGenerators.h"
 #include "Geometry/HFMeshOps.h"
 #include "HouseForge.h"
+#include "Materials/HFMaterialLibrary.h"
 
 using namespace UE::Geometry;
 
@@ -123,7 +124,14 @@ void AHFElementActor::CommitMesh(FDynamicMesh3&& Generated)
 	// Our own write must not look like an artist edit.
 	TGuardValue<bool> Guard(bGenerating, true);
 
+	// The last thing done to a generated mesh, after every boolean and every append. The material
+	// id is a pure function of the polygroup, so deriving it here rather than inside the generators
+	// means no mesh operation has to be trusted to carry it - and no generator has to reach for an
+	// asset to know what it is being materialled with.
+	FHFMeshOps::AssignMaterialIdsFromRoles(Generated);
+
 	Mesh->SetMesh(MoveTemp(Generated));
+	FHFMaterialLibrary::ApplyPlaceholders(Mesh);
 	Mesh->NotifyMeshUpdated();
 	Mesh->UpdateCollision(false);
 }

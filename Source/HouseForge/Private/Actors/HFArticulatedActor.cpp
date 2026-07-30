@@ -3,7 +3,9 @@
 #include "Actors/HFArticulatedActor.h"
 
 #include "Components/DynamicMeshComponent.h"
+#include "Geometry/HFMeshOps.h"
 #include "HouseForge.h"
+#include "Materials/HFMaterialLibrary.h"
 
 using namespace UE::Geometry;
 
@@ -365,10 +367,17 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 			// Our own write must not read as an artist edit.
 			TGuardValue<bool> Guard(bGenerating, true);
 
+			FHFMeshOps::AssignMaterialIdsFromRoles(Part.Mesh);
+
 			Component->SetMesh(MoveTemp(Part.Mesh));
 			Component->NotifyMeshUpdated();
 			Component->UpdateCollision(false);
 		}
+
+		// Outside the guard above, and outside the bArtistEdited check: the slot table belongs to
+		// the component, not to the mesh, so a hand-edited shutter has to be dressed too. A part
+		// that opted out of regeneration is still a part of the room being looked at.
+		FHFMaterialLibrary::ApplyPlaceholders(Component);
 
 		NewParts.Add(State);
 		NewComponents.Add(Component);

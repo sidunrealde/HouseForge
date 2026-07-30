@@ -28,6 +28,43 @@ public:
 	/** Prepares a mesh for generation: attributes, triangle groups, empty. */
 	static void InitialiseMesh(UE::Geometry::FDynamicMesh3& Mesh);
 
+	/** Material slot index a role renders through. Slot index IS the role index - see below. */
+	static int32 MaterialIdForRole(EHFSurfaceRole Role) { return static_cast<int32>(Role); }
+
+	/** The role a material slot renders, or WallPaint if the slot is not a role. */
+	static EHFSurfaceRole RoleForMaterialId(int32 MaterialId);
+
+	/** Number of material slots a fully-dressed HouseForge component carries: one per role. */
+	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::Structure) + 1; }
+
+	/**
+	 * Writes each triangle's material id from the surface role its polygroup already carries.
+	 *
+	 * A UDynamicMeshComponent does NOT render by polygroup. It splits into render sections by the
+	 * per-triangle MaterialID attribute and indexes its own material slot array with it
+	 * (DynamicMeshSceneProxy::InitializeByMaterial), and that attribute is off by default -
+	 * InitialiseMesh enables triangle groups and attributes, neither of which brings it. So a mesh
+	 * covered in perfectly good surface-role polygroups still renders as one undifferentiated blob
+	 * of the default material. This is the bridge between the two.
+	 *
+	 * Slot index is the role's own enum index, so every component carries the same slot table and
+	 * a slot means the same thing on a wall as on a wardrobe. Compacting to only the roles a given
+	 * mesh happens to use would save nothing measurable - the scene proxy skips a section with no
+	 * triangles - and would cost a per-mesh remap table that the material panel would then have to
+	 * consult before it could point at anything.
+	 *
+	 * Reads the polygroups and does not write them. That is deliberate and it is tested: the roles
+	 * are what every later material operation targets, and a pass that renumbered them while
+	 * assigning materials would undo the append fix that keeps them intact in the first place.
+	 *
+	 * Pure and idempotent - the material id is a function of the polygroup, so this can be re-run at
+	 * any point after any boolean or append without needing the ids to have survived it.
+	 */
+	static void AssignMaterialIdsFromRoles(UE::Geometry::FDynamicMesh3& Mesh);
+
+	/** The distinct surface roles present in a mesh, by polygroup. */
+	static TSet<EHFSurfaceRole> RolesPresent(const UE::Geometry::FDynamicMesh3& Mesh);
+
 	/**
 	 * Points a mesh's attribute set back at the mesh it belongs to.
 	 *

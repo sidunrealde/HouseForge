@@ -22,11 +22,70 @@ EHFSurfaceRole FHFMeshOps::RoleForGroup(int32 GroupId)
 	return (Index >= 0 && Index <= Max) ? static_cast<EHFSurfaceRole>(Index) : EHFSurfaceRole::WallPaint;
 }
 
+EHFSurfaceRole FHFMeshOps::RoleForMaterialId(int32 MaterialId)
+{
+	const int32 Max = static_cast<int32>(EHFSurfaceRole::Structure);
+	return (MaterialId >= 0 && MaterialId <= Max) ? static_cast<EHFSurfaceRole>(MaterialId) : EHFSurfaceRole::WallPaint;
+}
+
 void FHFMeshOps::InitialiseMesh(FDynamicMesh3& Mesh)
 {
 	Mesh.Clear();
 	Mesh.EnableTriangleGroups();
 	Mesh.EnableAttributes();
+}
+
+void FHFMeshOps::AssignMaterialIdsFromRoles(FDynamicMesh3& Mesh)
+{
+	if (!Mesh.HasAttributes())
+	{
+		Mesh.EnableAttributes();
+	}
+
+	// Reparent before touching an overlay - see AdoptAttributes. A mesh that has been carried in a
+	// TArray has an attribute set pointing at a freed buffer, and EnableMaterialID sizes the new
+	// attribute from ParentMesh->MaxTriangleID().
+	AdoptAttributes(Mesh);
+
+	FDynamicMeshAttributeSet* Attributes = Mesh.Attributes();
+	if (Attributes == nullptr)
+	{
+		return;
+	}
+
+	if (!Attributes->HasMaterialID())
+	{
+		Attributes->EnableMaterialID();
+	}
+
+	FDynamicMeshMaterialAttribute* MaterialIds = Attributes->GetMaterialID();
+	if (MaterialIds == nullptr)
+	{
+		return;
+	}
+
+	// Triangle groups are read, never written. If a mesh somehow arrived without them every
+	// triangle falls to WallPaint, which is the same fallback RoleForGroup already applies.
+	for (const int32 Tid : Mesh.TriangleIndicesItr())
+	{
+		const int32 Group = Mesh.HasTriangleGroups() ? Mesh.GetTriangleGroup(Tid) : 0;
+		MaterialIds->SetValue(Tid, MaterialIdForRole(RoleForGroup(Group)));
+	}
+}
+
+TSet<EHFSurfaceRole> FHFMeshOps::RolesPresent(const FDynamicMesh3& Mesh)
+{
+	TSet<EHFSurfaceRole> Roles;
+	if (!Mesh.HasTriangleGroups())
+	{
+		return Roles;
+	}
+
+	for (const int32 Tid : Mesh.TriangleIndicesItr())
+	{
+		Roles.Add(RoleForGroup(Mesh.GetTriangleGroup(Tid)));
+	}
+	return Roles;
 }
 
 double FHFMeshOps::SignedArea(const TArray<FVector2D>& Polygon)
