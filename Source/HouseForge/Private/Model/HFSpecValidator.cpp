@@ -142,6 +142,253 @@ namespace
 		return Bounds;
 	}
 
+	/**
+	 * True if the segment A->B touches the oriented rectangle at all.
+	 *
+	 * Liang-Barsky in the rectangle's own frame: clip the segment's parameter range against each
+	 * slab in turn and see whether anything survives. Exact, unlike sampling the segment, which
+	 * misses a wall that clips a column's corner - and a column caught by a corner is exactly the
+	 * marginal case a rule about columns standing free has to get right.
+	 */
+	bool SegmentHitsRect(const FVector2D& A, const FVector2D& B,
+		const FVector2D& Centre, const FVector2D& Size, double RotationDegrees)
+	{
+		const double Radians = FMath::DegreesToRadians(RotationDegrees);
+		const FVector2D AxisX(FMath::Cos(Radians), FMath::Sin(Radians));
+		const FVector2D AxisY(-AxisX.Y, AxisX.X);
+
+		auto ToLocal = [&AxisX, &AxisY, &Centre](const FVector2D& Point)
+		{
+			const FVector2D Relative = Point - Centre;
+			return FVector2D(FVector2D::DotProduct(Relative, AxisX), FVector2D::DotProduct(Relative, AxisY));
+		};
+
+		const FVector2D LocalA = ToLocal(A);
+		const FVector2D LocalB = ToLocal(B);
+
+		const double Start[2] = { LocalA.X, LocalA.Y };
+		const double Delta[2] = { LocalB.X - LocalA.X, LocalB.Y - LocalA.Y };
+		const double Half[2]  = { Size.X * 0.5, Size.Y * 0.5 };
+
+		double TMin = 0.0;
+		double TMax = 1.0;
+
+		for (int32 Axis = 0; Axis < 2; ++Axis)
+		{
+			const double Low = -Half[Axis] - Start[Axis];
+			const double High = Half[Axis] - Start[Axis];
+
+			if (FMath::IsNearlyZero(Delta[Axis]))
+			{
+				// Parallel to this pair of edges: either wholly within the slab or wholly outside.
+				if (Low > 0.0 || High < 0.0)
+				{
+					return false;
+				}
+				continue;
+			}
+
+			double T0 = Low / Delta[Axis];
+			double T1 = High / Delta[Axis];
+			if (T0 > T1)
+			{
+				Swap(T0, T1);
+			}
+
+			TMin = FMath::Max(TMin, T0);
+			TMax = FMath::Min(TMax, T1);
+
+			if (TMin > TMax)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/** A stretch of a beam that has something under it, measured along the beam from its Start. */
+	struct FSupportedRun
+	{
+		double Min = 0.0;
+		double Max = 0.0;
+	};
+
+	/**
+	 * The stretches of a beam that are carried by something.
+	 *
+	 * Two things count, and both are things this data model can say for certain hold load up:
+	 *
+	 * A WALL RUNNING UNDER THE BEAM, along its whole shared length. This is the ordinary case and
+	 * every beam in the reference flat is one: the beam is on the frame's grid line, the wall is on
+	 * the same line, and the wall conceals the beam so nothing shows in the room either.
+	 *
+	 * A COLUMN UNDER THE BEAM, at a point.
+	 *
+	 * What deliberately does NOT count is another beam. A secondary beam framing into a primary is
+	 * real construction, but it is a decision somebody has to make - the primary has to be sized for
+	 * the point load - and none of that is in a spec. Accepting it would accept BM_Living_Cross,
+	 * which landed on the mid-span of two beams and crossed the middle of the living room.
+	 *
+	 * Nor does a wall CROSSING the beam at an angle. In an RCC-framed flat the beams carry the
+	 * walls, not the other way round; every wall in a spec like this is infill masonry under a slab,
+	 * and treating a partition as a support inverts the load path. A 115 brick wall does not carry a
+	 * 6.6 m beam's reaction, and nothing in FHFWall says which walls are meant to.
+	 */
+	void GatherBeamSupports(const FHFHouseSpec& Spec, const FHFBeam& Beam, TArray<FSupportedRun>& OutRuns)
+	{
+		const double Length = Beam.Length();
+		if (Length <= UE_KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+
+		const FVector2D Direction = (Beam.End - Beam.Start) / Length;
+		const FVector2D Normal(-Direction.Y, Direction.X);
+
+		// The beam's own footprint. A support has to be under the beam, not beside it.
+		const double HalfWidth = Beam.Width * 0.5;
+
+		auto AddClippedRun = [&OutRuns, Length](double A, double B)
+		{
+			const double Min = FMath::Max(FMath::Min(A, B), 0.0);
+			const double Max = FMath::Min(FMath::Max(A, B), Length);
+			if (Max >= Min)
+			{
+				OutRuns.Add({ Min, Max });
+			}
+		};
+
+		for (const FHFWall& Wall : Spec.Walls)
+		{
+			if (Wall.Length() <= UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const FVector2D StartRelative = Wall.Start - Beam.Start;
+			const FVector2D EndRelative = Wall.End - Beam.Start;
+
+			// Both ends of the wall inside the beam's footprint band, which is a parallelism test
+			// and an offset test at once: a wall that crosses the beam has one end far outside.
+			if (FMath::Abs(FVector2D::DotProduct(StartRelative, Normal)) > HalfWidth ||
+				FMath::Abs(FVector2D::DotProduct(EndRelative, Normal)) > HalfWidth)
+			{
+				continue;
+			}
+
+			AddClippedRun(
+				FVector2D::DotProduct(StartRelative, Direction),
+				FVector2D::DotProduct(EndRelative, Direction));
+		}
+
+		for (const FHFColumn& Column : Spec.Columns)
+		{
+			if (Column.Size.X <= 0.0 || Column.Size.Y <= 0.0 || Column.Height <= 0.0)
+			{
+				continue;
+			}
+
+			const double Radians = FMath::DegreesToRadians(Column.RotationDegrees);
+			const FVector2D AxisX(FMath::Cos(Radians), FMath::Sin(Radians));
+			const FVector2D AxisY(-AxisX.Y, AxisX.X);
+
+			double AlongMin = TNumericLimits<double>::Max();
+			double AlongMax = -TNumericLimits<double>::Max();
+			double AcrossMin = TNumericLimits<double>::Max();
+			double AcrossMax = -TNumericLimits<double>::Max();
+
+			for (const double SignX : { -0.5, 0.5 })
+			{
+				for (const double SignY : { -0.5, 0.5 })
+				{
+					const FVector2D Relative = Column.Position
+						+ AxisX * (Column.Size.X * SignX)
+						+ AxisY * (Column.Size.Y * SignY)
+						- Beam.Start;
+
+					const double Along = FVector2D::DotProduct(Relative, Direction);
+					const double Across = FVector2D::DotProduct(Relative, Normal);
+
+					AlongMin = FMath::Min(AlongMin, Along);
+					AlongMax = FMath::Max(AlongMax, Along);
+					AcrossMin = FMath::Min(AcrossMin, Across);
+					AcrossMax = FMath::Max(AcrossMax, Across);
+				}
+			}
+
+			if (AcrossMin > HalfWidth || AcrossMax < -HalfWidth)
+			{
+				continue;
+			}
+
+			AddClippedRun(AlongMin, AlongMax);
+		}
+	}
+
+	/** Total length of a beam with nothing under it, given its supported runs. */
+	double UnsupportedLength(TArray<FSupportedRun> Runs, double Length)
+	{
+		Runs.Sort([](const FSupportedRun& A, const FSupportedRun& B) { return A.Min < B.Min; });
+
+		double Covered = 0.0;
+		double Reached = 0.0;
+		for (const FSupportedRun& Run : Runs)
+		{
+			const double From = FMath::Max(Run.Min, Reached);
+			if (Run.Max > From)
+			{
+				Covered += Run.Max - From;
+				Reached = Run.Max;
+			}
+		}
+
+		return FMath::Max(Length - Covered, 0.0);
+	}
+
+	/**
+	 * Whether a bulkhead's polygon actually covers a beam where it crosses a room.
+	 *
+	 * The beam's centreline rather than its full footprint: a bulkhead is normally built a little
+	 * wider than the beam it boxes in, but a few centimetres either way is a drafting rounding
+	 * rather than a design error, and failing a spec over it would train whoever reads the report to
+	 * ignore the rule. What the rule exists to catch is a bulkhead somewhere else entirely.
+	 *
+	 * Sampled at the same rate as FHFHouseSpec::DeepestBeamOverRoom, so the rule that finds a beam
+	 * over a room and the rule that asks whether it is covered agree about where the beam is.
+	 */
+	bool BulkheadCoversBeamOverRoom(const FHFFalseCeiling& Bulkhead, const FHFBeam& Beam, const FHFRoom& Room)
+	{
+		if (Bulkhead.ExplicitPolygon.Num() < 3 || Beam.Length() <= UE_KINDA_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		constexpr int32 SampleCount = 24;
+
+		bool bSawBeamInsideRoom = false;
+		for (int32 Sample = 0; Sample <= SampleCount; ++Sample)
+		{
+			const FVector2D Point = FMath::Lerp(Beam.Start, Beam.End,
+				static_cast<double>(Sample) / SampleCount);
+
+			// Only the part of the beam that is actually over this room has to be boxed in; where it
+			// runs on past the room's walls it is somebody else's ceiling.
+			if (!Room.ContainsPoint(Point))
+			{
+				continue;
+			}
+
+			bSawBeamInsideRoom = true;
+			if (!HFPolygonContainsPoint(Bulkhead.ExplicitPolygon, Point))
+			{
+				return false;
+			}
+		}
+
+		return bSawBeamInsideRoom;
+	}
+
 	/** Reports any id used more than once, since later lookups would silently take the first. */
 	template <typename ElementType, typename GetIdFunc>
 	void CheckDuplicateIds(
@@ -445,10 +692,83 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 		}
 	}
 
+	// ------------------------------------------------------------------- beams stand on something
+	//
+	// Nothing used to ask what held a beam up. The beam rules above check that it has length, has
+	// size, and does not reach the floor - every one of them a property of the beam alone - and the
+	// ceiling rules check what a beam does to a soffit. Between them nothing looked underneath it.
+	//
+	// The reference flat carried one for the whole of milestone 8. BM_Living_Cross ran the full
+	// 6600 width of the living room at Y 1800, which is the room's exact centre: no wall on that
+	// line, no column at either end, and a Cove ceiling that leaves the middle of the room at slab
+	// height so there was nothing to conceal it either. It validated clean on every run and a user
+	// found it by looking at a render.
+	//
+	// The rule is a grid check, not a structural analysis, and it is worth being plain about that: a
+	// beam belongs on the frame's grid, which means it either follows a wall line or is a clear span
+	// framed between columns. Anything else is a beam floating in a room.
+	//
+	// Severity splits on how many ends are loose, because that is where the honest doubt is. One
+	// loose end is a cantilever, which is real and which this model cannot tell apart from a
+	// mistake, so it warns. Both ends loose is not a cantilever and not anything else: there is
+	// nothing under it at either end and nothing along it, and no reading of the spec makes it
+	// stand up. BM_Living_Cross was both.
+	{
+		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+
+		// A support whose edge lands exactly on the beam's end is a bearing, not a miss. Same
+		// figure as the column-in-opening rule uses, for the same reason.
+		const double Tolerance = (ScaleToCm > 0.0) ? 1.0 / ScaleToCm : 0.0;
+
+		for (const FHFBeam& Beam : Spec.Beams)
+		{
+			const double Length = Beam.Length();
+			if (Length <= UE_KINDA_SMALL_NUMBER || Beam.Width <= 0.0)
+			{
+				continue;	// Already reported as zero-length or non-positive.
+			}
+
+			TArray<FSupportedRun> Runs;
+			GatherBeamSupports(Spec, Beam, Runs);
+
+			auto IsBorneAt = [&Runs, Tolerance](double Along)
+			{
+				return Runs.ContainsByPredicate([Along, Tolerance](const FSupportedRun& Run)
+				{
+					return Along >= Run.Min - Tolerance && Along <= Run.Max + Tolerance;
+				});
+			};
+
+			const bool bStartBorne = IsBorneAt(0.0);
+			const bool bEndBorne = IsBorneAt(Length);
+
+			if (bStartBorne && bEndBorne)
+			{
+				// Gaps in the middle are the point of a beam: it spans between its supports.
+				continue;
+			}
+
+			const int32 LooseEnds = (bStartBorne ? 0 : 1) + (bEndBorne ? 0 : 1);
+			const FVector2D& Loose = bStartBorne ? Beam.End : Beam.Start;
+
+			Result.Add(
+				LooseEnds == 2 ? EHFValidationSeverity::Error : EHFValidationSeverity::Warning,
+				TEXT("BeamNotSupported"), Beam.Id,
+				LooseEnds == 2
+					? FString::Printf(TEXT("Beam '%s' runs (%.1f, %.1f) to (%.1f, %.1f) with nothing under either end and %.1f cm of its %.1f cm length over open floor. A beam has to follow a wall line or span between columns; put a wall or a column under each end, or delete the beam."),
+						*Describe(Beam.Id), Beam.Start.X, Beam.Start.Y, Beam.End.X, Beam.End.Y,
+						UnsupportedLength(Runs, Length) * ScaleToCm, Length * ScaleToCm)
+					: FString::Printf(TEXT("Beam '%s' has nothing under its end at (%.1f, %.1f); only the other end is borne. That is a cantilever if it was meant to be one - otherwise put a wall or a column under it."),
+						*Describe(Beam.Id), Loose.X, Loose.Y));
+		}
+	}
+
 	// ------------------------------------------------------------------------------ columns
 	for (const FHFColumn& Column : Spec.Columns)
 	{
-		if (Column.Size.X <= 0.0 || Column.Size.Y <= 0.0)
+		const bool bHasPlanSize = Column.Size.X > 0.0 && Column.Size.Y > 0.0;
+
+		if (!bHasPlanSize)
 		{
 			Result.Add(EHFValidationSeverity::Error, TEXT("NonPositiveColumnSize"), Column.Id,
 				FString::Printf(TEXT("Column '%s' is %.2f x %.2f in plan; both dimensions must be greater than zero."),
@@ -460,6 +780,35 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 			Result.Add(EHFValidationSeverity::Error, TEXT("NonPositiveColumnHeight"), Column.Id,
 				FString::Printf(TEXT("Column '%s' has height %.2f; must be greater than zero."),
 					*Describe(Column.Id), Column.Height));
+		}
+
+		// The other half of the same blindness. Nothing asked what a column was doing there either,
+		// and a column is the one element a reader cannot argue with once it is built: it is 450 of
+		// concrete standing in the room, and if it is not on a wall junction or under a beam it is
+		// an obstruction somebody has to walk round for no reason.
+		//
+		// A warning rather than an error, and the distinction is the same one the beam rule makes: a
+		// free-standing column carrying a beam is ordinary in a large room, and this rule accepts
+		// exactly that - a column under a beam passes. What it catches is a column under nothing,
+		// which is a column read off the wrong layer of a drawing.
+		const bool bOnStructure =
+			Spec.Walls.ContainsByPredicate([&Column](const FHFWall& Wall)
+			{
+				return Wall.Length() > UE_KINDA_SMALL_NUMBER
+					&& SegmentHitsRect(Wall.Start, Wall.End, Column.Position, Column.Size, Column.RotationDegrees);
+			}) ||
+			Spec.Beams.ContainsByPredicate([&Column](const FHFBeam& Beam)
+			{
+				return Beam.Length() > UE_KINDA_SMALL_NUMBER
+					&& SegmentHitsRect(Beam.Start, Beam.End, Column.Position, Column.Size, Column.RotationDegrees);
+			});
+
+		if (!bOnStructure)
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("ColumnStandsFree"), Column.Id,
+				FString::Printf(TEXT("Column '%s' stands at (%.1f, %.1f) with no wall through it and no beam over it. A column belongs on a wall junction or under a beam; a %.0f x %.0f pier in open floor is an obstruction with nothing to carry."),
+					*Describe(Column.Id), Column.Position.X, Column.Position.Y,
+					Column.Size.X, Column.Size.Y));
 		}
 	}
 
@@ -915,18 +1264,31 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 			if (Ceiling.Drop + UE_KINDA_SMALL_NUMBER < Beam->Depth)
 			{
 				// A peripheral band leaves the centre of the room at slab height, so it conceals
-				// nothing mid-span. It is only excusable when a bulkhead in the same room boxes
-				// the beam in - which is exactly how this is detailed in practice.
+				// nothing mid-span. It is only excusable when a bulkhead boxes the beam in - which
+				// is exactly how this is detailed in practice.
 				const bool bIsPerimeterOnly =
 					Ceiling.Style == EHFCeilingStyle::Peripheral ||
 					Ceiling.Style == EHFCeilingStyle::Cove;
 
+				// OVER the beam, not merely in the same room.
+				//
+				// This exemption used to ask only whether a deep-enough bulkhead existed somewhere
+				// in the room, which is a question whose answer cannot conceal anything. A bulkhead
+				// is by definition a LOCALISED drop with its own polygon - BulkheadNeedsPolygon,
+				// thirty lines below, refuses one without a polygon - so a bulkhead over the TV unit
+				// at one end of a living room excused a beam crossing the middle of it.
+				//
+				// That is not hypothetical. It is how BM_Living_Cross validated clean: R_Living had
+				// a Cove at 200, a Bulkhead at 450, and a beam 400 deep, and the three figures alone
+				// satisfied every clause. The beam and the bulkhead did happen to coincide in that
+				// case, but nothing checked it and nothing would have noticed when they stopped.
 				const bool bBulkheadCoversIt = Spec.FalseCeilings.ContainsByPredicate(
-					[&Ceiling, Beam](const FHFFalseCeiling& Other)
+					[&Ceiling, Beam, Room](const FHFFalseCeiling& Other)
 					{
 						return Other.RoomId == Ceiling.RoomId
 							&& Other.Style == EHFCeilingStyle::Bulkhead
-							&& Other.Drop + UE_KINDA_SMALL_NUMBER >= Beam->Depth;
+							&& Other.Drop + UE_KINDA_SMALL_NUMBER >= Beam->Depth
+							&& BulkheadCoversBeamOverRoom(Other, *Beam, *Room);
 					});
 
 				if (!(bIsPerimeterOnly && bBulkheadCoversIt))

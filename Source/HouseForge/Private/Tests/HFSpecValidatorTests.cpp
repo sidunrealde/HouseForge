@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Model/HFSampleHouse.h"
 #include "Model/HFSpecValidator.h"
 #include "Model/HFTypes.h"
 #include "Tests/HFSpecTestHelpers.h"
@@ -734,6 +735,329 @@ bool FHFValidatorFixtureInOpeningTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("A run abutting the jamb is not reported"),
 		FHFSpecValidator::Validate(SpecWithWardrobeAt(FVector2D(50.0, 35.75)))
 			.Contains(TEXT("OpeningBlockedByFixture")));
+
+	return true;
+}
+
+/**
+ * A beam has to stand on something.
+ *
+ * Nothing asked before. The beam rules checked length, size and depth - every one of them a
+ * property of the beam by itself - and the ceiling rules checked what a beam does to a soffit.
+ * Between them, nothing ever looked underneath one.
+ *
+ * The reference flat carried the consequence for the whole of milestone 8: BM_Living_Cross ran the
+ * full width of the living room across its exact centre, on no wall line, between no columns, under
+ * a Cove ceiling that leaves the middle of a room at slab height. It validated clean every run and a
+ * user found it in a render.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorBeamSupportTest,
+	"HouseForge.Validation.BeamStandsOnSomething", HF_TEST_FLAGS)
+
+bool FHFValidatorBeamSupportTest::RunTest(const FString& Parameters)
+{
+	// MakeValidSpec is in centimetres: a 400 x 300 room with walls on its four boundary lines.
+	// A beam sized for that, rather than FHFBeam's millimetre defaults.
+	auto MakeBeam = [](const FName& Id, const FVector2D& Start, const FVector2D& End)
+	{
+		FHFBeam Beam;
+		Beam.Id = Id;
+		Beam.Start = Start;
+		Beam.End = End;
+		Beam.Width = 23.0;
+		Beam.Depth = 45.0;
+		Beam.SoffitZ = 300.0;
+		return Beam;
+	};
+
+	auto MakeColumn = [](const FName& Id, const FVector2D& Position)
+	{
+		FHFColumn Column;
+		Column.Id = Id;
+		Column.Position = Position;
+		Column.Size = FVector2D(45.0, 23.0);
+		Column.Height = 300.0;
+		return Column;
+	};
+
+	// A beam on a wall line, which is where eight of the reference flat's nine were and where all
+	// eight of them still are.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Beams.Add(MakeBeam(TEXT("BM_South"), FVector2D(0.0, 0.0), FVector2D(400.0, 0.0)));
+
+		TestFalse(TEXT("A beam following a wall line is supported"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("BeamNotSupported")));
+	}
+
+	// A clear span between two columns, with nothing under the middle of it. That is what a beam is
+	// for, so the gap must not be reported.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Beams.Add(MakeBeam(TEXT("BM_Cross"), FVector2D(50.0, 150.0), FVector2D(350.0, 150.0)));
+		Spec.Columns.Add(MakeColumn(TEXT("COL_A"), FVector2D(50.0, 150.0)));
+		Spec.Columns.Add(MakeColumn(TEXT("COL_B"), FVector2D(350.0, 150.0)));
+
+		TestFalse(TEXT("A clear span between two columns is supported"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("BeamNotSupported")));
+	}
+
+	// Nothing at either end: an error, because no reading of the spec makes it stand up.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Beams.Add(MakeBeam(TEXT("BM_Floating"), FVector2D(50.0, 150.0), FVector2D(350.0, 150.0)));
+		ExpectIssue(*this, Spec, TEXT("BeamNotSupported"), EHFValidationSeverity::Error);
+
+		const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
+		const FHFValidationIssue* Issue = Result.Issues.FindByPredicate(
+			[](const FHFValidationIssue& I) { return I.Code == TEXT("BeamNotSupported"); });
+
+		if (TestNotNull(TEXT("The floating beam is reported"), Issue))
+		{
+			TestTrue(TEXT("The message names the beam"), Issue->Message.Contains(TEXT("BM_Floating")));
+			// The whole 300 of it is over open floor, and saying so is what makes the report actionable.
+			TestTrue(TEXT("The message quantifies the unsupported run"), Issue->Message.Contains(TEXT("300.0")));
+		}
+	}
+
+	// One end borne and one loose is a cantilever, which is a real thing this model cannot tell
+	// apart from a mistake. It warns rather than failing, and names the end that is loose.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Beams.Add(MakeBeam(TEXT("BM_Cantilever"), FVector2D(50.0, 150.0), FVector2D(350.0, 150.0)));
+		Spec.Columns.Add(MakeColumn(TEXT("COL_A"), FVector2D(50.0, 150.0)));
+		ExpectIssue(*this, Spec, TEXT("BeamNotSupported"), EHFValidationSeverity::Warning);
+	}
+
+	// A beam landing on the mid-span of two other beams is NOT accepted, and that is deliberate
+	// rather than an oversight. A secondary framing into a primary is real construction, but the
+	// primary has to be sized for the point load and nothing in a spec says whether it was. It is
+	// also exactly what BM_Living_Cross did - both its ends landed on beams - so accepting it would
+	// accept the defect this rule exists for.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Beams.Add(MakeBeam(TEXT("BM_West"),  FVector2D(0.0, 0.0), FVector2D(0.0, 300.0)));
+		Spec.Beams.Add(MakeBeam(TEXT("BM_East"),  FVector2D(400.0, 0.0), FVector2D(400.0, 300.0)));
+		Spec.Beams.Add(MakeBeam(TEXT("BM_Cross"), FVector2D(0.0, 150.0), FVector2D(400.0, 150.0)));
+
+		const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
+		const FHFValidationIssue* Issue = Result.Issues.FindByPredicate(
+			[](const FHFValidationIssue& I) { return I.Code == TEXT("BeamNotSupported"); });
+
+		if (TestNotNull(TEXT("A beam framing into two other beams is still reported"), Issue))
+		{
+			TestEqual(TEXT("And only the crossing beam is"), Issue->ElementId, FName(TEXT("BM_Cross")));
+		}
+	}
+
+	// The lateral tolerance is the beam's own width and nothing more, so the eight beams in the
+	// reference flat pass because they are exactly on their wall lines rather than because the rule
+	// is generous. This wall is 20 clear of a beam 23 wide, so it is beside it, not under it.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+		Spec.Beams.Add(MakeBeam(TEXT("BM_Offset"), FVector2D(50.0, 20.0), FVector2D(350.0, 20.0)));
+		ExpectIssue(*this, Spec, TEXT("BeamNotSupported"), EHFValidationSeverity::Error);
+	}
+
+	// And the real thing. Put BM_Living_Cross back into the reference flat exactly as it was - a
+	// literal Y of 1800, 400 deep where every other beam is 450 - and the rule must catch it.
+	{
+		FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
+
+		FHFBeam Cross;
+		Cross.Id = TEXT("BM_Living_Cross");
+		Cross.Start = FVector2D(0.0, 1800.0);
+		Cross.End = FVector2D(6600.0, 1800.0);
+		Cross.Width = 230.0;
+		Cross.Depth = 400.0;
+		Cross.SoffitZ = 3000.0;
+		Spec.Beams.Add(Cross);
+
+		ExpectIssue(*this, Spec, TEXT("BeamNotSupported"), EHFValidationSeverity::Error);
+	}
+
+	// The flat as it stands has eight beams and every one of them is honestly borne.
+	TestFalse(TEXT("Every beam in the reference flat is supported"),
+		FHFSpecValidator::Validate(FHFSampleHouse::Make2BHK()).Contains(TEXT("BeamNotSupported")));
+
+	return true;
+}
+
+/**
+ * A column standing in open floor.
+ *
+ * The same blindness as the beam rule, one element over: nothing asked what a column was doing
+ * where it was. A column is the one thing in a plan a reader cannot argue with once it is built -
+ * it is concrete standing in the room - and one that is on no wall junction and under no beam is an
+ * obstruction with nothing to carry, usually a column read off the wrong layer of a drawing.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorFreeColumnTest,
+	"HouseForge.Validation.ColumnStandsFree", HF_TEST_FLAGS)
+
+bool FHFValidatorFreeColumnTest::RunTest(const FString& Parameters)
+{
+	auto SpecWithColumnAt = [](const FVector2D& Position, double RotationDegrees = 0.0)
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		FHFColumn Column;
+		Column.Id = TEXT("COL_1");
+		Column.Position = Position;
+		Column.Size = FVector2D(45.0, 23.0);
+		Column.RotationDegrees = RotationDegrees;
+		Column.Height = 300.0;
+		Spec.Columns.Add(Column);
+
+		return Spec;
+	};
+
+	// On the junction of the south and west walls, which is where all eleven of the reference
+	// flat's columns are.
+	TestFalse(TEXT("A column on a wall junction is not reported"),
+		FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(0.0, 0.0)))
+			.Contains(TEXT("ColumnStandsFree")));
+
+	// Out in the middle of the room, on nothing.
+	ExpectIssue(*this, SpecWithColumnAt(FVector2D(200.0, 150.0)),
+		TEXT("ColumnStandsFree"), EHFValidationSeverity::Warning);
+
+	// Free of every wall but carrying a beam. This is ordinary in a large room and is precisely what
+	// the beam rule demands of a beam that does not follow a wall line, so the two rules have to
+	// agree: a column put there to hold a beam up passes.
+	{
+		FHFHouseSpec Spec = SpecWithColumnAt(FVector2D(200.0, 150.0));
+
+		FHFBeam Beam;
+		Beam.Id = TEXT("BM_1");
+		Beam.Start = FVector2D(200.0, 0.0);
+		Beam.End = FVector2D(200.0, 150.0);
+		Beam.Width = 23.0;
+		Beam.Depth = 45.0;
+		Beam.SoffitZ = 300.0;
+		Spec.Beams.Add(Beam);
+
+		TestFalse(TEXT("A column under a beam is not reported"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("ColumnStandsFree")));
+	}
+
+	// A column that barely reaches its wall still counts. Centred at (200, 311) it spans Y
+	// 299.5..322.5, so the north wall's centreline at Y 300 passes through the last half centimetre
+	// of it - and it is on that wall. Sampling the wall's centreline against the column would be the
+	// obvious way to test this and would be wrong at exactly this margin, which is why the check is
+	// a real segment-rectangle clip.
+	TestFalse(TEXT("A column that only just reaches its wall still counts"),
+		FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(200.0, 311.0)))
+			.Contains(TEXT("ColumnStandsFree")));
+
+	// Pulled 40 back off the same wall it is on nothing again - its near edge is at Y 258.5, well
+	// clear of the centreline at 300 - so the margin above is the rule being exact rather than the
+	// rule being generous.
+	TestTrue(TEXT("The same column pulled off the wall is reported"),
+		FHFSpecValidator::Validate(SpecWithColumnAt(FVector2D(200.0, 270.0)))
+			.Contains(TEXT("ColumnStandsFree")));
+
+	// Every column in the reference flat is on a junction of two walls.
+	TestFalse(TEXT("No column in the reference flat stands free"),
+		FHFSpecValidator::Validate(FHFSampleHouse::Make2BHK()).Contains(TEXT("ColumnStandsFree")));
+
+	return true;
+}
+
+/**
+ * A bulkhead only excuses a beam it is actually OVER.
+ *
+ * CeilingDoesNotClearBeam has an exemption for a perimeter ceiling - a Cove or a Peripheral band
+ * leaves the middle of a room at slab height, so it cannot conceal a beam crossing it, and the way
+ * that is detailed in practice is a separate bulkhead boxing the beam in.
+ *
+ * The exemption was positional-blind. It asked whether a deep-enough bulkhead EXISTED IN THE ROOM,
+ * which is a question whose answer conceals nothing: a bulkhead is by definition a localised drop
+ * with its own polygon - the BulkheadNeedsPolygon rule insists on one - so a bulkhead over the TV
+ * unit at one end of a living room excused a beam crossing the middle of it.
+ *
+ * That is exactly how BM_Living_Cross validated clean: Cove drop 200, Bulkhead drop 450, beam depth
+ * 400, and the three numbers alone satisfied every clause.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorBulkheadOverBeamTest,
+	"HouseForge.Validation.BulkheadMustCoverTheBeam", HF_TEST_FLAGS)
+
+bool FHFValidatorBulkheadOverBeamTest::RunTest(const FString& Parameters)
+{
+	// The historical configuration, rebuilt: the reference flat with BM_Living_Cross back in it and
+	// a bulkhead of some description in the living room.
+	auto SpecWithBulkhead = [](double Drop, const TArray<FVector2D>& Polygon)
+	{
+		FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
+
+		FHFBeam Cross;
+		Cross.Id = TEXT("BM_Living_Cross");
+		Cross.Start = FVector2D(0.0, 1800.0);
+		Cross.End = FVector2D(6600.0, 1800.0);
+		Cross.Width = 230.0;
+		Cross.Depth = 400.0;
+		Cross.SoffitZ = 3000.0;
+		Spec.Beams.Add(Cross);
+
+		FHFFalseCeiling Bulkhead;
+		Bulkhead.Id = TEXT("FC_Living_Bulkhead");
+		Bulkhead.RoomId = TEXT("R_Living");
+		Bulkhead.Style = EHFCeilingStyle::Bulkhead;
+		Bulkhead.Drop = Drop;
+		Bulkhead.BandWidth = 0.0;
+		Bulkhead.ExplicitPolygon = Polygon;
+		Spec.FalseCeilings.Add(Bulkhead);
+
+		return Spec;
+	};
+
+	// The complaint has to be the COVE's. The bulkhead is a false ceiling too and the same rule runs
+	// over it, so a test that merely asked whether the code appeared anywhere would pass on a
+	// shallow bulkhead complaining about itself while the exemption stayed broken.
+	auto CoveIsReported = [](const FHFHouseSpec& Spec)
+	{
+		return FHFSpecValidator::Validate(Spec).Issues.ContainsByPredicate(
+			[](const FHFValidationIssue& Issue)
+			{
+				return Issue.Code == TEXT("CeilingDoesNotClearBeam")
+					&& Issue.ElementId == FName(TEXT("FC_Living"))
+					&& Issue.Severity == EHFValidationSeverity::Warning;
+			});
+	};
+
+	// Over the beam and deep enough: the exemption still works, which it has to, or the rule would
+	// simply be refusing the detail it exists to allow.
+	TestFalse(TEXT("A bulkhead over the beam excuses the cove"),
+		CoveIsReported(SpecWithBulkhead(450.0, {
+			FVector2D(0.0, 1700.0), FVector2D(6600.0, 1700.0),
+			FVector2D(6600.0, 1900.0), FVector2D(0.0, 1900.0) })));
+
+	// The same bulkhead, same depth, same room - at the wrong end of it. This is the case the old
+	// exemption waved through, and it is not a contrived one: a bulkhead over the TV unit along the
+	// south wall is the commonest bulkhead there is in a living room.
+	TestTrue(TEXT("A bulkhead at the wrong end of the room excuses nothing"),
+		CoveIsReported(SpecWithBulkhead(450.0, {
+			FVector2D(0.0, 200.0), FVector2D(6600.0, 200.0),
+			FVector2D(6600.0, 400.0), FVector2D(0.0, 400.0) })));
+
+	// Covering only part of the beam's run across the room is not covering it: the rest of the beam
+	// still hangs out of the soffit, which is what somebody standing in the room would see.
+	TestTrue(TEXT("A bulkhead over half the beam excuses nothing"),
+		CoveIsReported(SpecWithBulkhead(450.0, {
+			FVector2D(0.0, 1700.0), FVector2D(3000.0, 1700.0),
+			FVector2D(3000.0, 1900.0), FVector2D(0.0, 1900.0) })));
+
+	// Over the beam but shallower than it. The depth clause was never the broken half, and it still
+	// has to hold.
+	TestTrue(TEXT("A bulkhead shallower than the beam excuses nothing"),
+		CoveIsReported(SpecWithBulkhead(300.0, {
+			FVector2D(0.0, 1700.0), FVector2D(6600.0, 1700.0),
+			FVector2D(6600.0, 1900.0), FVector2D(0.0, 1900.0) })));
+
+	// The flat as it stands has no beam over any room to conceal, so nothing here is being kept
+	// quiet by an exemption at all.
+	TestFalse(TEXT("No ceiling in the reference flat is hiding a beam behind an exemption"),
+		FHFSpecValidator::Validate(FHFSampleHouse::Make2BHK())
+			.Contains(TEXT("CeilingDoesNotClearBeam")));
 
 	return true;
 }
