@@ -8,6 +8,7 @@
 #include "Engine/DirectionalLight.h"
 #include "Engine/PostProcessVolume.h"
 #include "Engine/SkyLight.h"
+#include "Engine/TextureCube.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HouseForgeEditor.h"
@@ -26,21 +27,26 @@ namespace
 	 * Expressed through the physical camera rather than through AutoExposureMinBrightness and
 	 * MaxBrightness, which is the other way of pinning exposure. Those two are read as EV100 only
 	 * when the project has bExtendDefaultLuminanceRange on, and as raw linear brightness when it
-	 * does not - so the same numbers mean two entirely different exposures depending on a project
-	 * ini this plugin is not allowed to edit (.claude/rules/01-scope.md). Shutter, ISO and aperture
-	 * mean the same thing either way.
+	 * does not - so the same numbers would mean two entirely different exposures depending on a
+	 * project ini this plugin is not allowed to edit (.claude/rules/01-scope.md). Shutter, ISO and
+	 * aperture mean the same thing either way.
 	 *
-	 * EV100 = log2(N^2 / t * 100 / ISO). Fixing ISO at 100 and the shutter at 1/100 s leaves the
-	 * aperture to carry it: N = sqrt(2^EV100 / 100).
+	 * EV100 = log2(N^2 / t * 100 / ISO). The aperture is fixed and the ISO carries the figure,
+	 * which is the opposite of the obvious arrangement and is the point: the aperture is clamped to
+	 * f/1 through f/32 by the engine, and with the shutter at 1/100 that bounds an aperture-carried
+	 * EV100 to roughly 6.6 through 16.6. Asking for anything below 6.6 silently clamps, so three
+	 * different exposures come out identical - which is exactly what happened while this was being
+	 * measured, and it read as "exposure has no effect" rather than as a clamp. ISO has no such
+	 * ceiling.
 	 */
 	void ApplyManualExposure(FPostProcessSettings& Settings, float EV100)
 	{
-		constexpr float Iso = 100.0f;
+		constexpr float Fstop = 2.0f;
 		constexpr float ShutterDenominator = 100.0f;
 
-		// The aperture's own clamp is 1.0 to 32, which bounds the EV100 this can express to about
-		// 6.6 through 16.6. Clamped rather than allowed to silently saturate at one end.
-		const float Fstop = FMath::Clamp(FMath::Sqrt(FMath::Pow(2.0f, EV100) / ShutterDenominator), 1.0f, 32.0f);
+		// ISO = N^2 * t^-1 * 100 / 2^EV100.
+		const float Iso = FMath::Max(1.0f,
+			Fstop * Fstop * ShutterDenominator * 100.0f / FMath::Pow(2.0f, EV100));
 
 		Settings.bOverride_AutoExposureMethod = 1;
 		Settings.AutoExposureMethod = AEM_Manual;
@@ -59,6 +65,29 @@ namespace
 
 		Settings.bOverride_DepthOfFieldFstop = 1;
 		Settings.DepthOfFieldFstop = Fstop;
+	}
+
+	/**
+	 * The ambient fill that makes the inside of the flat visible.
+	 *
+	 * The engine's own daylight ambient cubemap, at the intensity the reference flat was measured
+	 * at: the master bedroom renders around 44% mean brightness with it and around 3% without,
+	 * while the plan barely moves - so this lights interiors and leaves the sun in charge of
+	 * everything the sky can see.
+	 *
+	 * An ambient cubemap rather than the sky light because a scene capture has no global
+	 * illumination, and a sky light's diffuse arrives through GI. See the class comment.
+	 */
+	void ApplyAmbientFill(FPostProcessSettings& Settings)
+	{
+		static const TCHAR* CubemapPath = TEXT("/Engine/MapTemplates/Sky/DaylightAmbientCubemap.DaylightAmbientCubemap");
+
+		if (UTextureCube* Cubemap = LoadObject<UTextureCube>(nullptr, CubemapPath))
+		{
+			Settings.AmbientCubemap = Cubemap;
+			Settings.bOverride_AmbientCubemapIntensity = 1;
+			Settings.AmbientCubemapIntensity = 10.0f;
+		}
 	}
 
 	void MarkAsPlaceholder(AActor* Actor, const FString& Label)
@@ -136,8 +165,8 @@ TArray<AActor*> FHFViewingLight::EnsureIn(UWorld* World, bool* bOutSpawned)
 		{
 			// A bright overcast day's worth of sun, not noon. The flat is being read, not
 			// photographed: a hard sun through the window openings blows the rooms nearest them
-			// and leaves the rest black.
-			Light->SetIntensity(6.0f);
+			// and leaves the rest black. In lux, so it means something once real materials land.
+			Light->SetIntensity(SunLux());
 			Light->SetLightColor(FLinearColor(1.0f, 0.96f, 0.90f));
 
 			// Wide, soft shadows for the same reason. A plan wants enough shadow to separate a
@@ -158,9 +187,14 @@ TArray<AActor*> FHFViewingLight::EnsureIn(UWorld* World, bool* bOutSpawned)
 	{
 		if (USkyLightComponent* Light = Sky->GetLightComponent())
 		{
+			// Movable, or it contributes nothing at all without a lighting build - and this rig is
+			// spawned into levels that are never built. ASkyLight has no SetMobility of its own;
+			// it has to be set on the component.
+			Light->SetMobility(EComponentMobility::Movable);
+
 			Light->SourceType = SLS_CapturedScene;
 			Light->bRealTimeCapture = true;
-			Light->SetIntensity(3.0f);
+			Light->SetIntensity(1.0f);
 
 			// Both of these are deliberately unphysical, and both are what makes an interior
 			// readable at all without the lighting milestone behind them.
@@ -197,7 +231,7 @@ TArray<AActor*> FHFViewingLight::EnsureIn(UWorld* World, bool* bOutSpawned)
 		// looking in, which a bounded volume would miss.
 		Volume->bUnbound = true;
 		Volume->BlendWeight = 1.0f;
-		ApplyManualExposure(Volume->Settings, InteriorEV100());
+		ApplyViewingSettingsTo(Volume->Settings);
 
 		MarkAsPlaceholder(Volume, TEXT("HF_Placeholder_Exposure"));
 		Spawned.Add(Volume);
@@ -229,7 +263,8 @@ int32 FHFViewingLight::RemoveFrom(UWorld* World)
 	return Removed;
 }
 
-void FHFViewingLight::ApplyExposureTo(FPostProcessSettings& Settings)
+void FHFViewingLight::ApplyViewingSettingsTo(FPostProcessSettings& Settings)
 {
 	ApplyManualExposure(Settings, InteriorEV100());
+	ApplyAmbientFill(Settings);
 }

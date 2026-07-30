@@ -128,11 +128,15 @@ bool FHFSceneCapture::Render(UWorld* World, const FHFCaptureRequest& Request, FI
 		Capture->ShowFlags.SetVolumetricFog(false);
 	}
 
-	// Never left to eye adaptation. A capture renders exactly one frame, and adaptation needs a
-	// previous frame to adapt from - so the one frame that gets written is exposed by an empty
-	// adaptation buffer and comes back black. This pins it to the figure the placeholder rig is
-	// balanced around.
-	FHFViewingLight::ApplyExposureTo(Capture->PostProcessSettings);
+	// Exposure and ambient fill, both pinned rather than left to the scene.
+	//
+	// Eye adaptation is the first half: a capture renders exactly one frame, and adaptation needs a
+	// previous frame to adapt FROM, so the one frame that gets written would be exposed by an empty
+	// adaptation buffer and come back black. The ambient fill is the second: a scene capture runs
+	// no global illumination, so the sky light lights nothing inside an enclosed room and an
+	// interior view is black for an entirely different reason. Both figures come from the
+	// placeholder rig, so a capture and the editor viewport agree.
+	FHFViewingLight::ApplyViewingSettingsTo(Capture->PostProcessSettings);
 	Capture->PostProcessBlendWeight = 1.0f;
 
 	Capture->CaptureScene();

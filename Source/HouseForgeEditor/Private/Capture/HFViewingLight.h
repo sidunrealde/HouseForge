@@ -22,8 +22,9 @@ class UWorld;
  * later, and the whole rig is meant to be deleted in one call when the real thing lands - which is
  * what RemoveFrom is for, and why every actor carries the same tag.
  *
- * Two decisions in it are unphysical on purpose, because this is a viewing rig and not a
- * simulation:
+ * Several decisions in it are unphysical on purpose, because this is a viewing rig and not a
+ * simulation. Each of them was arrived at by rendering the reference flat and measuring the result,
+ * not by reasoning about lighting:
  *
  *  - The sky light's lower hemisphere is NOT black. Left at the default, everything facing
  *    downward - soffits, the underside of a loft, the head of every opening - goes to nothing, and
@@ -32,6 +33,15 @@ class UWorld;
  *  - The sky light does not cast shadows. Occluded ambient in an interior with no ray tracing
  *    guaranteed leaves rooms at the back of the flat black, and a black room looks exactly like a
  *    room that failed to generate.
+ *
+ *  - There is an ambient cubemap, and it is what actually lights the inside of the flat. A sky
+ *    light delivers its diffuse through global illumination, and a scene capture renders one frame
+ *    with no GI - so in a captured image the sky light contributes NOTHING indoors. Measured, not
+ *    assumed: driving the sky light's intensity across five orders of magnitude changed the
+ *    interior render by not one pixel value, while the sun kept lighting the plan perfectly. The
+ *    ambient cubemap is applied in the deferred pass, needs no GI, and reaches every enclosed room.
+ *    The sky light stays because the editor viewport does have GI, and because milestone 11
+ *    inherits a rig shaped the way a real one is.
  *
  * Idempotent by construction: EnsureIn finds the rig before it spawns one, so calling it on every
  * capture and after every rebuild leaves exactly one of each actor in the level.
@@ -60,6 +70,9 @@ public:
 	/** Deletes the rig. Returns how many actors went. For the lighting milestone to call. */
 	static int32 RemoveFrom(UWorld* World);
 
+	/** Illuminance of the placeholder sun, in lux. A bright overcast day rather than noon. */
+	static float SunLux() { return 10000.0f; }
+
 	/**
 	 * Exposure the rig is balanced for, as an EV100 figure.
 	 *
@@ -71,12 +84,11 @@ public:
 	static float InteriorEV100() { return 8.0f; }
 
 	/**
-	 * Pins a capture's own post-process settings to the rig's exposure.
+	 * Applies the rig's exposure and its ambient fill to a set of post-process settings.
 	 *
-	 * A scene capture renders one frame and stops. Eye adaptation needs a previous frame to adapt
-	 * FROM, so the only frame a capture ever renders is exposed by whatever the adaptation buffer
-	 * happened to hold - which for a fresh render target is nothing, and the image comes back
-	 * black. Every capture calls this, and it is the same exposure the rig itself is set to.
+	 * Used twice, from one place: on the rig's own unbound volume, so the editor viewport agrees
+	 * with the captures, and on each capture component, so a capture still comes out legible if
+	 * somebody has deleted the rig or overridden the volume.
 	 */
-	static void ApplyExposureTo(FPostProcessSettings& Settings);
+	static void ApplyViewingSettingsTo(FPostProcessSettings& Settings);
 };
