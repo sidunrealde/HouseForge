@@ -74,11 +74,17 @@ struct HOUSEFORGE_API FHFWardrobeParams
 
 	/**
 	 * Bays the run divides into: one shutter each, and one mid partition on every internal boundary.
+	 * Zero divides the run at the project's module width.
 	 *
 	 * Equal divisions of the OVERALL width, because that is what the carcass does - so the leaf and
 	 * the box behind it are set out from the same number and cannot drift apart.
+	 *
+	 * A sentinel for the same reason PlinthHeight is one, and resolved in the same place: Sanitise,
+	 * against Joinery::ShutterModuleWidth. Deriving it in the composing layer instead froze the
+	 * answer at composition time, so a project that later changed its module width rebuilt every
+	 * wardrobe and left every bay count exactly where it was.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "1", ClampMax = "12"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0", ClampMax = "12"))
 	int32 BayCount = 4;
 
 	/**

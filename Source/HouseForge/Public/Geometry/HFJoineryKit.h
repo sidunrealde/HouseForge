@@ -283,39 +283,9 @@ enum class EHFShutterHinge : uint8
 	Right
 };
 
-/**
- * How a shutter leaf moves.
- *
- * A side-hung leaf is the commonest thing in a fitted kitchen and the least common thing in a
- * modern Indian wardrobe, which is why all three of these exist. Hard-coding the vertical hinge
- * ruled out a loft flap, a lift-up wall cabinet and the sliding wardrobe that most flats of this
- * class actually have.
- */
-UENUM(BlueprintType)
-enum class EHFShutterMotion : uint8
-{
-	/** Hinged on a vertical edge and swinging out. The kitchen and cabinet default. */
-	SideHung,
-
-	/**
-	 * Hinged along its head and lifting out and up: a loft flap, a lift-up wall cabinet.
-	 *
-	 * The leaf hangs BELOW its hinge, so its local Z runs from -LeafHeight to 0, and it opens
-	 * about the horizontal axis at its head. Its leading edge is therefore the bottom one, which is
-	 * where the handle and the gas stay go.
-	 */
-	TopHung,
-
-	/**
-	 * Running on a track, passing its neighbour rather than swinging clear of it.
-	 *
-	 * Different from a hinged run in a way that shows: sliding leaves LAP one another on separate
-	 * tracks instead of being separated by a reveal, so there is no shadow gap between them and no
-	 * daylight either. The set-out is the same two-track rule a sliding door uses, and is taken
-	 * from FHFSlidingSetOut rather than worked out again here.
-	 */
-	Sliding
-};
+// EHFShutterMotion lives in Model/HFTypes.h, included above. It moved there because a drawing shows
+// whether a wardrobe slides or swings, so a spec has to be able to carry it - a motion the geometry
+// layer can build but no FHFFixtureParams can express is a motion no drawing can ever ask for.
 
 /**
  * One shutter leaf, filling one module of a carcass.

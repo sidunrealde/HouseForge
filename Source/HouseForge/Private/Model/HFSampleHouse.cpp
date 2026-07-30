@@ -637,7 +637,8 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		// 2400 long run, 600 deep, turned to stand against the east wall at X=10800.
 		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_MBed_Wardrobe"), TEXT("R_MBed"), EHFFixtureType::Wardrobe,
-			TEXT("4-door wardrobe with loft"), FVector2D(10385.0, 6900.0), FVector2D(2400.0, 600.0), 2400.0, 90.0);
+			TEXT("4-bay sliding wardrobe with a top-hung loft"), FVector2D(10385.0, 6900.0),
+			FVector2D(2400.0, 600.0), 2400.0, 90.0);
 		Wardrobe.AnchorWallId = TEXT("W_East");
 		Wardrobe.Params.ShutterCount = 4;
 		Wardrobe.Params.ShelfCount = 5;
@@ -646,6 +647,24 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Wardrobe.Params.bHasHangingRail = true;
 		Wardrobe.Params.PlinthHeight = 100.0;
 		Wardrobe.Params.HandleStyle = EHFHandleStyle::JProfile;
+
+		// SLIDING, and the room is why rather than fashion. This is 2400 of wardrobe in a bedroom
+		// 3000 deep with a bed in it: a hinged leaf on this run swings 591 mm out into the floor it
+		// stands on, measured off the built actor's own bounds, and the walkway between the bed and
+		// the wardrobe is not that wide. A sliding run is what a flat of this class actually gets
+		// here, and it is drawn differently - no swing arcs, leaves that lap instead of a reveal at
+		// every bay - so it is something the plan says rather than something anybody assumed.
+		//
+		// Bedroom 2's wardrobe stays side-hung deliberately. It is 1800 in a room with the space for
+		// it, and it keeps a hinged production instance beside the sliding one.
+		Wardrobe.Params.ShutterMotion = EHFShutterMotion::Sliding;
+
+		// The loft is a FLAP, not a slider, and Sanitise would refuse it as a slider anyway: a
+		// sliding run's gear is a track at the head of the body, and there is nothing above it for a
+		// loft leaf to run on. Top-hung is the other thing actually built over a slider - it lifts
+		// out and up on stays instead of swinging into the room, which is the same reason the body
+		// slides.
+		Wardrobe.Params.LoftShutterMotion = EHFShutterMotion::TopHung;
 
 		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_MBed"), TEXT("R_MBed"), EHFFixtureType::CeilingFan,
 			TEXT("Ceiling fan"), FVector2D(6300.0, 6900.0), FVector2D(1200.0, 1200.0), 300.0);

@@ -585,12 +585,36 @@ bool FHFWardrobesInTheFlatTest::RunTest(const FString& Parameters)
 
 		const FString Where = Fixture.Id.ToString();
 
-		// A leaf per bay the drawing counted, each on a component of its own. Not a total, because a
-		// wardrobe with a loft has a second row of leaves above the first.
-		for (int32 Bay = 0; Bay < Fixture.Params.ShutterCount; ++Bay)
+		// THE SHUTTER MOTION CAME OFF THE DRAWING. Until FHFFixtureParams carried it, every wardrobe
+		// the pipeline built was side-hung whatever the plan said - the kit could express a sliding
+		// run and a top-hung flap and no spec could ask for either, so both were reachable only by
+		// hand-editing an actor after generation.
+		TestEqual(*FString::Printf(TEXT("'%s' moves the way the drawing says"), *Where),
+			static_cast<int32>(Wardrobe->Wardrobe.MotionKind),
+			static_cast<int32>(Fixture.Params.ShutterMotion));
+		TestEqual(*FString::Printf(TEXT("'%s' hangs its loft the way the drawing says"), *Where),
+			static_cast<int32>(Wardrobe->Wardrobe.LoftMotionKind),
+			static_cast<int32>(Fixture.Params.LoftShutterMotion));
+
+		// A leaf per bay the drawing counted, each on a component of its own - unless the run slides,
+		// in which case it is two leaves on two tracks whatever the carcass behind them is divided
+		// into, because a sliding leaf passes its neighbour rather than swinging clear of it. Not a
+		// total either way: a wardrobe with a loft has a second row of leaves above the first.
+		const bool bSliding = Fixture.Params.ShutterMotion == EHFShutterMotion::Sliding;
+		const int32 ExpectedLeaves = bSliding ? 2 : Fixture.Params.ShutterCount;
+
+		for (int32 Bay = 0; Bay < ExpectedLeaves; ++Bay)
 		{
 			TestNotNull(*FString::Printf(TEXT("'%s' has a leaf on bay %d"), *Where, Bay),
 				Wardrobe->GetPartComponent(AHFWardrobeActor::ShutterPartId(Bay)));
+		}
+
+		// And a sliding run really is two leaves rather than four that happen to slide. Asserted as
+		// an absence, because that is the half a positive check cannot see.
+		if (bSliding && Fixture.Params.ShutterCount > 2)
+		{
+			TestNull(*FString::Printf(TEXT("'%s' slides on two tracks, not one leaf per bay"), *Where),
+				Wardrobe->GetPartComponent(AHFWardrobeActor::ShutterPartId(2)));
 		}
 
 		// The dimensions off the drawing reached the geometry, in centimetres. The spec is converted

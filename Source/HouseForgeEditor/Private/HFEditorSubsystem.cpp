@@ -26,6 +26,7 @@
 #include "Model/HFSettings.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFOpeningActor.h"
+#include "Actors/HFWardrobeActor.h"
 #include "UnrealEdGlobals.h"
 
 #include "Dom/JsonObject.h"
@@ -951,6 +952,21 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 		{
 			Opening->ApplyProjectDefaults();
 			Opening->Regenerate();
+			++Rebuilt;
+		}
+		else if (AHFWardrobeActor* Wardrobe = Cast<AHFWardrobeActor>(Typed))
+		{
+			// The whole Joinery section reaches a wardrobe and nothing else, so leaving this branch
+			// out made every joinery control on the page inert on anything already standing in the
+			// level: dragging the reveal gap, the board thickness, the toe kick or the module width
+			// rebuilt every door in the flat and left every wardrobe exactly as it was until
+			// somebody rebuilt the whole house. The page promised otherwise in writing.
+			//
+			// ApplyProjectDefaults is enough on its own now that BayCount is a sentinel resolved
+			// inside the kit rather than derived here - re-seeding Joinery re-derives the bay count
+			// with it, so ShutterModuleWidth moves geometry on an existing wardrobe too.
+			Wardrobe->ApplyProjectDefaults();
+			Wardrobe->Regenerate();
 			++Rebuilt;
 		}
 	}

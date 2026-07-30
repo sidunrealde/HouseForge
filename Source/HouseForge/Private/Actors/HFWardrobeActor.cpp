@@ -21,15 +21,14 @@ void AHFWardrobeActor::ApplyFixture(const FHFFixture& Fixture)
 	Wardrobe.Depth = Fixture.Footprint.Y;
 	Wardrobe.Height = Fixture.Height;
 
-	// A drawing that counted the shutters is believed. One that did not gets the run divided at the
-	// project's module width, which is the figure a joiner would set it out at - and is one more
-	// settings control that reaches geometry rather than sitting inert on the page.
-	Wardrobe.BayCount = Spec.ShutterCount > 0
-		? Spec.ShutterCount
-		: FMath::Max(1, FMath::RoundToInt32(Wardrobe.Width / FMath::Max(Wardrobe.Joinery.ShutterModuleWidth, 1.0)));
+	// Copied straight through, zero included, and that is the point: zero is the sentinel
+	// FHFWardrobeKit::Sanitise resolves against the project's module width. Deriving it HERE instead
+	// stamped a number onto the actor and froze it - the wardrobe was built at whatever the module
+	// width happened to be that day, and a project that later changed the dial rebuilt every
+	// wardrobe with its bay count unchanged. Resolving a sentinel in two places is how the two
+	// answers drift; PlinthHeight below is the same rule.
+	Wardrobe.BayCount = FMath::Max(Spec.ShutterCount, 0);
 
-	// Copied straight through, zero included: zero is the sentinel the kit resolves against the
-	// project's own plinth height, and resolving it twice in two places is how the two answers drift.
 	Wardrobe.PlinthHeight = Spec.PlinthHeight;
 
 	Wardrobe.bHasLoft = Spec.bHasLoft;
@@ -39,6 +38,16 @@ void AHFWardrobeActor::ApplyFixture(const FHFFixture& Fixture)
 	Wardrobe.HandleStyle = Spec.HandleStyle;
 	Wardrobe.bGlassInsert = Spec.bHasGlassInsert;
 	Wardrobe.CorniceHeight = Spec.CorniceHeight;
+
+	// How the leaves move, read off the drawing rather than assumed. Until FHFFixtureParams carried
+	// these, MotionKind and LoftMotionKind kept their SideHung defaults on every wardrobe the
+	// pipeline ever built - so the sliding wardrobe the kit was written for, and the top-hung loft
+	// flap beside it, were reachable only by hand-editing an actor after generation.
+	//
+	// Passed across separately rather than derived one from the other: a sliding body does not imply
+	// a sliding loft, and Sanitise refuses that combination anyway.
+	Wardrobe.MotionKind = Spec.ShutterMotion;
+	Wardrobe.LoftMotionKind = Spec.LoftShutterMotion;
 
 	// A wardrobe standing against one wall has both its ends on show, which is what an Indian bedroom
 	// wardrobe is: a 2400 run in a 3600 room. An end dying into a return wall is a fitted wardrobe and

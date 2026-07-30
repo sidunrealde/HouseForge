@@ -6,6 +6,7 @@
 
 #include "Actors/HFHouseActor.h"
 #include "Actors/HFOpeningActor.h"
+#include "Actors/HFWardrobeActor.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Actors/HFElementActors.h"
 #include "Editor.h"
@@ -97,6 +98,81 @@ namespace
 		House->SetSpec(Spec);
 		House->BuildGeometry();
 		return House;
+	}
+
+	/**
+	 * The same house with a wardrobe standing in it, and NO shutter count on the fixture.
+	 *
+	 * Both halves matter. A house with only a door in it cannot catch a joinery setting that never
+	 * reaches a wardrobe, which is exactly why the door test above passed while every joinery
+	 * control on the page was inert on anything already in the level. And leaving ShutterCount at
+	 * zero is what puts the bay count on the project's module width, which is the figure that used
+	 * to freeze at composition time.
+	 */
+	AHFHouseActor* SpawnOneWardrobeHouse(UWorld* World)
+	{
+		ClearHouseForgeActors(World);
+
+		FHFHouseSpec Spec;
+		Spec.Name = TEXT("Wardrobe Settings Test");
+		Spec.Units = EHFUnits::Centimeters;
+		Spec.UnitsSource = TEXT("test");
+
+		FHFRoom& Room = Spec.Rooms.AddDefaulted_GetRef();
+		Room.Id = TEXT("R1");
+		Room.Type = EHFRoomType::Bedroom;
+		Room.CeilingHeight = 300.0;
+		Room.Boundary = { FVector2D(0, 0), FVector2D(400, 0), FVector2D(400, 350), FVector2D(0, 350) };
+
+		FHFWall& Wall = Spec.Walls.AddDefaulted_GetRef();
+		Wall.Id = TEXT("W1");
+		Wall.Start = FVector2D(0.0, 0.0);
+		Wall.End = FVector2D(400.0, 0.0);
+		Wall.Thickness = 20.0;
+		Wall.Height = 300.0;
+
+		FHFFixture& Fixture = Spec.Fixtures.AddDefaulted_GetRef();
+		Fixture.Id = TEXT("F1");
+		Fixture.RoomId = TEXT("R1");
+		Fixture.Type = EHFFixtureType::Wardrobe;
+		Fixture.Label = TEXT("Wardrobe");
+		Fixture.Position = FVector2D(200.0, 40.0);
+		Fixture.Footprint = FVector2D(240.0, 60.0);
+		Fixture.Height = 240.0;
+		Fixture.AnchorWallId = TEXT("W1");
+		Fixture.Params.ShutterCount = 0;
+		Fixture.Params.PlinthHeight = 10.0;
+
+		AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+		if (House == nullptr)
+		{
+			return nullptr;
+		}
+
+		House->SetSpec(Spec);
+		House->BuildGeometry();
+		return House;
+	}
+
+	AHFWardrobeActor* FindWardrobe(AHFHouseActor* House)
+	{
+		for (AActor* Element : House->ElementActors)
+		{
+			if (AHFWardrobeActor* Wardrobe = Cast<AHFWardrobeActor>(Element))
+			{
+				return Wardrobe;
+			}
+		}
+		return nullptr;
+	}
+
+	/** Volume of the fixed shell - the carcass, plinth, shelves and cornice, without the leaves. */
+	double ShellVolume(AHFElementActor* Element)
+	{
+		UDynamicMeshComponent* Component = Element->GetMeshComponent();
+		return Component != nullptr
+			? TMeshQueries<FDynamicMesh3>::GetVolumeArea(Component->GetDynamicMesh()->GetMeshRef()).X
+			: 0.0;
 	}
 
 	AHFOpeningActor* FindOpening(AHFHouseActor* House)
@@ -348,6 +424,104 @@ bool FHFSettingsValidationLimitsReachTheToolsTest::RunTest(const FString& Parame
 	Settings->Validation.MinHeadroomCm = 250.0;
 	TestTrue(TEXT("Raising the project's headroom floor to 250 makes the tool report the same spec"),
 		Subsystem->ValidateSpecJson(Json).Message.Contains(TEXT("LowHeadroom")));
+
+	return true;
+}
+
+/**
+ * Dragging a joinery figure moves a wardrobe that is already standing in the level.
+ *
+ * The door test above cannot catch this and never could: its house holds one wall and one door, so
+ * the only element ApplyProjectSettingsToLevel can find is an opening. Every joinery control on the
+ * page was therefore inert on anything already built - the flat's doors rebuilt when a figure
+ * changed and its wardrobes did not - while the page said in writing that they did.
+ *
+ * Measured on the BUILT MESH rather than on the parameter struct, which is the only assertion a
+ * faithfully-copied-and-then-ignored figure cannot pass. Two figures, because they failed for two
+ * different reasons: CarcassBoardThickness never reached the actor at all, and ShutterModuleWidth
+ * reached it once and then froze, having been derived into a bay count at composition time.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFJoineryFigureRebuildsAWardrobeTest,
+	"HouseForge.Settings.ChangingAJoineryFigureRebuildsAWardrobe", HF_TEST_FLAGS)
+
+bool FHFJoineryFigureRebuildsAWardrobeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	UHFEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UHFEditorSubsystem>();
+	UHFSettings* Settings = GetMutableDefault<UHFSettings>();
+	if (!TestNotNull(TEXT("The HouseForge editor subsystem exists"), Subsystem)
+		|| !TestNotNull(TEXT("The settings CDO exists"), Settings))
+	{
+		return false;
+	}
+
+	const double SavedBoard = Settings->CarcassBoardThickness;
+	const double SavedModule = Settings->ShutterModuleWidth;
+
+	AHFHouseActor* House = SpawnOneWardrobeHouse(World);
+	if (!TestNotNull(TEXT("A house builds"), House))
+	{
+		return false;
+	}
+
+	ON_SCOPE_EXIT
+	{
+		Settings->CarcassBoardThickness = SavedBoard;
+		Settings->ShutterModuleWidth = SavedModule;
+		if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); }
+	};
+
+	AHFWardrobeActor* Wardrobe = FindWardrobe(House);
+	if (!TestNotNull(TEXT("The house built a wardrobe"), Wardrobe))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("The wardrobe was seeded from the project's settings"),
+		Wardrobe->Wardrobe.Joinery.CarcassBoardThickness, Settings->CarcassBoardThickness);
+
+	// A 240 run at the shipped 45 module is 5.33 bays, which sets out at 5.
+	const int32 BaysBefore = Wardrobe->NumParts();
+	TestEqual(TEXT("An uncounted run is divided at the project's module width"), BaysBefore, 5);
+
+	const double VolumeBefore = ShellVolume(Wardrobe);
+	TestTrue(TEXT("The carcass has volume"), VolumeBefore > 0.0);
+
+	// The user drags the board thickness. Thicker boards, more carcass - a change nothing but the
+	// mesh can report, and one that stayed at zero for as long as this branch was missing.
+	Settings->CarcassBoardThickness = SavedBoard * 2.0;
+	TestTrue(TEXT("Changing a joinery figure rebuilds something"),
+		Subsystem->ApplyProjectSettingsToLevel() > 0);
+
+	Wardrobe = FindWardrobe(House);
+	if (!TestNotNull(TEXT("The wardrobe survives the rebuild"), Wardrobe))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("The wardrobe was re-seeded from the changed settings"),
+		Wardrobe->Wardrobe.Joinery.CarcassBoardThickness, SavedBoard * 2.0);
+	TestTrue(TEXT("Doubling the board thickness puts more material in the carcass"),
+		ShellVolume(Wardrobe) > VolumeBefore * 1.05);
+
+	// And the module width, which is the figure the composing layer used to consume and discard. An
+	// 80 module divides the same 240 run into 3, so the run comes back with two fewer leaves on it.
+	Settings->ShutterModuleWidth = 80.0;
+	Subsystem->ApplyProjectSettingsToLevel();
+
+	Wardrobe = FindWardrobe(House);
+	if (!TestNotNull(TEXT("The wardrobe survives the second rebuild"), Wardrobe))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Widening the module re-divides a wardrobe already in the level"),
+		Wardrobe->NumParts(), 3);
 
 	return true;
 }

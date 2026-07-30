@@ -157,6 +157,47 @@ enum class EHFHandleStyle : uint8
 };
 
 /**
+ * How a shutter leaf moves.
+ *
+ * A side-hung leaf is the commonest thing in a fitted kitchen and the least common thing in a
+ * modern Indian wardrobe, which is why all three of these exist. Hard-coding the vertical hinge
+ * ruled out a loft flap, a lift-up wall cabinet and the sliding wardrobe that most flats of this
+ * class actually have.
+ *
+ * IN THE SPEC LAYER rather than beside the joinery kit that consumes it, and that is the whole
+ * point of it living here: a drawing shows whether a wardrobe slides or swings, so it is something
+ * Claude READS, and a value the geometry layer can express but no spec can carry is a value no
+ * drawing can ever produce. It sat in Geometry/HFJoineryKit.h for exactly one milestone and in that
+ * time every wardrobe in the reference flat was side-hung, because FHFFixtureParams had no field
+ * for it and AHFWardrobeActor::ApplyFixture had nothing to copy.
+ */
+UENUM(BlueprintType)
+enum class EHFShutterMotion : uint8
+{
+	/** Hinged on a vertical edge and swinging out. The kitchen and cabinet default. */
+	SideHung,
+
+	/**
+	 * Hinged along its head and lifting out and up: a loft flap, a lift-up wall cabinet.
+	 *
+	 * The leaf hangs BELOW its hinge, so its local Z runs from -LeafHeight to 0, and it opens
+	 * about the horizontal axis at its head. Its leading edge is therefore the bottom one, which is
+	 * where the handle and the gas stay go.
+	 */
+	TopHung,
+
+	/**
+	 * Running on a track, passing its neighbour rather than swinging clear of it.
+	 *
+	 * Different from a hinged run in a way that shows: sliding leaves LAP one another on separate
+	 * tracks instead of being separated by a reveal, so there is no shadow gap between them and no
+	 * daylight either. The set-out is the same two-track rule a sliding door uses, and is taken
+	 * from FHFSlidingSetOut rather than worked out again here.
+	 */
+	Sliding
+};
+
+/**
  * Material role a surface plays.
  *
  * Every triangle a generator emits carries one of these as its polygroup. The material panel
@@ -482,6 +523,32 @@ struct HOUSEFORGE_API FHFFixtureParams
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	EHFHandleStyle HandleStyle = EHFHandleStyle::Bar;
+
+	/**
+	 * How the shutter fronts move: side-hung, top-hung as a flap, or running on tracks.
+	 *
+	 * READ OFF THE DRAWING, not assumed. A sliding wardrobe is the commonest wardrobe in a modern
+	 * Indian flat and it is drawn differently from a hinged one - no swing arcs, and a run whose
+	 * leaves lap rather than being divided at every bay - so this is something a plan actually says.
+	 *
+	 * Side-hung is the default because it is the right answer for everything that is not a wardrobe:
+	 * a kitchen base unit, a crockery unit and a vanity are all hinged.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	EHFShutterMotion ShutterMotion = EHFShutterMotion::SideHung;
+
+	/**
+	 * How a loft's flap moves, where the fixture has a loft.
+	 *
+	 * Separate from ShutterMotion and NOT derived from it, because a sliding wardrobe's loft is not
+	 * sliding. A sliding run's gear is a track at the head of the body; there is nothing above it
+	 * for a loft leaf to run on, and hanging one off a second track standing further out into the
+	 * room is neither what is built nor what would look right. Real sliding wardrobes have hinged
+	 * loft shutters - or a top-hung flap, which is the other real answer and is why this is its own
+	 * field rather than a rule.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (EditCondition = "bHasLoft"))
+	EHFShutterMotion LoftShutterMotion = EHFShutterMotion::SideHung;
 
 	/** Hanging rail inside a wardrobe. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")

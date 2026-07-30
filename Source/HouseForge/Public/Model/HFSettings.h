@@ -36,6 +36,16 @@
  * than on the parameter struct, which is the assertion a faithfully-copied-and-then-ignored value
  * cannot pass.
  *
+ * "Turning a dial" means turning it on a level that is already built, and that took a second fix.
+ * UHFEditorSubsystem::ApplyProjectSettingsToLevel - what OnSettingChanged calls - re-seeded only
+ * AHFOpeningActor, so every joinery control on this page was inert on any wardrobe already standing
+ * in the level: the flat's doors rebuilt, its wardrobes did not, and the page was making a promise
+ * only a full house rebuild kept. ShutterModuleWidth was worse than inert - the bay count was
+ * DERIVED at composition time and stamped onto the actor, so the figure was frozen at whatever it
+ * had been the day the wardrobe was first built. It is a sentinel resolved inside the kit now, so
+ * re-seeding re-derives it. HouseForge.Settings.ChangingAJoineryFigureRebuildsAWardrobe measures
+ * both on the built mesh.
+ *
  * SEVEN STILL REACH NOTHING, and they say so on the page rather than in a comment nobody reads. The
  * five drawer figures have no fixture with drawers in it - a drawer inside a wardrobe is an
  * interlock rather than a drawer, and it lands with the chest and the vanity in milestone 9 - and

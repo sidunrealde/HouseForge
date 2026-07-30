@@ -84,7 +84,22 @@ FHFWardrobeParams FHFWardrobeKit::Sanitise(const FHFWardrobeParams& Params)
 	P.Width = FMath::Max(P.Width, 0.0);
 	P.Depth = FMath::Max(P.Depth, 0.0);
 	P.Height = FMath::Max(P.Height, 0.0);
+
+	// Zero bays means "divide the run at the project's module width", the same sentinel PlinthHeight
+	// uses below and for the same reason: a drawing that did not count the shutters has not asked
+	// for one shutter, it has said nothing, and the project has a figure for exactly that.
+	//
+	// Resolved HERE rather than in the composing layer, which is what keeps ShutterModuleWidth live
+	// after composition. Derived once in ApplyFixture and stamped onto BayCount, the bay count froze
+	// at whatever the module width was when the wardrobe was first built - so dragging that dial
+	// afterwards re-seeded Joinery, rebuilt the mesh, and changed nothing an artist could see.
+	// Joinery is already on the parameters, so this stays a pure function of its argument.
+	if (P.BayCount <= 0)
+	{
+		P.BayCount = FMath::RoundToInt32(P.Width / FMath::Max(P.Joinery.ShutterModuleWidth, 1.0));
+	}
 	P.BayCount = P.Bays();
+
 	P.ShelfCount = FMath::Clamp(P.ShelfCount, 0, 30);
 	P.CorniceHeight = FMath::Max(P.CorniceHeight, 0.0);
 
