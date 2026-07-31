@@ -815,7 +815,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 78);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 79);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;
