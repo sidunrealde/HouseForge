@@ -359,6 +359,18 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 
 			// A part the artist posed stays posed. Regeneration is a shape change, not a reason to
 			// slam every shutter shut - or to jerk every fan back to its starting blade.
+			//
+			// SO THE POSE OF AN EXISTING PART ALWAYS BEATS A FRESHLY GENERATED DEFAULT, and that is the
+			// decision, not an accident of ordering. DefaultSpinTurns seeds a part the first time it
+			// comes into existence and never again; after that the phase is the actor's, because
+			// somebody may have stopped that fan on a particular blade to photograph it.
+			//
+			// It is only a safe rule while a part cannot be built before its parameters are known. It
+			// could - every element regenerated once at spawn, from AActor::SetActorLabel firing
+			// PostEditChangeProperty - and a rotor created at phase 0 by that ghost generation then beat
+			// the real phase applied a moment later. Every fan in the flat came out stopped on the same
+			// blade. See AHFElementActor::PostEditChangeProperty, which no longer regenerates for a
+			// property that is not ours.
 			State.OpenAmount = Parts[*Index].OpenAmount;
 			State.SpinTurns = Parts[*Index].SpinTurns;
 			State.bArtistEdited = !bForce && Parts[*Index].bArtistEdited;

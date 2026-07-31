@@ -113,7 +113,9 @@ bool FHFFansInTheFlatTest::RunTest(const FString& Parameters)
 
 	// ------------------------------------------------------------------- and every one of them turns
 
-	TArray<double> Phases;
+	// Visible blade angles, in fractions of ONE BLADE PITCH, for the fans that are copies of each
+	// other. See below for why both of those qualifications are load-bearing.
+	TArray<double> CeilingAngles;
 
 	for (const TPair<FName, AHFFanActor*>& Entry : Built)
 	{
@@ -141,24 +143,59 @@ bool FHFFansInTheFlatTest::RunTest(const FString& Parameters)
 		TestNotNull(*FString::Printf(TEXT("'%s' has the rotor on a component of its own"), *Where),
 			Fan->GetPartComponent(AHFFanActor::RotorPartId()));
 
-		Phases.Add(Rotor->SpinTurns);
+		// THE PHASE THE DRAWING'S ID DECIDES ACTUALLY REACHES THE PART. This is the assertion that
+		// fails when a fan is built before it knows what it is: every individual hop of the chain -
+		// the hash, the params, the kit's DefaultSpinTurns, the part state - was correct, and all six
+		// fans still arrived at phase 0, because the actor generated itself once at spawn off the back
+		// of being given a label and the rotor created by that ghost generation then beat the real
+		// phase. Stated against the decided function of the id rather than against a literal, so it
+		// says what the pose is SUPPOSED to be and not merely that it is not zero.
+		if (Fan->Fan.BladeCount > 0)
+		{
+			TestNearlyEqual(*FString::Printf(TEXT("'%s' is stopped where its id says"), *Where),
+				Rotor->SpinTurns, AHFFanActor::PhaseForId(Entry.Key) / Fan->Fan.BladeCount, 1e-9);
+
+			if (Fan->Fan.Kind == EHFFanKind::Ceiling)
+			{
+				CeilingAngles.Add(FMath::Frac(Rotor->SpinTurns * Fan->Fan.BladeCount));
+			}
+		}
 	}
 
 	// THREE IDENTICAL FANS MUST NOT BE STOPPED ON THE SAME BLADE. They are three copies of one
-	// object, which is exactly what a still must not show, and the only cure is a phase that varies
-	// per instance. Asserted as a spread rather than against particular numbers: what matters is
-	// that they differ, not what they differ by.
-	if (Phases.Num() >= 3)
+	// object, which is exactly what a still must not show.
+	//
+	// Two things about how this is measured, and both were wrong before.
+	//
+	// IN BLADE PITCHES, NOT IN TURNS. A rotor repeats every 1/BladeCount of a turn, so a three-blade
+	// fan at 0.10 turns and one at 0.4333 are the same picture. Asserting distinctness on the raw
+	// phase would happily pass two fans that are pixel-identical in a render.
+	//
+	// OVER THE CEILING FANS ONLY. Those three are built from identical parameters and are the ones
+	// that read as copies. The three extracts differ in sweep, blade count and case, so demanding
+	// that a bathroom extract be stopped differently from a ceiling fan is not a claim about anything
+	// anybody can see - and the old assertion, an exact-distinctness test over all six in 1/1000
+	// buckets, was really a hash-collision test wearing a quality bar's clothes.
+	//
+	// The bar is 0.08 of a blade pitch, about ten degrees of blade. See AHFFanActor::PhaseForId for
+	// why that is a bar and not a guarantee.
+	for (int32 I = 0; I < CeilingAngles.Num(); ++I)
 	{
-		TSet<double> Distinct;
-		for (const double Phase : Phases)
+		for (int32 J = I + 1; J < CeilingAngles.Num(); ++J)
 		{
-			Distinct.Add(FMath::RoundToDouble(Phase * 1000.0));
-		}
+			// Circular: the blade angle wraps, so 0.02 and 0.99 are a fiftieth apart and not a whole
+			// blade. A straight subtraction would call the two most similar fans in the flat the two
+			// most different.
+			const double Raw = FMath::Abs(CeilingAngles[I] - CeilingAngles[J]);
+			const double Apart = FMath::Min(Raw, 1.0 - Raw);
 
-		TestEqual(TEXT("No two fans in the flat are stopped on the same blade"),
-			Distinct.Num(), Phases.Num());
+			TestTrue(*FString::Printf(
+				TEXT("No two of the flat's ceiling fans are stopped on the same blade (%.4f and %.4f of a blade, %.4f apart)"),
+				CeilingAngles[I], CeilingAngles[J], Apart), Apart > 0.08);
+		}
 	}
+
+	TestTrue(TEXT("There were ceiling fans to compare in the first place"), CeilingAngles.Num() >= 3);
 
 	// And the variation is deterministic: two builds of one spec have to produce one flat, or two
 	// renders of the same drawing would differ for no stated reason.
@@ -166,6 +203,79 @@ bool FHFFansInTheFlatTest::RunTest(const FString& Parameters)
 		AHFFanActor::PhaseForId(TEXT("F_Fan_Living")), AHFFanActor::PhaseForId(TEXT("F_Fan_Living")));
 	TestNotEqual(TEXT("...and two fans do not share one"),
 		AHFFanActor::PhaseForId(TEXT("F_Fan_Living")), AHFFanActor::PhaseForId(TEXT("F_Fan_MBed")));
+
+	return true;
+}
+
+/**
+ * AN ELEMENT DOES NOT BUILD ITSELF BEFORE IT HAS BEEN TOLD WHAT IT IS.
+ *
+ * The defect this exists for cost six fans their phase while every step of the chain that carried
+ * that phase was correct. AActor::SetActorLabel fires PostEditChangeProperty, the house labels every
+ * element the instant it spawns one, and AHFElementActor::PostEditChangeProperty rebuilt on any
+ * property change whatever - including the engine's own. So every element generated itself once
+ * with default parameters before the composing layer had said a word to it.
+ *
+ * Harmless-looking, and on a wall it only wastes a generation. On anything with pose state it is
+ * destructive, because that ghost generation CREATES THE PARTS: the rotor came into existence at
+ * phase 0, and a part that already exists keeps its pose through the next regeneration - correctly,
+ * that is what stops a rebuild slamming every shutter in the flat shut - so the real phase, applied
+ * moments later, could never land.
+ *
+ * Written against the label specifically, because that is the trigger, and asserted on the phase,
+ * because that is what it destroyed.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFanNotBuiltEarlyTest,
+	"HouseForge.Editor.AFanIsNotBuiltBeforeItKnowsWhatItIs", HF_TEST_FLAGS)
+
+bool FHFFanNotBuiltEarlyTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFFanActor* Fan = World->SpawnActor<AHFFanActor>();
+	if (!TestNotNull(TEXT("A fan actor spawns"), Fan))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(Fan)) { Fan->Destroy(); } };
+
+	FHFFixture Fixture;
+	Fixture.Id = TEXT("F_Fan_Test");
+	Fixture.Type = EHFFixtureType::CeilingFan;
+	Fixture.Params.Diameter = 120.0;
+
+	Fan->ApplyProjectDefaults(EHFFanKind::Ceiling);
+	Fan->ApplyFixture(Fixture);
+
+	// Exactly what AHFHouseActor::BuildGeometry does to every element it spawns, and exactly what
+	// used to build the rotor at phase 0 before Regenerate was ever called.
+	Fan->SetActorLabel(TEXT("Fan_F_Fan_Test"));
+
+	TestEqual(TEXT("Being given a name does not build a fan"), Fan->NumParts(), 0);
+
+	Fan->Regenerate();
+
+	if (!TestEqual(TEXT("Regenerating does"), Fan->NumParts(), 1))
+	{
+		return false;
+	}
+
+	const double Expected = AHFFanActor::PhaseForId(Fixture.Id) / FMath::Max(Fan->Fan.BladeCount, 1);
+
+	TestTrue(TEXT("...and the fan is stopped somewhere rather than at nothing"),
+		Fan->GetPartSpinTurns(AHFFanActor::RotorPartId()) > 0.0);
+	TestNearlyEqual(TEXT("...exactly where the id it was given says it should be"),
+		Fan->GetPartSpinTurns(AHFFanActor::RotorPartId()), Expected, 1e-9);
+
+	// And a phase only means anything folded by the blade count, which is the unit the whole
+	// decision is stated in - see AHFFanActor::PhaseForId.
+	TestNearlyEqual(TEXT("The blade angle a still shows is the one the id decides"),
+		FMath::Frac(Fan->GetPartSpinTurns(AHFFanActor::RotorPartId()) * Fan->Fan.BladeCount),
+		AHFFanActor::PhaseForId(Fixture.Id), 1e-9);
 
 	return true;
 }
@@ -248,8 +358,32 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 				*Where, LowestBlade, FloorZ), LowestBlade > FloorZ + 180.0);
 
 			// Over the spot the drawing marked, which is also the spot the false ceiling was cut for.
-			TestTrue(*FString::Printf(TEXT("'%s' hangs where the drawing put it"), *Where),
-				FVector2D(Blades.Origin.X, Blades.Origin.Y).Equals(Fixture.Position, 1.0));
+			//
+			// READ OFF THE COMPONENT'S LOCATION, which is its pivot and therefore the spin axis - not
+			// off the centre of its bounding box. This was asserted on Blades.Origin, and a three-blade
+			// rotor's box centre is not on its axis at all: the tips sit at 0, 120 and 240 degrees, so
+			// the box centre is about 13 cm off the axis in a direction that rotates with the phase.
+			// Every fan in the flat was hung exactly where it was drawn and this said otherwise.
+			const FVector OnAxis = Rotor->GetComponentLocation();
+			TestTrue(*FString::Printf(TEXT("'%s' hangs where the drawing put it (%.1f, %.1f against %.1f, %.1f)"),
+				*Where, OnAxis.X, OnAxis.Y, Fixture.Position.X, Fixture.Position.Y),
+				FVector2D(OnAxis.X, OnAxis.Y).Equals(Fixture.Position, 0.1));
+
+			// The box is still worth an assertion, just not that one: it says the MESH is centred on
+			// the axis the component sits at, which is the thing reading the pivot alone cannot see.
+			// A rotor generated 50 cm off its own origin would place perfectly and hang off to one side.
+			TestTrue(*FString::Printf(TEXT("'%s' has its blades about that axis rather than off to one side"),
+				*Where),
+				FMath::Abs(Blades.Origin.X - OnAxis.X) < Fan->Fan.SweepRadius() * 0.5
+					&& FMath::Abs(Blades.Origin.Y - OnAxis.Y) < Fan->Fan.SweepRadius() * 0.5);
+
+			// And they reach: three tips on a circle present at worst 0.75 of the sweep RADIUS to
+			// either side of the axis, whatever the phase, so anything under that is not a fan of the
+			// size the drawing asked for.
+			TestTrue(*FString::Printf(TEXT("'%s' sweeps what it was drawn at (%.1f x %.1f half-extents on a %.0f sweep)"),
+				*Where, Blades.BoxExtent.X, Blades.BoxExtent.Y, Fan->Fan.SweepDiameter),
+				Blades.BoxExtent.X > Fan->Fan.SweepRadius() * 0.7
+					&& Blades.BoxExtent.Y > Fan->Fan.SweepRadius() * 0.7);
 		}
 		else if (Fixture.Type == EHFFixtureType::ExhaustFan)
 		{
@@ -260,10 +394,16 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 
 			// At the height it was drawn at, which for every extract in this flat is high on the wall
 			// and clear of the beam soffits above it.
+			//
+			// Off the component's location for the same reason as the ceiling fan above. A five-blade
+			// rotor's box centre is only 0.3 cm off its axis, so this passed on a coincidence rather
+			// than on being right - and would have started failing the day somebody drew a
+			// three-blade extract.
 			const double Centre = FloorZ + Fixture.BaseZ + Fixture.Height * 0.5;
+			const double AxisZ = Rotor->GetComponentLocation().Z;
 			TestTrue(*FString::Printf(TEXT("'%s' sits at the height it was drawn (%.1f against %.1f)"),
-				*Where, Blades.Origin.Z, Centre),
-				FMath::IsNearlyEqual(Blades.Origin.Z, Centre, 1.0));
+				*Where, AxisZ, Centre),
+				FMath::IsNearlyEqual(AxisZ, Centre, 0.1));
 
 			// And it faces INTO the room it serves rather than into the wall it is screwed to. The
 			// case would look identical either way in plan, which is the only view a drawing has.

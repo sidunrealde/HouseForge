@@ -152,6 +152,37 @@ void AHFElementActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChan
 		return;
 	}
 
+	// ONLY OUR OWN PROPERTIES REBUILD ANYTHING.
+	//
+	// PostEditChangeProperty is not only the details panel. The engine fires it for its own
+	// properties too, and AActor::SetActorLabel is the one that matters here: naming an actor sends a
+	// property change for AActor::ActorLabel, which used to land on the Regenerate below. Every
+	// element the house builds is labelled the instant it is spawned, so EVERY element generated
+	// itself once with default parameters before the composing layer had told it what it was, and
+	// again properly a moment later.
+	//
+	// Wasteful on a wall. Destructive on anything with pose state, because the ghost generation
+	// creates the parts: a fan's rotor came into existence at phase 0, and the real phase applied
+	// straight afterwards then lost to the rule that an existing part's pose beats a generated
+	// default. All six fans in the reference flat came out stopped on the same blade, and every
+	// individual step in the chain was correct.
+	//
+	// MemberProperty first, so a change inside a nested struct - Fan.SweepDiameter, Wall.Thickness -
+	// is attributed to the struct's owner rather than to the struct. A null property is the engine
+	// saying "assume everything changed", which undo does, so that still rebuilds.
+	const FProperty* Edited = PropertyChangedEvent.MemberProperty != nullptr
+		? PropertyChangedEvent.MemberProperty
+		: PropertyChangedEvent.Property;
+
+	if (Edited != nullptr)
+	{
+		const UClass* DeclaredOn = Edited->GetOwnerClass();
+		if (DeclaredOn == nullptr || !DeclaredOn->IsChildOf(AHFElementActor::StaticClass()))
+		{
+			return;
+		}
+	}
+
 	// Editing any parameter rebuilds only this element, which is the point of one actor per
 	// element rather than one mesh for the whole house.
 	Regenerate();

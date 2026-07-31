@@ -84,13 +84,33 @@ public:
 	static FTransform PlacementFor(const FHFFixture& Fixture, const FHFRoom* Room, const FHFWall* AnchorWall);
 
 	/**
-	 * A stable, well-spread starting phase for a fan with this id, in revolutions.
+	 * Where a fan with this id is stopped, as a fraction of ONE BLADE PITCH. 0 to 1, never in turns.
 	 *
 	 * Three fans generated from identical parameters and all stopped with a blade at the same angle
 	 * read as three copies of one object, which is exactly what they are and exactly what a still
 	 * must not show. The generator cannot fix that - it is pure, and has no idea how many fans exist -
 	 * so the composing layer varies it, and varies it DETERMINISTICALLY: a rebuild of the same house
 	 * has to produce the same flat, or two renders of one spec would differ for no stated reason.
+	 *
+	 * ## The three things decided here
+	 *
+	 * WHERE IT COMES FROM: a hash of the fixture id, and not the spec. A phase is a POSE, and poses
+	 * live on the actor and survive a rebuild through CapturePartPoses - the spec is the import and
+	 * export format, not a live second source of truth (.claude/rules/04-conventions.md). Somebody who
+	 * wants a particular fan pinned for a particular still poses that fan, and it stays posed. A hash
+	 * rather than a counter so that inserting a fan into the living room does not shift every fan
+	 * after it in the file.
+	 *
+	 * WHAT UNIT IT IS IN: fractions of a blade pitch, because that is the only range in which two
+	 * fans can look different. ApplyFixture divides by the blade count to get the phase.
+	 *
+	 * HOW FAR APART IS FAR ENOUGH, AND OVER WHICH FANS: at least 0.08 of a blade pitch - about ten
+	 * degrees of blade on a three-blade fan - and only over fans built from IDENTICAL parameters.
+	 * The flat's three ceiling fans are the ones that read as copies of each other; its three
+	 * extracts differ in sweep, blade count and case and never could. That bar is asserted in
+	 * HouseForge.Editor.FansInTheReferenceFlatTurn against the flat's own ids. It is a real bar and
+	 * not a guarantee of the hash: a future set of ids could cluster inside it, and if it does, the
+	 * honest answer is that those two fans really would look alike and one of them should be posed.
 	 */
 	static double PhaseForId(FName FixtureId);
 

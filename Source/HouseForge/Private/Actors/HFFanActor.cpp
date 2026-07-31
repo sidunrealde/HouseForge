@@ -42,7 +42,17 @@ void AHFFanActor::ApplyFixture(const FHFFixture& Fixture)
 	// Varied per instance, deterministically. Three fans stopped on the same blade read as three
 	// copies of one object; two builds of the same spec that stopped them differently would be two
 	// renders disagreeing for no stated reason.
-	Fan.PhaseTurns = PhaseForId(Fixture.Id);
+	//
+	// DIVIDED BY THE BLADE COUNT, so that what is varied is what can actually be SEEN. A rotor
+	// repeats every 1/BladeCount of a turn - a three-blade fan at 0.10 and one at 0.4333 are
+	// pixel-identical - so spreading the raw phase over a whole revolution spreads three fans over
+	// three copies of the same picture and calls them different. Folded this way, PhaseForId is
+	// directly the blade angle a still shows: 0 is a blade where the last one was and 1 is the next
+	// blade round.
+	//
+	// Read from Fan.BladeCount, which is why ApplyProjectDefaults has to run first - it is the
+	// project's figure for this kind of fan, and it is already on the params by the time we get here.
+	Fan.PhaseTurns = PhaseForId(Fixture.Id) / FMath::Max(Fan.BladeCount, 1);
 }
 
 double AHFFanActor::PhaseForId(FName FixtureId)
@@ -52,10 +62,14 @@ double AHFFanActor::PhaseForId(FName FixtureId)
 	// shift. Keyed on the id, so a fan's phase is a property of that fan.
 	const uint32 Hash = GetTypeHash(FixtureId.ToString().ToLower());
 
-	// Into 0..1 of a revolution. A ceiling fan's blades repeat every 1/BladeCount turn, so anything
-	// past that is indistinguishable - but the phase is deliberately not folded to the blade count
-	// here, because the kit is what knows how many blades there are and a phase is unbounded by
-	// design.
+	// Into 0..1 of ONE BLADE PITCH - not of a revolution. A rotor repeats every 1/BladeCount turn, so
+	// this is the whole of the range in which two fans can look different at all: 0 puts a blade
+	// exactly where the previous one stood and 1 is the next blade round. ApplyFixture divides by the
+	// blade count to turn it into the phase itself.
+	//
+	// Stated as a fraction of a blade rather than of a turn because that is the unit any assertion
+	// about "stopped on the same blade" has to be made in, and because it is the unit somebody
+	// reading a render is judging in.
 	return static_cast<double>(Hash % 10000u) / 10000.0;
 }
 

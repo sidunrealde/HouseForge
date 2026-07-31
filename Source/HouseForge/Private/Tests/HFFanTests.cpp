@@ -190,6 +190,20 @@ bool FHFFanSpinsTest::RunTest(const FString& Parameters)
 		Built.Shell.GetBounds().Min.Z > -1e-6);
 	TestTrue(TEXT("The blades hang below the canopy"), Built.BladePlaneZ > P.DropLength);
 
+	// The starting phase reaches the part the actor will seed itself from. One hop of a chain that
+	// was correct at every single step and still delivered zero to all six fans in the flat, so each
+	// hop is now asserted on its own: this is the pure one, and the actor's is in
+	// HouseForge.Editor.AFanIsNotBuiltBeforeItKnowsWhatItIs.
+	FHFFanParams Posed = FHFFanKit::DefaultsFor(EHFFanKind::Ceiling);
+	Posed.PhaseTurns = 0.25;
+
+	const FHFFanBuild PosedBuild = FHFFanKit::Build(Posed);
+	if (TestEqual(TEXT("A posed fan builds one part"), PosedBuild.Parts.Num(), 1))
+	{
+		TestNearlyEqual(TEXT("The phase it was given is what the part starts at"),
+			PosedBuild.Parts[0].DefaultSpinTurns, 0.25, 1e-12);
+	}
+
 	return true;
 }
 
