@@ -103,6 +103,19 @@ if (Test-Path $IndexPath) {
     # held 106 - and those counts are what a merge commit records as its evidence. Worse, the
     # emptiness check below divides the same way: if every test warned, succeeded would be 0 and a
     # fully passing suite would be rejected as "no tests matched".
+    # Every counter must actually be present and numeric. A renamed or dropped field in a future
+    # engine version would otherwise read as $null, compare as "not greater than 0", and hand back a
+    # confident GATE PASSED computed from nothing at all - the same class of failure as a capture
+    # that renders the wrong material without saying so.
+    foreach ($Field in @('succeeded', 'succeededWithWarnings', 'failed', 'notRun')) {
+        $Value = $Report.$Field
+        if ($null -eq $Value -or -not ($Value -is [int] -or $Value -is [long] -or $Value -is [double])) {
+            Write-Host ''
+            Write-Host "GATE FAILED: the test report has no numeric '$Field' field, so the suite cannot be counted. Report format may have changed." -ForegroundColor Red
+            exit 1
+        }
+    }
+
     $Passed  = $Report.succeeded + $Report.succeededWithWarnings
     $Total   = $Passed + $Report.failed + $Report.notRun
     Write-Host ''
@@ -137,6 +150,39 @@ if (Test-Path $IndexPath) {
     if ($Report.failed -gt 0) {
         Write-Host ''
         Write-Host "GATE FAILED: $($Report.failed) test(s) failed" -ForegroundColor Red
+        exit 1
+    }
+
+    # A test that did not run has not passed. Nothing above catches this: notRun is counted into the
+    # total and printed, but only `failed` blocked the merge - so a suite where a test was filtered
+    # out, crashed before reporting, or was disabled would go green while claiming a total that
+    # included it.
+    if ($Report.notRun -gt 0) {
+        Write-Host ''
+        Write-Host "GATE FAILED: $($Report.notRun) test(s) did not run. A test that did not run has not passed." -ForegroundColor Red
+        foreach ($t in $Report.tests) {
+            if ($t.state -ne 'Success' -and $t.state -ne 'Fail') {
+                Write-Host "  NOT RUN  $($t.fullTestPath) [$($t.state)]" -ForegroundColor Red
+            }
+        }
+        exit 1
+    }
+
+    # The per-test states are the primary evidence; the counters above are a summary of them. If the
+    # two disagree, the summary is what gets believed and the summary is the thing that has already
+    # been wrong once - it omitted succeededWithWarnings and reported 102 of 106.
+    $Entries = @($Report.tests).Count
+    if ($Entries -ne $Total) {
+        Write-Host ''
+        Write-Host "GATE FAILED: the report summarises $Total test(s) but lists $Entries. The counts cannot both be right, so neither is trustworthy." -ForegroundColor Red
+        exit 1
+    }
+
+    $NotSucceeded = @($Report.tests | Where-Object { $_.state -ne 'Success' })
+    if ($NotSucceeded.Count -gt 0) {
+        Write-Host ''
+        Write-Host "GATE FAILED: $($NotSucceeded.Count) test(s) did not succeed, though the summary counters reported none." -ForegroundColor Red
+        foreach ($t in $NotSucceeded) { Write-Host "  $($t.state)  $($t.fullTestPath)" -ForegroundColor Red }
         exit 1
     }
 }

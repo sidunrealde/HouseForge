@@ -58,9 +58,11 @@ bool FHFValidatorAcceptsValidSpecTest::RunTest(const FString& Parameters)
 	const FHFHouseSpec Spec = MakeValidSpec();
 	const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
 
-	if (Result.HasErrors())
+	// Both severities, and the report either way. A warning here used to fail with nothing but the
+	// word "false" on screen, which tells whoever broke it nothing about which rule fired.
+	if (Result.HasErrors() || Result.HasWarnings())
 	{
-		AddError(FString::Printf(TEXT("Baseline spec should be valid but reported errors:\n%s"), *Result.ToString()));
+		AddError(FString::Printf(TEXT("Baseline spec should be clean but reported:\n%s"), *Result.ToString()));
 	}
 
 	TestFalse(TEXT("Baseline spec has no errors"), Result.HasErrors());
@@ -458,7 +460,18 @@ bool FHFValidatorStackedFixturesTest::RunTest(const FString& Parameters)
 	const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
 
 	TestFalse(TEXT("Stacked cabinets are not reported as overlapping"), Result.Contains(TEXT("OverlappingFixtures")));
-	TestFalse(TEXT("Stacked cabinets produce no errors"), Result.HasErrors());
+
+	// "No errors" is not what this test means. It means the validator says NOTHING about a wall
+	// cabinet over a base unit, which is ordinary kitchen construction - and every rule that could
+	// complain about it is warning-level, so an errors-only assertion was blind to exactly the
+	// outcome that would matter. The baseline spec is clean, so anything at all here is new.
+	if (Result.HasErrors() || Result.HasWarnings())
+	{
+		AddError(FString::Printf(
+			TEXT("A wall cabinet above a base unit is normal construction, but the validator reported:\n%s"),
+			*Result.ToString()));
+	}
+	TestEqual(TEXT("Stacked cabinets produce no issues at all"), Result.Issues.Num(), 0);
 
 	return true;
 }
@@ -488,6 +501,18 @@ bool FHFValidatorInsetFittingsTest::RunTest(const FString& Parameters)
 	const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
 	TestFalse(TEXT("A sink set into a counter is not reported as overlapping"),
 		Result.Contains(TEXT("OverlappingFixtures")));
+
+	// And nothing else either, for the same reason as the stacked-cabinet case: a sink in a worktop
+	// is how a kitchen is built, so any issue raised about it is noise, and noise is what trains a
+	// reader to stop reading. Asserting on the one rule by name would miss a second rule learning to
+	// complain about the same construction.
+	if (Result.HasErrors() || Result.HasWarnings())
+	{
+		AddError(FString::Printf(
+			TEXT("A sink set into a worktop is normal construction, but the validator reported:\n%s"),
+			*Result.ToString()));
+	}
+	TestEqual(TEXT("An inset fitting produces no issues at all"), Result.Issues.Num(), 0);
 
 	// The exemption must be narrow: two beds in the same place are still a real problem.
 	FHFHouseSpec Beds = MakeValidSpec();
