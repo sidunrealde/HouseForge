@@ -883,9 +883,11 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 	// 75 mm and reached the geometry as a door leaf built inside a column. Two things let it
 	// through, and both are fixed here.
 	//
-	// It was reported as a WARNING. Nothing in the suite fails on a warning - SampleHouseValidates
-	// only asks HasErrors() and prints the rest - so the golden fixture every later milestone
-	// measures against was allowed to carry an unbuildable doorway and say so quietly on every run.
+	// It was reported as a WARNING, and at the time nothing in the suite failed on a warning -
+	// SampleHouseValidates asked only HasErrors() and routed the rest to AddInfo - so the golden
+	// fixture every later milestone measures against was allowed to carry an unbuildable doorway and
+	// say so quietly on every run. (That hole is closed: the reference flat must now produce no
+	// warning the test does not name. The severity below is still right on its own merits.)
 	// A column in a doorway is not a judgement call with two defensible answers; there is nothing
 	// for a reader to weigh up, because the doorway cannot be built and cannot be walked through. So
 	// a door is now an error. A window keeps the warning: a pier across a glazing line is bad

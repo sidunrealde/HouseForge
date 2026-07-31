@@ -15,13 +15,68 @@
 #define HF_TEST_FLAGS (EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 /**
+ * A warning the reference flat is allowed to carry, and the reason it is allowed.
+ *
+ * There are none. The type exists so that there is somewhere principled to put one, because the
+ * alternative to having somewhere is what actually happens: the first time a defensible warning
+ * appears, whoever meets it deletes the assertion instead, and the check is gone for every future
+ * warning too.
+ */
+struct FHFAllowedWarning
+{
+	/** Validator rule code, e.g. "ColumnStandsFree". */
+	const TCHAR* Code;
+
+	/** Element it is allowed on. Empty means the rule is allowed anywhere in the flat. */
+	const TCHAR* ElementId;
+
+	/** Why this one is acceptable. Written for whoever finds it in a year and wonders. */
+	const TCHAR* Why;
+};
+
+/**
  * The reference 2BHK is what every later milestone builds and screenshots. If it does not
  * validate cleanly, every downstream test is measuring a broken house.
+ *
+ * Warnings count as "not cleanly", and that is the point of this test.
+ *
+ * It used to fail only on HasErrors() and route the warnings to AddInfo, which made a warning-level
+ * defect in the golden fixture invisible to the gate BY DESIGN. That is how a sealed foyer, a beam
+ * spanning 6.6 m between nothing, a doorway built across a column, two bedroom doors opening into
+ * bathrooms and ten fixtures standing in openings all survived a green gate at once. Every one of
+ * them was reported on every single run, by name, with the millimetres - and nothing failed, so
+ * nobody read it.
+ *
+ * But a blanket "any warning fails" is not the answer either, and it was the previous attempt here.
+ * A warning is a warning precisely because it is sometimes acceptable - the validator says so
+ * itself: "buildable, but probably not what the drawing meant". A rule that converts every
+ * judgement call into a build break is a rule that gets suppressed the first time somebody is in a
+ * hurry, and then it protects nothing.
+ *
+ * So the bar is: the reference flat produces exactly the warnings this test NAMES, and nothing
+ * else. Today that list is empty, so the assertion reduces to zero warnings. Three things follow,
+ * and the third is what makes it survive contact with a hurry:
+ *
+ *   - an unexpected warning FAILS, with its code, its element and its message;
+ *   - an expected warning is VISIBLE in the run, quoting the reason it was accepted, so an
+ *     exemption cannot become invisible the way the old AddInfo behaviour made everything invisible;
+ *   - an exemption that no longer fires FAILS, so the list cannot rot into a pile of stale
+ *     suppressions that quietly excuse defects nobody has looked at since.
+ *
+ * Adding an entry is deliberately a code change with a written justification next to it, reviewable
+ * in the diff. Deleting the check is not the path of least resistance any more; naming the warning
+ * is.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSampleHouseValidatesTest, "HouseForge.Model.SampleHouseValidates", HF_TEST_FLAGS)
 
 bool FHFSampleHouseValidatesTest::RunTest(const FString& Parameters)
 {
+	// Deliberately empty. The reference flat is clean, and every warning it ever carried turned out
+	// to be a real defect in the plan rather than a judgement call - see the commit history for the
+	// foyer, the beam and the blocked doorways. If you are adding the first entry, the bar is that
+	// you can write down why a reader should not act on it.
+	static const TArray<FHFAllowedWarning> Allowed = {};
+
 	const FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 	const FHFValidationResult Result = FHFSpecValidator::Validate(Spec);
 
@@ -31,21 +86,68 @@ bool FHFSampleHouseValidatesTest::RunTest(const FString& Parameters)
 	}
 	TestFalse(TEXT("Sample 2BHK has no validation errors"), Result.HasErrors());
 
-	// Warnings fail too, and that is the change.
-	//
-	// This test used to print them and pass. That is how a doorway built across a column, two
-	// bedroom doors opening into bathrooms, and six fixtures standing in openings all lived in the
-	// golden fixture at once: every one of them was reported on every run, by name, with the
-	// millimetres, and nothing failed. A reference flat is not a place to keep known defects -
-	// everything downstream measures against it, and a warning nobody has to clear is a warning
-	// nobody reads.
-	if (Result.HasWarnings())
+	TArray<bool> Fired;
+	Fired.Init(false, Allowed.Num());
+
+	int32 Excused = 0;
+	int32 Unexpected = 0;
+
+	for (const FHFValidationIssue& Issue : Result.Issues)
 	{
+		if (Issue.Severity != EHFValidationSeverity::Warning)
+		{
+			continue;
+		}
+
+		const int32 Match = Allowed.IndexOfByPredicate([&Issue](const FHFAllowedWarning& Entry)
+		{
+			const bool bAnyElement = (Entry.ElementId == nullptr) || (*Entry.ElementId == TEXT('\0'));
+			return Issue.Code == Entry.Code
+				&& (bAnyElement || Issue.ElementId == FName(Entry.ElementId));
+		});
+
+		if (Match != INDEX_NONE)
+		{
+			Fired[Match] = true;
+			++Excused;
+
+			// Named, therefore visible - with the justification, so a reader can disagree with it.
+			AddInfo(FString::Printf(
+				TEXT("Known warning '%s' on '%s' is accepted: %s (%s)"),
+				*Issue.Code, *Issue.ElementId.ToString(), Allowed[Match].Why, *Issue.Message));
+			continue;
+		}
+
+		++Unexpected;
 		AddError(FString::Printf(
-			TEXT("Sample 2BHK validates with warnings, which the reference flat is not allowed to carry:\n%s"),
-			*Result.ToString()));
+			TEXT("Sample 2BHK reports an unexpected warning '%s' on '%s': %s\n")
+			TEXT("The reference flat is the fixture every milestone measures against, so it must be clean. ")
+			TEXT("Either fix the flat in FHFSampleHouse::Make2BHK, or - if this warning is genuinely ")
+			TEXT("acceptable - add it to the Allowed list in this test with the reason, so it stays visible."),
+			*Issue.Code, *Issue.ElementId.ToString(), *Issue.Message));
 	}
-	TestFalse(TEXT("Sample 2BHK has no validation warnings either"), Result.HasWarnings());
+
+	// The explicit zero. With an empty Allowed list this says the flat carries no warnings at all;
+	// with entries in it, it says the flat carries no warnings beyond the named ones.
+	TestEqual(TEXT("Sample 2BHK produces no warnings the test has not named"), Unexpected, 0);
+	TestEqual(TEXT("Every warning in the reference flat is accounted for"),
+		Excused + Unexpected, Result.CountOf(EHFValidationSeverity::Warning));
+
+	// A stale exemption is a defect excused by a note about a problem that no longer exists, and it
+	// will happily go on excusing the next one that happens to share its rule code.
+	for (int32 Index = 0; Index < Allowed.Num(); ++Index)
+	{
+		if (!Fired[Index])
+		{
+			AddError(FString::Printf(
+				TEXT("The exemption for '%s' on '%s' no longer matches any warning, so it is excusing ")
+				TEXT("nothing and would silently excuse the next warning with that code. Remove it. ")
+				TEXT("It was justified as: %s"),
+				Allowed[Index].Code,
+				(Allowed[Index].ElementId != nullptr) ? Allowed[Index].ElementId : TEXT("(any)"),
+				Allowed[Index].Why));
+		}
+	}
 
 	return true;
 }
