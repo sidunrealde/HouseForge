@@ -106,6 +106,23 @@ struct HOUSEFORGE_API FHFFanParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
 	double CaseDepth = 12.0;
 
+	/**
+	 * Exhaust fan only: thickness of the wall it discharges through. 0 builds nothing behind it.
+	 *
+	 * WHAT THE FAR SIDE OF THE HOLE LOOKS LIKE. The duct is cored through the masonry and then, with
+	 * no discharge-side treatment, left as a bare square opening in a finished wall - the only
+	 * opening in the flat with no lining, where every door and window gets a frame. From the corridor
+	 * F_CBath_Exhaust read as a raw 15 cm hole at head height with the impeller visible inside it and
+	 * the blade tips clipped by the masonry; on an external wall the same hole opens straight to the
+	 * sky. A real extract has a sleeve through the wall and a louvred cowl on the discharge face.
+	 *
+	 * A DIMENSION, not a figure, and the wall's - which is why it is passed in rather than read.
+	 * A generator that reached for the wall it stands in would stop being a pure function of its
+	 * parameters, so the composing layer resolves it here.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double HostWallThickness = 0.0;
+
 	/** Blades on the rotor. Three on a ceiling fan, five or six on an extract. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Blades", meta = (ClampMin = "2", ClampMax = "12"))
 	int32 BladeCount = 3;

@@ -427,6 +427,17 @@ void AHFHouseActor::BuildGeometry()
 		FanActor->ApplyFixture(Fixture);
 
 		const FHFRoom* FanRoom = Spec.FindRoom(Fixture.RoomId);
+		const FHFWall* FanWall = Spec.FindWall(Fixture.AnchorWallId);
+
+		// AN EXTRACT HAS A FAR SIDE. The duct is cored through the masonry and, with nothing on the
+		// discharge face, left as a bare square opening in a finished wall - the only opening in the
+		// flat with no lining, since it is deliberately kept out of Spec.Openings so no ventilator
+		// sash is built in it. The sleeve and cowl belong to the fan, so the wall's thickness comes
+		// to the fan as a dimension: a generator may not reach for the wall it stands in.
+		if (Fixture.Type == EHFFixtureType::ExhaustFan && FanWall != nullptr)
+		{
+			FanActor->Fan.HostWallThickness = FanWall->Thickness;
+		}
 
 		// AND THEN WHAT IS BETWEEN THE FAN AND THE ROOM. A ceiling fan hangs from the structural
 		// slab, so a false ceiling over it is something the rod has to get through - and a rod that
@@ -452,8 +463,7 @@ void AHFHouseActor::BuildGeometry()
 			FanActor->ApplyCeilingAbove(SoffitDrop);
 		}
 
-		FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture,
-			FanRoom, Spec.FindWall(Fixture.AnchorWallId)));
+		FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture, FanRoom, FanWall));
 
 		FanActor->Regenerate();
 	}

@@ -6,6 +6,7 @@
 
 #include "Actors/HFFanActor.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "DynamicMesh/DynamicMeshAABBTree3.h"
 #include "Geometry/HFFanKit.h"
 #include "Geometry/HFMeshOps.h"
 #include "MeshQueries.h"
@@ -418,9 +419,124 @@ bool FHFExhaustFanTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("...and is still a case rather than a ring of nothing"), Actual > 0.0);
 
 	// A wall fan stands proud of what it is fixed to, in the same frame a ceiling fan hangs below it.
-	TestTrue(TEXT("Nothing sits behind the wall face"), Case.Min.Z > -1e-6);
+	// With no wall thickness given there is nothing to line, so nothing is built behind the face -
+	// which is the case this fan was declared without one to state.
+	TestTrue(TEXT("Told nothing about a wall, nothing is built behind the face"), Case.Min.Z > -1e-6);
 	TestTrue(TEXT("The rotor sits inside the case, not in front of it"),
 		Built.BladePlaneZ > 0.0 && Built.BladePlaneZ < P.CaseDepth);
+
+	return true;
+}
+
+/**
+ * AN EXTRACT HAS TWO SIDES, and the far one is not a bare hole in a finished wall.
+ *
+ * The duct was cored through the masonry and given nothing at all on the discharge face - the only
+ * opening in the flat with no lining, where every door and window gets a frame from AHFOpeningActor.
+ * From the corridor, F_CBath_Exhaust read as a raw 15 cm square opening at head height with the
+ * impeller turning inside it and the blade tips clipped by the masonry, immediately beside a window
+ * that had a proper frame. On the two external walls the same hole opened straight to the sky.
+ *
+ * It gets nothing from the opening system BY DESIGN and correctly: the duct is kept out of
+ * Spec.Openings so that no ventilator sash is built in it. Which is exactly why the sleeve and the
+ * cowl are the fan's - a property of the extract, not of the wall it is screwed to.
+ *
+ * Measured on where the geometry REACHES rather than on how much of it there is, since a triangle
+ * count says nothing about whether a hole is covered.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFExtractDischargeTest,
+	"HouseForge.Fan.AnExtractIsLinedThroughTheWall", HF_TEST_FLAGS)
+
+bool FHFExtractDischargeTest::RunTest(const FString& Parameters)
+{
+	FHFFanParams Bare = FHFFanKit::DefaultsFor(EHFFanKind::Exhaust);
+	Bare.SweepDiameter = 18.75;
+	Bare.CaseDepth = 10.0;
+
+	// The same fan, told what it is set into. A real internal partition in the reference flat.
+	FHFFanParams Lined = Bare;
+	Lined.HostWallThickness = 11.5;
+
+	const FHFFanBuild Without = FHFFanKit::Build(Bare);
+	const FHFFanBuild With = FHFFanKit::Build(Lined);
+
+	if (!TestTrue(TEXT("Both fans build"), Without.bValid && With.bValid))
+	{
+		return false;
+	}
+
+	const FAxisAlignedBox3d Unlined = Without.Shell.GetBounds();
+	const FAxisAlignedBox3d Behind = With.Shell.GetBounds();
+
+	// NOT KNOWING THE WALL BUILDS NOTHING. A fan asked to line a wall it was never told about would
+	// guess a thickness, and a guessed spigot is a spigot that ends inside or outside the masonry.
+	TestTrue(TEXT("An extract told nothing about a wall builds nothing behind itself"),
+		Unlined.Min.Z > -1e-6);
+
+	// THE SLEEVE REACHES THE FAR FACE. Short of it and the last of the cored hole is still raw
+	// masonry; past it and the spigot pokes out of the wall on the far side.
+	TestTrue(*FString::Printf(TEXT("The lining reaches the discharge face (%.2f against %.2f)"),
+		Behind.Min.Z, -Lined.HostWallThickness),
+		Behind.Min.Z < -Lined.HostWallThickness);
+
+	// And the cowl stands proud of that face rather than being flush with it - a grille flush in a
+	// wall reads as a painted-on panel. A hand's breadth is the most it may stand out, though: this
+	// is a cowl, not a hood.
+	const double Proud = -Behind.Min.Z - Lined.HostWallThickness;
+	TestTrue(*FString::Printf(TEXT("...and its cowl stands proud of it by %.2f cm"), Proud),
+		Proud > 0.3 && Proud < 8.0);
+
+	// THE COWL COVERS THE HOLE, CORNERS AND ALL. A square opening reaches its half-diagonal, and the
+	// corners of the cored duct are precisely what shows past something sized on the side alone.
+	const double DuctHalf = Lined.DuctSide() * 0.5;
+
+	TestTrue(*FString::Printf(TEXT("The cowl's flange covers the cored hole (%.2f x %.2f over a %.2f duct)"),
+		Behind.Width() * 0.5, Behind.Depth() * 0.5, DuctHalf),
+		Behind.Width() * 0.5 > DuctHalf && Behind.Depth() * 0.5 > DuctHalf);
+
+	// But it is not wider than the case that sits on the room side, or the fan is a plate with a
+	// smaller fan in front of it.
+	TestTrue(TEXT("...without growing wider than the fan itself"),
+		Behind.Width() * 0.5 <= Lined.CaseHalfWidth() + 1e-6);
+
+	// THE LOUVRES REALLY BLOCK THE VIEW THROUGH. Cast down the axis from outside on a grid across the
+	// mouth: a straight line of sight into the impeller is what a bare hole looked like, and blades
+	// that did not overlap in plan would leave stripes of exactly that.
+	FDynamicMeshAABBTree3 Tree(&With.Shell, true);
+
+	const double Mouth = DuctHalf * 0.75;
+	int32 Cast = 0;
+	int32 Blocked = 0;
+
+	for (int32 IX = -3; IX <= 3; ++IX)
+	{
+		for (int32 IY = -3; IY <= 3; ++IY)
+		{
+			const FVector3d From(Mouth * IX / 3.0, Mouth * IY / 3.0,
+				-Lined.HostWallThickness - 20.0);
+
+			++Cast;
+			if (Tree.FindNearestHitTriangle(FRay3d(From, FVector3d::UnitZ())) != IndexConstants::InvalidID)
+			{
+				++Blocked;
+			}
+		}
+	}
+
+	TestTrue(*FString::Printf(TEXT("The cowl closes the view into the duct (%d of %d rays stopped)"),
+		Blocked, Cast), Cast > 0 && Blocked == Cast);
+
+	// The lining is metal, and it is TAGGED metal: an untagged face is one the material panel can
+	// never reach, which is what makes surface roles load-bearing rather than decorative.
+	const TSet<EHFSurfaceRole> Roles = FHFMeshOps::RolesPresent(With.Shell);
+	TestTrue(TEXT("The sleeve and cowl are tagged as metal"), Roles.Contains(EHFSurfaceRole::MetalHardware));
+	TestFalse(TEXT("Nothing on the lined extract fell back to wall paint"),
+		Roles.Contains(EHFSurfaceRole::WallPaint));
+
+	// And the fan still works: lining the wall must not have eaten the aperture the blades turn in.
+	TestTrue(TEXT("The lined extract still has its rotor"), With.Parts.Num() == 1);
+	TestTrue(TEXT("...and still stands proud of the wall on the room side"),
+		Behind.Max.Z > Lined.CaseDepth * 0.5);
 
 	return true;
 }

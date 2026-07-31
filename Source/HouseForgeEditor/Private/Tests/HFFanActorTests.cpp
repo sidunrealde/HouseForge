@@ -756,6 +756,21 @@ bool FHFExtractDuctTest::RunTest(const FString& Parameters)
 
 			if (TestNotNull(*FString::Printf(TEXT("'%s' was built as an actor"), *Where), FanActor))
 			{
+				// THE DISCHARGE SIDE IS WIRED UP. A hole cored and left bare is the only opening in
+				// the flat with no lining - the duct is deliberately kept out of Spec.Openings so no
+				// ventilator sash is built in it, so it gets nothing from the opening system and the
+				// sleeve and cowl have to come from the fan. Asserted at the seam, since
+				// HouseForge.Fan.AnExtractIsLinedThroughTheWall already measures the geometry.
+				TestNearlyEqual(*FString::Printf(TEXT("'%s' knows how thick the wall it discharges through is"),
+					*Where), FanActor->Fan.HostWallThickness, Wall->Thickness, 1e-6);
+
+				// Its case is SQUARE and its cowl louvred, so the roll matters: local Y has to be
+				// world up on every wall, or the same fan comes out diamond-on with vertical weather
+				// blades depending which way its wall happens to run.
+				const FVector Up = FanActor->GetActorTransform().TransformVectorNoScale(FVector::YAxisVector);
+				TestTrue(*FString::Printf(TEXT("'%s' is set square to the world (up is %s)"),
+					*Where, *Up.ToString()), Up.Z > 0.99);
+
 				UDynamicMeshComponent* Rotor = FanActor->GetPartComponent(AHFFanActor::RotorPartId());
 				if (TestNotNull(*FString::Printf(TEXT("'%s' has a rotor to line up with"), *Where), Rotor))
 				{

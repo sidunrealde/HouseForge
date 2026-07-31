@@ -242,7 +242,12 @@ FTransform AHFFanActor::PlacementFor(const FHFFixture& Fixture, const FHFRoom* R
 		Axis = FVector(-FMath::Sin(Radians), FMath::Cos(Radians), 0.0);
 	}
 
-	return FTransform(FRotationMatrix::MakeFromZ(Axis).ToQuat(),
+	// ROLL PINNED TO WORLD UP, not left to MakeFromZ. An extract's case is a SQUARE and its cowl is
+	// louvred, and neither is symmetric about its own axis: MakeFromZ picks whatever second axis is
+	// convenient for the normal it is given, so the same fan on two walls could come out square to
+	// the world on one and diamond-on on the other, with its weather blades vertical. Naming the
+	// up vector makes local Y vertical and local X horizontal on every wall.
+	return FTransform(FRotationMatrix::MakeFromZY(Axis, FVector::ZAxisVector).ToQuat(),
 		FVector(Centre.X, Centre.Y, CentreZ));
 }
 

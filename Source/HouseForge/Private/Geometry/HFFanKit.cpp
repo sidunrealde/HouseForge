@@ -138,6 +138,98 @@ namespace
 		return Blade;
 	}
 
+	/** A square, centred on the axis, as a closed loop. */
+	TArray<FVector2D> SquareLoop(double HalfSide)
+	{
+		return {
+			FVector2D(-HalfSide, -HalfSide), FVector2D(HalfSide, -HalfSide),
+			FVector2D(HalfSide, HalfSide), FVector2D(-HalfSide, HalfSide)
+		};
+	}
+
+	/**
+	 * What the far side of the wall sees: a sleeve through the masonry and a louvred cowl over it.
+	 *
+	 * AN EXTRACT HAS TWO SIDES, and only one of them was built. The duct was cored and then left as a
+	 * bare square opening in a finished wall - the only opening in the flat with no lining, where
+	 * every door and window gets a frame from AHFOpeningActor. From the corridor it read as a raw
+	 * 15 cm hole at head height with the impeller turning inside it and the blade tips clipped by the
+	 * masonry; on an external wall the same hole opened straight to the sky.
+	 *
+	 * The duct is deliberately kept out of Spec.Openings, correctly, so that no ventilator sash is
+	 * built in it - which is exactly why it gets nothing from the opening system and why the
+	 * treatment belongs to the FAN. It is a property of the extract, not of the wall.
+	 *
+	 * Built in the fan's own frame, where +Z is the axis into the room, so the wall occupies
+	 * -HostWallThickness..0 and the discharge face is at -HostWallThickness. Two closed solids, both
+	 * of them square annuli: nothing here needs a boolean.
+	 */
+	void AppendDischargeSide(FDynamicMesh3& Shell, const FHFFanParams& P)
+	{
+		const double Thickness = P.HostWallThickness;
+		const double DuctHalf = P.DuctSide() * 0.5;
+
+		// Sheet metal, so thin. The bore has to stay wide enough to be a duct rather than a slot.
+		const double Sleeve = FMath::Clamp(DuctHalf * 0.08, 0.15, 0.6);
+		const double BoreHalf = DuctHalf - Sleeve;
+
+		if (BoreHalf <= MinStock || Thickness <= MinStock)
+		{
+			return;
+		}
+
+		// ---------------------------------------------------------------- the sleeve through the wall
+		//
+		// Lines the cored hole for its full depth, so a glance into the duct from either side finds a
+		// spigot rather than the cut face of the masonry. Held a hair inside the hole so the two
+		// surfaces are never coincident - two faces in the same plane flicker under any camera move,
+		// which is the sort of thing only a walkthrough ever shows.
+		FHFMeshOps::AppendPrismWithHoles(Shell, SquareLoop(DuctHalf - 0.05), { SquareLoop(BoreHalf) },
+			-Thickness, 0.0, EHFSurfaceRole::MetalHardware);
+
+		// ------------------------------------------------------------------------ the cowl outside it
+		//
+		// A flanged frame standing proud of the discharge face. The flange is what covers the arris of
+		// the cored hole - the same job DuctSide's 10% margin does on the room side.
+		const double FlangeHalf = DuctHalf * 1.18;
+		const double CowlDepth = FMath::Max(DuctHalf * 0.22, 1.2);
+
+		FHFMeshOps::AppendPrismWithHoles(Shell, SquareLoop(FlangeHalf), { SquareLoop(BoreHalf) },
+			-Thickness - CowlDepth, -Thickness, EHFSurfaceRole::MetalHardware);
+
+		// ----------------------------------------------------------------------------- and its louvres
+		//
+		// Weather blades across the mouth, set so they shed water and so that nothing looking at the
+		// cowl straight on sees through to the impeller. They are why AHFFanActor::PlacementFor pins
+		// the extract's roll to world up: local X is horizontal by construction, so these lie flat
+		// rather than at whatever angle a bare MakeFromZ happened to produce.
+		constexpr int32 LouvreCount = 4;
+		const double Pitch = (BoreHalf * 2.0) / LouvreCount;
+
+		// Overlapped in plan, or the gaps between them are a straight line of sight through the cowl.
+		const double Chord = Pitch * 1.45;
+		const double Blade = FMath::Clamp(Sleeve * 0.7, 0.12, 0.4);
+
+		for (int32 Index = 0; Index < LouvreCount; ++Index)
+		{
+			FDynamicMesh3 Louvre;
+			FHFMeshOps::InitialiseMesh(Louvre);
+
+			FHFMeshOps::AppendBox(Louvre, FVector3d::Zero(),
+				FVector3d(BoreHalf * 0.98, Chord * 0.5, Blade * 0.5), 0.0, EHFSurfaceRole::MetalHardware);
+
+			// Tilted about their own long axis, which is local X.
+			RotateAboutOrigin(Louvre, FVector3d::UnitX(), -35.0);
+
+			MeshTransforms::Translate(Louvre, FVector3d(0.0,
+				-BoreHalf + Pitch * (Index + 0.5),
+				-Thickness - CowlDepth * 0.55));
+
+			// Never the raw append: it renumbers polygroups, and the polygroup IS the surface role.
+			FHFMeshOps::AppendPreservingRoles(Shell, Louvre);
+		}
+	}
+
 	/** The blades, evenly spaced about the axis, merged into one mesh in rotor space. */
 	void AppendBlades(FDynamicMesh3& Rotor, const FHFFanParams& P, double RootRadius, double PlaneZ)
 	{
@@ -250,6 +342,7 @@ FHFFanParams FHFFanKit::Sanitise(const FHFFanParams& Params)
 	P.RodDiameter = FMath::Max(P.RodDiameter, MinStock);
 	P.DropLength = FMath::Max(P.DropLength, 0.0);
 	P.CaseDepth = FMath::Max(P.CaseDepth, 0.0);
+	P.HostWallThickness = FMath::Max(P.HostWallThickness, 0.0);
 
 	// A canopy below the motor it hangs is not a canopy. Clamped rather than refused, so a ceiling
 	// drop deeper than the rod resolved for it still builds something rather than nothing.
@@ -378,6 +471,14 @@ FHFFanBuild FHFFanKit::Build(const FHFFanParams& Params)
 			FVector3d(0.0, 0.0, -1.0), FVector3d::UnitZ(), RevolveSides, EHFSurfaceRole::Appliance);
 
 		FHFMeshOps::SubtractInPlace(Out.Shell, Throat);
+
+		// AND WHAT THE OTHER SIDE OF THE WALL SEES. Appended after the boolean on purpose: the throat
+		// cutter is a cylinder that overshoots both faces of the case, and running it through the
+		// sleeve and cowl as well would take the middle out of both.
+		if (P.HostWallThickness > MinStock)
+		{
+			AppendDischargeSide(Out.Shell, P);
+		}
 
 		RotorZ = P.CaseDepth * 0.5;
 
