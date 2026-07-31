@@ -73,14 +73,34 @@ struct HOUSEFORGE_API FHFFanParams
 	double SweepDiameter = 120.0;
 
 	/**
-	 * Ceiling fan only: canopy to the top of the motor, along the axis.
+	 * Ceiling fan only: the MOUNTING SURFACE to the top of the motor, along the axis.
+	 *
+	 * Measured from where the fan is fixed, which for a ceiling fan is the structural slab - NOT from
+	 * the canopy, which may sit some way down the rod. See CanopyDrop.
 	 *
 	 * What sets how far the blades hang below the slab, and it is a real decision rather than a
-	 * constant - a room with a false ceiling in it needs the rod long enough to clear the soffit,
-	 * which is exactly the case the reference flat is full of.
+	 * constant: a room with a false ceiling in it needs the rod long enough to clear the soffit, and
+	 * a fixed project figure built the entire rotor inside the plasterboard of every full-drop room.
+	 * The composing layer resolves it - the room's ceiling is not something a generator may read.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
 	double DropLength = 30.0;
+
+	/**
+	 * Ceiling fan only: how far below the mounting surface the canopy sits. 0 hangs it at the slab.
+	 *
+	 * THE THICKNESS OF WHAT THE ROD PASSES THROUGH. A fan hangs from the structural slab, so in a
+	 * room with a false ceiling the rod goes through the void and through a hole cut in the panel,
+	 * and the canopy belongs at the SOFFIT covering that hole - not up at the slab where nothing can
+	 * see it and the hole is left showing its four corners.
+	 *
+	 * A dimension, not a figure: it is the drop of the particular ceiling over this particular fan,
+	 * which is why FHFGenerators::CeilingSoffitDropAt answers it and the composing layer puts the
+	 * answer here. Zero for a fan under an open slab or in the open centre of a peripheral or cove
+	 * ceiling, which is every fan in the reference flat.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double CanopyDrop = 0.0;
 
 	/** Exhaust fan only: how far the case stands proud of the wall it is set into. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
@@ -182,6 +202,28 @@ struct HOUSEFORGE_API FHFFanParams
 
 	/** Radius the blades reach. */
 	double SweepRadius() const { return FMath::Max(SweepDiameter, 0.0) * 0.5; }
+
+	/**
+	 * Ceiling fan only: half the side of the square hole a false ceiling must cut for this fan's rod.
+	 *
+	 * DERIVED FROM THE FAN, exactly as the extract's duct is, and for the same reason: a plan marks a
+	 * fan, never the hole cut for it, and a hole sized independently is a hole that drifts. It was a
+	 * project constant of 8 - a 16 cm square opening for a 2.2 cm rod - whose corners showed past the
+	 * 15 cm motor housing as four bright wedges.
+	 *
+	 * Big enough that a rod passes through it with room to hang plumb, and small enough that
+	 * CanopyRadius covers it. The composing layer reads this onto AHFCeilingActor::FanDropRadius.
+	 */
+	double RodHoleHalfSide() const;
+
+	/**
+	 * Radius of the canopy: the plate that covers the rose, or the hole in a false ceiling.
+	 *
+	 * Sized to cover RodHoleHalfSide's square INCLUDING ITS CORNERS - a square reaches its
+	 * half-diagonal, and the corners are what actually show - so a canopy at a soffit always hides
+	 * the opening it sits over.
+	 */
+	double CanopyRadius() const;
 
 	/** Exhaust fan only: half the width of the square case that stands proud of the wall. */
 	double CaseHalfWidth() const;

@@ -50,6 +50,42 @@ void AHFFanActor::ApplyProjectDefaults(EHFFanKind Kind)
 	FHFBuildDefaults::FromProjectSettings().Fan.ApplyTo(Fan);
 }
 
+FHFFanParams AHFFanActor::ParamsFor(const FHFFixture& Fixture)
+{
+	const EHFFanKind Kind = Fixture.Type == EHFFixtureType::ExhaustFan
+		? EHFFanKind::Exhaust
+		: EHFFanKind::Ceiling;
+
+	FHFFanParams P = FHFFanKit::DefaultsFor(Kind);
+	FHFBuildDefaults::FromProjectSettings().Fan.ApplyTo(P);
+	ReadDrawnDimensions(Fixture, P);
+
+	return FHFFanKit::Sanitise(P);
+}
+
+void AHFFanActor::ApplyCeilingAbove(double SoffitDrop)
+{
+	// A FAN HANGS FROM THE STRUCTURAL SLAB, so a false ceiling between the slab and the room is
+	// something its rod has to get through - and DropLength was a fixed project figure that knew
+	// nothing about it. In any room with a full drop the whole rotor was built INSIDE the
+	// plasterboard: motor sunk into the panel, blades edge-on slivers lying in it, and from
+	// underneath a bladed light fitting glued to the ceiling rather than a fan.
+	//
+	// ADDED TO THE PROJECT'S FIGURE RATHER THAN MAXED AGAINST IT. The setting is the rod somebody
+	// SEES hanging in the room, so it has to be what is left below the soffit: taking the larger of
+	// the two would let a 40 cm ceiling swallow the whole 30 cm figure and hang the fan flush with
+	// the panel, which is the same wrong picture arrived at more slowly. A real installation hangs
+	// its fans at one height whatever the ceiling above them is doing.
+	//
+	// Resolved here and not in the kit. The room's ceiling is world knowledge, and a generator that
+	// read it would stop being a pure function of its parameters -
+	// HouseForge.Architecture.GeneratorsDoNotReadSettings is the standing check on that.
+	const double Drop = FMath::Max(SoffitDrop, 0.0);
+
+	Fan.CanopyDrop = Drop;
+	Fan.DropLength += Drop;
+}
+
 void AHFFanActor::ApplyFixture(const FHFFixture& Fixture)
 {
 	ReadDrawnDimensions(Fixture, Fan);
@@ -109,11 +145,9 @@ FHFOpening AHFFanActor::DuctOpeningFor(const FHFFixture& Fixture, const FHFWall&
 		return Duct;
 	}
 
-	FHFFanParams P = FHFFanKit::DefaultsFor(EHFFanKind::Exhaust);
-	ReadDrawnDimensions(Fixture, P);
-	P = FHFFanKit::Sanitise(P);
-
-	const double Side = P.DuctSide();
+	// The very fan that ends up standing in this hole, project figures and all, so the two cannot
+	// be sized from different ideas of what the fan is.
+	const double Side = ParamsFor(Fixture).DuctSide();
 	Duct.Width = Side;
 	Duct.Height = Side;
 

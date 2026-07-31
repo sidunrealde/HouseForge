@@ -62,6 +62,29 @@ public:
 	void ApplyProjectDefaults(EHFFanKind Kind);
 
 	/**
+	 * Lengthens the rod so the fan hangs BELOW a false ceiling rather than inside it.
+	 *
+	 * Called by the composing layer after ApplyProjectDefaults and ApplyFixture, because what a rod
+	 * has to clear is a property of the ROOM and a generator may not read one.
+	 * FHFGenerators::CeilingSoffitDropAt is what answers the question; this puts the answer on the
+	 * fan, moving the canopy down to the soffit so it covers the hole cut for the rod.
+	 *
+	 * @param SoffitDrop How far below the structural slab the panel over this fan hangs. 0 for a fan
+	 *                   under bare slab, which includes the open centre of a peripheral or cove
+	 *                   ceiling - and therefore every fan in the reference flat.
+	 */
+	void ApplyCeilingAbove(double SoffitDrop);
+
+	/**
+	 * The parameters a fan at this fixture will be built from, dimensions and project figures both.
+	 *
+	 * For the composing layer to size things that have to AGREE with a fan it has not spawned yet -
+	 * the hole a false ceiling cuts for a rod, and the duct cored through a wall for an extract.
+	 * Both were derived independently once and both drifted.
+	 */
+	static FHFFanParams ParamsFor(const FHFFixture& Fixture);
+
+	/**
 	 * Reads a spec fixture into the parameters. Call after ApplyProjectDefaults.
 	 *
 	 * The spec is in Unreal centimetres by the time it reaches an actor - AHFHouseActor::SetSpec

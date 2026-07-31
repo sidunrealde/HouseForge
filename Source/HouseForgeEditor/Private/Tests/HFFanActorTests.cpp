@@ -479,6 +479,194 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * A FAN UNDER A FALSE CEILING HANGS BELOW IT, NOT INSIDE IT.
+ *
+ * The assertion in FHFFanPlacementTest that says this - "hangs below the false ceiling, not inside
+ * it" - could never fire, and did not for the whole milestone. All three ceiling fans in the
+ * reference flat sit in the middle of a Cove or Peripheral ceiling, whose centre is left open to the
+ * structure, so the drop over each of them is zero and any rod length whatever passes. A dead
+ * assertion guarding a real defect: DropLength was a fixed project figure of 30 and nothing anywhere
+ * derived it from the room, so a fan in a room with a 40 cm full drop had its motor top at 30 -
+ * INSIDE the plasterboard - with the blades as edge-on slivers lying in the panel. From underneath
+ * it read as a bladed light fitting glued to the ceiling.
+ *
+ * So this test puts fans where the flat has none: under the kitchen's 300 mm full drop and the
+ * master bath's 400 mm one. IN A COPY OF THE SPEC, not in the golden fixture - the fixture is what
+ * the drawing says, and inventing a kitchen ceiling fan to make a test fire would be changing the
+ * drawing to suit the test. Two different drops on purpose, because a single one passes anything
+ * that adds a constant.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFanUnderACeilingTest,
+	"HouseForge.Editor.AFanHangsBelowAFalseCeiling", HF_TEST_FLAGS)
+
+bool FHFFanUnderACeilingTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeFan;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
+
+	// Where a fan would go if one were drawn there: the middle of the room, which under a full drop
+	// is panel wherever it is. Taken off the boundary rather than written down, so this follows the
+	// fixture if the plan moves.
+	auto CentreOf = [&Spec](const FName& RoomId) -> FVector2D
+	{
+		const FHFRoom* Room = Spec.FindRoom(RoomId);
+		if (Room == nullptr || Room->Boundary.IsEmpty())
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		FVector2D Sum = FVector2D::ZeroVector;
+		for (const FVector2D& Point : Room->Boundary)
+		{
+			Sum += Point;
+		}
+		return Sum / Room->Boundary.Num();
+	};
+
+	// In the spec's own units - millimetres - because SetSpec converts exactly once at ingest.
+	auto AddFan = [&Spec, &CentreOf](const FName& Id, const FName& RoomId)
+	{
+		FHFFixture Fan;
+		Fan.Id = Id;
+		Fan.RoomId = RoomId;
+		Fan.Type = EHFFixtureType::CeilingFan;
+		Fan.Label = TEXT("Ceiling fan, under a full drop");
+		Fan.Position = CentreOf(RoomId);
+		Fan.Footprint = FVector2D(1200.0, 1200.0);
+		Fan.Height = 300.0;
+		Fan.Params.Diameter = 1200.0;
+		Spec.Fixtures.Add(Fan);
+	};
+
+	AddFan(TEXT("F_Fan_UnderKitchen"), TEXT("R_Kitchen"));   // FC_Kitchen, FullDrop 300 mm
+	AddFan(TEXT("F_Fan_UnderMBath"), TEXT("R_MBath"));       // FC_MBath,   FullDrop 400 mm
+
+	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+	if (!TestNotNull(TEXT("A house actor spawns"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); } };
+
+	House->SetSpec(Spec);
+	House->BuildGeometry();
+
+	const TMap<FName, AHFFanActor*> Built = FansIn(House);
+	int32 Checked = 0;
+
+	for (const FHFFixture& Fixture : House->Spec.Fixtures)
+	{
+		if (Fixture.Type != EHFFixtureType::CeilingFan)
+		{
+			continue;
+		}
+
+		AHFFanActor* Fan = Built.FindRef(Fixture.Id);
+		const FHFRoom* Room = House->Spec.FindRoom(Fixture.RoomId);
+
+		if (Fan == nullptr || Room == nullptr)
+		{
+			continue;
+		}
+
+		const FString Where = Fixture.Id.ToString();
+		const double SlabZ = Room->FloorZ + Room->CeilingHeight;
+
+		// What the ceiling actually puts over this fan, asked of the same function the composing
+		// layer asked. A fan in the open centre of a cove gets zero and is expected to be unchanged.
+		double SoffitDrop = 0.0;
+		for (const FHFFalseCeiling& Ceiling : House->Spec.FalseCeilings)
+		{
+			if (Ceiling.RoomId == Fixture.RoomId)
+			{
+				SoffitDrop = FMath::Max(SoffitDrop,
+					FHFGenerators::CeilingSoffitDropAt(Ceiling, *Room, Fixture.Position));
+			}
+		}
+
+		++Checked;
+		AddInfo(FString::Printf(TEXT("'%s': %.1f cm of ceiling over it, %.1f cm of rod."),
+			*Where, SoffitDrop, Fan->Fan.DropLength));
+
+		// THE ROD CLEARS WHAT IS ABOVE IT. Stated against the drop the room actually has, so it says
+		// something for a fan under bare slab as well as for one under 40 cm of plasterboard.
+		TestTrue(*FString::Printf(TEXT("'%s' has a rod longer than the ceiling it passes through (%.1f through %.1f)"),
+			*Where, Fan->Fan.DropLength, SoffitDrop), Fan->Fan.DropLength > SoffitDrop);
+
+		// The canopy sits AT the soffit, covering the hole cut for the rod - not up at the slab
+		// where it would be invisible in the void and the hole left showing its four corners.
+		TestNearlyEqual(*FString::Printf(TEXT("'%s' puts its canopy at the soffit"), *Where),
+			Fan->Fan.CanopyDrop, SoffitDrop, 1e-6);
+
+		// And the rod below the canopy is the project's figure, unchanged by the ceiling: a fan
+		// hangs at one height in a flat whatever is going on above it.
+		TestNearlyEqual(*FString::Printf(TEXT("'%s' shows the same length of rod as every other fan"), *Where),
+			Fan->Fan.DropLength - Fan->Fan.CanopyDrop,
+			FHFBuildDefaults::FromProjectSettings().Fan.CeilingFanDropLength, 1e-6);
+
+		// THE MEASURED ARTICLE. Everything above is arithmetic on parameters; this is where the
+		// blades ended up, off the component that carries them.
+		UDynamicMeshComponent* Rotor = Fan->GetPartComponent(AHFFanActor::RotorPartId());
+		if (!TestNotNull(*FString::Printf(TEXT("'%s' has a rotor component"), *Where), Rotor))
+		{
+			continue;
+		}
+
+		Rotor->UpdateBounds();
+		const FBoxSphereBounds Blades = Rotor->Bounds;
+		const double HighestBlade = Blades.Origin.Z + Blades.BoxExtent.Z;
+		const double SoffitZ = SlabZ - SoffitDrop;
+
+		TestTrue(*FString::Printf(
+			TEXT("'%s' turns in the room rather than in the plasterboard (top of rotor %.1f, soffit %.1f)"),
+			*Where, HighestBlade, SoffitZ), HighestBlade < SoffitZ - 0.01);
+
+		// Still at a height somebody would hang a fan at, which is the other half of the same
+		// decision: a rod that cleared the ceiling by lowering the fan to head height would pass
+		// every assertion above and be unusable.
+		TestTrue(*FString::Printf(TEXT("'%s' is still well clear of the floor (%.1f above %.1f)"),
+			*Where, Blades.Origin.Z - Blades.BoxExtent.Z, Room->FloorZ),
+			Blades.Origin.Z - Blades.BoxExtent.Z > Room->FloorZ + 180.0);
+
+		// And the canopy covers the hole the ceiling cut for the rod, corners and all. A square
+		// reaches its half-diagonal, and the corners are exactly what showed.
+		const FHFFanParams Resolved = AHFFanActor::ParamsFor(Fixture);
+		TestTrue(*FString::Printf(TEXT("'%s' has a canopy that covers its own rod hole (%.2f against %.2f)"),
+			*Where, Resolved.CanopyRadius(), Resolved.RodHoleHalfSide() * UE_DOUBLE_SQRT_2),
+			Resolved.CanopyRadius() > Resolved.RodHoleHalfSide() * UE_DOUBLE_SQRT_2);
+
+		// ...and the hole is still big enough for the rod to hang plumb in.
+		TestTrue(*FString::Printf(TEXT("'%s' has a rod hole its rod fits through"), *Where),
+			Resolved.RodHoleHalfSide() > Resolved.RodDiameter * 0.5);
+	}
+
+	// The flat's three plus the two invented, and both invented ones matter: one drop alone would
+	// pass anything that adds a constant.
+	TestTrue(TEXT("There were fans under real ceilings to check"), Checked >= 5);
+
+	const AHFFanActor* Kitchen = Built.FindRef(TEXT("F_Fan_UnderKitchen"));
+	const AHFFanActor* MBath = Built.FindRef(TEXT("F_Fan_UnderMBath"));
+
+	if (TestNotNull(TEXT("The kitchen fan was built under its full drop"), Kitchen) &&
+		TestNotNull(TEXT("...and the master bath's, under a deeper one"), MBath))
+	{
+		// The deeper ceiling gets the longer rod, by exactly the difference between the two drops -
+		// 400 mm against 300. This is the assertion a constant cannot satisfy.
+		TestNearlyEqual(TEXT("A deeper ceiling gets a longer rod, by the depth it is deeper"),
+			MBath->Fan.DropLength - Kitchen->Fan.DropLength, 10.0, 1e-6);
+	}
+
+	return true;
+}
+
+/**
  * AN EXTRACT BLOWS THROUGH THE WALL, not into it.
  *
  * The fan's own case has an aperture and its blades turn inside that aperture, and none of it is

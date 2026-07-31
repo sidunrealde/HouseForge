@@ -182,6 +182,24 @@ double FHFFanParams::DuctSide() const
 	return FMath::Max(FMath::Min(SweepDiameter, InsideTheCase), 0.0);
 }
 
+double FHFFanParams::RodHoleHalfSide() const
+{
+	// A hole a rod hangs plumb in with a working tolerance round it, and no more. Half again on the
+	// rod's radius plus a fixed few millimetres, so a thin rod still gets a hole somebody could cut
+	// rather than a slot the rod jams in.
+	return FMath::Max(RodDiameter, MinStock) * 0.75 + 0.4;
+}
+
+double FHFFanParams::CanopyRadius() const
+{
+	// The corners are what show. A square hole reaches its half-diagonal, so the canopy is sized
+	// against that rather than against the hole's side, with a lap so the two are never flush.
+	const double CoversTheHole = RodHoleHalfSide() * UE_DOUBLE_SQRT_2 + 0.5;
+
+	return FMath::Max3(FMath::Max(MotorDiameter, 0.0) * 0.5 * 0.55,
+		FMath::Max(RodDiameter, MinStock), CoversTheHole);
+}
+
 double FHFFanParams::OverallDepth() const
 {
 	return Kind == EHFFanKind::Ceiling
@@ -233,6 +251,10 @@ FHFFanParams FHFFanKit::Sanitise(const FHFFanParams& Params)
 	P.DropLength = FMath::Max(P.DropLength, 0.0);
 	P.CaseDepth = FMath::Max(P.CaseDepth, 0.0);
 
+	// A canopy below the motor it hangs is not a canopy. Clamped rather than refused, so a ceiling
+	// drop deeper than the rod resolved for it still builds something rather than nothing.
+	P.CanopyDrop = FMath::Clamp(P.CanopyDrop, 0.0, P.DropLength);
+
 	// A hub wider than the sweep is a disc, not a fan. Clamped rather than refused: a drawing that
 	// gave a sweep and left the motor at a catalogue figure is a drawing worth building from.
 	P.MotorDiameter = FMath::Min(P.MotorDiameter, FMath::Max(P.SweepDiameter * 0.8, MinStock));
@@ -276,18 +298,37 @@ FHFFanBuild FHFFanKit::Build(const FHFFanParams& Params)
 		// below the slab. Neither moves, so both stay on the shell: a fan welded into one mesh is a
 		// fan that cannot run.
 
-		const double CanopyHeight = FMath::Min(4.0, FMath::Max(P.DropLength * 0.4, 0.5));
-		const double CanopyRadius = FMath::Max(MotorRadius * 0.55, P.RodDiameter);
+		const double RodRadius = P.RodDiameter * 0.5;
+
+		// WHERE THE CANOPY SITS IS NOT ALWAYS WHERE THE FAN IS FIXED. The fan hangs off the
+		// structural slab, so in a room with a false ceiling the rod runs down through the void and
+		// through a hole cut in the panel, and the canopy belongs at the SOFFIT covering that hole.
+		// At the slab it would be invisible inside the void and the hole left showing its corners.
+		const double CanopyAt = FMath::Clamp(P.CanopyDrop, 0.0, P.DropLength);
+
+		if (CanopyAt > MinStock)
+		{
+			// The bare rod through the ceiling void. Seen from the room only through the hole it
+			// passes through, but a rod that started at the canopy would leave the fan hanging off
+			// nothing when the void is looked into from above or in section.
+			FHFMeshOps::AppendRevolvedProfile(Out.Shell,
+				{ FVector2D(0.0, RodRadius), FVector2D(CanopyAt, RodRadius) },
+				FVector3d::Zero(), FVector3d::UnitZ(), RevolveSides, EHFSurfaceRole::MetalHardware);
+		}
+
+		// Proportioned against the rod that shows BELOW the canopy, not against the whole drop: a
+		// fan through a 40 cm ceiling would otherwise get a canopy scaled to a rod nobody can see.
+		const double CanopyHeight = FMath::Min(4.0, FMath::Max((P.DropLength - CanopyAt) * 0.4, 0.5));
 
 		FHFMeshOps::AppendRevolvedProfile(Out.Shell,
-			{ FVector2D(0.0, CanopyRadius), FVector2D(CanopyHeight, P.RodDiameter * 0.5) },
+			{ FVector2D(CanopyAt, P.CanopyRadius()), FVector2D(CanopyAt + CanopyHeight, RodRadius) },
 			FVector3d::Zero(), FVector3d::UnitZ(), RevolveSides, EHFSurfaceRole::MetalHardware);
 
-		const double RodTop = FMath::Min(CanopyHeight, P.DropLength);
+		const double RodTop = FMath::Min(CanopyAt + CanopyHeight, P.DropLength);
 		if (P.DropLength > RodTop)
 		{
 			FHFMeshOps::AppendRevolvedProfile(Out.Shell,
-				{ FVector2D(RodTop, P.RodDiameter * 0.5), FVector2D(P.DropLength, P.RodDiameter * 0.5) },
+				{ FVector2D(RodTop, RodRadius), FVector2D(P.DropLength, RodRadius) },
 				FVector3d::Zero(), FVector3d::UnitZ(), RevolveSides, EHFSurfaceRole::MetalHardware);
 		}
 

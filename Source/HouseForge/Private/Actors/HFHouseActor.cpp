@@ -290,12 +290,28 @@ void AHFHouseActor::BuildGeometry()
 		CeilingActor->Ceiling = Ceiling;
 		CeilingActor->Room = *Room;
 
+		// THE HOLE IS A CONSEQUENCE OF THE FAN, exactly as an extract's duct is. It was a fixed 8 -
+		// a 16 cm square opening for a 2.2 cm rod - whose corners showed past the 15 cm motor
+		// housing as four bright wedges from below. Sized from the fan's own rod now, and the
+		// canopy is sized to cover it, so the two cannot drift.
+		double HoleHalfSide = 0.0;
+
 		for (const FHFFixture& Fixture : Spec.Fixtures)
 		{
 			if (Fixture.Type == EHFFixtureType::CeilingFan && Fixture.RoomId == Ceiling.RoomId)
 			{
 				CeilingActor->FanDrops.Add(Fixture.Position);
+
+				// The largest, because one radius cuts every hole in this ceiling and a hole too
+				// small for a rod is a rod through plasterboard.
+				HoleHalfSide = FMath::Max(HoleHalfSide,
+					AHFFanActor::ParamsFor(Fixture).RodHoleHalfSide());
 			}
+		}
+
+		if (HoleHalfSide > 0.0)
+		{
+			CeilingActor->FanDropRadius = HoleHalfSide;
 		}
 
 		CeilingActor->Regenerate();
@@ -410,8 +426,34 @@ void AHFHouseActor::BuildGeometry()
 			Fixture.Type == EHFFixtureType::ExhaustFan ? EHFFanKind::Exhaust : EHFFanKind::Ceiling);
 		FanActor->ApplyFixture(Fixture);
 
+		const FHFRoom* FanRoom = Spec.FindRoom(Fixture.RoomId);
+
+		// AND THEN WHAT IS BETWEEN THE FAN AND THE ROOM. A ceiling fan hangs from the structural
+		// slab, so a false ceiling over it is something the rod has to get through - and a rod that
+		// was a fixed project figure built the whole rotor inside the plasterboard of any room with
+		// a full drop. Every ceiling fan in the reference flat sits in the open centre of a cove or
+		// peripheral ceiling, where the drop is zero and nothing showed.
+		//
+		// The drop is asked of the room, per fan, because the answer depends on WHERE in the room
+		// the fan is: the same ceiling covers its band and leaves its centre open.
+		if (Fixture.Type == EHFFixtureType::CeilingFan && FanRoom != nullptr)
+		{
+			double SoffitDrop = 0.0;
+
+			for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+			{
+				if (Ceiling.RoomId == Fixture.RoomId)
+				{
+					SoffitDrop = FMath::Max(SoffitDrop,
+						FHFGenerators::CeilingSoffitDropAt(Ceiling, *FanRoom, Fixture.Position));
+				}
+			}
+
+			FanActor->ApplyCeilingAbove(SoffitDrop);
+		}
+
 		FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture,
-			Spec.FindRoom(Fixture.RoomId), Spec.FindWall(Fixture.AnchorWallId)));
+			FanRoom, Spec.FindWall(Fixture.AnchorWallId)));
 
 		FanActor->Regenerate();
 	}

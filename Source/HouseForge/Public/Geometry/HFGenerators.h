@@ -59,6 +59,30 @@ public:
 	static UE::Geometry::FDynamicMesh3 GenerateCeiling(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
 		const TArray<FVector2D>& FanDrops, double FanDropRadius);
 
+	/**
+	 * How far below the structural slab this ceiling's panel hangs over a plan point. 0 if none does.
+	 *
+	 * WHAT A CEILING FAN'S ROD HAS TO GET THROUGH. A fan hangs from the structural slab - that is why
+	 * GenerateCeiling cuts a hole for its rod at all - so a panel between the slab and the room is
+	 * something the rod passes through and the canopy has to land below. A rod sized from a project
+	 * constant instead built the whole rotor INSIDE the plasterboard of any room with a full drop:
+	 * the blades end up edge-on slivers lying in the panel, and from underneath the fan reads as a
+	 * bladed light fitting glued to the ceiling.
+	 *
+	 * The answer depends on WHERE, not just on the ceiling: a peripheral or cove ceiling leaves its
+	 * centre open to the slab and a fan there needs no extra rod at all, which is exactly why every
+	 * fan in the reference flat looked right and the trap stayed shut.
+	 *
+	 * Pure, and deliberately here rather than on the fan: it mirrors the switch in GenerateCeiling
+	 * case for case, and the two have to agree about which parts of a room are covered. The composing
+	 * layer asks this and resolves the rod - a generator never reads it.
+	 *
+	 * @return Distance from the slab down to the UNDERSIDE of whatever covers the point, in
+	 *         centimetres. Zero means the point is open to the structure.
+	 */
+	static double CeilingSoffitDropAt(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
+		const FVector2D& Point);
+
 	/** The structural slab soffit over a room - what you see looking up where nothing conceals it. */
 	static UE::Geometry::FDynamicMesh3 GenerateCeilingSlab(const FHFRoom& Room, double SlabThickness);
 
