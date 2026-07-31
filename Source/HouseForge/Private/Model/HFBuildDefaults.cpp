@@ -127,7 +127,12 @@ void FHFFanDefaults::ApplyTo(FHFFanParams& Params) const
 
 	Params.RevolutionsPerMinute = bCeiling ? CeilingFanRpm : ExhaustFanRpm;
 	Params.BladeCount = bCeiling ? CeilingFanBladeCount : ExhaustFanBladeCount;
-	Params.BladePitchDegrees = BladePitchDegrees;
+
+	// THE PITCH IS PER KIND TOO, and it was not. One BladePitchDegrees was stamped over both, which
+	// put a ceiling fan's 12 degrees onto every extract in the flat and made the kit's own 22 - set
+	// deliberately, with a comment saying an extract is a different object - unreachable from
+	// anything the house built. A 5-blade 22 cm impeller at 12 degrees reads as flat spokes.
+	Params.BladePitchDegrees = bCeiling ? CeilingFanBladePitchDegrees : ExhaustFanBladePitchDegrees;
 
 	if (bCeiling)
 	{

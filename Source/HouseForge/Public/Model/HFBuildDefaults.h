@@ -280,9 +280,26 @@ struct HOUSEFORGE_API FHFFanDefaults
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	int32 ExhaustFanBladeCount = 5;
 
-	/** Angle a blade is set at. Never zero - a flat blade reads as a paper cut-out under any light. */
+	/**
+	 * Angle a ceiling fan's blade is set at. Never zero - a flat blade reads as a paper cut-out.
+	 *
+	 * SPLIT FROM THE EXTRACT'S, the same way the speeds and the blade counts are, and for the same
+	 * reason: the two are different objects and one figure covering both is wrong for one of them. A
+	 * single BladePitchDegrees stamped 12 over FHFFanKit::DefaultsFor(Exhaust)'s own 22, which made
+	 * the kit's figure unreachable from anything the house built and left every extract in the flat
+	 * with blades too shallow to read as an impeller - flat spokes in a case.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
-	double BladePitchDegrees = 12.0;
+	double CeilingFanBladePitchDegrees = 12.0;
+
+	/**
+	 * Angle an extract's blade is set at. Steeper than a ceiling fan's, because it is one.
+	 *
+	 * An extract moves a small volume fast through a duct rather than a large one slowly across a
+	 * room, so its impeller is deeper-set. 22 is the kit's own figure for the object.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ExhaustFanBladePitchDegrees = 22.0;
 
 	/**
 	 * Canopy to the top of the motor on a ceiling fan.

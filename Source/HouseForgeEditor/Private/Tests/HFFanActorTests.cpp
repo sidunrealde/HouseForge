@@ -15,6 +15,7 @@
 #include "MeshQueries.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "Model/HFBuildDefaults.h"
 #include "Model/HFSampleHouse.h"
 #include "Model/HFTypes.h"
 
@@ -200,6 +201,33 @@ bool FHFFansInTheFlatTest::RunTest(const FString& Parameters)
 	}
 
 	TestTrue(TEXT("There were ceiling fans to compare in the first place"), CeilingAngles.Num() >= 3);
+
+	// ---------------------------------------------------------------- and they are not the same fan
+	//
+	// AN EXTRACT IS PITCHED LIKE AN EXTRACT. FHFFanKit::DefaultsFor(Exhaust) sets 22 degrees with a
+	// comment saying an extract is a different object from a ceiling fan, and a single project-wide
+	// BladePitchDegrees then stamped a ceiling fan's 12 over it - so the kit's figure was unreachable
+	// from anything the house built, and every extract in the flat turned flat spokes in a case.
+	//
+	// ASSERTED ON THE FANS THE HOUSE SPAWNED, not on DefaultsFor. The kit's figure was correct the
+	// whole time; the defect was entirely in what reached the level, so a test that asks the kit
+	// cannot see it. HouseForge.Fan.ProjectFiguresReachTheFan covers the settings half.
+	const FHFFanDefaults Project = FHFBuildDefaults::FromProjectSettings().Fan;
+
+	for (const TPair<FName, AHFFanActor*>& Entry : Built)
+	{
+		const AHFFanActor* Fan = Entry.Value;
+		const bool bCeiling = Fan->Fan.Kind == EHFFanKind::Ceiling;
+
+		TestEqual(*FString::Printf(TEXT("'%s' is set at the angle its own kind is set at"),
+			*Entry.Key.ToString()), Fan->Fan.BladePitchDegrees,
+			bCeiling ? Project.CeilingFanBladePitchDegrees : Project.ExhaustFanBladePitchDegrees);
+
+		// A pitch is a magnitude and never zero: a flat blade reads as a paper cut-out under any
+		// lighting, which is the quality bar in .claude/rules/04-conventions.md.
+		TestTrue(*FString::Printf(TEXT("'%s' has blades that are actually pitched"), *Entry.Key.ToString()),
+			Fan->Fan.BladePitchDegrees > 0.0);
+	}
 
 	// And the variation is deterministic: two builds of one spec have to produce one flat, or two
 	// renders of the same drawing would differ for no stated reason.

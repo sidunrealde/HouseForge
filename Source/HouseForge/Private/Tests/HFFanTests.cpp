@@ -483,7 +483,8 @@ bool FHFFanSettingsTest::RunTest(const FString& Parameters)
 	Project.ExhaustFanRpm = 900.0;
 	Project.CeilingFanBladeCount = 4;
 	Project.ExhaustFanBladeCount = 6;
-	Project.BladePitchDegrees = 20.0;
+	Project.CeilingFanBladePitchDegrees = 20.0;
+	Project.ExhaustFanBladePitchDegrees = 34.0;
 	Project.CeilingFanDropLength = 55.0;
 
 	FHFFanParams Ceiling = FHFFanKit::DefaultsFor(EHFFanKind::Ceiling);
@@ -503,8 +504,26 @@ bool FHFFanSettingsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The extract takes its own speed, not the ceiling fan's"),
 		Exhaust.RevolutionsPerMinute, 900.0);
 	TestEqual(TEXT("...and its own blade count"), Exhaust.BladeCount, 6);
+
+	// AND ITS OWN PITCH. One figure covered both, so a ceiling fan's 12 degrees was stamped over
+	// FHFFanKit::DefaultsFor(Exhaust)'s deliberate 22 and the kit's figure became unreachable from
+	// anything the house built. Asserted as a DIFFERENCE between the two kinds rather than as a
+	// number, because the defect was precisely that they were the same number.
+	TestEqual(TEXT("...and its own pitch, which is not the ceiling fan's"),
+		Exhaust.BladePitchDegrees, 34.0);
+	TestNotEqual(TEXT("The two kinds are set at different angles"),
+		Exhaust.BladePitchDegrees, Ceiling.BladePitchDegrees);
+
 	TestEqual(TEXT("A rod length means nothing on an extract, so its case depth stands"),
 		Exhaust.CaseDepth, 9.0);
+
+	// The shipped figures, not just a pair invented for this test: an extract leaves the settings
+	// page steeper than a ceiling fan, which is what the two objects are.
+	const FHFFanDefaults Shipped;
+	TestTrue(TEXT("Out of the box an extract is pitched steeper than a ceiling fan"),
+		Shipped.ExhaustFanBladePitchDegrees > Shipped.CeilingFanBladePitchDegrees);
+	TestEqual(TEXT("...and the extract's default is the kit's own figure for the object"),
+		Shipped.ExhaustFanBladePitchDegrees, FHFFanKit::DefaultsFor(EHFFanKind::Exhaust).BladePitchDegrees);
 
 	// And the speed reaches the part, which is the only place it can do any work.
 	const FHFFanBuild Built = FHFFanKit::Build(Ceiling);

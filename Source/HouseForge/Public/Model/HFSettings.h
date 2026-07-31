@@ -403,7 +403,7 @@ public:
 	int32 ExhaustFanBladeCount = 5;
 
 	/**
-	 * Angle a fan blade is set at, in degrees.
+	 * Angle a ceiling fan's blade is set at, in degrees.
 	 *
 	 * Never zero. A blade is pitched because that is what moves air, and a flat one is instantly
 	 * readable as wrong: it catches the light as a uniform strip where a real blade has a bright edge
@@ -412,7 +412,20 @@ public:
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Fans",
 		meta = (ClampMin = "0.0", ClampMax = "45.0", UIMin = "5.0", UIMax = "30.0"))
-	double BladePitchDegrees = 12.0;
+	double CeilingFanBladePitchDegrees = 12.0;
+
+	/**
+	 * Angle an extract's blade is set at, in degrees. Steeper, because an extract is a different
+	 * object: it moves a small volume fast through a duct rather than a large one slowly across a
+	 * room, and its impeller is deeper-set accordingly.
+	 *
+	 * Its own control rather than the ceiling fan's, because one figure for both was one figure that
+	 * was wrong for the extract - it built every extract in the flat with 12 degree blades that read
+	 * as flat spokes in a case.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Fans",
+		meta = (ClampMin = "0.0", ClampMax = "45.0", UIMin = "10.0", UIMax = "40.0"))
+	double ExhaustFanBladePitchDegrees = 22.0;
 
 	/**
 	 * Canopy to the top of the motor on a ceiling fan, in centimetres.

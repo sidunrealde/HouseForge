@@ -540,8 +540,8 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// The whole page ships, not a subset of it. A control quietly dropped between milestones is
 	// exactly what this number is here to catch.
 	//
-	// 78 leaves: 4 door + 15 sliding window + 12 ventilator + 4 fixed window under Openings, 32
-	// under Joinery, 6 under Fans, and 5 validation limits. The struct properties themselves are
+	// 79 leaves: 4 door + 15 sliding window + 12 ventilator + 4 fixed window under Openings, 32
+	// under Joinery, 7 under Fans, and 5 validation limits. The struct properties themselves are
 	// headings in the details panel rather than things anybody drags, so they are recursed through,
 	// not counted.
 	//
@@ -549,7 +549,9 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// judged against, and a doorway blockage is a project's own call - how far in front of a door
 	// counts as being in the way, and how narrow a gap that project will let somebody squeeze
 	// through - so they belong on the page beside MinHeadroomCm rather than compiled in.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 78);
+	// 79 rather than 78: the single BladePitchDegrees became one control per kind, because one
+	// figure covering a ceiling fan and an extract was a figure that was wrong for the extract.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 79);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
 	return true;
