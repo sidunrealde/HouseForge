@@ -5,6 +5,7 @@
 #include "Actors/HFArticulatedActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFOpeningActor.h"
+#include "Actors/HFFanActor.h"
 #include "Actors/HFWardrobeActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
@@ -359,6 +360,39 @@ void AHFHouseActor::BuildGeometry()
 			Spec.FindWall(Fixture.AnchorWallId)));
 
 		WardrobeActor->Regenerate();
+	}
+
+	// Fans. The one thing in the flat that revolves rather than opens, and until this loop existed
+	// the only production consumer of EHFMotionType::Spin was nothing at all: the mechanism was
+	// complete and tested, CeilingFan was read here solely to punch a rod hole in the false ceiling
+	// above a fan that did not exist, and ExhaustFan was not read anywhere.
+	for (const FHFFixture& Fixture : Spec.Fixtures)
+	{
+		if (Fixture.Type != EHFFixtureType::CeilingFan && Fixture.Type != EHFFixtureType::ExhaustFan)
+		{
+			continue;
+		}
+
+		AHFFanActor* FanActor = Cast<AHFFanActor>(
+			Spawn(AHFFanActor::StaticClass(), Fixture.Id,
+				FString::Printf(TEXT("Fan_%s"), *Fixture.Id.ToString())));
+
+		if (FanActor == nullptr)
+		{
+			continue;
+		}
+
+		// Settings first, then the drawing, exactly as a wardrobe: ApplyProjectDefaults picks the
+		// catalogue for the kind and ApplyFixture puts the drawn dimensions over it, so the order is
+		// load-bearing. Only on a freshly spawned actor - Spawn returns null for a preserved one.
+		FanActor->ApplyProjectDefaults(
+			Fixture.Type == EHFFixtureType::ExhaustFan ? EHFFanKind::Exhaust : EHFFanKind::Ceiling);
+		FanActor->ApplyFixture(Fixture);
+
+		FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture,
+			Spec.FindRoom(Fixture.RoomId), Spec.FindWall(Fixture.AnchorWallId)));
+
+		FanActor->Regenerate();
 	}
 
 	// Once every element has been regenerated its parts exist again, so the poses captured above can

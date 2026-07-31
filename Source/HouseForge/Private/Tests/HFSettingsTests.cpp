@@ -540,15 +540,16 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// The whole page ships, not a subset of it. A control quietly dropped between milestones is
 	// exactly what this number is here to catch.
 	//
-	// 72 leaves: 4 door + 15 sliding window + 12 ventilator + 4 fixed window under Openings, 32
-	// under Joinery, and 5 validation limits. The struct properties themselves are headings in the
-	// details panel rather than things anybody drags, so they are recursed through, not counted.
+	// 78 leaves: 4 door + 15 sliding window + 12 ventilator + 4 fixed window under Openings, 32
+	// under Joinery, 6 under Fans, and 5 validation limits. The struct properties themselves are
+	// headings in the details panel rather than things anybody drags, so they are recursed through,
+	// not counted.
 	//
 	// 5, not 3: DoorApproachDepthCm and MinClearPassageCm are what the DoorwayNotClear rule is
 	// judged against, and a doorway blockage is a project's own call - how far in front of a door
 	// counts as being in the way, and how narrow a gap that project will let somebody squeeze
 	// through - so they belong on the page beside MinHeadroomCm rather than compiled in.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 72);
+	TestEqual(TEXT("The page ships every control it did"), Controls, 78);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
 	return true;
@@ -746,11 +747,17 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// What counts as naming a unit. Deliberately short: a figure is a length, an angle or a ratio,
-	// and anything else on this page would want a rule of its own rather than a looser match here.
+	// What counts as naming a unit. Deliberately short: anything not on this list wants a considered
+	// addition rather than a looser match, which is the whole point of the guard.
+	//
+	// It began as lengths, angles and ratios because that was every figure the page had. Fans added
+	// two kinds it could not express: a SPEED, which is what an artist knows about a fan and is the
+	// figure that turns elapsed time into revolutions, and a COUNT, which is dimensionless but is
+	// still a thing a tooltip has to say plainly - "blades", not a bare number.
 	static const TArray<FString> Units = {
 		TEXT("centimetre"), TEXT("centimeter"), TEXT("millimetre"), TEXT("millimeter"),
-		TEXT("degree"), TEXT("ratio"), TEXT("fraction"), TEXT("percent")
+		TEXT("degree"), TEXT("ratio"), TEXT("fraction"), TEXT("percent"),
+		TEXT("revolution"), TEXT("count")
 	};
 
 	int32 Checked = 0;
@@ -806,7 +813,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 72);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 78);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;
