@@ -232,7 +232,8 @@ void AHFArticulatedActor::ApplyOpenAmounts()
 	// it allows. Done here rather than in the setters because every route into a pose ends up here -
 	// a details-panel edit, a master open, a rebuild, and a restore after one.
 	TArray<FName> Cyclic;
-	if (!FHFArticulation::ResolvePartAmounts(Parts, &Cyclic))
+	TArray<FHFUnresolvedDependency> Unresolved;
+	if (!FHFArticulation::ResolvePartAmounts(Parts, &Cyclic, &Unresolved))
 	{
 		TArray<FString> Names;
 		Names.Reserve(Cyclic.Num());
@@ -247,6 +248,20 @@ void AHFArticulatedActor::ApplyOpenAmounts()
 		UE_LOG(LogHouseForge, Warning,
 			TEXT("'%s' declares a circular relationship between its parts (%s); their gearing and sequencing were ignored. A part cannot drive, or wait for, something that waits for it."),
 			*GetName(), *FString::Join(Names, TEXT(", ")));
+	}
+
+	// A dependency naming a part that does not exist is not refused - the fixture still poses - but
+	// it is never harmless, and until this log existed it was completely silent. An ordering that
+	// resolves to nothing leaves the part it constrained entirely free, which is the behaviour the
+	// interlock was added to remove: the drawer comes out through the shut leaf, and every pose
+	// measurement agrees it should have. So it is named, per part, per bad id.
+	for (const FHFUnresolvedDependency& Bad : Unresolved)
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Part '%s' of '%s' is %s '%s', which is not a part of this fixture; the relationship was ignored and the part moves unconstrained."),
+			*Bad.PartId.ToString(), *GetName(),
+			Bad.bGearing ? TEXT("geared to") : TEXT("sequenced after"),
+			*Bad.MissingPartId.ToString());
 	}
 
 	for (int32 Index = 0; Index < Parts.Num(); ++Index)

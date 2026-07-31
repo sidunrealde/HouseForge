@@ -5,6 +5,7 @@
 #include "Actors/HFArticulatedActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFOpeningActor.h"
+#include "Actors/HFWardrobeActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
 #include "Geometry/HFGenerators.h"
@@ -322,6 +323,42 @@ void AHFHouseActor::BuildGeometry()
 			OpeningActor->ApplyProjectDefaults();
 			OpeningActor->Regenerate();
 		}
+	}
+
+	// Joinery. One fixture type so far - a wardrobe - and it is the first thing in the flat built out
+	// of FHFJoineryKit rather than out of a bespoke generator. The rest of the catalogue composes from
+	// the same kit and lands with milestone 9.
+	for (const FHFFixture& Fixture : Spec.Fixtures)
+	{
+		if (Fixture.Type != EHFFixtureType::Wardrobe)
+		{
+			continue;
+		}
+
+		AHFWardrobeActor* WardrobeActor = Cast<AHFWardrobeActor>(
+			Spawn(AHFWardrobeActor::StaticClass(), Fixture.Id,
+				FString::Printf(TEXT("Wardrobe_%s"), *Fixture.Id.ToString())));
+
+		if (WardrobeActor == nullptr)
+		{
+			continue;
+		}
+
+		// Settings first, then the drawing: ApplyFixture reads the project's module width and plinth
+		// height to fill in what a drawing did not state, so the order is load-bearing.
+		//
+		// Only on a freshly spawned actor - Spawn returns null for a preserved one - so a wardrobe
+		// somebody has modelled on keeps the figures it was built with rather than having a
+		// project-wide setting reach in and change it.
+		WardrobeActor->ApplyProjectDefaults();
+		WardrobeActor->ApplyFixture(Fixture);
+
+		const FHFRoom* Room = Spec.FindRoom(Fixture.RoomId);
+		WardrobeActor->SetActorTransform(AHFWardrobeActor::PlacementFor(Fixture,
+			Room != nullptr ? Room->FloorZ : 0.0,
+			Spec.FindWall(Fixture.AnchorWallId)));
+
+		WardrobeActor->Regenerate();
 	}
 
 	// Once every element has been regenerated its parts exist again, so the poses captured above can

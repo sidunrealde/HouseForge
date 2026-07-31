@@ -20,6 +20,22 @@ void FHFJoineryDefaults::ApplyTo(FHFPlinthParams& Params) const
 	// layer's call, and defaulting it would silently deepen every toe kick by a leaf's thickness.
 }
 
+void FHFJoineryDefaults::ApplyTo(FHFCarcassParams& Params) const
+{
+	Params.BoardThickness = CarcassBoardThickness;
+
+	// BackThickness is deliberately left alone. A carcass back is 6 to 12 mm ply pinned into a rebate,
+	// genuinely a different board from the 18 the sides are cut from, and FHFCarcassParams keeps the
+	// two apart for exactly that reason: the back is the one figure that changes the CLEAR DEPTH a
+	// shelf and a hanging rail get. Stamping the side board onto it would make a project that thickened
+	// its carcass quietly build a shallower wardrobe inside than the one it ordered.
+	//
+	// There is no settings control for it yet because nothing has asked for one, and a control on the
+	// page that nothing had ever been measured against is what this whole struct exists to avoid.
+
+	// Width, Depth, Height and BayCount are dimensions of the unit being built, not figures.
+}
+
 void FHFJoineryDefaults::ApplyTo(FHFShutterParams& Params) const
 {
 	Params.ModuleWidth = ShutterModuleWidth;

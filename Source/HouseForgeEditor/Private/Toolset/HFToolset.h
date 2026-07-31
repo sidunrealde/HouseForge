@@ -114,11 +114,43 @@ public:
 	static FString SaveSpec(const FString& FileName);
 
 	/**
-	 * Captures a top-down orthographic view of the house and returns the image path.
-	 * Compare this against the source drawing to check what was built matches what was read.
+	 * Draws a PLAN of the house and returns the image path: the flat cut through horizontally and
+	 * viewed orthographically from above, the way an architectural plan is drawn.
+	 *
+	 * This is the tool to compare against the source drawing. It is a section, not a view of the
+	 * roof, so walls read as walls, doorways as gaps and rooms as rooms. The house is not modified.
+	 * Works with the editor window minimised or covered.
+	 *
+	 * ORIENTATION: world +X runs right across the image and world +Y runs DOWN it. The drawing
+	 * sheets under Reference/Drawings are laid out with +Y UP, so a captured plan and a drawing
+	 * sheet of the same flat are mirrored vertically. Compare accordingly - a room that is
+	 * top-left on the sheet is bottom-left here.
 	 * @param FileName Output file name.
-	 * @param Resolution Longest edge in pixels.
+	 * @param Resolution Longest edge in pixels. The short edge follows the plan's proportions.
+	 * @param SectionHeightCm Height of the cut. Leave at 0 for 120 cm, which is where plans are cut.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HouseForge", meta = (ClampMin = "256", ClampMax = "8192"))
-	static FString CaptureTopDown(const FString& FileName, int32 Resolution);
+	static FString CaptureTopDown(const FString& FileName, int32 Resolution, float SectionHeightCm);
+
+	/**
+	 * Renders a perspective view from a point, looking at another point - an interior of one room.
+	 *
+	 * Use this to judge a room rather than the layout: whether a wardrobe is the right height, what
+	 * a doorway lines up with, whether a ceiling reads. Coordinates are world centimetres, the same
+	 * ones the House Spec uses after ingest. Standing eye height is about 160.
+	 * @param FileName Output file name.
+	 * @param Resolution Longest edge in pixels. The image is 16:9.
+	 * @param CameraX Camera position X, in centimetres.
+	 * @param CameraY Camera position Y, in centimetres.
+	 * @param CameraZ Camera position Z, in centimetres.
+	 * @param TargetX What to look at, X.
+	 * @param TargetY What to look at, Y.
+	 * @param TargetZ What to look at, Z.
+	 * @param FieldOfViewDegrees Horizontal field of view. Leave at 0 for 70, a wide interior lens.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge", meta = (ClampMin = "256", ClampMax = "8192"))
+	static FString CaptureView(const FString& FileName, int32 Resolution,
+		float CameraX, float CameraY, float CameraZ,
+		float TargetX, float TargetY, float TargetZ,
+		float FieldOfViewDegrees);
 };

@@ -1084,16 +1084,65 @@ bool FHFSequencedPartsTest::RunTest(const FString& Parameters)
 	}
 
 	// An ordering naming a part that is not in the assembly is ignored rather than blocking
-	// everything: a fixture missing a part is already logged at generation, and freezing every
-	// drawer in it would be a second, more confusing failure.
+	// everything: freezing every drawer in a fixture over one bad name would be a second and more
+	// confusing failure than the first.
+	//
+	// BUT IT IS NOT SILENT, and it used to be. Ignoring the ordering leaves the part completely
+	// unconstrained, which is precisely the pre-interlock behaviour this whole mechanism exists to
+	// remove - so a shutter part renamed without its drawer's ordering renamed with it would quietly
+	// revert the physical-pose guarantee, with nothing anywhere saying so. Nothing validates a
+	// declared dependency at generation either: AHFArticulatedActor::RegenerateParts checks empty
+	// ids and duplicate ids and never that a named part exists. The report below is the only thing
+	// that catches it, so the permissiveness and the diagnostic are asserted together.
 	{
 		TArray<FHFPartState> Parts = MakeWardrobe();
 		Parts[1].Motion.SequencedAfterPartId = TEXT("NoSuchLeaf");
 		Parts[1].OpenAmount = 1.0;
+
+		TArray<FHFUnresolvedDependency> Unresolved;
 		TestTrue(TEXT("An ordering naming a part that does not exist still resolves"),
-			FHFArticulation::ResolvePartAmounts(Parts));
+			FHFArticulation::ResolvePartAmounts(Parts, nullptr, &Unresolved));
 		TestNearlyEqual(TEXT("...and does not freeze the part that declared it"),
 			AmountOf(Parts, TEXT("Drawer")), 1.0, 1e-9);
+
+		if (TestEqual(TEXT("...but the dangling ordering is reported rather than swallowed"),
+			Unresolved.Num(), 1))
+		{
+			TestEqual(TEXT("...naming the part that declared it"), Unresolved[0].PartId, FName(TEXT("Drawer")));
+			TestEqual(TEXT("...and the id it could not find"), Unresolved[0].MissingPartId, FName(TEXT("NoSuchLeaf")));
+			TestFalse(TEXT("...and saying it was an ordering, not a gearing"), Unresolved[0].bGearing);
+		}
+	}
+
+	// The same for gearing, which fails the same way and is the other half of the pair.
+	{
+		TArray<FHFPartState> Parts = MakeWardrobe();
+		// Its own sound ordering is taken off first, so the only thing capping the drawer here is
+		// the dangling gearing - otherwise the shut leaf would hold it at 0 and the assertion below
+		// would pass for the wrong reason.
+		Parts[1].Motion.SequencedAfterPartId = NAME_None;
+		Parts[1].Motion.DrivenByPartId = TEXT("NoSuchDriver");
+		Parts[1].OpenAmount = 0.4;
+
+		TArray<FHFUnresolvedDependency> Unresolved;
+		TestTrue(TEXT("A gearing naming a part that does not exist still resolves"),
+			FHFArticulation::ResolvePartAmounts(Parts, nullptr, &Unresolved));
+		TestNearlyEqual(TEXT("...and leaves the part on its own amount"),
+			AmountOf(Parts, TEXT("Drawer")), 0.4, 1e-9);
+
+		if (TestEqual(TEXT("...and is reported too"), Unresolved.Num(), 1))
+		{
+			TestTrue(TEXT("...marked as a gearing"), Unresolved[0].bGearing);
+		}
+	}
+
+	// A sound assembly reports nothing. Without this the two assertions above would pass just as
+	// well against a function that reported every part it ever looked at.
+	{
+		TArray<FHFPartState> Parts = MakeWardrobe();
+		TArray<FHFUnresolvedDependency> Unresolved;
+		FHFArticulation::ResolvePartAmounts(Parts, nullptr, &Unresolved);
+		TestEqual(TEXT("A wardrobe whose orderings all resolve reports nothing"), Unresolved.Num(), 0);
 	}
 
 	return true;

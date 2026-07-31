@@ -80,7 +80,8 @@ FTransform FHFPartState::PoseAt(double InOpenAmount) const
 
 // ------------------------------------------------------------------------------- assembly solve
 
-bool FHFArticulation::ResolvePartAmounts(TArrayView<FHFPartState> Parts, TArray<FName>* OutCyclicPartIds)
+bool FHFArticulation::ResolvePartAmounts(TArrayView<FHFPartState> Parts, TArray<FName>* OutCyclicPartIds,
+	TArray<FHFUnresolvedDependency>* OutUnresolved)
 {
 	const int32 Count = Parts.Num();
 	if (Count == 0)
@@ -112,6 +113,38 @@ bool FHFArticulation::ResolvePartAmounts(TArrayView<FHFPartState> Parts, TArray<
 		const int32* Found = IndexById.Find(Id);
 		return Found != nullptr ? *Found : INDEX_NONE;
 	};
+
+	// ------------------------------------------------------------------ dependencies that dangle
+	//
+	// Collected here, once, before anything is decided - DependencyOf is called from two loops and
+	// several times per part, so reporting from inside it would report the same bad name repeatedly.
+	//
+	// Nothing is refused. A part naming an id no part carries stays free to move, because a fixture
+	// still has to pose. But free to move IS the pre-interlock behaviour, so it must be audible: a
+	// composer typo, or a shutter renamed without the drawer that waits on it, otherwise turns the
+	// whole ordering guarantee off and looks exactly like a wardrobe with no drawers in it.
+
+	if (OutUnresolved != nullptr)
+	{
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const FHFPartMotion& Motion = Parts[Index].Motion;
+
+			for (int32 Which = 0; Which < 2; ++Which)
+			{
+				const FName Id = Which == 0 ? Motion.DrivenByPartId : Motion.SequencedAfterPartId;
+				if (Id.IsNone() || IndexById.Contains(Id))
+				{
+					continue;
+				}
+
+				FHFUnresolvedDependency& Bad = OutUnresolved->AddDefaulted_GetRef();
+				Bad.PartId = Parts[Index].PartId;
+				Bad.MissingPartId = Id;
+				Bad.bGearing = Which == 0;
+			}
+		}
+	}
 
 	// ------------------------------------------------------------------- find the cycles first
 	//

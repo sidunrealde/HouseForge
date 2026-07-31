@@ -35,10 +35,10 @@
 <polygon points="328.35,435.68 422.83,435.68 422.83,674.80 328.35,674.80" fill="none" stroke="#787878" stroke-width="1.00"/>
 <circle cx="411.83" cy="555.24" r="3.40" fill="#464646" stroke="#464646" stroke-width="1.00"/>
 <text x="375.59" y="414.68" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">D_MBed</text>
-<polygon points="794.44,428.68 884.84,428.68 884.84,681.80 794.44,681.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
-<polygon points="801.44,435.68 877.84,435.68 877.84,674.80 801.44,674.80" fill="none" stroke="#787878" stroke-width="1.00"/>
-<circle cx="866.84" cy="555.24" r="3.40" fill="#464646" stroke="#464646" stroke-width="1.00"/>
-<text x="839.64" y="414.68" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">D_MBath</text>
+<polygon points="899.91,428.68 990.31,428.68 990.31,681.80 899.91,681.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
+<polygon points="906.91,435.68 983.31,435.68 983.31,674.80 906.91,674.80" fill="none" stroke="#787878" stroke-width="1.00"/>
+<circle cx="972.31" cy="555.24" r="3.40" fill="#464646" stroke="#464646" stroke-width="1.00"/>
+<text x="945.11" y="414.68" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="middle" dominant-baseline="central">D_MBath</text>
 <line x1="297.24" y1="721.80" x2="1092.76" y2="721.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="297.24" y1="681.80" x2="297.24" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
 <line x1="1092.76" y1="681.80" x2="1092.76" y2="729.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
