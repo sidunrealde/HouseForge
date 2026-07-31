@@ -21,6 +21,105 @@ namespace
 	{
 		return TMeshQueries<FDynamicMesh3>::GetVolumeArea(Mesh).X;
 	}
+
+	/**
+	 * How far a mesh reaches from the spin axis, which for a fan is the only measurement of "how big"
+	 * that means anything.
+	 *
+	 * NOT a bounding box, deliberately. An odd blade count is not symmetric about the axis - three
+	 * tips at 0, 120 and 240 degrees put the box 95 wide on a 120 sweep - so no bounding box on a
+	 * three-blade fan can ever equal its sweep, and an assertion written against one could only have
+	 * passed by accident on an even count. The sweep is a circle and the radius is what it is about.
+	 */
+	double MaxRadiusAboutAxis(const FDynamicMesh3& Mesh)
+	{
+		double Max = 0.0;
+		for (const int32 Vid : Mesh.VertexIndicesItr())
+		{
+			const FVector3d V = Mesh.GetVertex(Vid);
+			Max = FMath::Max(Max, FMath::Sqrt(V.X * V.X + V.Y * V.Y));
+		}
+		return Max;
+	}
+
+	/** How deep the BLADES are along the axis, ignoring the housing they are bolted to. */
+	double BladeDepthAlongAxis(const FDynamicMesh3& Mesh)
+	{
+		double Min = TNumericLimits<double>::Max();
+		double Max = -TNumericLimits<double>::Max();
+
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			// The rotor carries two roles: the blades are metal hardware and the motor housing is an
+			// appliance. Measuring the whole rotor measures the housing, which no pitch can change.
+			if (FHFMeshOps::RoleForGroup(Mesh.GetTriangleGroup(Tid)) != EHFSurfaceRole::MetalHardware)
+			{
+				continue;
+			}
+
+			FVector3d A, B, C;
+			Mesh.GetTriVertices(Tid, A, B, C);
+
+			Min = FMath::Min(Min, FMath::Min3(A.Z, B.Z, C.Z));
+			Max = FMath::Max(Max, FMath::Max3(A.Z, B.Z, C.Z));
+		}
+
+		return Max > Min ? Max - Min : -1.0;
+	}
+
+	/**
+	 * Which way the blades drive air along the spin axis, at a positive rpm. Signed; the magnitude is
+	 * arbitrary and only the sign is asserted on.
+	 *
+	 * A fan pitched the wrong way is perfect in every other measurable respect - watertight, the right
+	 * volume, the right sweep, the right roles - and blows at the ceiling. Nothing else in this file
+	 * can see it, so it is measured directly off the blade surfaces.
+	 *
+	 * For each blade triangle, take its outward normal N and the direction T that point of the blade
+	 * is travelling in at a positive phase (Z cross radial). A surface that both faces the room (N.Z
+	 * positive) and leans into its own motion (N dot T positive) is throwing air into the room; one
+	 * that faces the room while leaning away from its motion is throwing air at the ceiling. The
+	 * product of the two is that statement, and it is the same sign on BOTH faces of the blade - so it
+	 * does not depend on which way the triangles happen to be wound - and exactly zero on a flat one.
+	 */
+	double AirflowAlongAxis(const FDynamicMesh3& Mesh)
+	{
+		double Sum = 0.0;
+
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			if (FHFMeshOps::RoleForGroup(Mesh.GetTriangleGroup(Tid)) != EHFSurfaceRole::MetalHardware)
+			{
+				continue;
+			}
+
+			FVector3d A, B, C;
+			Mesh.GetTriVertices(Tid, A, B, C);
+
+			const FVector3d Cross = (B - A).Cross(C - A);
+			const double Area = Cross.Length() * 0.5;
+			if (Area <= UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const FVector3d Normal = Cross / (Area * 2.0);
+			const FVector3d Centroid = (A + B + C) / 3.0;
+
+			const double Radius = FMath::Sqrt(Centroid.X * Centroid.X + Centroid.Y * Centroid.Y);
+			if (Radius <= UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			// Where this bit of blade is going at a positive phase: Z cross radial.
+			const FVector3d Travel(-Centroid.Y / Radius, Centroid.X / Radius, 0.0);
+
+			Sum += Area * Normal.Z * Normal.Dot(Travel);
+		}
+
+		return Sum;
+	}
 }
 
 /**
@@ -62,22 +161,33 @@ bool FHFFanSpinsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The shell is a solid, not an inside-out one"), VolumeOf(Built.Shell) > 0.0);
 	TestTrue(TEXT("The rotor is a solid too"), VolumeOf(Rotor.Mesh) > 0.0);
 
-	// THE BLADES ARE ON THE ROTOR, not on the shell. Measured by reach: the rotor spans the sweep
-	// and the shell is a rod and a canopy, so if the two were the wrong way round - or if everything
-	// had been merged - the radii would say so.
-	const FAxisAlignedBox3d RotorBounds = Rotor.Mesh.GetBounds();
-	const FAxisAlignedBox3d ShellBounds = Built.Shell.GetBounds();
+	// THE BLADES ARE ON THE ROTOR, not on the shell. Measured by RADIAL REACH about the spin axis,
+	// which is what "reaches the full sweep" means on a fan: the sweep is the circle the tips
+	// describe. This was asserted on the rotor's bounding WIDTH and could not have passed - three
+	// blades at 0, 120 and 240 degrees are not symmetric in X, so the box is 95 wide on a declared
+	// 120 sweep and no blade length could make that number 120. See MaxRadiusAboutAxis.
+	//
+	// Tight, because the reach is exact by construction: MakeBlade runs the blade out until its outer
+	// CORNER lands on the sweep circle, so this asserts that a fan's declared dimension is true rather
+	// than nearly true.
+	const double RotorReach = MaxRadiusAboutAxis(Rotor.Mesh);
+	const double ShellReach = MaxRadiusAboutAxis(Built.Shell);
 
-	TestTrue(*FString::Printf(TEXT("The rotor reaches the full sweep (%.2f against a declared %.2f)"),
-		RotorBounds.Width(), P.SweepDiameter),
-		FMath::IsNearlyEqual(RotorBounds.Width(), P.SweepDiameter, 0.5));
-	TestTrue(*FString::Printf(TEXT("The fixed shell is only the rod and canopy (%.2f wide)"),
-		ShellBounds.Width()),
-		ShellBounds.Width() < P.SweepDiameter * 0.25);
+	TestTrue(*FString::Printf(TEXT("The rotor reaches the full sweep (%.3f across, against a declared %.2f)"),
+		RotorReach * 2.0, P.SweepDiameter),
+		FMath::IsNearlyEqual(RotorReach * 2.0, P.SweepDiameter, 0.5));
+	TestTrue(*FString::Printf(TEXT("...and nothing on it stands outside the circle it declares (%.3f against %.2f)"),
+		RotorReach, P.SweepRadius()),
+		RotorReach <= P.SweepRadius() + 0.01);
+	TestTrue(*FString::Printf(TEXT("The fixed shell is only the rod and canopy (%.2f across)"),
+		ShellReach * 2.0),
+		ShellReach * 2.0 < P.SweepDiameter * 0.25);
 
 	// A fan hangs BELOW what it is fixed to, in its own frame: local +Z is the spin axis pointing
-	// away from the mounting surface, so everything is at Z >= 0 and the caller aims it.
-	TestTrue(TEXT("Nothing sits behind the ceiling it is fixed to"), ShellBounds.Min.Z > -1e-6);
+	// away from the mounting surface, so everything is at Z >= 0 and the caller aims it. A bounding
+	// box is the right instrument for THIS question - it is about one axis, not about a circle.
+	TestTrue(TEXT("Nothing sits behind the ceiling it is fixed to"),
+		Built.Shell.GetBounds().Min.Z > -1e-6);
 	TestTrue(TEXT("The blades hang below the canopy"), Built.BladePlaneZ > P.DropLength);
 
 	return true;
@@ -87,38 +197,48 @@ bool FHFFanSpinsTest::RunTest(const FString& Parameters)
  * The blades are pitched, and the pitch is what a fan blade IS.
  *
  * A flat blade builds perfectly and is instantly readable as wrong under any light: it catches as a
- * uniform strip where a real blade has a bright edge and a dark one. Asserted on the rotor's own
- * depth, because that is the only thing a pitch changes - a flat rotor is as deep as its housing and
- * a pitched one is deeper by the blade's chord swept through the angle.
+ * uniform strip where a real blade has a bright edge and a dark one.
+ *
+ * Measured on THE BLADES, not on the rotor. This was asserted on the whole rotor's bounds, which
+ * cannot see a pitch at all: the blade plane sits at 65% of the housing height and a pitched blade's
+ * own depth - 5.8 cm at the steepest angle the kit allows - never reaches outside the 12 cm housing,
+ * so the rotor's depth is the housing's at every pitch. The measurement also read Height(), the Y
+ * extent, which is a PLAN dimension and therefore falls as the blade is pitched rather than rising.
+ * Both mistakes pointed the same way, which is why the numbers looked almost right.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFanBladePitchTest, "HouseForge.Fan.BladesArePitched", HF_TEST_FLAGS)
 
 bool FHFFanBladePitchTest::RunTest(const FString& Parameters)
 {
-	auto RotorDepthAtPitch = [this](double Degrees) -> double
+	auto BladeDepthAtPitch = [](double Degrees) -> double
 	{
 		FHFFanParams P = FHFFanKit::DefaultsFor(EHFFanKind::Ceiling);
 		P.BladePitchDegrees = Degrees;
 
 		const FHFFanBuild Built = FHFFanKit::Build(P);
-		return Built.Parts.Num() == 1 ? Built.Parts[0].Mesh.GetBounds().Height() : -1.0;
+		return Built.Parts.Num() == 1 ? BladeDepthAlongAxis(Built.Parts[0].Mesh) : -1.0;
 	};
 
-	const double Flat = RotorDepthAtPitch(0.0);
-	const double Pitched = RotorDepthAtPitch(12.0);
-	const double Steep = RotorDepthAtPitch(30.0);
+	const double Flat = BladeDepthAtPitch(0.0);
+	const double Pitched = BladeDepthAtPitch(12.0);
+	const double Steep = BladeDepthAtPitch(30.0);
 
 	if (!TestTrue(TEXT("All three rotors build"), Flat > 0.0 && Pitched > 0.0 && Steep > 0.0))
 	{
 		return false;
 	}
 
+	// A flat blade is exactly its own stock thickness deep, which is the one figure here that is not
+	// a comparison: it says the measurement is reading the blade and nothing else.
+	TestNearlyEqual(TEXT("A flat blade is exactly its own stock deep"),
+		Flat, FHFFanKit::DefaultsFor(EHFFanKind::Ceiling).BladeThickness, 1e-6);
+
 	// A pitched blade stands taller than a flat one, and a steeper one taller still. Monotone rather
-	// than a fixed figure, because the number depends on chord and housing height and asserting one
-	// would be asserting the current dimensions rather than the behaviour.
-	TestTrue(*FString::Printf(TEXT("Pitching the blades deepens the rotor (%.3f flat, %.3f at 12 degrees)"),
+	// than a fixed figure, because the number depends on the chord and asserting one would be
+	// asserting the current dimensions rather than the behaviour.
+	TestTrue(*FString::Printf(TEXT("Pitching the blades deepens them (%.3f flat, %.3f at 12 degrees)"),
 		Flat, Pitched), Pitched > Flat + 0.5);
-	TestTrue(*FString::Printf(TEXT("...and a steeper pitch deepens it further (%.3f at 30 degrees)"), Steep),
+	TestTrue(*FString::Printf(TEXT("...and a steeper pitch deepens them further (%.3f at 30 degrees)"), Steep),
 		Steep > Pitched + 0.5);
 
 	// The default is never flat. A generator that shipped a zero pitch would pass every geometric
@@ -127,6 +247,78 @@ bool FHFFanBladePitchTest::RunTest(const FString& Parameters)
 		FHFFanKit::DefaultsFor(EHFFanKind::Ceiling).BladePitchDegrees > 0.0);
 	TestTrue(TEXT("...and so is the extract's"),
 		FHFFanKit::DefaultsFor(EHFFanKind::Exhaust).BladePitchDegrees > 0.0);
+
+	return true;
+}
+
+/**
+ * The blades are set the RIGHT WAY ROUND, so the air goes where the fan is for.
+ *
+ * The failure this exists for is invisible to every other test in this file. A rotor pitched the
+ * wrong way is watertight, has the right volume, reaches exactly its declared sweep, carries every
+ * surface role, and blows at the ceiling - and it looks completely correct in a still, because a
+ * still cannot see which way a blade is set unless you go and measure it. That is what this does.
+ *
+ * The direction is not a free parameter and BladePitchDegrees deliberately does not carry a sign.
+ * A ceiling fan drives air INTO the room and an extract draws it OUT through the wall: those are
+ * what the two things are, not settings of one thing. A fan reverses the way a real fan reverses -
+ * by running its motor backwards - which is a negative RevolutionsPerMinute with the blades
+ * untouched, exactly as on a real reversible fan.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFanAirflowTest, "HouseForge.Fan.BladesBlowTheRightWay", HF_TEST_FLAGS)
+
+bool FHFFanAirflowTest::RunTest(const FString& Parameters)
+{
+	// A ceiling fan's local +Z points straight DOWN in the world - AHFFanActor::PlacementFor turns it
+	// half a turn about X - so driving air along +Z is driving it at the floor, which is what a
+	// ceiling fan in a flat in India is doing every day of the year.
+	const FHFFanBuild Ceiling = FHFFanKit::Build(FHFFanKit::DefaultsFor(EHFFanKind::Ceiling));
+	double CeilingFlow = 0.0;
+
+	if (TestTrue(TEXT("A ceiling fan builds"), Ceiling.bValid && Ceiling.Parts.Num() == 1))
+	{
+		CeilingFlow = AirflowAlongAxis(Ceiling.Parts[0].Mesh);
+		TestTrue(*FString::Printf(TEXT("A ceiling fan blows down into the room, not up at the slab (%.2f)"), CeilingFlow),
+			CeilingFlow > 0.0);
+	}
+
+	// An extract's local +Z points into the room it serves, and it has to move air the other way -
+	// out through the wall. Same kit, opposite hand, and nothing else about it differs in direction.
+	const FHFFanBuild Extract = FHFFanKit::Build(FHFFanKit::DefaultsFor(EHFFanKind::Exhaust));
+	if (TestTrue(TEXT("An extract builds"), Extract.bValid && Extract.Parts.Num() == 1))
+	{
+		const double Flow = AirflowAlongAxis(Extract.Parts[0].Mesh);
+		TestTrue(*FString::Printf(TEXT("An extract draws air out of the room rather than into it (%.2f)"), Flow),
+			Flow < 0.0);
+	}
+
+	// And the two really are opposite, rather than both happening to satisfy their own assertion for
+	// some reason that has nothing to do with the pitch.
+	if (Ceiling.Parts.Num() == 1 && Extract.Parts.Num() == 1)
+	{
+		TestTrue(TEXT("The two kinds are set opposite ways, which is the only difference between them"),
+			AirflowAlongAxis(Ceiling.Parts[0].Mesh) * AirflowAlongAxis(Extract.Parts[0].Mesh) < 0.0);
+	}
+
+	// A flat blade moves no air in either direction. The near-zero is what says the measurement is
+	// reading the pitch rather than something else that happens to correlate with it.
+	//
+	// Judged AGAINST THE PITCHED FIGURE rather than against an absolute tolerance. A flat blade's
+	// chamfer facets cancel exactly in arithmetic and only to about one part in a million once three
+	// blades have been rotated to their stations in doubles, so an absolute epsilon here would be
+	// asserting the accumulated rounding error of a yaw and not the geometry.
+	FHFFanParams FlatParams = FHFFanKit::DefaultsFor(EHFFanKind::Ceiling);
+	FlatParams.BladePitchDegrees = 0.0;
+
+	const FHFFanBuild FlatFan = FHFFanKit::Build(FlatParams);
+	if (TestTrue(TEXT("A flat fan builds"), FlatFan.bValid && FlatFan.Parts.Num() == 1)
+		&& CeilingFlow > 0.0)
+	{
+		const double FlatFlow = AirflowAlongAxis(FlatFan.Parts[0].Mesh);
+		TestTrue(*FString::Printf(TEXT("A flat blade drives air neither way (%.6f against a pitched %.2f)"),
+			FlatFlow, CeilingFlow),
+			FMath::Abs(FlatFlow) < CeilingFlow * 0.001);
+	}
 
 	return true;
 }

@@ -50,12 +50,6 @@ namespace
 
 		const double Half = FMath::Max(P.BladeChord, MinStock) * 0.5;
 		const double Thick = FMath::Max(P.BladeThickness, MinStock) * 0.5;
-		const double Length = P.SweepRadius() - RootRadius;
-
-		if (Length <= MinStock)
-		{
-			return Blade;
-		}
 
 		// The chamfer cannot eat the section it is cut from - a bevel wider than the stock is half a
 		// blade, not a chamfered one.
@@ -79,14 +73,66 @@ namespace
 			};
 		}
 
+		// ------------------------------------------------------------------------- which way it is set
+		//
+		// THE SIGN OF THE PITCH IS THE DIRECTION OF THE AIRFLOW, and getting it backwards builds a fan
+		// that is perfect in every measurable way and blows at the ceiling.
+		//
+		// The derivation, in the fan's own frame, where +Z is the axis pointing into the room. A
+		// positive phase turns the rotor about +Z, which carries +X towards +Y, so a blade lying along
+		// +X is travelling in +Y and ITS LEADING EDGE IS ITS +Y EDGE. A blade wants to throw air along
+		// +Z, so - by the same reasoning as a wing at a positive angle of attack, whose lift is opposite
+		// the air it deflects - its leading edge has to be tilted towards -Z, the ceiling side. That is
+		// the rule of thumb a real fan is checked against: IN DOWNDRAFT THE LEADING EDGE IS THE HIGHER
+		// ONE.
+		//
+		// A rotation of +theta about +X carries +Y towards +Z, which puts the leading edge on the ROOM
+		// side - the wrong way round. Hence the minus. AirflowSign then flips the whole thing for an
+		// extract, which has to draw air out through the wall rather than push it into the room.
+		const double PitchDegrees = -P.BladePitchDegrees * P.AirflowSign();
+		const double PitchRadians = FMath::DegreesToRadians(PitchDegrees);
+		const double CosPitch = FMath::Cos(PitchRadians);
+		const double SinPitch = FMath::Sin(PitchRadians);
+
+		// ------------------------------------------------------------------------------ how long it is
+		//
+		// THE SWEEP IS A CIRCLE, so a blade run out to the sweep radius along its own centreline puts
+		// its outer CORNERS outside that circle - by 2.4 mm on a standard 1200 fan, which is small but
+		// is the difference between a declared dimension being true and being nearly true. A fan is
+		// bought by its sweep; a 1200 fan that measures 1205 is a fan nothing can be dimensioned
+		// against.
+		//
+		// So the length is set from the corner rather than the centreline: find how far the pitched
+		// section reaches to either side of the centreline IN PLAN - the section's (u, v) lands on
+		// (Y, Z), and the pitch turns about X, so a section point is u*cos - v*sin off the centreline -
+		// and pull the tip back until sqrt(tip^2 + that^2) is exactly the sweep radius.
+		double HalfWidthInPlan = 0.0;
+		for (const FVector2D& Point : Section)
+		{
+			HalfWidthInPlan = FMath::Max(HalfWidthInPlan,
+				FMath::Abs(Point.X * CosPitch - Point.Y * SinPitch));
+		}
+
+		const double TipRadius = FMath::Sqrt(
+			FMath::Max(FMath::Square(P.SweepRadius()) - FMath::Square(HalfWidthInPlan), 0.0));
+
+		const double Length = TipRadius - RootRadius;
+
+		// A blade wider than the fan it is on has nowhere to go. Refused rather than clamped: a sliver
+		// carries through every volume and bounds measurement taken afterwards.
+		if (Length <= MinStock)
+		{
+			return Blade;
+		}
+
 		FHFMeshOps::AppendExtrudedSection(Blade, Section, FVector3d(RootRadius, 0.0, 0.0),
 			FVector3d::UnitY(), FVector3d::UnitX(), Length, EHFSurfaceRole::MetalHardware);
 
 		// Pitch, about the blade's own long axis, which is +X and passes through the fan's centre. A
 		// flat blade is what makes a generated fan read as a paper cut-out.
-		if (Blade.TriangleCount() > 0 && FMath::Abs(P.BladePitchDegrees) > UE_KINDA_SMALL_NUMBER)
+		if (Blade.TriangleCount() > 0 && FMath::Abs(PitchDegrees) > UE_KINDA_SMALL_NUMBER)
 		{
-			RotateAboutOrigin(Blade, FVector3d::UnitX(), P.BladePitchDegrees);
+			RotateAboutOrigin(Blade, FVector3d::UnitX(), PitchDegrees);
 		}
 
 		return Blade;

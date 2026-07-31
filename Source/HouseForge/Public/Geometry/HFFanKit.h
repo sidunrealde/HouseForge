@@ -91,12 +91,18 @@ struct HOUSEFORGE_API FHFFanParams
 	int32 BladeCount = 3;
 
 	/**
-	 * Angle the blade is set at, in degrees. Never zero.
+	 * Angle the blade is set at, in degrees. A MAGNITUDE, never zero, and never signed.
 	 *
 	 * A fan blade is pitched because that is what moves air, and a flat one is instantly readable as
 	 * wrong: it catches the light as a uniform strip where a real blade has a bright edge and a dark
 	 * one. This is a lighting decision as much as a mechanical one - see the quality bar in
 	 * .claude/rules/04-conventions.md.
+	 *
+	 * WHICH WAY THE BLADE IS SET IS NOT STATED HERE. The direction of airflow is the product of the
+	 * pitch handedness and the direction of rotation, and only one of those two is a free choice.
+	 * See AirflowSign: a ceiling fan drives air into the room and an extract draws it out, which is
+	 * what those two things ARE rather than something a drawing gets to vary. Leaving the sign on
+	 * this figure would have let a settings page build an extract that blew into the bathroom.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Blades",
 		meta = (ClampMin = "0.0", ClampMax = "45.0"))
@@ -152,6 +158,24 @@ struct HOUSEFORGE_API FHFFanParams
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Motor")
 	double PhaseTurns = 0.0;
+
+	/**
+	 * Which way this fan drives air along its own axis when it turns at a POSITIVE rpm.
+	 *
+	 * +1 along local +Z, which is away from the mounting surface and into the room; -1 the other way,
+	 * out through the surface it is fixed to.
+	 *
+	 * Derived from the kind rather than stated, because it is not a free choice. A ceiling fan that
+	 * blew at the slab and an extract that blew into the bathroom are not two settings of one object;
+	 * they are the two things being wrong. What IS free is the direction of rotation - a real fan
+	 * reverses for winter by running its motor backwards, and that is exactly what a negative
+	 * RevolutionsPerMinute expresses here, with the blades unchanged as they are on a real fan.
+	 *
+	 * Read by the generator to decide which way to set the blade. See MakeBlade for the derivation of
+	 * the sign; the short version is the rule of thumb every fan is checked against - in downdraft
+	 * the LEADING EDGE OF THE BLADE IS THE HIGHER ONE.
+	 */
+	double AirflowSign() const { return Kind == EHFFanKind::Ceiling ? 1.0 : -1.0; }
 
 	/** How far the blades sit below the top of the motor housing, as a share of its height. */
 	double BladePlaneFraction() const { return 0.65; }
