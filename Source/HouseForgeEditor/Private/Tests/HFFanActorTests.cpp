@@ -361,6 +361,27 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 			TestTrue(*FString::Printf(TEXT("'%s' is well clear of the floor (%.1f above %.1f)"),
 				*Where, LowestBlade, FloorZ), LowestBlade > FloorZ + 180.0);
 
+			// ON A ROD, and at a height somebody would actually hang one at. A fan flush to the slab
+			// is a different fitting - it reads as a light - and one hung off the false-ceiling soffit
+			// instead of the structural slab sits lower than it is drawn while the hole cut for its rod
+			// serves nothing. The gap between the slab and the top of the rotor IS the rod.
+			TestTrue(*FString::Printf(TEXT("'%s' hangs on a rod rather than flush to the slab (%.1f of drop)"),
+				*Where, CeilingZ - HighestBlade), CeilingZ - HighestBlade > 10.0);
+
+			// Head height in a flat, and below any false ceiling in the room. Blades buried in
+			// plasterboard is the failure the rod length exists to prevent.
+			for (const FHFFalseCeiling& Ceiling : House->Spec.FalseCeilings)
+			{
+				if (Ceiling.RoomId != Fixture.RoomId || Ceiling.Style == EHFCeilingStyle::None)
+				{
+					continue;
+				}
+
+				const double Soffit = CeilingZ - Ceiling.Drop;
+				TestTrue(*FString::Printf(TEXT("'%s' hangs below the false ceiling, not inside it (%.1f under %.1f)"),
+					*Where, HighestBlade, Soffit), HighestBlade < Soffit + 0.01);
+			}
+
 			// Over the spot the drawing marked, which is also the spot the false ceiling was cut for.
 			//
 			// READ OFF THE COMPONENT'S LOCATION, which is its pivot and therefore the spin axis - not
