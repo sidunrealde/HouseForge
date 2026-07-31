@@ -55,6 +55,11 @@ public class HouseForgeEditor : ModuleRules
 				// lives in - the editor viewport read this replaces needed none of it.
 				"RenderCore",
 
+				// GetFeatureLevelShaderPlatform, so the capture can ask whether a material's
+				// shader map is compiled for the platform it is about to render at rather than
+				// letting the renderer quietly swap in DefaultMaterial.
+				"RHI",
+
 				// Geometry, for baking and level construction.
 				"GeometryCore",
 				"GeometryFramework",

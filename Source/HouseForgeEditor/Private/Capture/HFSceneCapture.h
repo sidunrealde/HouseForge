@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 
 class AActor;
+class UMaterialInterface;
 class UWorld;
 
 /** One offscreen render: where the camera is, what it sees, and how big the image is. */
@@ -63,6 +64,10 @@ struct FHFCaptureRequest
  * What it cannot do is render without a renderer. Under -nullrhi - which is how the validation gate
  * runs the whole suite - there is no rendering at all, and CanRender says so with the reason rather
  * than writing a black PNG that looks like a captured image of an unlit house.
+ *
+ * Nor will it render before the materials are ready. See EnsureMaterialsReady: a capture that draws
+ * with a half-compiled material produces a confident image of the wrong thing, which is a worse
+ * outcome than either a refusal or a wait.
  */
 class FHFSceneCapture
 {
@@ -73,6 +78,31 @@ public:
 	 * @param OutWhyNot  Filled in with what to change when the answer is no.
 	 */
 	static bool CanRender(FString& OutWhyNot);
+
+	/**
+	 * Every distinct material that would be drawn by this request, in the order first encountered.
+	 *
+	 * Honours ShowOnly, because that is what decides what is in the picture: a plan draws the
+	 * sectioned copy and nothing else, so the uncut house's materials are irrelevant to it.
+	 *
+	 * Separated out from EnsureMaterialsReady so that WHICH materials get checked is testable
+	 * without a renderer - the checking itself needs one, this does not.
+	 */
+	static TArray<UMaterialInterface*> GatherRenderedMaterials(UWorld* World, const FHFCaptureRequest& Request);
+
+	/**
+	 * Blocks until every material in the picture has a compiled shader map, and refuses if one
+	 * cannot be given one.
+	 *
+	 * A material whose shader map is not ready does not delay the frame - the renderer silently
+	 * substitutes DefaultMaterial for it and carries on, so the capture succeeds and writes a
+	 * plausible PNG in grey checkerboard. That is the failure this exists to stop: a whole review
+	 * package came back showing the default material while the MI_HF_* instances were correctly
+	 * assigned to all sixteen slots of every component, and nothing anywhere said so.
+	 *
+	 * @param OutWhyNot  Filled in with the materials that could not be made ready.
+	 */
+	static bool EnsureMaterialsReady(UWorld* World, const FHFCaptureRequest& Request, FString& OutWhyNot);
 
 	/**
 	 * Renders and writes the PNG.
