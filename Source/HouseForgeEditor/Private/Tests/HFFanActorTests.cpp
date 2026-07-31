@@ -426,6 +426,120 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * A ROTOR IS NOT A BLENDER, and it is not invisible to a trace either.
+ *
+ * The one part in the plugin where "collision follows the visual mesh" and "collision blocks" pull
+ * apart. Collision geometry does not spin with the render - the mesh never moves, only the
+ * component's transform does - so a blocking rotor is a blade frozen at one azimuth: a pawn walks
+ * cleanly through the gap between two blades and hits an invisible wall a few degrees later, at
+ * whatever angle the fan was last posed at. Both halves of that are wrong, and which half you get
+ * depends on where somebody stopped the fan.
+ *
+ * So the decision is query-only collision that blocks nothing, built complex-as-simple off the real
+ * blades so that traces, editor picking and any measurement of the fan still see them. Asserted
+ * against a wardrobe shutter, which is the opposite case and must still block: a door leaf you can
+ * walk through is the failure the complex collision existed to prevent in the first place.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFanCollisionTest,
+	"HouseForge.Editor.AFanRotorDoesNotBlockAWalkthrough", HF_TEST_FLAGS)
+
+bool FHFFanCollisionTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeFan;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+	if (!TestNotNull(TEXT("A house actor spawns"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); } };
+
+	House->SetSpec(FHFSampleHouse::Make2BHK());
+	House->BuildGeometry();
+
+	int32 Checked = 0;
+
+	for (const TPair<FName, AHFFanActor*>& Entry : FansIn(House))
+	{
+		UDynamicMeshComponent* Rotor = Entry.Value->GetPartComponent(AHFFanActor::RotorPartId());
+		if (Rotor == nullptr)
+		{
+			continue;
+		}
+
+		++Checked;
+		const FString Where = Entry.Key.ToString();
+
+		// Nothing that moves through the room can hit it.
+		TestEqual(*FString::Printf(TEXT("'%s' has no physics collision to walk into"), *Where),
+			Rotor->GetCollisionEnabled(), ECollisionEnabled::QueryOnly);
+		TestEqual(*FString::Printf(TEXT("'%s' does not block a pawn"), *Where),
+			Rotor->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
+		TestEqual(*FString::Printf(TEXT("'%s' does not block a camera either"), *Where),
+			Rotor->GetCollisionResponseToChannel(ECC_Camera), ECR_Ignore);
+
+		// But it is still there to be traced against and picked in the editor, off the real blades
+		// rather than off a box round them.
+		TestEqual(*FString::Printf(TEXT("'%s' is still visible to a trace"), *Where),
+			Rotor->GetCollisionResponseToChannel(ECC_Visibility), ECR_Block);
+		TestEqual(*FString::Printf(TEXT("'%s' traces against its own mesh, not a hull"), *Where),
+			Rotor->CollisionType, ECollisionTraceFlag::CTF_UseComplexAsSimple);
+		TestTrue(*FString::Printf(TEXT("'%s' actually builds that complex collision"), *Where),
+			Rotor->bEnableComplexCollision);
+
+		// And the state says so, so somebody asking "why does the pawn walk through the fan" finds
+		// an answer in the details panel rather than in this file.
+		const FHFPartState* State = Entry.Value->FindPart(AHFFanActor::RotorPartId());
+		if (State != nullptr)
+		{
+			TestEqual(*FString::Printf(TEXT("'%s' declares itself trace-only"), *Where),
+				State->Collision, EHFPartCollision::TraceOnly);
+		}
+	}
+
+	TestTrue(TEXT("There were rotors in the flat to check"), Checked >= 6);
+
+	// THE OPPOSITE CASE. A wardrobe shutter is posed and then stands still, so collision that matches
+	// it exactly is collision that stays true - and a leaf somebody can walk through is precisely
+	// what complex-as-simple was added for. If the fan's treatment had leaked onto every part, this
+	// is what would say so.
+	int32 Blocking = 0;
+
+	for (AActor* Element : House->ElementActors)
+	{
+		AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Element);
+		if (Articulated == nullptr || Cast<AHFFanActor>(Element) != nullptr)
+		{
+			continue;
+		}
+
+		for (const FHFPartState& Part : Articulated->Parts)
+		{
+			UDynamicMeshComponent* Component = Articulated->GetPartComponent(Part.PartId);
+			if (Component == nullptr || !Part.Motion.Opens())
+			{
+				continue;
+			}
+
+			++Blocking;
+			TestEqual(*FString::Printf(TEXT("'%s' part '%s' still blocks, because it opens and then stands still"),
+				*Articulated->GetName(), *Part.PartId.ToString()),
+				Component->GetCollisionEnabled(), ECollisionEnabled::QueryAndPhysics);
+		}
+	}
+
+	TestTrue(TEXT("There were opening parts in the flat to check against"), Blocking > 0);
+
+	return true;
+}
+
+/**
  * A fan that was stopped somewhere goes back there after a rebuild, phase intact.
  *
  * The wardrobe's assertion, for the other kind of pose. A phase is unbounded and an open amount is

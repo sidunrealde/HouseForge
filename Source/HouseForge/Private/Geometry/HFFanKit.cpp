@@ -347,6 +347,13 @@ FHFFanBuild FHFFanKit::Build(const FHFFanParams& Params)
 	Part.Motion.Axis = FVector::ZAxisVector;
 	Part.Motion.RevolutionsPerMinute = P.RevolutionsPerMinute;
 
+	// A ROTOR MUST NOT BE A BLENDER. Collision geometry does not spin with the render - the mesh
+	// stays put and only the component's transform turns - so a blocking rotor is a blade frozen at
+	// whatever angle the fan was left at: a pawn walks through the gap between two blades and hits an
+	// invisible wall a few degrees later. It keeps its complex collision, so traces and editor
+	// picking still hit the real blades, and blocks nothing. See EHFPartCollision::TraceOnly.
+	Part.Collision = EHFPartCollision::TraceOnly;
+
 	// Where this fan's blades are stopped as generated. Not clamped and not wrapped, exactly as
 	// FHFPartState::SpinTurns is not: a phase that keeps counting is the whole difference between a
 	// part that revolves and one that opens.

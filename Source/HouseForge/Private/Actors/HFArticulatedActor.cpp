@@ -348,6 +348,7 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 		State.PartId = Part.PartId;
 		State.PivotTransform = Part.PivotTransform;
 		State.Motion = Part.Motion;
+		State.Collision = Part.Collision;
 		State.OpenAmount = FMath::Clamp(Part.DefaultOpenAmount, 0.0, 1.0);
 		State.SpinTurns = Part.DefaultSpinTurns;
 
@@ -406,6 +407,11 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 		// that opted out of regeneration is still a part of the room being looked at.
 		FHFMaterialLibrary::ApplyPlaceholders(Component);
 
+		// Same reasoning for collision: it belongs to the component, and what a part blocks is a
+		// property of what that part IS rather than of the mesh currently on it. A hand-modelled fan
+		// blade must not become something a pawn can walk into.
+		ApplyPartCollision(Component, Part.Collision);
+
 		NewParts.Add(State);
 		NewComponents.Add(Component);
 	}
@@ -446,6 +452,38 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 	PartComponents = MoveTemp(NewComponents);
 }
 
+void AHFArticulatedActor::ApplyPartCollision(UDynamicMeshComponent* Component, EHFPartCollision Collision)
+{
+	if (!IsValid(Component))
+	{
+		return;
+	}
+
+	// Complex-as-simple either way. COLLISION FOLLOWS THE VISUAL MESH is not negotiable - an open
+	// door leaf has to block where the leaf is and not where a hull says it is - and what varies here
+	// is only what is allowed to hit it. bEnableComplexCollision is what actually builds that
+	// geometry; without it the leaf swings and a walkthrough goes straight through.
+	Component->CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
+	Component->bEnableComplexCollision = true;
+	Component->SetGenerateOverlapEvents(false);
+
+	if (Collision == EHFPartCollision::TraceOnly)
+	{
+		// A rotor. Query only, and blocking nothing that moves through the room: the collision cannot
+		// spin with the render, so anything it blocked would be a blade frozen at one azimuth - a
+		// wall across part of the sweep and thin air across the rest. Traces still hit the real
+		// blades, which is what editor picking and any line-of-sight query need. See
+		// EHFPartCollision::TraceOnly for the whole argument.
+		Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Component->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Component->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		return;
+	}
+
+	Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Component->SetCollisionProfileName(TEXT("BlockAll"));
+}
+
 UDynamicMeshComponent* AHFArticulatedActor::CreatePartComponent(FName PartId)
 {
 	if (Mesh == nullptr)
@@ -467,14 +505,10 @@ UDynamicMeshComponent* AHFArticulatedActor::CreatePartComponent(FName PartId)
 	Component->SetupAttachment(Mesh);
 
 	// Same collision treatment as the fixed shell: complex-as-simple, so an open door leaf blocks
-	// where it actually is rather than where a convex hull says it is. bEnableComplexCollision is
-	// what actually builds that collision - see AHFElementActor's constructor; without it the leaf
-	// swings and a walkthrough walks straight through it.
-	Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	Component->SetCollisionProfileName(TEXT("BlockAll"));
-	Component->CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
-	Component->bEnableComplexCollision = true;
-	Component->SetGenerateOverlapEvents(false);
+	// where it actually is rather than where a convex hull says it is. Blocking to begin with;
+	// RegenerateParts applies what the part itself declares immediately afterwards, so a rotor never
+	// exists as a blocker even for the moment between the two.
+	ApplyPartCollision(Component, EHFPartCollision::Blocking);
 
 	// And the same tangent treatment, for the same reason: the default takes tangents from the
 	// FDynamicMesh3 attribute set, nothing here ever enables them, and the component then falls back

@@ -58,6 +58,49 @@ enum class EHFMotionType : uint8
 };
 
 /**
+ * What a moving part's component blocks.
+ *
+ * COLLISION ALWAYS FOLLOWS THE VISUAL MESH - complex-as-simple off the part's own geometry, never a
+ * hull - because an open door leaf that blocks where a box says it is rather than where the leaf is
+ * makes a walkthrough walk through things. That is not what this chooses. This chooses what may
+ * collide with it, which is a separate question and one only a moving part raises.
+ *
+ * See EHFPartCollision::TraceOnly for the case that forced it.
+ */
+UENUM(BlueprintType)
+enum class EHFPartCollision : uint8
+{
+	/**
+	 * Blocks everything, off its own mesh. A door leaf, a wardrobe shutter, a drawer.
+	 *
+	 * The default, and right for every part whose motion is an OPENING. Those parts are posed and
+	 * then stand still: a door left open at 40% is at 40% while somebody walks past it, so collision
+	 * that matches it exactly is collision that is true for as long as anybody can test it.
+	 */
+	Blocking,
+
+	/**
+	 * Answers traces off its own mesh, and stops nothing. A fan rotor.
+	 *
+	 * A SPINNING PART IS THE ONE CASE WHERE MATCHING THE VISUAL MESH AND BLOCKING ARE INCOMPATIBLE.
+	 * Collision geometry does not spin with the render - the mesh never moves, only the component's
+	 * transform does - so blocking collision on a rotor is a blade frozen at one azimuth. A pawn
+	 * would walk freely through the gap between two blades and hit an invisible wall a few degrees
+	 * later, at whatever angle the fan happened to be stopped at when the level was saved. That is
+	 * worse than either extreme: it is a blender that is only sometimes there, and which moves
+	 * whenever anybody poses the fan.
+	 *
+	 * It is also not a thing anything should ever hit. A ceiling fan's blades hang about 2.6 m up and
+	 * an extract sits high in a wall; a pawn reaching either has already gone wrong somewhere else.
+	 *
+	 * So the rotor keeps its complex collision - traces still hit the real blades, which is what
+	 * editor picking, line-of-sight queries and any measurement of the fan need - and blocks nothing.
+	 * A walkthrough pawn and a camera pass through it. Query, not physics.
+	 */
+	TraceOnly
+};
+
+/**
  * The motion one part is capable of.
  *
  * Axis and travel are expressed in the part's own local space, whose origin is the pivot - the
@@ -261,6 +304,16 @@ struct HOUSEFORGE_API FHFPartState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
 	FHFPartMotion Motion;
 
+	/**
+	 * What this part's component blocks. Decided by the generator, shown here so it can be checked.
+	 *
+	 * Visible rather than editable because it follows from what the part IS - see EHFPartCollision.
+	 * Worth surfacing all the same: "why does the pawn walk through the fan" has an answer, and this
+	 * is where somebody looks for it.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	EHFPartCollision Collision = EHFPartCollision::Blocking;
+
 	/** Relative transform this part's component should carry as it currently stands. */
 	FTransform CurrentPose() const { return PoseAt(OpenAmount); }
 
@@ -324,6 +377,15 @@ struct HOUSEFORGE_API FHFMeshPart
 	FTransform PivotTransform = FTransform::Identity;
 
 	FHFPartMotion Motion;
+
+	/**
+	 * What this part's component should block. See EHFPartCollision.
+	 *
+	 * Stated by the generator, because the generator is what knows whether this part is a door leaf
+	 * or a fan blade. Blocking unless a generator says otherwise, so a part that says nothing gets
+	 * the collision a door leaf needs rather than none.
+	 */
+	EHFPartCollision Collision = EHFPartCollision::Blocking;
 
 	/** Open amount a freshly generated part starts at. Almost always 0. */
 	double DefaultOpenAmount = 0.0;
