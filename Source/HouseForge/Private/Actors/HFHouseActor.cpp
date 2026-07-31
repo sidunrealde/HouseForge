@@ -211,6 +211,23 @@ void AHFHouseActor::BuildGeometry()
 				WallActor->Openings.Add(Opening);
 			}
 		}
+
+		// AN EXTRACT HAS TO BLOW THROUGH THE WALL IT IS SCREWED TO. The fan's case carries an
+		// aperture and its blades turn inside it, and none of that is worth anything while the
+		// masonry behind is solid - which it was for all three extracts in the flat. Invisible from
+		// the room, because the case covers precisely the spot where the hole is not.
+		//
+		// Derived from the fan rather than asked of the drawing, and added to the WALL's openings
+		// only - never to the spec's - so the hole is cut but no ventilator sash is built in it. See
+		// AHFFanActor::DuctOpeningFor.
+		for (const FHFFixture& Fixture : Spec.Fixtures)
+		{
+			if (Fixture.Type == EHFFixtureType::ExhaustFan && Fixture.AnchorWallId == Wall.Id)
+			{
+				WallActor->Openings.Add(AHFFanActor::DuctOpeningFor(Fixture, Wall));
+			}
+		}
+
 		WallActor->Regenerate();
 	}
 

@@ -6,6 +6,42 @@
 
 using namespace UE::Geometry;
 
+namespace
+{
+	/**
+	 * The dimensions a drawing actually states about a fan, put onto its parameters.
+	 *
+	 * Shared between ApplyFixture and DuctOpeningFor on purpose: the hole cored through a wall has to
+	 * be derived from exactly the fan that ends up standing in it, and two copies of these rules
+	 * would be two copies that drift.
+	 */
+	void ReadDrawnDimensions(const FHFFixture& Fixture, FHFFanParams& P)
+	{
+		P.Kind = Fixture.Type == EHFFixtureType::ExhaustFan ? EHFFanKind::Exhaust : EHFFanKind::Ceiling;
+
+		// A fan is specified and bought by its SWEEP, which is what Diameter carries. A drawing that
+		// stated one is believed; one that did not falls back on the footprint it was drawn at, because
+		// a fan symbol on a plan is drawn at its sweep.
+		const double Drawn = FMath::Max(Fixture.Footprint.X, Fixture.Footprint.Y);
+		P.SweepDiameter = Fixture.Params.Diameter > 0.0 ? Fixture.Params.Diameter : Drawn;
+
+		if (P.Kind == EHFFanKind::Exhaust)
+		{
+			// An extract's case depth is how far it stands out of the wall, which is the smaller of the
+			// two plan dimensions - the drawing's 250 x 100 is a 250 fan in a 100 deep case.
+			const double Shallow = FMath::Min(Fixture.Footprint.X, Fixture.Footprint.Y);
+			if (Shallow > 0.0)
+			{
+				P.CaseDepth = Shallow;
+			}
+
+			// Both plan dimensions are the case, so the sweep is the aperture inside it rather than the
+			// outside of the box. Left at the drawn width the blades would foul their own frame.
+			P.SweepDiameter = Drawn * 0.75;
+		}
+	}
+}
+
 void AHFFanActor::ApplyProjectDefaults(EHFFanKind Kind)
 {
 	// The composing layer's job, and the only lines in this file that know a settings object could
@@ -16,28 +52,7 @@ void AHFFanActor::ApplyProjectDefaults(EHFFanKind Kind)
 
 void AHFFanActor::ApplyFixture(const FHFFixture& Fixture)
 {
-	Fan.Kind = Fixture.Type == EHFFixtureType::ExhaustFan ? EHFFanKind::Exhaust : EHFFanKind::Ceiling;
-
-	// A fan is specified and bought by its SWEEP, which is what Diameter carries. A drawing that
-	// stated one is believed; one that did not falls back on the footprint it was drawn at, because
-	// a fan symbol on a plan is drawn at its sweep.
-	const double Drawn = FMath::Max(Fixture.Footprint.X, Fixture.Footprint.Y);
-	Fan.SweepDiameter = Fixture.Params.Diameter > 0.0 ? Fixture.Params.Diameter : Drawn;
-
-	if (Fan.Kind == EHFFanKind::Exhaust)
-	{
-		// An extract's case depth is how far it stands out of the wall, which is the smaller of the
-		// two plan dimensions - the drawing's 250 x 100 is a 250 fan in a 100 deep case.
-		const double Shallow = FMath::Min(Fixture.Footprint.X, Fixture.Footprint.Y);
-		if (Shallow > 0.0)
-		{
-			Fan.CaseDepth = Shallow;
-		}
-
-		// Both plan dimensions are the case, so the sweep is the aperture inside it rather than the
-		// outside of the box. Left at the drawn width the blades would foul their own frame.
-		Fan.SweepDiameter = Drawn * 0.75;
-	}
+	ReadDrawnDimensions(Fixture, Fan);
 
 	// Varied per instance, deterministically. Three fans stopped on the same blade read as three
 	// copies of one object; two builds of the same spec that stopped them differently would be two
@@ -71,6 +86,53 @@ double AHFFanActor::PhaseForId(FName FixtureId)
 	// about "stopped on the same blade" has to be made in, and because it is the unit somebody
 	// reading a render is judging in.
 	return static_cast<double>(Hash % 10000u) / 10000.0;
+}
+
+FHFOpening AHFFanActor::DuctOpeningFor(const FHFFixture& Fixture, const FHFWall& Wall)
+{
+	FHFOpening Duct;
+	Duct.Id = FName(*FString::Printf(TEXT("%s_Duct"), *Fixture.Id.ToString()));
+	Duct.WallId = Wall.Id;
+
+	// Cut as a ventilator rather than a window, which is what it is: a hole high in a wall with no
+	// leaf in it. Nothing spawns a sash for it - it is never added to the spec's openings, only to
+	// the wall's own list - so the kind is here to say what the hole IS to anything reading it back.
+	Duct.Kind = EHFOpeningKind::Ventilator;
+	Duct.Swing = EHFSwing::None;
+
+	if (Fixture.Type != EHFFixtureType::ExhaustFan)
+	{
+		// A ceiling fan cores nothing through a wall. Zero width so a caller that added it anyway
+		// cuts nothing, rather than punching a hole for a fan hanging in the middle of the room.
+		Duct.Width = 0.0;
+		Duct.Height = 0.0;
+		return Duct;
+	}
+
+	FHFFanParams P = FHFFanKit::DefaultsFor(EHFFanKind::Exhaust);
+	ReadDrawnDimensions(Fixture, P);
+	P = FHFFanKit::Sanitise(P);
+
+	const double Side = P.DuctSide();
+	Duct.Width = Side;
+	Duct.Height = Side;
+
+	// Along the wall from its start, to the fan's own centre - OffsetAlongWall is a centre, not an
+	// edge. Projected onto the wall rather than taken from the fixture's distance to it, because the
+	// fixture stands proud of the face it is fixed to.
+	const FVector2D Along = Wall.End - Wall.Start;
+	const double Length = Along.Size();
+	if (Length > UE_KINDA_SMALL_NUMBER)
+	{
+		Duct.OffsetAlongWall = FVector2D::DotProduct(Fixture.Position - Wall.Start, Along / Length);
+	}
+
+	// Centred on the fan, which sits at BaseZ plus half its drawn height - the same centre
+	// PlacementFor puts the rotor at, so the hole and the thing turning in it agree.
+	const double CentreZ = Fixture.BaseZ + Fixture.Height * 0.5;
+	Duct.SillHeight = FMath::Max(CentreZ - Side * 0.5, 0.0);
+
+	return Duct;
 }
 
 FTransform AHFFanActor::PlacementFor(const FHFFixture& Fixture, const FHFRoom* Room, const FHFWall* AnchorWall)

@@ -183,6 +183,28 @@ struct HOUSEFORGE_API FHFFanParams
 	/** Radius the blades reach. */
 	double SweepRadius() const { return FMath::Max(SweepDiameter, 0.0) * 0.5; }
 
+	/** Exhaust fan only: half the width of the square case that stands proud of the wall. */
+	double CaseHalfWidth() const;
+
+	/** Exhaust fan only: radius of the aperture through the case, which the blades turn inside. */
+	double ThroatRadius() const;
+
+	/**
+	 * Exhaust fan only: the side of the square hole cored through the wall behind it.
+	 *
+	 * An extract has to blow THROUGH the wall it is screwed to, and the fan's own case having an
+	 * aperture is not the same thing as the masonry having one. Every extract in the reference flat
+	 * was bolted to a solid wall and discharging into it, which is invisible in plan and invisible in
+	 * any still of the room, because the case covers the spot where the hole is not.
+	 *
+	 * A square, because a wall opening is rectangular, and smaller than the fan - which is what a
+	 * real installation is: a cored duct of 150 behind a 250 fan. Inscribed in the case with a margin
+	 * so the case flange always hides it, since a hole peeking out from behind its own fan reads as a
+	 * modelling mistake; and never wider than the blades, because a duct wider than the impeller is
+	 * not a duct this fan is moving air through.
+	 */
+	double DuctSide() const;
+
 	/** Overall depth from the mounting surface: rod plus motor, or the case. */
 	double OverallDepth() const;
 

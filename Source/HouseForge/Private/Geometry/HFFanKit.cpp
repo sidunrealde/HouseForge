@@ -163,6 +163,25 @@ namespace
 
 // ------------------------------------------------------------------------------------ parameters
 
+double FHFFanParams::CaseHalfWidth() const
+{
+	return FMath::Max(SweepRadius() * 1.25, MotorDiameter * 0.5 + MinStock);
+}
+
+double FHFFanParams::ThroatRadius() const
+{
+	return FMath::Max(SweepRadius() * 1.05, MotorDiameter * 0.5 + MinStock);
+}
+
+double FHFFanParams::DuctSide() const
+{
+	// Inscribed in the case - a square hole's corners reach its half-diagonal, so the side is bounded
+	// by the case width over root two - with a tenth held back as the flange that hides the arris.
+	const double InsideTheCase = CaseHalfWidth() * 2.0 * 0.9 / UE_DOUBLE_SQRT_2;
+
+	return FMath::Max(FMath::Min(SweepDiameter, InsideTheCase), 0.0);
+}
+
 double FHFFanParams::OverallDepth() const
 {
 	return Kind == EHFFanKind::Ceiling
@@ -300,8 +319,10 @@ FHFFanBuild FHFFanKit::Build(const FHFFanParams& Params)
 		// annulus because the tool carries the role the cut faces end up with - the inside of the
 		// throat is the cutter's own wall - and SubtractInPlace is what keeps that role intact.
 
-		const double CaseHalf = FMath::Max(P.SweepRadius() * 1.25, MotorRadius + MinStock);
-		const double ThroatRadius = FMath::Max(P.SweepRadius() * 1.05, MotorRadius + MinStock);
+		// Shared with the hole cored through the wall behind it, so the two cannot drift apart and
+		// leave the masonry showing round the edge of the case. See FHFFanParams::DuctSide.
+		const double CaseHalf = P.CaseHalfWidth();
+		const double ThroatRadius = P.ThroatRadius();
 
 		FHFMeshOps::AppendBox(Out.Shell, FVector3d(0.0, 0.0, P.CaseDepth * 0.5),
 			FVector3d(CaseHalf, CaseHalf, P.CaseDepth * 0.5), 0.0, EHFSurfaceRole::Appliance);

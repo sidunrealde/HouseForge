@@ -114,6 +114,27 @@ public:
 	 */
 	static double PhaseForId(FName FixtureId);
 
+	/**
+	 * The hole an extract needs cored through the wall it is fixed to.
+	 *
+	 * AN EXTRACT HAS TO BLOW THROUGH SOMETHING. Its case carries an aperture and its blades turn
+	 * inside that aperture, and none of that is worth anything if the masonry behind it is solid -
+	 * which it was, for every extract in the reference flat. The failure is invisible from the room:
+	 * the case covers exactly the spot where the hole is not.
+	 *
+	 * DERIVED HERE RATHER THAN ASKED OF THE DRAWING. A plan marks an extract, not the duct cored for
+	 * it; the hole is a consequence of the fan's own size and putting it in the spec would be asking
+	 * a drawing for something no drawing has, and letting the two disagree.
+	 *
+	 * Returns an opening in the wall's own terms - an offset along it, a width, a height and a sill -
+	 * so the wall cuts it exactly as it cuts a window. Not added to the spec's openings, so no
+	 * ventilator sash is built in it: this is a duct, not a window.
+	 *
+	 * @param Fixture The extract. A fixture of any other type gives a zero-width opening.
+	 * @param Wall The wall it is anchored to, for the offset the hole is measured along.
+	 */
+	static FHFOpening DuctOpeningFor(const FHFFixture& Fixture, const FHFWall& Wall);
+
 	/** Part id of the spinning assembly: motor housing and blades. */
 	static FName RotorPartId() { return FHFFanKit::RotorPartId; }
 

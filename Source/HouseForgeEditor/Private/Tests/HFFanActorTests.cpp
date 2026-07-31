@@ -4,11 +4,15 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Actors/HFElementActors.h"
 #include "Actors/HFFanActor.h"
 #include "Actors/HFHouseActor.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Editor.h"
 #include "Engine/World.h"
+#include "Geometry/HFGenerators.h"
+#include "Geometry/HFMeshOps.h"
+#include "MeshQueries.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "Model/HFSampleHouse.h"
@@ -421,6 +425,132 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 			}
 		}
 	}
+
+	return true;
+}
+
+/**
+ * AN EXTRACT BLOWS THROUGH THE WALL, not into it.
+ *
+ * The fan's own case has an aperture and its blades turn inside that aperture, and none of it is
+ * worth anything while the masonry behind is solid. All three extracts in the flat were bolted to
+ * unbroken walls and discharging into them - and it is invisible from the room, because the case
+ * covers exactly the spot where the hole is not, so every still of every bathroom looked right.
+ *
+ * Measured on the wall's own geometry rather than on the derived opening, because an opening added
+ * to a list that nothing cuts would satisfy any assertion about the list.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFExtractDuctTest,
+	"HouseForge.Editor.AnExtractHasSomethingToBlowThrough", HF_TEST_FLAGS)
+
+bool FHFExtractDuctTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+	if (!TestNotNull(TEXT("A house actor spawns"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); } };
+
+	House->SetSpec(FHFSampleHouse::Make2BHK());
+	House->BuildGeometry();
+
+	int32 Extracts = 0;
+
+	for (const FHFFixture& Fixture : House->Spec.Fixtures)
+	{
+		if (Fixture.Type != EHFFixtureType::ExhaustFan)
+		{
+			continue;
+		}
+
+		const FString Where = Fixture.Id.ToString();
+		++Extracts;
+
+		const FHFWall* Wall = House->Spec.FindWall(Fixture.AnchorWallId);
+		if (!TestNotNull(*FString::Printf(TEXT("'%s' names a wall to blow through"), *Where), Wall))
+		{
+			continue;
+		}
+
+		// The wall actor that was actually built, and the openings it was actually built with.
+		AHFWallActor* WallActor = nullptr;
+		for (AActor* Element : House->ElementActors)
+		{
+			AHFWallActor* Candidate = Cast<AHFWallActor>(Element);
+			if (Candidate != nullptr && Candidate->ElementId == Wall->Id)
+			{
+				WallActor = Candidate;
+				break;
+			}
+		}
+
+		if (!TestNotNull(*FString::Printf(TEXT("'%s' has a wall actor to be cut into"), *Where), WallActor))
+		{
+			continue;
+		}
+
+		const FHFOpening Expected = AHFFanActor::DuctOpeningFor(Fixture, *Wall);
+
+		TestTrue(*FString::Printf(TEXT("'%s' has a duct wide enough to be a duct (%.1f cm)"),
+			*Where, Expected.Width), Expected.Width > 5.0);
+
+		// It is smaller than the case that covers it, or the hole shows round the edge of the fan.
+		// Corners included: a square hole reaches its half-diagonal, which is what actually pokes out.
+		FHFFanParams AsBuilt = FHFFanKit::DefaultsFor(EHFFanKind::Exhaust);
+		AsBuilt.SweepDiameter = FMath::Max(Fixture.Footprint.X, Fixture.Footprint.Y) * 0.75;
+		AsBuilt = FHFFanKit::Sanitise(AsBuilt);
+
+		TestTrue(*FString::Printf(TEXT("'%s' is covered by its own case (%.1f half-diagonal against %.1f)"),
+			*Where, Expected.Width * 0.5 * UE_DOUBLE_SQRT_2, AsBuilt.CaseHalfWidth()),
+			Expected.Width * 0.5 * UE_DOUBLE_SQRT_2 < AsBuilt.CaseHalfWidth());
+
+		// THE HOLE IS REALLY CUT. Measured as the volume the wall lost: regenerate the same wall
+		// from the same openings with the duct taken out of the list, and the difference is the
+		// masonry the duct removed. A list entry nothing acted on would show a difference of zero.
+		TArray<FHFOpening> WithoutDuct;
+		int32 Ducts = 0;
+
+		for (const FHFOpening& Opening : WallActor->Openings)
+		{
+			if (Opening.Id == Expected.Id)
+			{
+				++Ducts;
+				continue;
+			}
+			WithoutDuct.Add(Opening);
+		}
+
+		if (!TestEqual(*FString::Printf(TEXT("'%s' put exactly one duct in its wall"), *Where), Ducts, 1))
+		{
+			continue;
+		}
+
+		const double Solid = TMeshQueries<FDynamicMesh3>::GetVolumeArea(
+			FHFGenerators::GenerateWall(*Wall, WithoutDuct)).X;
+		const double Cored = TMeshQueries<FDynamicMesh3>::GetVolumeArea(
+			FHFGenerators::GenerateWall(*Wall, WallActor->Openings)).X;
+
+		// What a hole of this size through this wall has to take out, allowing for the boolean
+		// resolving the corners differently from an exact prism.
+		const double Nominal = Expected.Width * Expected.Height * Wall->Thickness;
+
+		TestTrue(*FString::Printf(TEXT("'%s' cored a real hole (%.0f cm3 of a nominal %.0f)"),
+			*Where, Solid - Cored, Nominal), Solid - Cored > Nominal * 0.8);
+		TestTrue(*FString::Printf(TEXT("'%s' took out no more than the hole"), *Where),
+			Solid - Cored < Nominal * 1.2);
+
+		TestTrue(*FString::Printf(TEXT("'%s' leaves its wall watertight"), *Where),
+			FHFMeshOps::IsClosed(FHFGenerators::GenerateWall(*Wall, WallActor->Openings)));
+	}
+
+	TestTrue(TEXT("The flat has extracts to check"), Extracts >= 3);
 
 	return true;
 }
