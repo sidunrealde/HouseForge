@@ -88,7 +88,7 @@ double AHFFanActor::PhaseForId(FName FixtureId)
 	return static_cast<double>(Hash % 10000u) / 10000.0;
 }
 
-FHFOpening AHFFanActor::DuctOpeningFor(const FHFFixture& Fixture, const FHFWall& Wall)
+FHFOpening AHFFanActor::DuctOpeningFor(const FHFFixture& Fixture, const FHFWall& Wall, const FHFRoom* Room)
 {
 	FHFOpening Duct;
 	Duct.Id = FName(*FString::Printf(TEXT("%s_Duct"), *Fixture.Id.ToString()));
@@ -127,10 +127,28 @@ FHFOpening AHFFanActor::DuctOpeningFor(const FHFFixture& Fixture, const FHFWall&
 		Duct.OffsetAlongWall = FVector2D::DotProduct(Fixture.Position - Wall.Start, Along / Length);
 	}
 
-	// Centred on the fan, which sits at BaseZ plus half its drawn height - the same centre
-	// PlacementFor puts the rotor at, so the hole and the thing turning in it agree.
-	const double CentreZ = Fixture.BaseZ + Fixture.Height * 0.5;
-	Duct.SillHeight = FMath::Max(CentreZ - Side * 0.5, 0.0);
+	// ------------------------------------------------------------------- and up the wall, in ITS datum
+	//
+	// TWO DIFFERENT DATUMS MEET HERE, and getting that wrong hangs a raw hole out below the fan that
+	// is supposed to be covering it - which is exactly the invisible-from-the-room failure this
+	// function exists to fix, only the other way round.
+	//
+	// FHFFixture::BaseZ is measured ABOVE THE ROOM FLOOR, and PlacementFor honours that: the rotor
+	// goes at Room.FloorZ + BaseZ + Height/2. FHFOpening::SillHeight is measured ABOVE THE WALL'S
+	// BASE, and every consumer of one resolves it as Wall.BaseZ + SillHeight - GenerateWall,
+	// OpeningCentre and the validator all do. Writing the room-datum figure straight into SillHeight
+	// therefore puts the hole at Wall.BaseZ + BaseZ + Height/2 while the fan is at Room.FloorZ +
+	// BaseZ + Height/2, and the two disagree by exactly (Wall.BaseZ - Room.FloorZ).
+	//
+	// Both are zero everywhere in the reference flat, so they agreed by coincidence rather than by
+	// construction. One room on a raised floor - a bathroom with its slab dropped and made up, which
+	// is normal - and the case stops covering the hole.
+	const double FloorZ = Room != nullptr ? Room->FloorZ : 0.0;
+	const double CentreZ = FloorZ + Fixture.BaseZ + Fixture.Height * 0.5;
+
+	// Converted into the wall's own datum, so that Wall.BaseZ + SillHeight lands back on the fan's
+	// centre - which is the property HouseForge.Editor.AnExtractHasSomethingToBlowThrough asserts.
+	Duct.SillHeight = FMath::Max(CentreZ - Wall.BaseZ - Side * 0.5, 0.0);
 
 	return Duct;
 }

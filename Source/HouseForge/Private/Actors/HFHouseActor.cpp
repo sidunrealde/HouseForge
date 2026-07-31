@@ -224,7 +224,11 @@ void AHFHouseActor::BuildGeometry()
 		{
 			if (Fixture.Type == EHFFixtureType::ExhaustFan && Fixture.AnchorWallId == Wall.Id)
 			{
-				WallActor->Openings.Add(AHFFanActor::DuctOpeningFor(Fixture, Wall));
+				// The ROOM as well as the wall: a fixture's BaseZ is measured above the room floor
+				// and an opening's sill above the wall's base, and the hole has to land on the fan's
+				// own centre rather than on whichever of the two datums happened to be handy.
+				WallActor->Openings.Add(
+					AHFFanActor::DuctOpeningFor(Fixture, Wall, Spec.FindRoom(Fixture.RoomId)));
 			}
 		}
 

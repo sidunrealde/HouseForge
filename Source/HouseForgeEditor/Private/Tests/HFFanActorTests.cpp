@@ -545,7 +545,43 @@ bool FHFExtractDuctTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
-		const FHFOpening Expected = AHFFanActor::DuctOpeningFor(Fixture, *Wall);
+		const FHFRoom* Room = House->Spec.FindRoom(Fixture.RoomId);
+		const FHFOpening Expected = AHFFanActor::DuctOpeningFor(Fixture, *Wall, Room);
+
+		// ------------------------------------------------------- the hole is where the FAN is, not near it
+		//
+		// Measured against the rotor's own world position rather than against a figure recomputed
+		// here, because the two are derived by different code down different datums and the whole
+		// defect was that they disagreed. Volume alone cannot see this: a hole in the wrong place is
+		// exactly as many cubic centimetres as one in the right place.
+		{
+			AHFFanActor* FanActor = nullptr;
+			for (AActor* Element : House->ElementActors)
+			{
+				AHFFanActor* Candidate = Cast<AHFFanActor>(Element);
+				if (Candidate != nullptr && Candidate->ElementId == Fixture.Id)
+				{
+					FanActor = Candidate;
+					break;
+				}
+			}
+
+			if (TestNotNull(*FString::Printf(TEXT("'%s' was built as an actor"), *Where), FanActor))
+			{
+				UDynamicMeshComponent* Rotor = FanActor->GetPartComponent(AHFFanActor::RotorPartId());
+				if (TestNotNull(*FString::Printf(TEXT("'%s' has a rotor to line up with"), *Where), Rotor))
+				{
+					// Wall.BaseZ + SillHeight is how GenerateWall, OpeningCentre and the validator all
+					// resolve a sill, so it is the hole's real world centre.
+					const double DuctCentreZ = Wall->BaseZ + Expected.SillHeight + Expected.Height * 0.5;
+					const double RotorZ = Rotor->GetComponentLocation().Z;
+
+					TestTrue(*FString::Printf(
+						TEXT("'%s' cores its duct at the height the fan turns at (hole %.1f, rotor %.1f)"),
+						*Where, DuctCentreZ, RotorZ), FMath::IsNearlyEqual(DuctCentreZ, RotorZ, 0.1));
+				}
+			}
+		}
 
 		TestTrue(*FString::Printf(TEXT("'%s' has a duct wide enough to be a duct (%.1f cm)"),
 			*Where, Expected.Width), Expected.Width > 5.0);

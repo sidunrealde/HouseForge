@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Actors/HFFanActor.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Geometry/HFFanKit.h"
 #include "Geometry/HFMeshOps.h"
@@ -534,6 +535,105 @@ bool FHFFanSettingsTest::RunTest(const FString& Parameters)
 		TestNearlyEqual(TEXT("A minute at 210 rpm is 210 revolutions"),
 			Built.Parts[0].Motion.TurnsInSeconds(60.0), 210.0, 1e-9);
 	}
+
+	return true;
+}
+
+/**
+ * THE HOLE AND THE FAN ARE MEASURED FROM DIFFERENT THINGS, and still land on each other.
+ *
+ * A fixture's BaseZ is above the ROOM FLOOR - FHFTypes.h says so and PlacementFor honours it - and an
+ * opening's SillHeight is above the WALL'S BASE, which is how GenerateWall, OpeningCentre and the
+ * validator every one of them resolve a sill. DuctOpeningFor wrote the room-datum figure straight
+ * into SillHeight, so the hole sat at Wall.BaseZ + BaseZ + Height/2 and the fan at Room.FloorZ +
+ * BaseZ + Height/2, differing by exactly (Wall.BaseZ - Room.FloorZ).
+ *
+ * Both are zero throughout the reference flat, which is why the gate was green and why the comment
+ * claiming the two agreed read as true. So this test is deliberately NOT run against the flat: it
+ * gives the room a raised floor and the wall a raised base, because agreement between two zeros is
+ * not evidence of anything. That is also why it is here rather than in the editor suite - the
+ * invariant is arithmetic between two static functions and needs no world to state.
+ *
+ * A duct off its fan is the same failure the duct was added to fix, only inverted: instead of a case
+ * covering a hole that is not there, a raw hole hanging in plain view below the case that should
+ * have covered it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFanDuctDatumTest,
+	"HouseForge.Fan.ADuctIsCutWhereTheFanTurns", HF_TEST_FLAGS)
+
+bool FHFFanDuctDatumTest::RunTest(const FString& Parameters)
+{
+	// Every datum different from every other, and none of them zero. Two figures that are both zero
+	// agree whatever the code does.
+	FHFRoom Room;
+	Room.Id = TEXT("R_Raised");
+	Room.FloorZ = 15.0;
+	Room.CeilingHeight = 285.0;
+
+	FHFWall Wall;
+	Wall.Id = TEXT("W_Host");
+	Wall.Start = FVector2D(0.0, 0.0);
+	Wall.End = FVector2D(400.0, 0.0);
+	Wall.Thickness = 23.0;
+	Wall.BaseZ = 8.0;
+	Wall.Height = 300.0;
+
+	FHFFixture Fan;
+	Fan.Id = TEXT("F_Exh_Raised");
+	Fan.RoomId = Room.Id;
+	Fan.Type = EHFFixtureType::ExhaustFan;
+	Fan.AnchorWallId = Wall.Id;
+	Fan.Position = FVector2D(180.0, 12.0);
+	Fan.Footprint = FVector2D(25.0, 10.0);
+	Fan.Height = 25.0;
+	Fan.BaseZ = 220.0;
+
+	const FHFOpening Duct = AHFFanActor::DuctOpeningFor(Fan, Wall, &Room);
+
+	if (!TestTrue(TEXT("The extract cores a duct at all"), Duct.Width > 5.0))
+	{
+		return false;
+	}
+
+	// Resolved the way every other consumer of a sill resolves one.
+	const double DuctCentreZ = Wall.BaseZ + Duct.SillHeight + Duct.Height * 0.5;
+	const double RotorZ = AHFFanActor::PlacementFor(Fan, &Room, &Wall).GetLocation().Z;
+
+	TestNearlyEqual(TEXT("The hole is cut at the height the rotor turns at"), DuctCentreZ, RotorZ, 1e-6);
+
+	// And the case really does cover it, which is the point of the two agreeing. A square hole
+	// reaches its half-diagonal, and that is what pokes out from behind a fan when it does not.
+	FHFFanParams AsBuilt = FHFFanKit::DefaultsFor(EHFFanKind::Exhaust);
+	AsBuilt.SweepDiameter = FMath::Max(Fan.Footprint.X, Fan.Footprint.Y) * 0.75;
+	AsBuilt.CaseDepth = FMath::Min(Fan.Footprint.X, Fan.Footprint.Y);
+	AsBuilt = FHFFanKit::Sanitise(AsBuilt);
+
+	TestTrue(TEXT("...and the case covers the hole rather than sitting beside it"),
+		Duct.Width * 0.5 * UE_DOUBLE_SQRT_2 < AsBuilt.CaseHalfWidth());
+
+	// THE TWO DATUMS ARE REALLY BEING TOLD APART. Move the floor alone and the hole has to move with
+	// the fan; move the wall's base alone and the sill has to absorb it while the hole stays put in
+	// the world. A function that ignored the room would fail the first and one that ignored the
+	// wall's base would fail the second, and the old one failed both by the same amount.
+	FHFRoom Higher = Room;
+	Higher.FloorZ += 40.0;
+
+	const FHFOpening Moved = AHFFanActor::DuctOpeningFor(Fan, Wall, &Higher);
+	TestNearlyEqual(TEXT("Raising the room's floor raises the duct with the fan"),
+		Moved.SillHeight - Duct.SillHeight, 40.0, 1e-6);
+
+	FHFWall Deeper = Wall;
+	Deeper.BaseZ += 30.0;
+
+	const FHFOpening Rebased = AHFFanActor::DuctOpeningFor(Fan, Deeper, &Room);
+	TestNearlyEqual(TEXT("Raising the wall's base leaves the duct where it was in the world"),
+		Deeper.BaseZ + Rebased.SillHeight, Wall.BaseZ + Duct.SillHeight, 1e-6);
+
+	// A ceiling fan cores nothing, whatever the datums say.
+	FHFFixture Ceiling = Fan;
+	Ceiling.Type = EHFFixtureType::CeilingFan;
+	TestEqual(TEXT("A ceiling fan still cores nothing through a wall"),
+		AHFFanActor::DuctOpeningFor(Ceiling, Wall, &Room).Width, 0.0);
 
 	return true;
 }

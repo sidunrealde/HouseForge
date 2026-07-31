@@ -130,10 +130,22 @@ public:
 	 * so the wall cuts it exactly as it cuts a window. Not added to the spec's openings, so no
 	 * ventilator sash is built in it: this is a duct, not a window.
 	 *
+	 * ## Two datums
+	 *
+	 * A fixture's BaseZ is measured above the ROOM FLOOR and an opening's SillHeight above the WALL'S
+	 * BASE, so the room has to be here to convert between them. Without it the hole sits at
+	 * Wall.BaseZ + BaseZ + Height/2 while the fan sits at Room.FloorZ + BaseZ + Height/2, and the two
+	 * differ by (Wall.BaseZ - Room.FloorZ) - both zero throughout the reference flat, so they agreed
+	 * by coincidence until the first raised floor.
+	 *
 	 * @param Fixture The extract. A fixture of any other type gives a zero-width opening.
-	 * @param Wall The wall it is anchored to, for the offset the hole is measured along.
+	 * @param Wall The wall it is anchored to, for the offset the hole is measured along and the base
+	 *             its sill is measured from.
+	 * @param Room The room the extract serves, for its floor level. Null is read as a floor at zero.
+	 *             NOT DEFAULTED: a caller that forgets it is a caller that puts the hole back in the
+	 *             wrong datum, and defaulting to null would let that happen silently.
 	 */
-	static FHFOpening DuctOpeningFor(const FHFFixture& Fixture, const FHFWall& Wall);
+	static FHFOpening DuctOpeningFor(const FHFFixture& Fixture, const FHFWall& Wall, const FHFRoom* Room);
 
 	/** Part id of the spinning assembly: motor housing and blades. */
 	static FName RotorPartId() { return FHFFanKit::RotorPartId; }
