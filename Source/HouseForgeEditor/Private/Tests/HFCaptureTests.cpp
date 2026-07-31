@@ -19,6 +19,8 @@
 #include "HAL/FileManager.h"
 #include "HFEditorSubsystem.h"
 #include "ImageUtils.h"
+#include "Materials/MaterialInstance.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 
@@ -543,6 +545,137 @@ bool FHFCaptureRefusesAViewOfNowhereTest::RunTest(const FString& Parameters)
 
 	TestFalse(TEXT("A camera pointed at itself is refused"), Result.bSuccess);
 	TestTrue(TEXT("And no path is handed back"), Out.IsEmpty());
+
+	return true;
+}
+
+/**
+ * The materials a capture checks for readiness are exactly the ones that will be in the picture.
+ *
+ * The readiness check itself needs a renderer and so cannot run here - see
+ * HouseForge.Architecture.CaptureWaitsForItsMaterials for what guards it instead. What CAN be
+ * measured headless is the half that decides its scope, and that half is where a silent hole would
+ * open: a gather that quietly returned nothing would make EnsureMaterialsReady a no-op, the capture
+ * would go back to rendering whatever was ready, and every assertion about refusing would still
+ * pass. So this asserts the set is real, is complete, and is bounded by ShowOnly.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCaptureGathersWhatIsInThePictureTest,
+	"HouseForge.Capture.EveryMaterialInThePictureIsChecked", HF_TEST_FLAGS)
+
+bool FHFCaptureGathersWhatIsInThePictureTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeCapture;
+
+	UWorld* World = EditorWorld();
+	if (!TestNotNull(TEXT("There is an editor world"), World))
+	{
+		return false;
+	}
+
+	AHFHouseActor* House = BuildFlat(*this);
+	if (!TestNotNull(TEXT("The test flat built"), House))
+	{
+		return false;
+	}
+
+	// Only the house's elements are in the picture.
+	FHFCaptureRequest Request;
+	for (AActor* Element : House->ElementActors)
+	{
+		if (IsValid(Element))
+		{
+			Request.ShowOnly.Add(Element);
+		}
+	}
+
+	if (!TestTrue(TEXT("The flat has elements to draw"), Request.ShowOnly.Num() > 0))
+	{
+		return false;
+	}
+
+	const TArray<UMaterialInterface*> Gathered = FHFSceneCapture::GatherRenderedMaterials(World, Request);
+
+	// An empty gather is the failure this test exists for: it would disarm the readiness check
+	// completely while leaving every other capture assertion green.
+	if (!TestTrue(TEXT("A house with elements yields materials to check"), Gathered.Num() > 0))
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("No null material is handed to the readiness check"),
+		Gathered.Contains(nullptr));
+
+	TSet<const UMaterialInterface*> Unique(Gathered);
+	TestEqual(TEXT("Each material is checked once, not once per slot it fills"),
+		Unique.Num(), Gathered.Num());
+
+	// Every material actually assigned to a drawn component must be in the set. Recomputing the
+	// expectation from the components - rather than from the placeholder library - means a component
+	// carrying something the library never issued is caught too.
+	TSet<const UMaterialInterface*> Expected;
+	for (AActor* Element : House->ElementActors)
+	{
+		if (!IsValid(Element))
+		{
+			continue;
+		}
+		TArray<UDynamicMeshComponent*> Components;
+		Element->GetComponents<UDynamicMeshComponent>(Components);
+		for (const UDynamicMeshComponent* Component : Components)
+		{
+			if (!IsValid(Component) || !Component->IsRegistered() || !Component->IsVisible())
+			{
+				continue;
+			}
+			for (int32 Slot = 0; Slot < Component->GetNumMaterials(); ++Slot)
+			{
+				if (UMaterialInterface* Material = Component->GetMaterial(Slot))
+				{
+					Expected.Add(Material);
+				}
+			}
+		}
+	}
+
+	for (const UMaterialInterface* Material : Expected)
+	{
+		TestTrue(FString::Printf(TEXT("'%s' is on a drawn component and so is checked"),
+			*Material->GetPathName()), Unique.Contains(Material));
+	}
+
+	// ShowOnly is what decides what is in the picture, so it must bound the check as well. A plan
+	// draws the sectioned copy and nothing else; the uncut house's materials are not its problem.
+	FHFCaptureRequest Nothing;
+	Nothing.ShowOnly.Add(nullptr);
+	TestEqual(TEXT("A request that draws nothing checks nothing"),
+		FHFSceneCapture::GatherRenderedMaterials(World, Nothing).Num(), 0);
+
+	// The premise the readiness check rests on, asserted rather than assumed.
+	//
+	// EnsureMaterialsReady deliberately does not use UMaterialInterface::IsComplete(), because for a
+	// parameter-only material instance that function never consults the parent that actually owns the
+	// shader map - it would answer "ready" for the very material about to render as checkerboard.
+	// That reasoning is only sound while the placeholders really are parameter-only instances. If
+	// somebody authors an MI_HF_* with a static switch, it acquires its own permutation, and whoever
+	// does that should be told that the justification in the capture code has changed under them.
+	int32 Instances = 0;
+	for (const UMaterialInterface* Material : Gathered)
+	{
+		const UMaterialInstance* Instance = Cast<UMaterialInstance>(Material);
+		if (Instance == nullptr)
+		{
+			continue;
+		}
+
+		++Instances;
+		TestNotNull(FString::Printf(TEXT("Placeholder '%s' has a parent to inherit its shader map from"),
+			*Instance->GetPathName()), Instance->Parent.Get());
+		TestFalse(FString::Printf(
+			TEXT("Placeholder '%s' is parameter-only, so IsComplete() would not look at that parent - ")
+			TEXT("see the reasoning in FHFSceneCapture::EnsureMaterialsReady"), *Instance->GetPathName()),
+			static_cast<bool>(Instance->bHasStaticPermutationResource));
+	}
+	TestTrue(TEXT("The placeholders really are material instances"), Instances > 0);
 
 	return true;
 }

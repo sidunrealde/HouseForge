@@ -375,6 +375,69 @@ public:
 		meta = (ClampMin = "0.1", ClampMax = "1.2", UIMin = "0.3", UIMax = "1.2"))
 	double ShutterGlassThickness = 0.5;
 
+	// =================================================================================== fans
+
+	/**
+	 * Ceiling fan speed, in revolutions per minute. Signed: the sign is the direction.
+	 *
+	 * A speed rather than an angle, because that is what an artist knows about a fan. Nothing spins
+	 * on its own - these actors do not tick - so this is the figure that turns elapsed time into
+	 * revolutions for a Sequencer track, a walkthrough pawn, or AdvanceSpinningParts. 300 is speed 5
+	 * on a real fan's plate.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Fans",
+		meta = (ClampMin = "-3000.0", ClampMax = "3000.0", UIMin = "0.0", UIMax = "500.0"))
+	double CeilingFanRpm = 300.0;
+
+	/** Extract speed, in revolutions per minute. Four times a ceiling fan, and audible. */
+	UPROPERTY(config, EditAnywhere, Category = "Fans",
+		meta = (ClampMin = "-6000.0", ClampMax = "6000.0", UIMin = "0.0", UIMax = "3000.0"))
+	double ExhaustFanRpm = 1350.0;
+
+	/** Blade count on a ceiling fan. Three everywhere in India; four is a hotel fitting. */
+	UPROPERTY(config, EditAnywhere, Category = "Fans", meta = (ClampMin = "2", ClampMax = "12"))
+	int32 CeilingFanBladeCount = 3;
+
+	/** Blade count on an extract. */
+	UPROPERTY(config, EditAnywhere, Category = "Fans", meta = (ClampMin = "2", ClampMax = "12"))
+	int32 ExhaustFanBladeCount = 5;
+
+	/**
+	 * Angle a ceiling fan's blade is set at, in degrees.
+	 *
+	 * Never zero. A blade is pitched because that is what moves air, and a flat one is instantly
+	 * readable as wrong: it catches the light as a uniform strip where a real blade has a bright edge
+	 * and a dark one. A lighting decision as much as a mechanical one - see
+	 * .claude/rules/04-conventions.md.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Fans",
+		meta = (ClampMin = "0.0", ClampMax = "45.0", UIMin = "5.0", UIMax = "30.0"))
+	double CeilingFanBladePitchDegrees = 12.0;
+
+	/**
+	 * Angle an extract's blade is set at, in degrees. Steeper, because an extract is a different
+	 * object: it moves a small volume fast through a duct rather than a large one slowly across a
+	 * room, and its impeller is deeper-set accordingly.
+	 *
+	 * Its own control rather than the ceiling fan's, because one figure for both was one figure that
+	 * was wrong for the extract - it built every extract in the flat with 12 degree blades that read
+	 * as flat spokes in a case.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Fans",
+		meta = (ClampMin = "0.0", ClampMax = "45.0", UIMin = "10.0", UIMax = "40.0"))
+	double ExhaustFanBladePitchDegrees = 22.0;
+
+	/**
+	 * Canopy to the top of the motor on a ceiling fan, in centimetres.
+	 *
+	 * How far the blades hang below the slab, and it matters in every room of this flat with a false
+	 * ceiling in it: the rod has to clear the soffit it passes through, and a short one leaves the
+	 * blades inside the plasterboard.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Fans",
+		meta = (ClampMin = "0.0", ClampMax = "120.0", UIMin = "10.0", UIMax = "90.0"))
+	double CeilingFanDropLength = 30.0;
+
 	// ======================================================================= validation limits
 
 	/** What the spec validator judges a house against, before anything is built from it. */

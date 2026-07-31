@@ -208,6 +208,14 @@ protected:
 	 */
 	void ApplyOpenAmounts();
 
+	/**
+	 * Puts what a part declares it blocks onto its component. See EHFPartCollision.
+	 *
+	 * Collision geometry is complex-as-simple off the part's own mesh either way, so it always
+	 * matches what is drawn; this only settles what may hit it.
+	 */
+	static void ApplyPartCollision(UDynamicMeshComponent* Component, EHFPartCollision Collision);
+
 private:
 	/** Index-parallel to Parts. */
 	UPROPERTY()

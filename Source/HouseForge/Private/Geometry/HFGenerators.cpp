@@ -379,6 +379,151 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 	return Mesh;
 }
 
+namespace
+{
+	/**
+	 * Crossing test, on the polygon a ceiling is triangulated from.
+	 *
+	 * A ray cast along +X counting edge crossings. Handedness-agnostic, which matters because a room
+	 * boundary and an explicit bulkhead polygon are not guaranteed to be wound the same way.
+	 */
+	bool PointInPolygon2D(const TArray<FVector2D>& Polygon, const FVector2D& Point)
+	{
+		bool bInside = false;
+		int32 Previous = Polygon.Num() - 1;
+
+		for (int32 Index = 0; Index < Polygon.Num(); ++Index)
+		{
+			const FVector2D& A = Polygon[Index];
+			const FVector2D& B = Polygon[Previous];
+			Previous = Index;
+
+			if ((A.Y > Point.Y) != (B.Y > Point.Y) &&
+				Point.X < (B.X - A.X) * (Point.Y - A.Y) / (B.Y - A.Y) + A.X)
+			{
+				bInside = !bInside;
+			}
+		}
+
+		return bInside;
+	}
+
+	/** True when the point falls inside any loop of an inset result. */
+	bool InsideAnyLoop(const TArray<TArray<FVector2D>>& Loops, const FVector2D& Point)
+	{
+		for (const TArray<FVector2D>& Loop : Loops)
+		{
+			if (PointInPolygon2D(Loop, Point))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+double FHFGenerators::CeilingSoffitDropAt(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
+	const FVector2D& Point)
+{
+	if (Ceiling.Style == EHFCeilingStyle::None || Ceiling.Drop <= 0.0)
+	{
+		return 0.0;
+	}
+
+	// The same outline GenerateCeiling triangulates: a bulkhead follows its own polygon and
+	// everything else follows the room.
+	const TArray<FVector2D>& Outline = (Ceiling.ExplicitPolygon.Num() >= 3)
+		? Ceiling.ExplicitPolygon
+		: Room.Boundary;
+
+	if (Outline.Num() < 3 || !PointInPolygon2D(Outline, Point))
+	{
+		return 0.0;
+	}
+
+	// Mirrors GenerateCeiling's switch case for case. The two answer the same question about the
+	// same geometry - what covers this spot - and a fan resolved against a different answer from the
+	// one the panel was built with is a fan in the plasterboard.
+	switch (Ceiling.Style)
+	{
+	case EHFCeilingStyle::FullDrop:
+	case EHFCeilingStyle::Bulkhead:
+		// A panel across the whole outline.
+		return Ceiling.Drop;
+
+	case EHFCeilingStyle::Peripheral:
+	{
+		// Band only; the centre is open to the slab, which is why the three fans in the reference
+		// flat hang in clear air and why nothing caught this.
+		const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(Outline, Ceiling.BandWidth);
+		if (Inner.IsEmpty())
+		{
+			// The band swallowed the room, so it built as a full drop. Same answer here.
+			return Ceiling.Drop;
+		}
+		return InsideAnyLoop(Inner, Point) ? 0.0 : Ceiling.Drop;
+	}
+
+	case EHFCeilingStyle::Tray:
+	{
+		const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(Outline, Ceiling.BandWidth);
+		if (Inner.IsEmpty())
+		{
+			return Ceiling.Drop;
+		}
+
+		// The inner region steps back up to half the drop, and it is still a panel.
+		return InsideAnyLoop(Inner, Point) ? Ceiling.Drop * 0.5 : Ceiling.Drop;
+	}
+
+	case EHFCeilingStyle::Cove:
+	{
+		const double LipHeight = FMath::Max(Ceiling.Cove.LipHeight, 1.0);
+		const double ChannelWidth = FMath::Max(Ceiling.Cove.ChannelWidth, 1.0);
+		const double Setback = FMath::Max(Ceiling.Cove.Setback, 0.0);
+		const double BandInner = FMath::Max(Ceiling.BandWidth - ChannelWidth - Setback, 1.0);
+
+		const TArray<TArray<FVector2D>> Lips = FHFMeshOps::InsetPolygon(Outline, BandInner);
+		if (Lips.IsEmpty())
+		{
+			return Ceiling.Drop;
+		}
+
+		if (!InsideAnyLoop(Lips, Point))
+		{
+			// Out in the band itself.
+			return Ceiling.Drop;
+		}
+
+		// Inside the lip: either the channel, whose floor sits a lip's height above the band soffit,
+		// or the open centre beyond it.
+		for (const TArray<FVector2D>& Lip : Lips)
+		{
+			if (!PointInPolygon2D(Lip, Point))
+			{
+				continue;
+			}
+
+			const TArray<TArray<FVector2D>> Centre = FHFMeshOps::InsetPolygon(Lip, ChannelWidth);
+			if (Centre.IsEmpty())
+			{
+				// Channel wider than what is left, so the whole lip is channel floor.
+				return FMath::Max(Ceiling.Drop - LipHeight, 0.0);
+			}
+
+			return InsideAnyLoop(Centre, Point)
+				? 0.0
+				: FMath::Max(Ceiling.Drop - LipHeight, 0.0);
+		}
+
+		return 0.0;
+	}
+
+	default:
+		return 0.0;
+	}
+}
+
 FDynamicMesh3 FHFGenerators::GenerateBeam(const FHFBeam& Beam)
 {
 	FDynamicMesh3 Mesh;

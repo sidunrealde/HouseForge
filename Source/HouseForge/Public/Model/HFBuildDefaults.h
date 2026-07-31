@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Geometry/HFFanKit.h"
 #include "Geometry/HFJoineryKit.h"
 #include "Geometry/HFOpeningParams.h"
 #include "Model/HFSpecValidator.h"
@@ -248,6 +249,73 @@ struct HOUSEFORGE_API FHFJoineryDefaults
 };
 
 /**
+ * How this project builds its fans.
+ *
+ * Small, because a fan is small, and separate from the joinery figures because it shares none of
+ * them. The two kinds keep their own speeds: 300 rpm is a ceiling fan on speed 5 and 1350 an
+ * extract, and a single figure covering both would be wrong for one of them by a factor of four.
+ *
+ * A SPEED IS A REAL SETTING even though it moves no geometry in a still. It is the figure that turns
+ * elapsed time into revolutions for a Sequencer track or a walkthrough pawn, so a render of a fan on
+ * a long exposure - or any shot where the blades are meant to blur - depends on it entirely.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFFanDefaults
+{
+	GENERATED_BODY()
+
+	/** Ceiling fan speed, in revolutions per minute. Signed: the sign is the direction. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CeilingFanRpm = 300.0;
+
+	/** Extract speed, in revolutions per minute. An order faster than a ceiling fan, and audible. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ExhaustFanRpm = 1350.0;
+
+	/** Blades on a ceiling fan. Three everywhere in India; four is a hotel fitting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	int32 CeilingFanBladeCount = 3;
+
+	/** Blades on an extract. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	int32 ExhaustFanBladeCount = 5;
+
+	/**
+	 * Angle a ceiling fan's blade is set at. Never zero - a flat blade reads as a paper cut-out.
+	 *
+	 * SPLIT FROM THE EXTRACT'S, the same way the speeds and the blade counts are, and for the same
+	 * reason: the two are different objects and one figure covering both is wrong for one of them. A
+	 * single BladePitchDegrees stamped 12 over FHFFanKit::DefaultsFor(Exhaust)'s own 22, which made
+	 * the kit's figure unreachable from anything the house built and left every extract in the flat
+	 * with blades too shallow to read as an impeller - flat spokes in a case.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CeilingFanBladePitchDegrees = 12.0;
+
+	/**
+	 * Angle an extract's blade is set at. Steeper than a ceiling fan's, because it is one.
+	 *
+	 * An extract moves a small volume fast through a duct rather than a large one slowly across a
+	 * room, so its impeller is deeper-set. 22 is the kit's own figure for the object.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double ExhaustFanBladePitchDegrees = 22.0;
+
+	/**
+	 * Canopy to the top of the motor on a ceiling fan.
+	 *
+	 * The figure that decides how far the blades hang below the slab, which matters in every room of
+	 * this flat that has a false ceiling in it: the rod has to clear the soffit the fan passes
+	 * through, and a short one leaves the blades inside the plasterboard.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double CeilingFanDropLength = 30.0;
+
+	/** Stamps the figures onto a fan's parameters, leaving its dimensions alone. */
+	void ApplyTo(FHFFanParams& Params) const;
+};
+
+/**
  * Everything the project says about how its house is built.
  *
  * Held by value, copied freely, and the only thing the composing layer needs in hand before it can
@@ -265,6 +333,10 @@ struct HOUSEFORGE_API FHFBuildDefaults
 	/** The joinery kit's construction figures. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFJoineryDefaults Joinery;
+
+	/** How fast the fans turn, and how they are built. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFFanDefaults Fan;
 
 	/** What the validator judges a spec against. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")

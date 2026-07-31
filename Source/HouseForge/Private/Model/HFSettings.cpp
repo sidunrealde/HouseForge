@@ -66,6 +66,16 @@ FHFBuildDefaults UHFSettings::Resolve() const
 	J.GlazedShutterStileWidth = GlazedShutterStileWidth;
 	J.ShutterGlassThickness = ShutterGlassThickness;
 
+	FHFFanDefaults& F = Out.Fan;
+
+	F.CeilingFanRpm = CeilingFanRpm;
+	F.ExhaustFanRpm = ExhaustFanRpm;
+	F.CeilingFanBladeCount = CeilingFanBladeCount;
+	F.ExhaustFanBladeCount = ExhaustFanBladeCount;
+	F.CeilingFanBladePitchDegrees = CeilingFanBladePitchDegrees;
+	F.ExhaustFanBladePitchDegrees = ExhaustFanBladePitchDegrees;
+	F.CeilingFanDropLength = CeilingFanDropLength;
+
 	Out.Validation = Validation;
 
 	return Out;

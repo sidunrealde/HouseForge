@@ -111,3 +111,33 @@ void FHFJoineryDefaults::ApplyTo(FHFDrawerParams& Params) const
 
 	// ModuleHeight, CarcassDepth and RunnerLength are dimensions of the unit being built.
 }
+
+// ------------------------------------------------------------------------------------------ fans
+
+void FHFFanDefaults::ApplyTo(FHFFanParams& Params) const
+{
+	// Only the figures, never the dimensions. SweepDiameter comes off the drawing - a fan is bought
+	// and specified by its sweep - and stamping a project default over it would silently make every
+	// fan in the flat the same size whatever the plan said.
+	//
+	// The two kinds share nothing, so each takes its own: a ceiling fan turns at 300 rpm on three
+	// blades and an extract at 1350 on five, and one figure covering both would be wrong for one of
+	// them by a factor of four.
+	const bool bCeiling = Params.Kind == EHFFanKind::Ceiling;
+
+	Params.RevolutionsPerMinute = bCeiling ? CeilingFanRpm : ExhaustFanRpm;
+	Params.BladeCount = bCeiling ? CeilingFanBladeCount : ExhaustFanBladeCount;
+
+	// THE PITCH IS PER KIND TOO, and it was not. One BladePitchDegrees was stamped over both, which
+	// put a ceiling fan's 12 degrees onto every extract in the flat and made the kit's own 22 - set
+	// deliberately, with a comment saying an extract is a different object - unreachable from
+	// anything the house built. A 5-blade 22 cm impeller at 12 degrees reads as flat spokes.
+	Params.BladePitchDegrees = bCeiling ? CeilingFanBladePitchDegrees : ExhaustFanBladePitchDegrees;
+
+	if (bCeiling)
+	{
+		// A rod length means nothing on an extract, which is set into a wall rather than hung off a
+		// slab, and writing one would leave a figure on the params that the generator ignores.
+		Params.DropLength = CeilingFanDropLength;
+	}
+}

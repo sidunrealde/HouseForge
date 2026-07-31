@@ -5,6 +5,7 @@
 #include "Actors/HFArticulatedActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFOpeningActor.h"
+#include "Actors/HFFanActor.h"
 #include "Actors/HFWardrobeActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
@@ -210,6 +211,27 @@ void AHFHouseActor::BuildGeometry()
 				WallActor->Openings.Add(Opening);
 			}
 		}
+
+		// AN EXTRACT HAS TO BLOW THROUGH THE WALL IT IS SCREWED TO. The fan's case carries an
+		// aperture and its blades turn inside it, and none of that is worth anything while the
+		// masonry behind is solid - which it was for all three extracts in the flat. Invisible from
+		// the room, because the case covers precisely the spot where the hole is not.
+		//
+		// Derived from the fan rather than asked of the drawing, and added to the WALL's openings
+		// only - never to the spec's - so the hole is cut but no ventilator sash is built in it. See
+		// AHFFanActor::DuctOpeningFor.
+		for (const FHFFixture& Fixture : Spec.Fixtures)
+		{
+			if (Fixture.Type == EHFFixtureType::ExhaustFan && Fixture.AnchorWallId == Wall.Id)
+			{
+				// The ROOM as well as the wall: a fixture's BaseZ is measured above the room floor
+				// and an opening's sill above the wall's base, and the hole has to land on the fan's
+				// own centre rather than on whichever of the two datums happened to be handy.
+				WallActor->Openings.Add(
+					AHFFanActor::DuctOpeningFor(Fixture, Wall, Spec.FindRoom(Fixture.RoomId)));
+			}
+		}
+
 		WallActor->Regenerate();
 	}
 
@@ -268,12 +290,28 @@ void AHFHouseActor::BuildGeometry()
 		CeilingActor->Ceiling = Ceiling;
 		CeilingActor->Room = *Room;
 
+		// THE HOLE IS A CONSEQUENCE OF THE FAN, exactly as an extract's duct is. It was a fixed 8 -
+		// a 16 cm square opening for a 2.2 cm rod - whose corners showed past the 15 cm motor
+		// housing as four bright wedges from below. Sized from the fan's own rod now, and the
+		// canopy is sized to cover it, so the two cannot drift.
+		double HoleHalfSide = 0.0;
+
 		for (const FHFFixture& Fixture : Spec.Fixtures)
 		{
 			if (Fixture.Type == EHFFixtureType::CeilingFan && Fixture.RoomId == Ceiling.RoomId)
 			{
 				CeilingActor->FanDrops.Add(Fixture.Position);
+
+				// The largest, because one radius cuts every hole in this ceiling and a hole too
+				// small for a rod is a rod through plasterboard.
+				HoleHalfSide = FMath::Max(HoleHalfSide,
+					AHFFanActor::ParamsFor(Fixture).RodHoleHalfSide());
 			}
+		}
+
+		if (HoleHalfSide > 0.0)
+		{
+			CeilingActor->FanDropRadius = HoleHalfSide;
 		}
 
 		CeilingActor->Regenerate();
@@ -359,6 +397,75 @@ void AHFHouseActor::BuildGeometry()
 			Spec.FindWall(Fixture.AnchorWallId)));
 
 		WardrobeActor->Regenerate();
+	}
+
+	// Fans. The one thing in the flat that revolves rather than opens, and until this loop existed
+	// the only production consumer of EHFMotionType::Spin was nothing at all: the mechanism was
+	// complete and tested, CeilingFan was read here solely to punch a rod hole in the false ceiling
+	// above a fan that did not exist, and ExhaustFan was not read anywhere.
+	for (const FHFFixture& Fixture : Spec.Fixtures)
+	{
+		if (Fixture.Type != EHFFixtureType::CeilingFan && Fixture.Type != EHFFixtureType::ExhaustFan)
+		{
+			continue;
+		}
+
+		AHFFanActor* FanActor = Cast<AHFFanActor>(
+			Spawn(AHFFanActor::StaticClass(), Fixture.Id,
+				FString::Printf(TEXT("Fan_%s"), *Fixture.Id.ToString())));
+
+		if (FanActor == nullptr)
+		{
+			continue;
+		}
+
+		// Settings first, then the drawing, exactly as a wardrobe: ApplyProjectDefaults picks the
+		// catalogue for the kind and ApplyFixture puts the drawn dimensions over it, so the order is
+		// load-bearing. Only on a freshly spawned actor - Spawn returns null for a preserved one.
+		FanActor->ApplyProjectDefaults(
+			Fixture.Type == EHFFixtureType::ExhaustFan ? EHFFanKind::Exhaust : EHFFanKind::Ceiling);
+		FanActor->ApplyFixture(Fixture);
+
+		const FHFRoom* FanRoom = Spec.FindRoom(Fixture.RoomId);
+		const FHFWall* FanWall = Spec.FindWall(Fixture.AnchorWallId);
+
+		// AN EXTRACT HAS A FAR SIDE. The duct is cored through the masonry and, with nothing on the
+		// discharge face, left as a bare square opening in a finished wall - the only opening in the
+		// flat with no lining, since it is deliberately kept out of Spec.Openings so no ventilator
+		// sash is built in it. The sleeve and cowl belong to the fan, so the wall's thickness comes
+		// to the fan as a dimension: a generator may not reach for the wall it stands in.
+		if (Fixture.Type == EHFFixtureType::ExhaustFan && FanWall != nullptr)
+		{
+			FanActor->Fan.HostWallThickness = FanWall->Thickness;
+		}
+
+		// AND THEN WHAT IS BETWEEN THE FAN AND THE ROOM. A ceiling fan hangs from the structural
+		// slab, so a false ceiling over it is something the rod has to get through - and a rod that
+		// was a fixed project figure built the whole rotor inside the plasterboard of any room with
+		// a full drop. Every ceiling fan in the reference flat sits in the open centre of a cove or
+		// peripheral ceiling, where the drop is zero and nothing showed.
+		//
+		// The drop is asked of the room, per fan, because the answer depends on WHERE in the room
+		// the fan is: the same ceiling covers its band and leaves its centre open.
+		if (Fixture.Type == EHFFixtureType::CeilingFan && FanRoom != nullptr)
+		{
+			double SoffitDrop = 0.0;
+
+			for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+			{
+				if (Ceiling.RoomId == Fixture.RoomId)
+				{
+					SoffitDrop = FMath::Max(SoffitDrop,
+						FHFGenerators::CeilingSoffitDropAt(Ceiling, *FanRoom, Fixture.Position));
+				}
+			}
+
+			FanActor->ApplyCeilingAbove(SoffitDrop);
+		}
+
+		FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture, FanRoom, FanWall));
+
+		FanActor->Regenerate();
 	}
 
 	// Once every element has been regenerated its parts exist again, so the poses captured above can

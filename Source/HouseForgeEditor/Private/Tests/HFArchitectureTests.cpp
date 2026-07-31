@@ -299,6 +299,74 @@ bool FHFCaptureNeedsNoViewportSourceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A capture must consult material readiness before it draws.
+ *
+ * This is a source scan because the thing it protects cannot be executed by the gate. The gate runs
+ * -nullrhi, FApp::CanEverRender() is false, and FHFSceneCapture::Render therefore refuses at
+ * CanRender long before it reaches a material - so no headless test can ever observe the readiness
+ * step running, and its removal would leave the entire suite green.
+ *
+ * That is exactly the shape of the defect this was written for. A material with no compiled shader
+ * map does not delay a frame: the renderer substitutes DefaultMaterial and the capture writes a
+ * confident PNG in grey checkerboard. There is no failure, no log line, and no wrong-looking API
+ * result - the only evidence is the image, and the image is the thing nobody can check
+ * automatically. Deleting the two lines that prevent it would look like tidying up a redundant
+ * check.
+ *
+ * So the ORDER is asserted, not merely the presence: readiness has to be settled before
+ * CaptureScene, since asking afterwards would be a check on an image already drawn wrong.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCaptureWaitsForMaterialsTest,
+	"HouseForge.Architecture.CaptureWaitsForItsMaterials", HF_TEST_FLAGS)
+
+bool FHFCaptureWaitsForMaterialsTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HouseForge"));
+	if (!TestTrue(TEXT("HouseForge plugin is discoverable"), Plugin.IsValid()))
+	{
+		return false;
+	}
+
+	const FString Path = FPaths::Combine(Plugin->GetBaseDir(),
+		TEXT("Source"), TEXT("HouseForgeEditor"), TEXT("Private"), TEXT("Capture"), TEXT("HFSceneCapture.cpp"));
+
+	FString Contents;
+	if (!TestTrue(FString::Printf(TEXT("Read the capture implementation at '%s'"), *Path),
+		FFileHelper::LoadFileToString(Contents, *Path)))
+	{
+		return false;
+	}
+
+	// The wait itself. EnsureIsComplete is the engine facility that resubmits a material's
+	// outstanding compile jobs and blocks on them; a sleep or a frame-spin in its place would be
+	// unsound, because nothing guarantees a job was ever submitted to wait on.
+	TestTrue(TEXT("The capture waits on the engine's shader compilation rather than on a timer"),
+		Contents.Contains(TEXT("EnsureIsComplete()")));
+
+	// IsComplete() is the trap: for a parameter-only material instance, which is what every MI_HF_*
+	// is, it never consults the parent that owns the shader map and so answers "ready" for precisely
+	// the material about to render as the default. It is also the obvious-looking call, which is why
+	// it is named here rather than left to a comment.
+	TestFalse(TEXT("Readiness is not decided by IsComplete(), which is vacuous for our instances"),
+		Contents.Contains(TEXT("->IsComplete()")));
+	TestTrue(TEXT("Readiness is decided by the shader map the renderer's fallback actually reads"),
+		Contents.Contains(TEXT("IsGameThreadShaderMapComplete()")));
+
+	const int32 Guard = Contents.Find(TEXT("EnsureMaterialsReady(World, Request, OutError)"));
+	const int32 Draw = Contents.Find(TEXT("CaptureScene()"));
+
+	if (!TestTrue(TEXT("Render consults material readiness"), Guard != INDEX_NONE)
+		|| !TestTrue(TEXT("Render draws a frame"), Draw != INDEX_NONE))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Readiness is settled BEFORE the frame is drawn, not checked afterwards"), Guard < Draw);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -348,6 +348,7 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 		State.PartId = Part.PartId;
 		State.PivotTransform = Part.PivotTransform;
 		State.Motion = Part.Motion;
+		State.Collision = Part.Collision;
 		State.OpenAmount = FMath::Clamp(Part.DefaultOpenAmount, 0.0, 1.0);
 		State.SpinTurns = Part.DefaultSpinTurns;
 
@@ -359,6 +360,18 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 
 			// A part the artist posed stays posed. Regeneration is a shape change, not a reason to
 			// slam every shutter shut - or to jerk every fan back to its starting blade.
+			//
+			// SO THE POSE OF AN EXISTING PART ALWAYS BEATS A FRESHLY GENERATED DEFAULT, and that is the
+			// decision, not an accident of ordering. DefaultSpinTurns seeds a part the first time it
+			// comes into existence and never again; after that the phase is the actor's, because
+			// somebody may have stopped that fan on a particular blade to photograph it.
+			//
+			// It is only a safe rule while a part cannot be built before its parameters are known. It
+			// could - every element regenerated once at spawn, from AActor::SetActorLabel firing
+			// PostEditChangeProperty - and a rotor created at phase 0 by that ghost generation then beat
+			// the real phase applied a moment later. Every fan in the flat came out stopped on the same
+			// blade. See AHFElementActor::PostEditChangeProperty, which no longer regenerates for a
+			// property that is not ours.
 			State.OpenAmount = Parts[*Index].OpenAmount;
 			State.SpinTurns = Parts[*Index].SpinTurns;
 			State.bArtistEdited = !bForce && Parts[*Index].bArtistEdited;
@@ -393,6 +406,11 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 		// the component, not to the mesh, so a hand-edited shutter has to be dressed too. A part
 		// that opted out of regeneration is still a part of the room being looked at.
 		FHFMaterialLibrary::ApplyPlaceholders(Component);
+
+		// Same reasoning for collision: it belongs to the component, and what a part blocks is a
+		// property of what that part IS rather than of the mesh currently on it. A hand-modelled fan
+		// blade must not become something a pawn can walk into.
+		ApplyPartCollision(Component, Part.Collision);
 
 		NewParts.Add(State);
 		NewComponents.Add(Component);
@@ -434,6 +452,38 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 	PartComponents = MoveTemp(NewComponents);
 }
 
+void AHFArticulatedActor::ApplyPartCollision(UDynamicMeshComponent* Component, EHFPartCollision Collision)
+{
+	if (!IsValid(Component))
+	{
+		return;
+	}
+
+	// Complex-as-simple either way. COLLISION FOLLOWS THE VISUAL MESH is not negotiable - an open
+	// door leaf has to block where the leaf is and not where a hull says it is - and what varies here
+	// is only what is allowed to hit it. bEnableComplexCollision is what actually builds that
+	// geometry; without it the leaf swings and a walkthrough goes straight through.
+	Component->CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
+	Component->bEnableComplexCollision = true;
+	Component->SetGenerateOverlapEvents(false);
+
+	if (Collision == EHFPartCollision::TraceOnly)
+	{
+		// A rotor. Query only, and blocking nothing that moves through the room: the collision cannot
+		// spin with the render, so anything it blocked would be a blade frozen at one azimuth - a
+		// wall across part of the sweep and thin air across the rest. Traces still hit the real
+		// blades, which is what editor picking and any line-of-sight query need. See
+		// EHFPartCollision::TraceOnly for the whole argument.
+		Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Component->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Component->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		return;
+	}
+
+	Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Component->SetCollisionProfileName(TEXT("BlockAll"));
+}
+
 UDynamicMeshComponent* AHFArticulatedActor::CreatePartComponent(FName PartId)
 {
 	if (Mesh == nullptr)
@@ -455,14 +505,10 @@ UDynamicMeshComponent* AHFArticulatedActor::CreatePartComponent(FName PartId)
 	Component->SetupAttachment(Mesh);
 
 	// Same collision treatment as the fixed shell: complex-as-simple, so an open door leaf blocks
-	// where it actually is rather than where a convex hull says it is. bEnableComplexCollision is
-	// what actually builds that collision - see AHFElementActor's constructor; without it the leaf
-	// swings and a walkthrough walks straight through it.
-	Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	Component->SetCollisionProfileName(TEXT("BlockAll"));
-	Component->CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
-	Component->bEnableComplexCollision = true;
-	Component->SetGenerateOverlapEvents(false);
+	// where it actually is rather than where a convex hull says it is. Blocking to begin with;
+	// RegenerateParts applies what the part itself declares immediately afterwards, so a rotor never
+	// exists as a blocker even for the moment between the two.
+	ApplyPartCollision(Component, EHFPartCollision::Blocking);
 
 	// And the same tangent treatment, for the same reason: the default takes tangents from the
 	// FDynamicMesh3 attribute set, nothing here ever enables them, and the component then falls back
