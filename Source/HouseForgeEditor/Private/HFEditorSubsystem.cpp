@@ -947,6 +947,14 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 	for (TActorIterator<AHFHouseActor> It(World); It; ++It)
 	{
 		Elements.Append(It->ElementActors);
+
+		// CEILINGS ARE ASKED OF THE HOUSE, NOT OF THE ELEMENT, and they are the only section on the
+		// page that has to be. Every other control changes one element in place; a ceiling figure
+		// changes what hangs between a fan and the room, so the ceiling and the fans under it have
+		// to move together or a deeper ceiling swallows the rotor - the exact defect the rod
+		// resolution was added for, reached by dragging a slider rather than by writing a spec. Only
+		// the house holds both the ceiling and the fixture the fan was seeded from.
+		Rebuilt += It->ApplyProjectSettingsToCeilings();
 	}
 
 	for (AActor* Element : Elements)
@@ -972,16 +980,6 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 		{
 			Opening->ApplyProjectDefaults();
 			Opening->Regenerate();
-			++Rebuilt;
-		}
-		else if (AHFCeilingActor* CeilingActor = Cast<AHFCeilingActor>(Typed))
-		{
-			// The False Ceilings section reaches these and nothing else. Left out, every template
-			// figure on the page would be inert on a level already built - the same failure the
-			// Joinery section had, where dragging a control rebuilt every door in the flat and left
-			// every wardrobe exactly as it was.
-			CeilingActor->ApplyProjectDefaults();
-			CeilingActor->Regenerate();
 			++Rebuilt;
 		}
 		else if (AHFWardrobeActor* Wardrobe = Cast<AHFWardrobeActor>(Typed))

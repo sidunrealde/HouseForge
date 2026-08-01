@@ -591,16 +591,6 @@ void AHFHouseActor::BuildGeometry()
 		CeilingActor->Ceiling = Ceiling;
 		CeilingActor->Room = *Room;
 
-		// The beams this ceiling has to bury, carried onto the actor so a later settings change can
-		// re-derive the perimeter ring instead of quietly dropping it. Deliberately every beam that
-		// SHOWS rather than every beam in the room: a 230 beam flush in the 230 wall under it is
-		// invisible and needs no ring, and that distinction is the whole reason the uniform 500 drop
-		// was wrong.
-		if (const FHFBeam* Showing = Spec.DeepestBeamOverRoom(Ceiling.RoomId))
-		{
-			CeilingActor->BeamsShowingInRoom.Add(*Showing);
-		}
-
 		// THE HOLE IS A CONSEQUENCE OF THE FAN, exactly as an extract's duct is. It was a fixed 8 -
 		// a 16 cm square opening for a 2.2 cm rod - whose corners showed past the 15 cm motor
 		// housing as four bright wedges from below. Sized from the fan's own rod now, and the
@@ -801,6 +791,90 @@ void AHFHouseActor::BuildGeometry()
 	UE_LOG(LogHouseForge, Log,
 		TEXT("HouseForge built '%s': %d element actors, %d preserved as hand-edited."),
 		*Spec.Name, ElementActors.Num(), PreservedCount);
+}
+
+int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
+{
+	// The project's designs, resolved onto this house's own spec. Everything on the spec is already
+	// in centimetres - SetSpec converts exactly once, at ingest - so the templates need no scaling.
+	FHFCeilingTemplates::Apply(Spec, FHFBuildDefaults::FromProjectSettings().Ceiling);
+
+	auto FindElement = [this](UClass* Class, const FName& Id) -> AHFElementActor*
+	{
+		for (AActor* Element : ElementActors)
+		{
+			AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+			if (IsValid(Typed) && Typed->GetClass() == Class && Typed->ElementId == Id)
+			{
+				return Typed;
+			}
+		}
+		return nullptr;
+	};
+
+	int32 Rebuilt = 0;
+
+	// ----------------------------------------------------------------------------- the ceilings
+	for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+	{
+		AHFCeilingActor* CeilingActor =
+			Cast<AHFCeilingActor>(FindElement(AHFCeilingActor::StaticClass(), Ceiling.Id));
+
+		// Asked before anything is touched, so a hand-modelled ceiling keeps the parameters it was
+		// built with as well as the mesh - a re-seed would change what Revert To Generated produced.
+		if (CeilingActor == nullptr || CeilingActor->ShouldPreserveOnRebuild())
+		{
+			continue;
+		}
+
+		// The fan holes and their radius are properties of the fans, not of the settings, so they
+		// are left exactly as the build worked them out.
+		CeilingActor->Ceiling = Ceiling;
+		CeilingActor->Regenerate();
+		++Rebuilt;
+	}
+
+	// -------------------------------------------------------------------------- and the fans
+	//
+	// Re-seeded in full - project figures, then the drawing, then the ceiling - because the rod
+	// length is cumulative and there is no way to subtract the ceiling that used to be there.
+	for (const FHFFixture& Fixture : Spec.Fixtures)
+	{
+		if (Fixture.Type != EHFFixtureType::CeilingFan)
+		{
+			continue;
+		}
+
+		AHFFanActor* FanActor = Cast<AHFFanActor>(FindElement(AHFFanActor::StaticClass(), Fixture.Id));
+		if (FanActor == nullptr || FanActor->ShouldPreserveOnRebuild())
+		{
+			continue;
+		}
+
+		const FHFRoom* FanRoom = Spec.FindRoom(Fixture.RoomId);
+		if (FanRoom == nullptr)
+		{
+			continue;
+		}
+
+		double SoffitDrop = 0.0;
+		for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+		{
+			if (Ceiling.RoomId == Fixture.RoomId)
+			{
+				SoffitDrop = FMath::Max(SoffitDrop,
+					FHFGenerators::CeilingSoffitDropAt(Ceiling, *FanRoom, Fixture.Position));
+			}
+		}
+
+		FanActor->ApplyProjectDefaults(EHFFanKind::Ceiling);
+		FanActor->ApplyFixture(Fixture);
+		FanActor->ApplyCeilingAbove(SoffitDrop);
+		FanActor->Regenerate();
+		++Rebuilt;
+	}
+
+	return Rebuilt;
 }
 
 void AHFHouseActor::PostLoad()

@@ -7,8 +7,6 @@
 #include "Geometry/HFMeshOps.h"
 #include "HouseForge.h"
 #include "Materials/HFMaterialLibrary.h"
-#include "Model/HFBuildDefaults.h"
-#include "Model/HFCeilingTemplates.h"
 
 using namespace UE::Geometry;
 
@@ -207,25 +205,6 @@ FDynamicMesh3 AHFRoomActor::BuildMesh() const
 	}
 
 	return Result;
-}
-
-void AHFCeilingActor::ApplyProjectDefaults()
-{
-	// The deepest beam showing in the room is what the ring is sized against, exactly as it is when
-	// the house first composes this ceiling - so re-seeding cannot lose it.
-	const FHFBeam* Deepest = nullptr;
-	for (const FHFBeam& Beam : BeamsShowingInRoom)
-	{
-		if (Deepest == nullptr || Beam.Depth > Deepest->Depth)
-		{
-			Deepest = &Beam;
-		}
-	}
-
-	// Everything on this actor is already in centimetres - AHFHouseActor::SetSpec converts once, at
-	// ingest - so the template's own centimetre figures need no scaling here.
-	FHFCeilingTemplates::Apply(Ceiling, Room, Deepest,
-		FHFBuildDefaults::FromProjectSettings().Ceiling, 1.0);
 }
 
 TArray<FVector> AHFCeilingActor::DownlightPositions() const

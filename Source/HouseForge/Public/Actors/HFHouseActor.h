@@ -64,6 +64,29 @@ public:
 	void ClearGeometry();
 
 	/**
+	 * Re-resolves the ceilings against the project's current figures, and the fans under them.
+	 *
+	 * THE TWO CANNOT BE DONE SEPARATELY, which is why this is one call and why it is on the house
+	 * rather than on either actor. A ceiling fan hangs from the structural SLAB and its rod is
+	 * lengthened to reach past whatever the false ceiling puts between it and the room - so
+	 * deepening a ceiling from the settings page and rebuilding only the ceiling leaves every fan in
+	 * that room with the rod it had, which is the rotor built inside the plasterboard all over
+	 * again. It is exactly the failure the rod resolution was added to fix, arrived at by dragging a
+	 * slider instead of by writing a spec.
+	 *
+	 * Only the house can put them back in step: the fan's rod is seeded from the FIXTURE and the
+	 * ceiling's drop from the CEILING, and nothing but the spec holds both. Re-seeded from scratch
+	 * rather than adjusted, because ApplyCeilingAbove ADDS to the project's rod length and calling
+	 * it twice would hang the fan a ceiling lower each time.
+	 *
+	 * Hand-edited elements are left alone completely, parameters included.
+	 *
+	 * @return How many elements were rebuilt.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
+	int32 ApplyProjectSettingsToCeilings();
+
+	/**
 	 * Takes the house's elements with it.
 	 *
 	 * UWorld::DestroyActor explicitly DETACHES attached children rather than destroying them, and
