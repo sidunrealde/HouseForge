@@ -250,10 +250,30 @@ public:
 	 * NOT IDEMPOTENT, which is what makes it a composing-layer operation rather than a generator one.
 	 * See FHFRenderFinish.
 	 *
+	 * ## AND NOT EVERY CONVEX ARRIS IS AN ARRIS
+	 *
+	 * Each element is its own closed solid, so where one element's material STOPS because another
+	 * element's material starts, the boundary between them is convex within the first solid's own
+	 * mesh and is not an edge of the building at all. A partition butting into a wall ends in that
+	 * wall's face; the plaster runs straight through. Chamfered anyway, both sides retreat and the
+	 * two 45-degree strips meet as a 3 mm V-notch scored down what should be one flat plane - two
+	 * full-height hairlines down the corridor's far wall, and the same at every wall butt, at all
+	 * eighteen column-in-wall faces, and along the floor line wherever no skirting covers it. It was
+	 * the first thing anybody would have seen, and it was new with the chamfer.
+	 *
+	 * So the composing layer says where the material continues. FlushVolumes are the volumes this
+	 * element's geometry was built AROUND - which for a wall is exactly the FHFStructuralCut list it
+	 * already carries, plus what it stands on - and a candidate edge lying inside one of them is
+	 * dropped. Bounded volumes rather than infinite planes: a column flush in a wall shares the
+	 * wall's face plane, and suppressing that plane would take every door reveal on the wall with it.
+	 *
+	 * In the same space as the mesh, which for a HouseForge element is world centimetres.
+	 *
 	 * @return true if any edge was chamfered. On failure the mesh is left exactly as it arrived - a
 	 *         partially beveled mesh is worse than a sharp one, because it looks plausible.
 	 */
-	static bool BevelConvexEdges(UE::Geometry::FDynamicMesh3& Mesh, const FHFBevelParams& Params);
+	static bool BevelConvexEdges(UE::Geometry::FDynamicMesh3& Mesh, const FHFBevelParams& Params,
+		const TArray<FHFStructuralCut>& FlushVolumes = TArray<FHFStructuralCut>());
 
 	/**
 	 * Builds a non-overlapping second UV channel for baked lighting, leaving UV0 untouched.
@@ -281,8 +301,11 @@ public:
 	 * normal elements renders as an untextured band shading off the constant normal, which is
 	 * precisely the invisible-in-a-screenshot failure this file keeps guarding against. The lightmap
 	 * unwrap runs LAST, because it packs the islands the projection produced.
+	 *
+	 * @param FlushVolumes What this element's material dies into. See BevelConvexEdges.
 	 */
-	static void FinishForRender(UE::Geometry::FDynamicMesh3& Mesh, const FHFRenderFinish& Finish);
+	static void FinishForRender(UE::Geometry::FDynamicMesh3& Mesh, const FHFRenderFinish& Finish,
+		const TArray<FHFStructuralCut>& FlushVolumes = TArray<FHFStructuralCut>());
 
 	/**
 	 * Insets a closed polygon inward by Amount, returning the resulting loops.

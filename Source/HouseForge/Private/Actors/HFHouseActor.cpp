@@ -151,6 +151,23 @@ namespace
 		return Candidate.Id.LexicalLess(Other.Id);
 	}
 
+	/**
+	 * What a wall stands on, as a volume its underside dies into.
+	 *
+	 * A wall's bottom arris is never an arris: there is a slab, a plinth or the ground under every
+	 * one of them, and the plaster turns the corner onto whatever it is. Modelled as a thin slice
+	 * under the wall's own footprint rather than as the room's floor, because a wall does not know
+	 * which rooms are on either side of it and does not need to - the answer is the same.
+	 */
+	FHFStructuralCut FootingUnder(const FHFWall& Wall)
+	{
+		FHFStructuralCut Footing = FHFGenerators::StructuralCutFor(Wall);
+		Footing.SourceId = FName(*FString::Printf(TEXT("%s_Footing"), *Wall.Id.ToString()));
+		Footing.Centre.Z = Wall.BaseZ - 1.0;
+		Footing.Extents.Z = 1.0;
+		return Footing;
+	}
+
 	/** True when the first wall is the one built through at a junction, and the other butts to it. */
 	bool WallRunsThrough(const FHFWall& Candidate, const FHFWall& Other)
 	{
@@ -496,6 +513,16 @@ void AHFHouseActor::BuildGeometry()
 		WallActor->Wall = Wall;
 		WallActor->Structure = StructureInWall(Wall);
 		WallActor->Openings = OpeningsInWall(Spec, Fixtures, Wall);
+
+		// WHERE THE PLASTER RUNS ON. The masonry is built around all of that structure, so every
+		// arris it leaves against a column, a beam or the wall it butts into is a boundary between
+		// two solids and not an edge of the building - and a chamfer there scores a groove down a
+		// junction that ought to read as one continuous plane. The footing goes on the list for the
+		// same reason: a wall stands on a slab, so its bottom arris is not an arris either, and that
+		// one shows wherever no skirting covers it.
+		WallActor->FlushVolumes = WallActor->Structure;
+		WallActor->FlushVolumes.Add(FootingUnder(Wall));
+
 		WallActor->Regenerate();
 	}
 
@@ -580,6 +607,10 @@ void AHFHouseActor::BuildGeometry()
 		{
 			BeamActor->Beam = Beam;
 			BeamActor->Structure = BeamStructure[Index];
+
+			// A beam frames into the columns it lands on and into the beam that runs through it, so
+			// the faces it leaves against them are not arrises either.
+			BeamActor->FlushVolumes = BeamActor->Structure;
 			BeamActor->Regenerate();
 		}
 	}

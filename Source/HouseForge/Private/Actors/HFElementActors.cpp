@@ -129,7 +129,7 @@ void AHFElementActor::CommitMesh(FDynamicMesh3&& Generated)
 	// generators because a bevel is the one operation in this plugin that is NOT idempotent, and a
 	// generator that beveled its own output would have its chamfers chamfered again by every
 	// composition it was appended into. See FHFRenderFinish.
-	FHFMeshOps::FinishForRender(Generated, RenderFinish);
+	FHFMeshOps::FinishForRender(Generated, RenderFinish, FlushVolumes);
 
 	// The last thing done to a generated mesh, after every boolean and every append. The material
 	// id is a pure function of the polygroup, so deriving it here rather than inside the generators

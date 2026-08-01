@@ -1103,7 +1103,8 @@ void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 	ComputeShadingNormals(Mesh);
 }
 
-bool FHFMeshOps::BevelConvexEdges(FDynamicMesh3& Mesh, const FHFBevelParams& Params)
+bool FHFMeshOps::BevelConvexEdges(FDynamicMesh3& Mesh, const FHFBevelParams& Params,
+	const TArray<FHFStructuralCut>& FlushVolumes)
 {
 	if (!Params.bEnabled || Mesh.TriangleCount() == 0 || !Mesh.HasTriangleGroups())
 	{
@@ -1111,6 +1112,37 @@ bool FHFMeshOps::BevelConvexEdges(FDynamicMesh3& Mesh, const FHFBevelParams& Par
 	}
 
 	AdoptAttributes(Mesh);
+
+	// WHERE THIS ELEMENT'S MATERIAL DIES INTO SOMETHING ELSE'S, there is no arris to chamfer. See
+	// the header. A tolerance rather than an exact surface test: the boundary is a lap of a
+	// millimetre or two by construction, and an edge that close to a neighbour's masonry is one no
+	// camera can see round.
+	constexpr double FlushToleranceCm = 0.2;
+
+	auto InsideAnyFlushVolume = [&FlushVolumes](const FVector3d& Point)
+	{
+		for (const FHFStructuralCut& Volume : FlushVolumes)
+		{
+			if (!Volume.IsValid())
+			{
+				continue;
+			}
+
+			// Into the volume's own frame, so a cut turned in plan is tested as the box it is
+			// rather than as its axis-aligned bounds - which for a 450 x 230 column at 90 degrees
+			// would reach 110 mm further into the wall than the concrete does.
+			const FVector Local = FRotator(0.0, -Volume.YawDegrees, 0.0)
+				.RotateVector(FVector(Point) - Volume.Centre);
+
+			if (FMath::Abs(Local.X) <= Volume.Extents.X + FlushToleranceCm
+				&& FMath::Abs(Local.Y) <= Volume.Extents.Y + FlushToleranceCm
+				&& FMath::Abs(Local.Z) <= Volume.Extents.Z + FlushToleranceCm)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
 
 	// One pass per distinct chamfer width the roles present actually ask for, widest first. An edge
 	// between two roles takes the SMALLER of the two widths, so a chamfer never eats past what the
@@ -1176,7 +1208,18 @@ bool FHFMeshOps::BevelConvexEdges(FDynamicMesh3& Mesh, const FHFBevelParams& Par
 			}
 
 			const FIndex2i EdgeVerts = Mesh.GetEdgeV(Eid);
-			if (FVector3d::Distance(Mesh.GetVertex(EdgeVerts.A), Mesh.GetVertex(EdgeVerts.B)) < MinFace)
+			const FVector3d VertexA = Mesh.GetVertex(EdgeVerts.A);
+			const FVector3d VertexB = Mesh.GetVertex(EdgeVerts.B);
+
+			if (FVector3d::Distance(VertexA, VertexB) < MinFace)
+			{
+				continue;
+			}
+
+			// Both ends, so a long arris that merely passes through a neighbour's footprint - a
+			// wall's own corner running past a column further along it - keeps its chamfer.
+			if (!FlushVolumes.IsEmpty()
+				&& InsideAnyFlushVolume(VertexA) && InsideAnyFlushVolume(VertexB))
 			{
 				continue;
 			}
@@ -1361,14 +1404,15 @@ bool FHFMeshOps::BuildLightmapUVs(FDynamicMesh3& Mesh, const FHFLightmapParams& 
 	return true;
 }
 
-void FHFMeshOps::FinishForRender(FDynamicMesh3& Mesh, const FHFRenderFinish& Finish)
+void FHFMeshOps::FinishForRender(FDynamicMesh3& Mesh, const FHFRenderFinish& Finish,
+	const TArray<FHFStructuralCut>& FlushVolumes)
 {
 	if (Mesh.TriangleCount() == 0)
 	{
 		return;
 	}
 
-	BevelConvexEdges(Mesh, Finish.Bevel);
+	BevelConvexEdges(Mesh, Finish.Bevel, FlushVolumes);
 
 	// Re-projected after the bevel rather than trusted from the generator. The chamfer facets are
 	// new triangles with no UV elements and no normal elements of their own, and a triangle with no

@@ -78,6 +78,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Render")
 	FHFRenderFinish RenderFinish;
 
+	/**
+	 * Volumes this element's geometry was built around, so the chamfer knows where the plaster runs on.
+	 *
+	 * NOT A RENDER SETTING, which is why it is here and not on FHFRenderFinish: it is a fact about
+	 * where this element sits in the building, and the settings page re-seeds RenderFinish wholesale.
+	 * A wall butting into another wall ends in that wall's face and the surface continues straight
+	 * through; chamfered anyway, the junction is scored with a 3 mm V-notch. See
+	 * FHFMeshOps::BevelConvexEdges.
+	 *
+	 * Empty is the honest answer for an element standing on its own, and then every convex arris is
+	 * a real one.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Render")
+	TArray<FHFStructuralCut> FlushVolumes;
+
 	UDynamicMeshComponent* GetMeshComponent() const { return Mesh; }
 
 	virtual void PostInitializeComponents() override;

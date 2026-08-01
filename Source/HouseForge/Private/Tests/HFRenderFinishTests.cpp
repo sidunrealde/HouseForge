@@ -226,6 +226,116 @@ bool FHFBevelledBoxTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * A CHAMFER GOES ON AN ARRIS OF THE BUILDING, NOT ON A SEAM BETWEEN TWO SOLIDS.
+ *
+ * Every element here is its own closed mesh, so where a partition butts into a wall its end face is
+ * convex within its own solid even though the assembled plaster is one continuous plane. Chamfered
+ * anyway, both sides retreat by the chamfer width and the two 45 degree strips meet as a V-notch
+ * scored down the junction. Rendered from a standing eye in the reference flat's corridor, that was
+ * two full-height hairlines down a wall that has none, and the same at every wall butt, at all
+ * eighteen column-in-wall faces, and along the floor line wherever no skirting covers it. It was new
+ * with the chamfer and it is the first thing anybody would have seen.
+ *
+ * Measured on the one case that shows it: a butting wall as its own box, with the wall it dies into
+ * handed over as a flush volume. The far end, which is a genuine free end, must keep its chamfer -
+ * so this is not "chamfer less", it is "chamfer the right edges".
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBevelFlushJunctionTest,
+	"HouseForge.Photoreal.ChamferSkipsFlushJunctions", HF_TEST_FLAGS)
+
+bool FHFBevelFlushJunctionTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeRenderFinish;
+
+	// A partition 200 long, 11.5 thick, 300 tall, running in X from 0 to 200 and butting at x = 200
+	// into a wall whose face is that plane.
+	FDynamicMesh3 Sharp;
+	FHFMeshOps::InitialiseMesh(Sharp);
+	FHFMeshOps::AppendBox(Sharp, FVector3d(100.0, 0.0, 150.0), FVector3d(100.0, 5.75, 150.0), 0.0,
+		EHFSurfaceRole::WallPaint);
+
+	FHFBevelParams Params;
+
+	FDynamicMesh3 Free = Sharp;
+	FHFMeshOps::BevelConvexEdges(Free, Params);
+
+	// The wall it butts into: 11.5 thick, centred on x = 205.75, so its near face is exactly the
+	// partition's end plane at x = 200.
+	FHFStructuralCut Host;
+	Host.SourceId = TEXT("W_Host");
+	Host.Centre = FVector(205.75, 0.0, 150.0);
+	Host.Extents = FVector(5.75, 200.0, 150.0);
+
+	FDynamicMesh3 Butted = Sharp;
+	FHFMeshOps::BevelConvexEdges(Butted, Params, { Host });
+
+	TestTrue(TEXT("A free-standing partition is chamfered all round"),
+		Free.TriangleCount() > Sharp.TriangleCount());
+	TestTrue(TEXT("Butting into a wall costs it some of those chamfers"),
+		Butted.TriangleCount() < Free.TriangleCount());
+	TestTrue(TEXT("But it keeps the chamfers on its free end"),
+		Butted.TriangleCount() > Sharp.TriangleCount());
+	TestTrue(TEXT("And it is still watertight"), FHFMeshOps::IsClosed(Butted));
+
+	// THE MEASURABLE VERSION OF "THE PLASTER RUNS THROUGH". Chamfering the end arris pulls the two
+	// side faces back off the end plane by the chamfer width, and that retreat IS the notch: half of
+	// it on this partition and the matching half on the wall opposite. So the test is whether any
+	// vertex sits just short of the buried plane. Counting vertices ON the plane would not work -
+	// the chamfer leaves its own offset points there, and the long horizontal arrises that genuinely
+	// keep their chamfer terminate there too.
+	auto VerticesJustShortOf = [](const FDynamicMesh3& Mesh, double X, double Width)
+	{
+		int32 Count = 0;
+		for (const int32 Vid : Mesh.VertexIndicesItr())
+		{
+			const double Offset = X - Mesh.GetVertex(Vid).X;
+			if (Offset > Width * 0.5 && Offset < Width * 2.0)
+			{
+				++Count;
+			}
+		}
+		return Count;
+	};
+
+	const double Width = Params.PlasterWidth;
+
+	TestTrue(TEXT("Chamfered free, the end face is cut back off its plane"),
+		VerticesJustShortOf(Free, 200.0, Width) > 0);
+	TestEqual(TEXT("Butted into a wall, nothing is cut back off that plane at all"),
+		VerticesJustShortOf(Butted, 200.0, Width), 0);
+
+	// The free end really was chamfered, so the difference is the suppression and not the operation
+	// declining on both ends. Measured from the other direction, at x = 0.
+	auto VerticesJustPast = [](const FDynamicMesh3& Mesh, double X, double Width)
+	{
+		int32 Count = 0;
+		for (const int32 Vid : Mesh.VertexIndicesItr())
+		{
+			const double Offset = Mesh.GetVertex(Vid).X - X;
+			if (Offset > Width * 0.5 && Offset < Width * 2.0)
+			{
+				++Count;
+			}
+		}
+		return Count;
+	};
+
+	TestTrue(TEXT("The free end of the butted partition is still chamfered"),
+		VerticesJustPast(Butted, 0.0, Width) > 0);
+
+	// A volume the element does not touch changes nothing at all.
+	FHFStructuralCut Elsewhere = Host;
+	Elsewhere.Centre = FVector(1000.0, 1000.0, 150.0);
+
+	FDynamicMesh3 Unaffected = Sharp;
+	FHFMeshOps::BevelConvexEdges(Unaffected, Params, { Elsewhere });
+	TestEqual(TEXT("A volume nowhere near the element suppresses nothing"),
+		Unaffected.TriangleCount(), Free.TriangleCount());
+
+	return true;
+}
+
+/**
  * The chamfers carry the same surface role as the faces they came off.
  *
  * FMeshBevel allocates a fresh polygroup for every strip and every junction polygon, and here the
