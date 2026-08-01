@@ -2472,24 +2472,32 @@ FDynamicMesh3 FHFJoineryKit::GenerateCarcass(const FHFCarcassParams& Params)
 	// Sides full height and full depth; top and bottom running between them; the back behind both.
 	// Exactly the lay-up the composition tests build by hand, so their clearances keep measuring the
 	// same boards in the same places.
+	const double TopFace = P.TopFaceZ();
+
 	AppendRail(Mesh, FVector3d(0.0, 0.0, 0.0), FVector3d(T, D, H), Carc);
 	AppendRail(Mesh, FVector3d(W - T, 0.0, 0.0), FVector3d(W, D, H), Carc);
 	AppendRail(Mesh, FVector3d(T, 0.0, 0.0), FVector3d(W - T, D, T), Carc);
-	AppendRail(Mesh, FVector3d(T, 0.0, H - T), FVector3d(W - T, D, H), Carc);
+
+	// A BASE UNIT UNDER A COUNTER HAS NO TOP BOARD - the granite is its top, and a bowl 200 deep has
+	// to pass through the plane where a board would be. See FHFCarcassParams::bHasTop.
+	if (P.bHasTop)
+	{
+		AppendRail(Mesh, FVector3d(T, 0.0, H - T), FVector3d(W - T, D, H), Carc);
+	}
 
 	if (P.bHasBack && D - BackY > UE_KINDA_SMALL_NUMBER)
 	{
-		AppendRail(Mesh, FVector3d(T, BackY, T), FVector3d(W - T, D, H - T), Carc);
+		AppendRail(Mesh, FVector3d(T, BackY, T), FVector3d(W - T, D, TopFace), Carc);
 	}
 
-	// Mid partitions on the internal bay boundaries, butted between the bottom and the top and
-	// stopping at the back panel rather than running through it.
+	// Mid partitions on the internal bay boundaries, butted between the bottom and whatever closes
+	// the box above, and stopping at the back panel rather than running through it.
 	const double Module = P.ModuleWidth();
 	for (int32 Boundary = 1; Boundary < P.Bays(); ++Boundary)
 	{
 		const double Centre = Boundary * Module;
 		AppendRail(Mesh, FVector3d(Centre - T * 0.5, 0.0, T),
-			FVector3d(Centre + T * 0.5, BackY, H - T), Carc);
+			FVector3d(Centre + T * 0.5, BackY, TopFace), Carc);
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
@@ -2510,7 +2518,7 @@ FBox FHFJoineryKit::CarcassBayClearVolume(const FHFCarcassParams& Params, int32 
 	CarcassBayClearX(P, Bay, X0, X1);
 
 	const double Z0 = P.BoardThickness;
-	const double Z1 = P.Height - P.BoardThickness;
+	const double Z1 = P.TopFaceZ();
 
 	// A bay whose partitions have eaten it has no clear volume, and saying so is what stops a caller
 	// placing a shelf stack into a negative width and getting geometry inside out.

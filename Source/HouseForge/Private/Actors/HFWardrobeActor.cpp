@@ -3,6 +3,7 @@
 #include "Actors/HFWardrobeActor.h"
 
 #include "Model/HFBuildDefaults.h"
+#include "Model/HFFixturePlacement.h"
 
 using namespace UE::Geometry;
 
@@ -58,36 +59,13 @@ void AHFWardrobeActor::ApplyFixture(const FHFFixture& Fixture)
 
 FTransform AHFWardrobeActor::PlacementFor(const FHFFixture& Fixture, double FloorZ, const FHFWall* AnchorWall)
 {
-	double Yaw = Fixture.RotationDegrees;
-
-	if (AnchorWall != nullptr)
-	{
-		// Which way the back of the wardrobe looks at this yaw. Local +Y runs back into the unit, and
-		// a yaw rotation takes it to (-sin, cos).
-		const double Radians = FMath::DegreesToRadians(Yaw);
-		const FVector2D Back(-FMath::Sin(Radians), FMath::Cos(Radians));
-
-		// From the wall to the wardrobe. If the back is already pointing that way it is pointing away
-		// from the wall, so the wardrobe is facing into it - and the whole run is turned round.
-		const FVector2D OnWall = FMath::ClosestPointOnSegment2D(Fixture.Position, AnchorWall->Start, AnchorWall->End);
-		const FVector2D ToFixture = Fixture.Position - OnWall;
-
-		if (FVector2D::DotProduct(Back, ToFixture) > 0.0)
-		{
-			Yaw += 180.0;
-		}
-	}
-
-	const FRotator Rotation(0.0, Yaw, 0.0);
-
-	// The fixture is positioned by the CENTRE of its footprint and the wardrobe is built from its
-	// front-left corner, so the corner is where the actor goes. Rotated with the run, or a turned
-	// wardrobe lands half its own length away from where the drawing put it.
-	const FVector ToCorner = Rotation.RotateVector(
-		FVector(-Fixture.Footprint.X * 0.5, -Fixture.Footprint.Y * 0.5, 0.0));
-
-	return FTransform(Rotation,
-		FVector(Fixture.Position.X, Fixture.Position.Y, FloorZ + Fixture.BaseZ) + ToCorner);
+	// THE RULE MOVED, THE ANSWER DID NOT. This was the only correct implementation in the codebase of
+	// "put the run's back against the anchor wall and turn it through half a turn if the drawing's
+	// yaw pointed the front at the wall", and milestone 9 needs it for thirteen more types. Copied
+	// once per type it would be thirteen chances to copy it slightly wrong, and every one of those
+	// mistakes reads as correct in plan. Kept as a named entry point because a wardrobe's placement is
+	// a thing tests and tools ask for by name.
+	return FHFFixturePlacement::AgainstWall(Fixture, FloorZ, AnchorWall);
 }
 
 // ------------------------------------------------------------------------------------ generation

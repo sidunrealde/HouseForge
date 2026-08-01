@@ -1034,6 +1034,22 @@ struct HOUSEFORGE_API FHFCarcassParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	bool bHasBack = true;
 
+	/**
+	 * A top board.
+	 *
+	 * OFF FOR A BASE UNIT UNDER A COUNTER, which is not a shortcut: a kitchen base carcass is built
+	 * open-topped and the granite IS its top, fixed down onto the sides and the front and back rails.
+	 * That is also the only construction a sink or a hob can be set into - a bowl 200 deep hanging
+	 * through a 40 counter has to pass through the plane where a top board would be, and a carcass
+	 * that kept one would have the bowl of every sink in the flat driven through 18 mm of ply.
+	 *
+	 * Its own flag rather than a consequence of anything, for the same reason bHasBack is: it changes
+	 * the CLEAR HEIGHT a shelf stack or a drawer bank is given, and a bay that thought it had a top
+	 * board would place its topmost shelf 18 mm low for ever after.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	bool bHasTop = true;
+
 	/** Bays, never less than one: a carcass with no bay is a carcass with one. */
 	int32 Bays() const { return FMath::Max(1, BayCount); }
 
@@ -1043,8 +1059,11 @@ struct HOUSEFORGE_API FHFCarcassParams
 	/** Inner face of the back panel: how far back the inside of the carcass actually goes. */
 	double BackFaceY() const { return bHasBack ? Depth - BackThickness : Depth; }
 
-	/** Clear height between the bottom and the top boards. */
-	double ClearHeight() const { return Height - 2.0 * BoardThickness; }
+	/** Underside of the top board, or the top of the box when it is open-topped. */
+	double TopFaceZ() const { return bHasTop ? Height - BoardThickness : Height; }
+
+	/** Clear height between the bottom board and whatever closes the box above it. */
+	double ClearHeight() const { return TopFaceZ() - BoardThickness; }
 
 	/**
 	 * Bottom-left corner of a bay's module, on the front plane, in carcass-local space.
