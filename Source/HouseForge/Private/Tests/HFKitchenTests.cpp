@@ -203,7 +203,27 @@ bool FHFSinkBowlTest::RunTest(const FString& Parameters)
 	// below it - a rim modelled the other way up put 318 cm2 of steel in the same plane as the
 	// granite and z-fought with it, which is what this figure exists to hold.
 	TestNearlyEqual(TEXT("Nothing of the sink but the bowls is below the worktop"),
-		Bounds.Min.Z, -20.15, 0.2);
+		Bounds.Min.Z, -21.2, 0.3);
+
+	// AND EVERY SURFACE OF IT IS SANITARYWARE OR THE TAP'S METAL. A role is not decoration: it is
+	// what the material panel targets and what decides the thing's colour, so a bowl floor that came
+	// out tagged as joinery carcass is a bowl floor rendered in cabinet laminate - present, solid,
+	// facing the right way, measurably correct in area and volume, and visibly the wrong material at
+	// the bottom of a stainless sink. Nothing but looking at it, or this, catches that.
+	{
+		const TSet<EHFSurfaceRole> Present = FHFMeshOps::RolesPresent(Built.Shell);
+
+		for (const EHFSurfaceRole Role : Present)
+		{
+			const bool bExpected = Role == EHFSurfaceRole::Sanitary
+				|| Role == EHFSurfaceRole::MetalHardware;
+
+			TestTrue(*FString::Printf(TEXT("A sink carries only sanitary and metal, not role %d"),
+				static_cast<int32>(Role)), bExpected);
+		}
+
+		TestTrue(TEXT("The pressing is sanitaryware"), Present.Contains(EHFSurfaceRole::Sanitary));
+	}
 
 	// AND THE BOWL IS A BOWL. A solid block of the same outline would have roughly the rim's
 	// footprint times its depth in volume; a hollow pressing has a small fraction of that. This is
@@ -215,6 +235,45 @@ bool FHFSinkBowlTest::RunTest(const FString& Parameters)
 	AddInfo(FString::Printf(TEXT("Sink solid volume %.0f cm3 in an envelope of %.0f."), Actual, Envelope));
 	TestTrue(TEXT("The bowls are hollow, not solid"), Actual < Envelope * 0.25);
 	TestTrue(TEXT("But there is real material there"), Actual > 0.0);
+
+	// AND IT HAS A BOTTOM. Hollow is not enough, and this is not a hypothetical: the first version
+	// that passed the volume test above was two neat tubes looking straight through into the cabinet
+	// below, because the cavity's floor and the base's top wanted to be the same plane and the
+	// boolean resolved that by taking the base. Hollow, correct volume, correct bounds, no bottom.
+	//
+	// Measured by counting the mesh's downward-facing area at the bowl's floor level: a bowl with a
+	// base has a floor there, and a tube has nothing at all.
+	{
+		const double FloorZ = -Built.Used.BowlDepth;
+		double FloorArea = 0.0;
+
+		for (const int32 Tri : Built.Shell.TriangleIndicesItr())
+		{
+			FVector3d A, B, C;
+			Built.Shell.GetTriVertices(Tri, A, B, C);
+
+			const double MidZ = (A.Z + B.Z + C.Z) / 3.0;
+			if (FMath::Abs(MidZ - FloorZ) > 0.6)
+			{
+				continue;
+			}
+
+			// FACING UP, not merely horizontal. A floor whose winding is inverted is culled from
+			// above: the bowl looks straight through into whatever is under the sink, while every
+			// measurement of area, volume and bounds still passes. Accepting any horizontal face
+			// here would accept exactly that.
+			const FVector3d Normal = VectorUtil::Normal(A, B, C);
+			if (Normal.Z > 0.9)
+			{
+				FloorArea += VectorUtil::Area(A, B, C);
+			}
+		}
+
+		AddInfo(FString::Printf(TEXT("Upward-facing bowl floor at the base level: %.0f cm2."), FloorArea));
+
+		// Two bowls of roughly 33 x 38, so well over one bowl's footprint of floor looking up.
+		TestTrue(TEXT("The bowls have a bottom, and it faces up"), FloorArea > 1200.0);
+	}
 
 	// A single-bowl utility sink is the same object at a different count, not a different fixture.
 	FHFSinkParams Single = MakeSink();

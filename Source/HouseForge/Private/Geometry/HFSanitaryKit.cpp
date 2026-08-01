@@ -199,28 +199,56 @@ FHFSinkBuild FHFSanitaryKit::BuildSink(const FHFSinkParams& Params)
 
 	for (int32 Bowl = 0; Bowl < P.BowlCount; ++Bowl)
 	{
-		// The tub as a solid, from the underside of its base up to the rim.
-		FDynamicMesh3 Tub;
-		FHFMeshOps::InitialiseMesh(Tub);
+		// ------------------------------------------------------------------------ the four walls
+		//
+		// A SOLID CUT CLEAN THROUGH, and then a base put back under it as its own slab.
+		//
+		// Cutting a cavity that stopped at the inside of the base was the obvious way round and it
+		// produced BOTTOMLESS BOWLS - two neat white tubes looking straight through into the cream
+		// carcass below. The cavity's bottom face and the base's top face wanted to be the same plane,
+		// which is the one case a mesh boolean has no good answer for, and it resolved it by taking
+		// the base. Every measurement still passed: the bowls were hollow, the volume was small, the
+		// bounds reached the right depth. It took looking into the sink to see there was no bottom.
+		//
+		// So neither solid is asked to end where the other begins. The cut goes right through, which
+		// is unambiguous, and the base is a separate slab that meets the walls face to face.
+		FDynamicMesh3 Walls;
+		FHFMeshOps::InitialiseMesh(Walls);
 
-		if (!FHFMeshOps::AppendPrism(Tub, BowlOuter[Bowl], BaseZ - Wall, 0.0,
-			EHFSurfaceRole::Sanitary))
+		if (!FHFMeshOps::AppendPrism(Walls, BowlOuter[Bowl], BaseZ, 0.0, EHFSurfaceRole::Sanitary))
 		{
 			continue;
 		}
 
-		// And the water's worth of it taken back out, open at the top. Carried up past the rim so the
-		// cut face reaches daylight rather than leaving a skin of steel over the mouth.
 		FDynamicMesh3 Cavity;
 		FHFMeshOps::InitialiseMesh(Cavity);
 
-		if (FHFMeshOps::AppendPrism(Cavity, BowlInner[Bowl], BaseZ, P.RimThickness + 1.0,
-			EHFSurfaceRole::Sanitary))
+		if (FHFMeshOps::AppendPrism(Cavity, BowlInner[Bowl], BaseZ - Wall - 1.0,
+			P.RimThickness + 1.0, EHFSurfaceRole::Sanitary))
 		{
-			FHFMeshOps::SubtractInPlace(Tub, Cavity);
+			FHFMeshOps::SubtractInPlace(Walls, Cavity);
 		}
 
-		FHFMeshOps::AppendPreservingRoles(Out.Shell, Tub);
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Walls);
+
+		// ------------------------------------------------------------------------------ the base
+		//
+		// The floor of the bowl, sitting under the walls: its top IS the surface water stands on.
+		//
+		// THICKER THAN THE WALLS, DOWNWARDS ONLY. The floor's top stays exactly at the bowl's depth,
+		// so nothing about the bowl a person sees or measures changes; the slab simply has some
+		// substance under it. At one wall thickness it was 3 mm of steel spanning 33 x 38 - right on
+		// FHFRenderFinish::MinFeatureFactor's threshold, thin enough to be lost in the render finish,
+		// and the bowl looked straight through into the cream carcass below. A real bowl is a formed
+		// pan with a sound-deadening pad under it and is nothing like 3 mm at the bottom either.
+		FDynamicMesh3 Base;
+		FHFMeshOps::InitialiseMesh(Base);
+
+		if (FHFMeshOps::AppendPrism(Base, BowlOuter[Bowl], BaseZ - Wall * 4.0, BaseZ,
+			EHFSurfaceRole::Sanitary))
+		{
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Base);
+		}
 
 		Out.BowlVolume += (2.0 * (BowlHalf.X - Wall)) * (2.0 * (BowlHalf.Y - Wall)) * P.BowlDepth;
 	}
