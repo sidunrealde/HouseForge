@@ -7,6 +7,7 @@
 #include "Actors/HFCounterActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFFittingActors.h"
+#include "Actors/HFFurnitureActors.h"
 #include "Actors/HFOpeningActor.h"
 #include "Actors/HFFanActor.h"
 #include "Actors/HFWardrobeActor.h"
@@ -448,6 +449,33 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	void SeedBed(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFBedActor& Actor = static_cast<AHFBedActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// PLACED LIKE A RUN OF JOINERY AND NOT LIKE LOOSE FURNITURE, which is the one thing about a bed
+		// that is easy to get wrong. A bed has a front and a back - the headboard goes against the wall
+		// and the foot into the room - and a drawing states a yaw that is a one-in-two chance of being
+		// the half turn that puts the headboard in the middle of the floor. FHFFixturePlacement resolves
+		// it from the anchor wall, exactly as it does for a wardrobe.
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedDesk(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFDeskActor& Actor = static_cast<AHFDeskActor&>(Element);
+
+		// The project's figures FIRST: ApplyFixture deliberately preserves the skirting setback this
+		// resolves, and re-seeding in the other order would leave the desk standing inside the board.
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
 	void SeedCounter(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFCounterActor& Actor = static_cast<AHFCounterActor&>(Element);
@@ -589,6 +617,23 @@ namespace
 				TEXT("Case"), &SeedCasedGoods },
 			{ EHFFixtureType::KitchenWallCabinet, AHFCasedGoodsActor::StaticClass(),
 				TEXT("Case"), &SeedCasedGoods },
+
+			// THE SAME ACTOR AND THE SAME SEEDING FOR ALL FIVE, which is the whole return on the cased
+			// goods kit: a TV console, a bedside unit and a shoe rack differ from a kitchen base unit in
+			// their proportions and in which front each bay carries, and in nothing that this layer can
+			// see. What each of them IS lives in AHFCasedGoodsActor's recipe, in one switch, where the
+			// five can be read against each other.
+			{ EHFFixtureType::TVUnit, AHFCasedGoodsActor::StaticClass(),
+				TEXT("Case"), &SeedCasedGoods },
+			{ EHFFixtureType::Nightstand, AHFCasedGoodsActor::StaticClass(),
+				TEXT("Case"), &SeedCasedGoods },
+			{ EHFFixtureType::ShoeRack, AHFCasedGoodsActor::StaticClass(),
+				TEXT("Case"), &SeedCasedGoods },
+
+			{ EHFFixtureType::Bed, AHFBedActor::StaticClass(),
+				TEXT("Bed"), &SeedBed },
+			{ EHFFixtureType::StudyTable, AHFDeskActor::StaticClass(),
+				TEXT("Desk"), &SeedDesk },
 
 			{ EHFFixtureType::CounterTop, AHFCounterActor::StaticClass(),
 				TEXT("Counter"), &SeedCounter },
@@ -1405,6 +1450,24 @@ TArray<FHFFixture> AHFHouseActor::ResolveFixtures(TArray<FString>* OutMoved) con
 		if (Fixture.Type == EHFFixtureType::ExhaustFan)
 		{
 			BuiltHeights.Add(Fixture.Id, AHFFanActor::ParamsFor(Fixture).CaseHalfWidth() * 2.0);
+		}
+		else if (AHFBedActor::Builds(Fixture.Type))
+		{
+			// A BED DRAWN 600 HIGH STANDS 1050, and the difference is the headboard. The drawn height
+			// is the top of the mattress, because that is the figure a plan dimensions a bed by and the
+			// one that has to agree with the nightstand beside it - so the drawn box is 450 mm shorter
+			// than the object every time. Nothing in this flat has a ceiling low enough for it to
+			// matter, and that is exactly why it is supplied: the answer must not depend on the room
+			// happening to be tall.
+			BuiltHeights.Add(Fixture.Id, AHFBedActor::ParamsFor(Fixture).BuiltHeight());
+		}
+		else if (AHFCasedGoodsActor::Builds(Fixture.Type))
+		{
+			// And a run capped with a cornice stands proud of its own carcass by the moulding's height,
+			// for the same reason and with the same consequence: a ceiling fitted to the drawn box
+			// would leave the cornice inside the plasterboard. Zero cornice returns the drawn height,
+			// so this is a no-op for the four cased-goods types that do not carry one.
+			BuiltHeights.Add(Fixture.Id, AHFCasedGoodsActor::ParamsFor(Fixture).BuiltHeight());
 		}
 	}
 

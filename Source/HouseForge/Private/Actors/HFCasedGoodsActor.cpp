@@ -74,6 +74,67 @@ namespace
 		}
 	}
 
+	/**
+	 * A shoe rack: tilt-out flaps STACKED, one over another, with a shelf inside each.
+	 *
+	 * ## Why the flaps stack rather than standing side by side
+	 *
+	 * Because that is what a shoe cabinet is. A pair of side-hung doors on a 350-deep box is a
+	 * cupboard that happens to have shoes in it; the thing every Indian foyer actually has is a
+	 * shallow cabinet whose fronts tip forward out of the way, precisely because 350 mm is too little
+	 * depth to open a door into a hallway somebody is standing in. So the drawing's ShutterCount is
+	 * read as the number of TIERS, and each tier is its own carcass in the stack - a real board
+	 * between them, exactly as a wardrobe's loft is a real box on top of its body.
+	 *
+	 * ## And why the drawn shelf count still adds up
+	 *
+	 * ShelfCount is every horizontal division the drawing shows inside the rack. One of those
+	 * divisions per tier boundary is the carcass board between two tiers and is not a shelf at all,
+	 * so what is left over is what actually gets shelved out - 3 divisions over 2 tiers is one tier
+	 * board and one shelf inside each tier, which is the rack that was drawn and not a rack with two
+	 * extra boards in it.
+	 */
+	void ComposeShoeRackTiers(const FHFFixtureParams& Spec, FHFCasedGoodsParams& P)
+	{
+		const int32 Tiers = FMath::Clamp(Spec.ShutterCount, 1, 6);
+
+		// The divisions the drawing marked, less the ones that are tier boundaries, shared out. Never
+		// negative: a drawing that counted fewer divisions than there are tiers has described the tier
+		// boards themselves, and the answer to that is tiers with nothing extra in them.
+		const int32 Shelved = FMath::Max(Spec.ShelfCount - (Tiers - 1), 0);
+		const int32 PerTier = Shelved / Tiers;
+
+		FHFCaseBay Compartment;
+		Compartment.Front = EHFCaseFront::Shutter;
+
+		// THE FLAP, and the one thing that makes this a shoe rack rather than a cupboard. Its stop
+		// angle is not this file's business - FHFCasedGoodsKit resolves it from the project's
+		// TiltOutFlapAngleDegrees, because only the kit is holding the joinery figures.
+		Compartment.Motion = EHFShutterMotion::BottomHung;
+		Compartment.LeafCount = 1;
+		Compartment.Interior = PerTier > 0 ? EHFCaseInterior::Shelves : EHFCaseInterior::None;
+
+		// Stated rather than left at the sentinel. Zero asks the project how many shelves fit in the
+		// clear height, and the project's answer is a 375 wardrobe compartment - one shelf, or none at
+		// all, in a tier a shoe is meant to stand in.
+		Compartment.ShelfCount = PerTier;
+		Compartment.ShelfMaterial = EHFShelfMaterial::Ply;
+
+		P.Units.Reset();
+
+		for (int32 Tier = 0; Tier < Tiers; ++Tier)
+		{
+			FHFCaseUnit Unit;
+
+			// Left at zero so Sanitise shares the stack equally. Stating a height here would be this
+			// file working out the plinth a second time, and the two copies would drift.
+			Unit.Height = 0.0;
+			Unit.BayCount = 1;
+			Unit.Bays.Add(Compartment);
+			P.Units.Add(MoveTemp(Unit));
+		}
+	}
+
 	/** Everything the drawing states about a run, and what its type makes of it. */
 	void ReadFixture(const FHFFixture& Fixture, FHFCasedGoodsParams& P, bool bBankAtStart)
 	{
@@ -123,6 +184,48 @@ namespace
 				Spec.bHasGlassInsert ? EHFShelfMaterial::Glass : EHFShelfMaterial::Ply, bBankAtStart);
 			break;
 
+		case EHFFixtureType::ShoeRack:
+			// A stack rather than a run of bays, so it does not go through ComposeBays at all - see
+			// ComposeShoeRackTiers. Returns early because it fills P.Units itself.
+			P.Mount = EHFCaseMount::Plinth;
+			ComposeShoeRackTiers(Spec, P);
+			return;
+
+		case EHFFixtureType::TVUnit:
+			// A TALL STORAGE COLUMN AND A LOW CONSOLE ARE THE SAME OBJECT AT TWO HEIGHTS, and the
+			// drawing already separates them: the column is drawn with shutters and shelves, the
+			// console with drawers. ComposeBays reads exactly that, so there is nothing here beyond
+			// the mount - which is the point of the shared kit.
+			P.Mount = EHFCaseMount::Plinth;
+			ComposeBays(Unit, Spec, Spec.ShutterMotion, EHFShelfMaterial::Ply, bBankAtStart);
+			break;
+
+		case EHFFixtureType::Nightstand:
+			// A BEDSIDE UNIT IS A DRAWER BANK AND NOTHING ELSE. ComposeBays would give it a cupboard
+			// bay beside the bank the moment a drawing marked a shutter count, which is not what
+			// stands beside a bed: it is 450 wide, there is no room for two bays in it, and a hinged
+			// door at that width swings across the bed rather than into the room.
+			//
+			// So the whole of it is one bay of drawers, and the count is the drawing's - falling back
+			// to two, because that is what a nightstand has and a drawing that marked none has said
+			// nothing rather than asked for a box with no fronts.
+			{
+				P.Mount = EHFCaseMount::Plinth;
+
+				FHFCaseBay Bank;
+				Bank.Front = EHFCaseFront::DrawerBank;
+				Bank.DrawerCount = Spec.DrawerCount > 0 ? Spec.DrawerCount : 2;
+
+				// Nearly equal, not the kitchen's 2:1. A bedside unit's drawers hold the same sort of
+				// thing as each other; the deep-pan-drawer graduation belongs under a worktop.
+				Bank.GradationRatio = 1.25;
+				Bank.Interior = EHFCaseInterior::None;
+
+				Unit.BayCount = 1;
+				Unit.Bays.Add(Bank);
+			}
+			break;
+
 		default:
 			P.Mount = EHFCaseMount::Plinth;
 			ComposeBays(Unit, Spec, Spec.ShutterMotion, EHFShelfMaterial::Ply, bBankAtStart);
@@ -140,12 +243,15 @@ bool AHFCasedGoodsActor::Builds(EHFFixtureType Type)
 	{
 	case EHFFixtureType::KitchenBaseCabinet:
 	case EHFFixtureType::KitchenWallCabinet:
+	case EHFFixtureType::TVUnit:
+	case EHFFixtureType::Nightstand:
+	case EHFFixtureType::ShoeRack:
 		return true;
 
 	default:
-		// The other five cased-goods types - TV unit, nightstand, shoe rack, vanity, study table -
-		// land with the groups that own them. Their recipes are the only thing missing; the kit under
-		// this actor already builds all seven shapes.
+		// The vanity lands with the sanitary group. A study table is deliberately NOT here: it is a
+		// top on legs with a pedestal under one end, and a stack of carcasses cannot express the
+		// knee space that makes it a desk rather than a sideboard. See FHFDeskKit.
 		return false;
 	}
 }

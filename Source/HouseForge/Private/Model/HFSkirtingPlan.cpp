@@ -105,9 +105,21 @@ bool FHFSkirting::IsScribedJoinery(EHFFixtureType Type)
 	case EHFFixtureType::Bookshelf:
 	case EHFFixtureType::ShoeRack:
 	case EHFFixtureType::TVUnit:
-	case EHFFixtureType::StudyTable:
 	case EHFFixtureType::Vanity:
 		return true;
+
+	// A STUDY TABLE IS NOT SCRIBED, and it used to be listed above as though it were. A desk is a top
+	// on a pedestal and a gable with 700 mm of clear knee hole between them, so there is no carcass
+	// across most of its width for a break to be paid for: cutting the skirting to the drawn footprint
+	// leaves a 1200 mm hole in R_Bed2's board with two supports standing in it and bare plaster
+	// meeting bare floor between them, which is the exact failure BuiltFixtureIds exists to prevent -
+	// arrived at from the other side.
+	//
+	// The board therefore runs straight through behind it, and the supports stand clear of the board:
+	// see FHFDeskParams::SupportSetback, which is the other half of this decision and without which
+	// this one would simply move the interpenetration rather than remove it.
+	case EHFFixtureType::StudyTable:
+		return false;
 
 	default:
 		// Everything else either hangs clear of the floor - a wall cabinet, a loft - or is loose

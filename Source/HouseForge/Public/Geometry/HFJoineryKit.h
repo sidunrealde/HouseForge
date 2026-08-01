@@ -449,7 +449,11 @@ struct HOUSEFORGE_API FHFShutterParams
 
 	bool IsSideHung() const { return MotionKind == EHFShutterMotion::SideHung; }
 	bool IsTopHung() const { return MotionKind == EHFShutterMotion::TopHung; }
+	bool IsBottomHung() const { return MotionKind == EHFShutterMotion::BottomHung; }
 	bool IsSliding() const { return MotionKind == EHFShutterMotion::Sliding; }
+
+	/** True for the two flaps, which turn about a horizontal axis and have no hand to mirror. */
+	bool IsFlap() const { return IsTopHung() || IsBottomHung(); }
 
 	/**
 	 * Where the leaf runs to, along the module, as the two-track rule sets it out.

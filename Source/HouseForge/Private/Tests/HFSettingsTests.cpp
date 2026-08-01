@@ -620,8 +620,14 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// are what stop a 450 band and a 300 ring consuming a 1800 foyer and leaving a 310 mm shaft
 	// punched through its plaster; the third is what a room that wants no design at all gets, so
 	// "flat on purpose" stops being indistinguishable from "not done yet".
-	TestEqual(TEXT("The page ships every control it did"), Controls, 145);
-	TestEqual(TEXT("Every joinery control is still there"), Joinery, 31);
+	// 146 rather than 145, and 32 joinery rather than 31: TiltOutFlapAngleDegrees, where a shoe
+	// rack's flap stops. Its own dial rather than a reuse of ShutterOpenAngleDegrees, because it is
+	// its own object - a tilt-out hangs on a stay and stops at about 68 where a concealed hinge opens
+	// to 100, and a foyer whose four flaps swung to 100 would have them lying flat out across the
+	// walkway. The same split, and the same reason, as the extract's blade pitch against the ceiling
+	// fan's.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 146);
+	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
 	return true;
 }
@@ -884,7 +890,9 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 141);
+	// 142 rather than 141: TiltOutFlapAngleDegrees. See the marking test for why a tilt-out gets its
+	// own figure rather than sharing the shutter's.
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 142);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

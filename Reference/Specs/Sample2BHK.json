@@ -2068,7 +2068,7 @@
 			"position":
 			{
 				"x": 690,
-				"y": 400
+				"y": 340
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2106,7 +2106,7 @@
 			"position":
 			{
 				"x": 3800,
-				"y": 400
+				"y": 340
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2652,12 +2652,12 @@
 			"params":
 			{
 				"shutterCount": 0,
-				"drawerCount": 0,
+				"drawerCount": 2,
 				"shelfCount": 0,
 				"bHasLoft": false,
 				"loftHeight": 60,
-				"plinthHeight": 10,
-				"handleStyle": "Bar",
+				"plinthHeight": 80,
+				"handleStyle": "HandlelessGroove",
 				"shutterMotion": "SideHung",
 				"loftShutterMotion": "SideHung",
 				"bHasHangingRail": false,
@@ -2690,12 +2690,12 @@
 			"params":
 			{
 				"shutterCount": 0,
-				"drawerCount": 0,
+				"drawerCount": 2,
 				"shelfCount": 0,
 				"bHasLoft": false,
 				"loftHeight": 60,
-				"plinthHeight": 10,
-				"handleStyle": "Bar",
+				"plinthHeight": 80,
+				"handleStyle": "HandlelessGroove",
 				"shutterMotion": "SideHung",
 				"loftShutterMotion": "SideHung",
 				"bHasHangingRail": false,
@@ -2828,7 +2828,7 @@
 			"position":
 			{
 				"x": 8300,
-				"y": 1300
+				"y": 1200
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -3397,8 +3397,8 @@
 			"label": "Shoe rack",
 			"position":
 			{
-				"x": 1600,
-				"y": 4300
+				"x": 1567.5,
+				"y": 4600
 			},
 			"rotationDegrees": 90,
 			"footprint":
@@ -3445,7 +3445,7 @@
 				"y": 20
 			},
 			"height": 120,
-			"baseZ": 300,
+			"baseZ": 1100,
 			"anchorWallId": "W_South",
 			"params":
 			{

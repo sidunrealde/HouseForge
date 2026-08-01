@@ -57,6 +57,14 @@ EHFCeilingFitRule FHFCeilingFit::RuleFor(EHFFixtureType Type)
 	case EHFFixtureType::KitchenWallCabinet:
 	case EHFFixtureType::KitchenTallUnit:
 	case EHFFixtureType::Bookshelf:
+
+	// A TV storage column and a shoe rack are the same kind of thing: carcasses cut on site to the
+	// room they are going into. Neither is anywhere near a ceiling in this flat - the column tops out
+	// at 1880 and the rack at 900 - and both are listed anyway, because the rule is a property of the
+	// OBJECT and not of whether it currently happens to clear. A wall unit that only answers to the
+	// ceiling once somebody drags a depth slider is a wall unit whose answer was never tested.
+	case EHFFixtureType::TVUnit:
+	case EHFFixtureType::ShoeRack:
 		return EHFCeilingFitRule::Shortens;
 
 	default:

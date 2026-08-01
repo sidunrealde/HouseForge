@@ -578,9 +578,22 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// the 1650 pier between the door's east jamb at 3000 and Win_Living's west jamb at 4650.
 		// That is how the kitchen's wall units already deal with the window over the sink, and it is
 		// what the joinery in front of a balcony door actually is.
+		// ------------------------------------------------------- why both of these moved to Y = 340
+		//
+		// SET OUT FROM THE WALL'S FACE, NOT ITS CENTRELINE. Both units stood at Y 400, which put their
+		// backs at 175 with W_South's inner face at 115 - a 60 mm slot behind 2100 mm of fitted
+		// joinery. Nothing said so while a TV unit was a row in the spec and nothing in the level.
+		//
+		// It is worse than an ordinary gap, because a TV unit is scribed joinery: the skirting is CUT
+		// OUT for its full width - see FHFSkirting::IsScribedJoinery - so the slot behind it has no
+		// skirting in it either. Bare plaster meeting bare floor, 60 mm wide and 2100 long, in the one
+		// place in the living room the eye is aimed at all evening.
+		//
+		// 340 puts the back on 115. Both wardrobes in the flat were already set out this way and were
+		// the check: F_MBed_Wardrobe's back lands on W_East's face at 10685 exactly.
 		FHFFixture& TallUnit = B.AddFixture(TEXT("F_TVUnit_W"), TEXT("R_Living"), EHFFixtureType::TVUnit,
 			TEXT("TV wall unit, tall storage west of the balcony door"),
-			FVector2D(690.0, 400.0), FVector2D(900.0, 450.0), 1800.0);
+			FVector2D(690.0, 340.0), FVector2D(900.0, 450.0), 1800.0);
 		TallUnit.AnchorWallId = TEXT("W_South");
 		TallUnit.Params.ShutterCount = 2;
 		TallUnit.Params.ShelfCount = 4;
@@ -589,7 +602,7 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		FHFFixture& TVUnit = B.AddFixture(TEXT("F_TVUnit_E"), TEXT("R_Living"), EHFFixtureType::TVUnit,
 			TEXT("TV console with drawers, east of the balcony door"),
-			FVector2D(3800.0, 400.0), FVector2D(1200.0, 450.0), 600.0);
+			FVector2D(3800.0, 340.0), FVector2D(1200.0, 450.0), 600.0);
 		TVUnit.AnchorWallId = TEXT("W_South");
 		TVUnit.Params.DrawerCount = 3;
 		TVUnit.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
@@ -734,10 +747,25 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Bed.AnchorWallId = TEXT("W_North");
 
 		// Clear of the bed's 5400..7200 span so they sit beside it, not clipping into it.
-		B.AddFixture(TEXT("F_MBed_Night1"), TEXT("R_MBed"), EHFFixtureType::Nightstand,
-			TEXT("Nightstand"), FVector2D(5100.0, 8000.0), FVector2D(450.0, 400.0), 550.0);
-		B.AddFixture(TEXT("F_MBed_Night2"), TEXT("R_MBed"), EHFFixtureType::Nightstand,
-			TEXT("Nightstand"), FVector2D(7500.0, 8000.0), FVector2D(450.0, 400.0), 550.0);
+		//
+		// Both state their plinth in MILLIMETRES, which is the units this spec is written in, and they
+		// have to: FHFFixtureParams defaults PlinthHeight to 10, and that 10 is a CENTIMETRE figure
+		// sitting on a struct whose lengths are converted from whatever the spec declares. Left unsaid
+		// it arrives as a 10 mm plinth - a bedside unit standing on a 1 cm rebate, which is not a toe
+		// kick, it is a manufacturing tolerance. Exactly the trap F_Bed2_Wardrobe's LoftHeight fell
+		// into, and it is worth two lines here rather than a second bug report.
+		auto AddNightstand = [&B](const FName& Id, const FVector2D& Position) -> FHFFixture&
+		{
+			FHFFixture& Night = B.AddFixture(Id, TEXT("R_MBed"), EHFFixtureType::Nightstand,
+				TEXT("Nightstand"), Position, FVector2D(450.0, 400.0), 550.0);
+			Night.Params.DrawerCount = 2;
+			Night.Params.PlinthHeight = 80.0;
+			Night.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
+			return Night;
+		};
+
+		AddNightstand(TEXT("F_MBed_Night1"), FVector2D(5100.0, 8000.0));
+		AddNightstand(TEXT("F_MBed_Night2"), FVector2D(7500.0, 8000.0));
 
 		// 2400 long run, 600 deep, turned to stand against the east wall at X=10800.
 		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_MBed_Wardrobe"), TEXT("R_MBed"), EHFFixtureType::Wardrobe,
@@ -783,8 +811,13 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Bedroom 2
 	{
+		// 1200, not 1300. The headboard is built at the back of the drawn footprint - the drawn box is
+		// the object, so a bed cannot grow through the wall behind it - which put this one's head at
+		// Y 300 with W_South's face at 115: a 185 mm gap behind a queen bed, wide enough to read from
+		// the doorway as a bed that has been pulled away from the wall. 1200 leaves 85, which is what
+		// F_MBed_Bed already has and is a bed standing against a wall with its skirting behind it.
 		FHFFixture& Bed = B.AddFixture(TEXT("F_Bed2_Bed"), TEXT("R_Bed2"), EHFFixtureType::Bed,
-			TEXT("Queen bed"), FVector2D(8300.0, 1300.0), FVector2D(1500.0, 2000.0), 600.0);
+			TEXT("Queen bed"), FVector2D(8300.0, 1200.0), FVector2D(1500.0, 2000.0), 600.0);
 		Bed.AnchorWallId = TEXT("W_South");
 
 		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_Bed2_Wardrobe"), TEXT("R_Bed2"), EHFFixtureType::Wardrobe,
@@ -917,8 +950,21 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		// Turned onto the foyer's east wall. The foyer's north wall is now the kitchen doorway, and
 		// it was against that; the east wall is 1800 of blank partition with the DB high up on it.
+		// --------------------------------------------------- why this moved from (1600, 4300)
+		//
+		// IT WAS INSIDE THE WALL. Turned onto the east wall, a 350-deep rack centred at X 1600 has its
+		// back at 1775; W_Foyer_CBath is 115 thick on the X1 = 1800 line, so its foyer face is at
+		// 1742.5. The rack stood 32.5 mm inside the masonry down its whole 1200 length. Set out from
+		// the wall's centreline instead of its face - the same slip as the two TV units, and equally
+		// invisible until something was actually built there. 1567.5 puts the back on 1742.5.
+		//
+		// And it moved north at the same time, because pulling it 32.5 west walked its near end into
+		// D_Foyer's swing: the doorway occupies X 375..1425 of W_Mid_Lower and the leaf sweeps a
+		// 1050 quarter-circle out of it. At Y 4000 the leaf has come round to 3919 at worst, so
+		// centring the rack at 4600 clears the arc by 81 mm and still leaves 142 to the north wall,
+		// with F_DB passing overhead at 1800.
 		FHFFixture& Shoes = B.AddFixture(TEXT("F_ShoeRack"), TEXT("R_Foyer"), EHFFixtureType::ShoeRack,
-			TEXT("Shoe rack"), FVector2D(1600.0, 4300.0), FVector2D(1200.0, 350.0), 900.0, 90.0);
+			TEXT("Shoe rack"), FVector2D(1567.5, 4600.0), FVector2D(1200.0, 350.0), 900.0, 90.0);
 		Shoes.AnchorWallId = TEXT("W_Foyer_CBath");
 		Shoes.Params.ShutterCount = 2;
 		Shoes.Params.ShelfCount = 3;
@@ -931,10 +977,10 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// own layer, and they are what makes a generated flat usable rather than merely furnished.
 	{
 		auto AddSocket = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
-			const FName& AnchorWall, double Rotation = 0.0)
+			const FName& AnchorWall, double Rotation = 0.0, double BaseZ = 300.0)
 		{
 			FHFFixture& Socket = B.AddFixture(Id, RoomId, EHFFixtureType::PowerSocket,
-				TEXT("Power socket"), Position, FVector2D(160.0, 20.0), 120.0, Rotation, 300.0);
+				TEXT("Power socket"), Position, FVector2D(160.0, 20.0), 120.0, Rotation, BaseZ);
 			Socket.AnchorWallId = AnchorWall;
 			Socket.Params.GangCount = 2;
 			return &Socket;
@@ -962,7 +1008,16 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		// Living / dining. The switch plate sits beside D_Living's handle jamb at X 5850, and the
 		// TV point follows the console it feeds.
-		AddSocket(TEXT("F_Soc_Living_TV"), TEXT("R_Living"), FVector2D(3800.0, 120.0), TEXT("W_South"));
+		// The TV point is at 1100, not at the general-purpose 300 the rest of the flat's sockets are.
+		//
+		// It is the one socket in the flat with a fixed height, and the height is the television's:
+		// the set hangs on the wall over the console with its centre at 1000-1100, and the point goes
+		// behind it so no flex shows. At 300 it was behind the CONSOLE instead - literally, once the
+		// console was set out on the wall face rather than 60 mm off it, the validator reported the
+		// two overlapping by 75% of the smaller footprint and sharing a height range. A socket buried
+		// in the back of a cabinet is not a socket; nothing can be plugged into it.
+		AddSocket(TEXT("F_Soc_Living_TV"), TEXT("R_Living"), FVector2D(3800.0, 120.0), TEXT("W_South"),
+			0.0, 1100.0);
 		AddSocket(TEXT("F_Soc_Living_1"),  TEXT("R_Living"), FVector2D(5900.0, 1800.0), TEXT("W_Living_Bed2"), 90.0);
 		AddSwitchPlate(TEXT("F_Sw_Living"), TEXT("R_Living"), FVector2D(6060.0, 3480.0), TEXT("W_Mid_Lower"), 8);
 		AddSplitAC(TEXT("F_AC_Living"), TEXT("R_Living"), FVector2D(3300.0, 3480.0), TEXT("W_Mid_Lower"));

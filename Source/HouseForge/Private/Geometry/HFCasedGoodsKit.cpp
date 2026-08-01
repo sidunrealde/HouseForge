@@ -228,9 +228,10 @@ FHFCasedGoodsParams FHFCasedGoodsKit::Sanitise(const FHFCasedGoodsParams& Params
 				Bay.LeafCount = LeafCountFor(BayWidth, P.Joinery.ShutterModuleWidth);
 			}
 
-			// A lift-up flap is one panel on a pair of gas stays, which is exactly what makes a 900
-			// lift-up ordinary where a 900 side-hung leaf is not.
-			if (Bay.Motion == EHFShutterMotion::TopHung)
+			// A flap is one panel on a pair of stays whichever edge it turns about, which is exactly
+			// what makes a 900 lift-up - or a 600 tilt-out - ordinary where a 900 side-hung leaf is
+			// not. Two half-width leaves on one horizontal hinge line is not something anybody builds.
+			if (Bay.Motion == EHFShutterMotion::TopHung || Bay.Motion == EHFShutterMotion::BottomHung)
 			{
 				Bay.LeafCount = 1;
 			}
@@ -413,6 +414,18 @@ FHFCasedGoodsBuild FHFCasedGoodsKit::Build(const FHFCasedGoodsParams& Params)
 					if (Leaf.IsTopHung() && P.CorniceHeight > 0.0)
 					{
 						Leaf.OpenAngleDegrees = FMath::Min(Leaf.OpenAngleDegrees, 88.0);
+					}
+
+					// A TILT-OUT STOPS SOMEWHERE ELSE ENTIRELY. Every other leaf in this kit opens to
+					// the project's 100 degrees because a concealed hinge does; a tilt-out hangs on a
+					// stay that stops it at about 68, because past that the compartment tips its
+					// contents onto the floor. Resolved here rather than in ApplyTo because ApplyTo
+					// stamps a shutter before anything knows how the bay moves - and a shoe rack whose
+					// flaps swung to 100 would lie flat out into the foyer, which measures as four
+					// perfectly good hinges and reads as a wrecked cabinet.
+					if (Leaf.IsBottomHung())
+					{
+						Leaf.OpenAngleDegrees = P.Joinery.TiltOutFlapAngleDegrees;
 					}
 
 					// A PAIR OPENS FROM THE MIDDLE OUT, which is how a double base unit is hung: the

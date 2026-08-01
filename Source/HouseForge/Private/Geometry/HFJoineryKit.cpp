@@ -596,6 +596,14 @@ FBox FHFJoineryKit::ShutterPanelBox(const FHFShutterParams& Params)
 		return FBox(FVector(0.0, 0.0, -H), FVector(W, Params.Thickness, 0.0));
 	}
 
+	if (Params.IsBottomHung())
+	{
+		// And a tilt-out flap stands ABOVE its hinge: the exact mirror, and the same absence of a
+		// hand. Its board still lies on +Y of its own origin, so the face it presents to the room is
+		// at local Y = 0 exactly as every other leaf's is.
+		return FBox(FVector(0.0, 0.0, 0.0), FVector(W, Params.Thickness, H));
+	}
+
 	if (Params.IsSliding())
 	{
 		// Set out over the module rather than inside it: the near edge stands off the jamb by the
@@ -623,6 +631,14 @@ EHFHandleEdge FHFJoineryKit::ShutterLeadingEdge(const FHFShutterParams& Params)
 		return EHFHandleEdge::Bottom;
 	}
 
+	// A tilt-out flap's leading edge is its TOP one, for the same reason and the other way up: that
+	// is the edge that comes towards you, and the edge the hand goes behind to tip the compartment
+	// open. A pull at the bottom of a tilt-out is a pull that fights the hinge it is next to.
+	if (Params.IsBottomHung())
+	{
+		return EHFHandleEdge::Top;
+	}
+
 	// A sliding leaf leads with the edge it runs towards, which is the one away from the jamb it is
 	// set out from - the same edge a hinged leaf of that hand opens from.
 	return Params.Hinge == EHFShutterHinge::Left ? EHFHandleEdge::MaxX : EHFHandleEdge::MinX;
@@ -643,6 +659,14 @@ FTransform FHFJoineryKit::ShutterPivotTransform(const FHFShutterParams& Params)
 	{
 		// The head of the module, half a reveal down from its top. The leaf hangs below.
 		return FTransform(FVector(HalfReveal, AxisY, Params.ModuleHeight - HalfReveal));
+	}
+
+	if (Params.IsBottomHung())
+	{
+		// The FOOT of the module, half a reveal up from its bottom. The leaf stands above, and the
+		// axis lies on its front face like every other leaf's - which is what keeps the flap swinging
+		// out of the compartment rather than back through the shelf behind it.
+		return FTransform(FVector(HalfReveal, AxisY, HalfReveal));
 	}
 
 	if (Params.IsSliding())
@@ -676,6 +700,19 @@ FHFPartMotion FHFJoineryKit::ShutterMotion(const FHFShutterParams& Params)
 		Motion.Type = EHFMotionType::Hinge;
 		Motion.Axis = FVector::XAxisVector;
 		Motion.MaxAngleDegrees = -Params.OpenAngleDegrees;
+		return Motion;
+	}
+
+	if (Params.IsBottomHung())
+	{
+		// The same axis and the OPPOSITE sign, which is the whole of the difference between a lift-up
+		// and a tilt-out. Rotating a point at +Z about +X by a positive angle carries it to negative
+		// Y - forward, out of the compartment - and the leaf's top edge comes down into the room as
+		// it goes. The other sign would tip the flap backwards through the shelf behind it, which
+		// looks identical in elevation and is obvious the instant it is opened.
+		Motion.Type = EHFMotionType::Hinge;
+		Motion.Axis = FVector::XAxisVector;
+		Motion.MaxAngleDegrees = Params.OpenAngleDegrees;
 		return Motion;
 	}
 

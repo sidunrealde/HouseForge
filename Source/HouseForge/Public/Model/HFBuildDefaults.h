@@ -179,6 +179,22 @@ struct HOUSEFORGE_API FHFJoineryDefaults
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	double ShutterOpenAngleDegrees = 100.0;
 
+	/**
+	 * Where a TILT-OUT flap stops, in degrees from shut. Its own figure, and not the one above.
+	 *
+	 * A shoe rack's flap hangs on a stay rather than on a hinge, and the stay is what decides this:
+	 * past about 70 degrees the compartment is tipped far enough to empty itself onto the floor, so
+	 * nothing is built to go further. Stamped over ShutterOpenAngleDegrees for a bottom-hung leaf by
+	 * FHFCasedGoodsKit, which is the only place that knows a bay's motion.
+	 *
+	 * Separate for the same reason the extract's blade pitch is separate from the ceiling fan's: one
+	 * figure covering two different objects is wrong for one of them, and the wrong one here is a
+	 * foyer with four flaps lying flat out into the walkway.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (ClampMin = "10.0", ClampMax = "90.0"))
+	double TiltOutFlapAngleDegrees = 68.0;
+
 	/** Width of the frame members around a pane in a glazed leaf. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	double GlazedShutterStileWidth = 6.0;

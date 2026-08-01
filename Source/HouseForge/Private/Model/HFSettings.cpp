@@ -63,6 +63,7 @@ FHFBuildDefaults UHFSettings::Resolve() const
 
 	J.ShutterModuleWidth = ShutterModuleWidth;
 	J.ShutterOpenAngleDegrees = ShutterOpenAngleDegrees;
+	J.TiltOutFlapAngleDegrees = TiltOutFlapAngleDegrees;
 	J.GlazedShutterStileWidth = GlazedShutterStileWidth;
 	J.ShutterGlassThickness = ShutterGlassThickness;
 

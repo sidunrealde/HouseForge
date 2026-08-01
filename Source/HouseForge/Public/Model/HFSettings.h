@@ -365,6 +365,17 @@ public:
 		meta = (ClampMin = "0.0", ClampMax = "180.0", UIMin = "60.0", UIMax = "180.0"))
 	double ShutterOpenAngleDegrees = 100.0;
 
+	/**
+	 * Where a tilt-out flap stops, in degrees. A shoe rack's front, not a cabinet door.
+	 *
+	 * Its own dial because it is its own object: a tilt-out hangs on a stay, and past about 70
+	 * degrees the compartment empties itself onto the floor. Driven off the figure above it, every
+	 * flap in the foyer would lie flat out into the walkway.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shutters",
+		meta = (ClampMin = "10.0", ClampMax = "90.0", UIMin = "45.0", UIMax = "80.0"))
+	double TiltOutFlapAngleDegrees = 68.0;
+
 	/** Width of the frame members around a pane in a glazed leaf, in centimetres. */
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Shutters",
 		meta = (ClampMin = "0.1", ClampMax = "15.0", UIMin = "2.0", UIMax = "15.0"))
