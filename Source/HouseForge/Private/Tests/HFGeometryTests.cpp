@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "DynamicMesh/DynamicMeshAABBTree3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFGenerators.h"
@@ -507,6 +508,131 @@ bool FHFStructureTest::RunTest(const FString& Parameters)
 	TestNearlyEqual(TEXT("A column is as tall as declared"), ColumnBounds.Depth(), 300.0, 0.01);
 	TestTrue(TEXT("A column is centred on its position"),
 		ColumnBounds.Center().Equals(FVector3d(100.0, 200.0, 150.0), 0.01));
+
+	return true;
+}
+
+/**
+ * A beam narrower than the wall it sits in does not take the whole wall with it.
+ *
+ * A wall is built as RUNS, and a run is the member's full thickness with a top. That is exact for
+ * the case the flat happens to contain - every beam in it is 230 in a 230 wall, spanning the
+ * masonry completely - and wrong for every other case. Any cut that merely OVERLAPPED the wall
+ * across its thickness used to cap the run anyway: the full 230 came out over the beam's length and
+ * only the beam's own 150 went back, leaving a 40 slot open right through the wall for the length
+ * of the run.
+ *
+ * Nothing measurable was wrong with the result. Each box emitted was watertight, correctly wound,
+ * correctly sized and correctly role-tagged, and the wall had a hole you could see daylight
+ * through. A 150 or 200 beam in a 230 external wall is ordinary on the drawings this plugin exists
+ * to build from, so this is asserted by SECTION - what a ray fired through the wall meets - rather
+ * than by any count.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFNarrowBeamKeepsTheWallTest,
+	"HouseForge.Geometry.NarrowBeamLeavesTheWallStanding", HF_TEST_FLAGS)
+
+bool FHFNarrowBeamKeepsTheWallTest::RunTest(const FString& Parameters)
+{
+	constexpr double WallThickness = 23.0;
+	constexpr double BeamWidth = 15.0;
+	constexpr double BeamSoffit = 255.0;
+
+	FHFWall Wall = MakeWall(400.0, WallThickness, 300.0);
+
+	FHFBeam Beam;
+	Beam.Id = TEXT("B_Narrow");
+	Beam.Start = Wall.Start;
+	Beam.End = Wall.End;
+	Beam.Width = BeamWidth;
+	Beam.Depth = 300.0 - BeamSoffit;
+	Beam.SoffitZ = 300.0;
+
+	const FDynamicMesh3 Mesh = FHFGenerators::GenerateWall(Wall, {},
+		{ FHFGenerators::StructuralCutFor(Beam) });
+
+	/**
+	 * Every surface a ray meets, as distances along it.
+	 *
+	 * Free of any winding convention on purpose - this file's meshes do not agree with the textbook
+	 * about which way a prism's normals point, and an assertion built on that would be an assertion
+	 * about the convention. A surface is a surface from either side.
+	 */
+	auto CrossingsAlongY = [&Mesh](double X, double Z)
+	{
+		FDynamicMesh3 Copy = Mesh;
+		FDynamicMeshAABBTree3 Tree(&Copy, true);
+
+		TArray<double> Out;
+		const FVector3d Direction(0.0, 1.0, 0.0);
+		double Travelled = 0.0;
+
+		while (Travelled < 100.0 && Out.Num() < 32)
+		{
+			const FRay3d Ray(FVector3d(X, -50.0 + Travelled, Z), Direction);
+
+			double HitT = 0.0;
+			int32 Tid = IndexConstants::InvalidID;
+			if (!Tree.FindNearestHitTriangle(Ray, HitT, Tid))
+			{
+				break;
+			}
+
+			Out.Add(-50.0 + Travelled + HitT);
+			Travelled += HitT + 0.01;
+		}
+
+		return Out;
+	};
+
+	// Below the beam the wall is solid masonry: in one face, out the other, and nothing between.
+	{
+		const TArray<double> Low = CrossingsAlongY(200.0, 100.0);
+		TestEqual(TEXT("Below the beam a ray crosses the wall exactly twice"), Low.Num(), 2);
+		if (Low.Num() == 2)
+		{
+			TestNearlyEqual(TEXT("...entering at the near face"), Low[0], -WallThickness * 0.5, 0.05);
+			TestNearlyEqual(TEXT("...and leaving at the far face"), Low[1], WallThickness * 0.5, 0.05);
+		}
+	}
+
+	// THE ASSERTION THIS EXISTS FOR. At the beam's own height the masonry packs around it: two
+	// flanks of 4 either side of the 15 the concrete occupies. Before the fix this measured ZERO
+	// crossings - the wall was simply not there across its whole thickness.
+	{
+		const TArray<double> Through = CrossingsAlongY(200.0, (BeamSoffit + 300.0) * 0.5);
+
+		TestEqual(TEXT("At the beam's height a ray crosses masonry four times, not zero"),
+			Through.Num(), 4);
+
+		if (Through.Num() == 4)
+		{
+			TestNearlyEqual(TEXT("Near flank starts at the wall face"), Through[0], -WallThickness * 0.5, 0.05);
+			TestNearlyEqual(TEXT("Near flank stops at the beam"), Through[1], -BeamWidth * 0.5, 0.05);
+			TestNearlyEqual(TEXT("Far flank starts at the beam"), Through[2], BeamWidth * 0.5, 0.05);
+			TestNearlyEqual(TEXT("Far flank stops at the wall face"), Through[3], WallThickness * 0.5, 0.05);
+		}
+	}
+
+	// And the beam's own volume really is empty, or the wall would be occupying concrete instead.
+	{
+		const TArray<double> Middle = CrossingsAlongY(200.0, (BeamSoffit + 300.0) * 0.5);
+		const bool bClearOnCentreline = !Middle.ContainsByPredicate(
+			[](double Y) { return FMath::Abs(Y) < BeamWidth * 0.5 - 0.05; });
+
+		TestTrue(TEXT("No masonry stands inside the beam"), bClearOnCentreline);
+	}
+
+	// A wall the beam DOES span is unchanged: this is the case the reference flat contains, and the
+	// arithmetic path is still the one that handles it.
+	{
+		FHFWall Thin = MakeWall(400.0, BeamWidth, 300.0);
+		const FDynamicMesh3 Spanned = FHFGenerators::GenerateWall(Thin, {},
+			{ FHFGenerators::StructuralCutFor(Beam) });
+
+		TestTrue(TEXT("A wall the beam spans is still watertight"), FHFMeshOps::IsClosed(Spanned));
+		TestNearlyEqual(TEXT("...and is capped at the beam soffit"),
+			Spanned.GetBounds().Max.Z, BeamSoffit, 0.05);
+	}
 
 	return true;
 }

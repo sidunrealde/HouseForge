@@ -195,6 +195,35 @@ namespace
 			const bool bReachesBottom = Cut.BottomZ() <= BaseZ + Reached;
 			const bool bReachesTop = Cut.TopZ() >= TopZ - Reached;
 
+			// A RUN IS THE MEMBER'S FULL WIDTH, so only a cut that crosses the whole of that width
+			// may shorten one.
+			//
+			// The test above rejects a cut that misses across entirely, and everything that merely
+			// OVERLAPPED then went to CapRuns - which removes the stretch over the member's full
+			// thickness and refills only the part the structure actually occupies. A 150 beam in a
+			// 230 wall took the whole 230 out and put 150 back, leaving a 40 slot open through the
+			// masonry for the length of the run. Each emitted box was still watertight, correctly
+			// wound, correctly sized and correctly tagged, so nothing measurable was wrong with any
+			// of it and the wall had a hole you could see the sky through.
+			//
+			// The reference flat never showed it - every beam there is 230 in a 230 wall and every
+			// column 450x230 - but a 150 or 200 beam in a 230 external wall is routine on the very
+			// drawings this plugin exists to build from.
+			//
+			// A cut that overlaps without spanning is exactly the "shape this is not" the fallback
+			// below was written for: hand it to the boolean, which carves the structure out and
+			// leaves the flanking masonry standing, which is what packing a wall around a narrower
+			// beam looks like on site.
+			const bool bSpansWidth =
+				Across - HalfAcross <= -Width * 0.5 + Reached &&
+				Across + HalfAcross >= Width * 0.5 - Reached;
+
+			if (!bSpansWidth)
+			{
+				Awkward.Add(Cut);
+				continue;
+			}
+
 			if (bReachesBottom && bReachesTop)
 			{
 				CapRuns(From, To, BaseZ);
