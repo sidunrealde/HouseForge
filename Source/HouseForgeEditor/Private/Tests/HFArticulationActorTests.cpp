@@ -12,6 +12,7 @@
 #include "Engine/World.h"
 #include "MeshQueries.h"
 #include "Misc/AutomationTest.h"
+#include "Model/HFSampleHouse.h"
 #include "Model/HFTypes.h"
 
 using namespace UE::Geometry;
@@ -975,6 +976,205 @@ bool FHFDanglingOrderingIsReportedTest::RunTest(const FString& Parameters)
 
 	TestNearlyEqual(TEXT("A part whose ordering names nothing still moves - a fixture has to pose"),
 		Door->GetPartOpenAmount(BlockedId), 1.0, 1e-9);
+
+	return true;
+}
+
+/**
+ * A slider opens from EITHER end, and the aperture is measured in centimetres.
+ *
+ * The user's report: "The sliding doors right now can only be opened in one direction." They could:
+ * one panel was built as furniture and only the other had gear, so the daylight always appeared at
+ * the same jamb whatever anybody wanted. Both panels run now.
+ *
+ * WHAT IS ASSERTED IS THE APERTURE, IN CENTIMETRES, AND WHICH END IT IS AT. Not that a part moved -
+ * this project has already been bitten once by exactly that assertion, on the master bedroom
+ * wardrobe whose two leaves both travelled their full 118.45 cm in opposite directions off one open
+ * amount, exchanged tracks, and left the run 100% covered while every motion check passed. A
+ * measurement of movement cannot see a slider that does not open, and a measurement of aperture
+ * SIZE cannot see one that always opens the same end. Both are needed and both are here.
+ *
+ * Measured against the reference flat's own balcony doors rather than a fixture built for the test,
+ * because the flat is where the user looked.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSliderOpensBothWaysTest,
+	"HouseForge.Editor.SliderOpensBothWays", HF_TEST_FLAGS)
+
+namespace HouseForgeSlider
+{
+	/** Where a part stands along its opening's run, right now, in the opening's own local space. */
+	bool SpanAlongRun(const AHFOpeningActor& Unit, UDynamicMeshComponent& Part,
+		double& OutMin, double& OutMax)
+	{
+		if (Part.GetDynamicMesh() == nullptr)
+		{
+			return false;
+		}
+
+		FAxisAlignedBox3d Local = FAxisAlignedBox3d::Empty();
+		Part.GetDynamicMesh()->ProcessMesh([&Local](const FDynamicMesh3& Mesh)
+		{
+			Local = Mesh.GetBounds();
+		});
+
+		if (Local.IsEmpty())
+		{
+			return false;
+		}
+
+		// Component space into the ACTOR's space, corner by corner. Read off the live transform, so
+		// it measures where the panel has actually gone rather than where the parameters say it
+		// should be - the difference between testing the geometry and testing the arithmetic.
+		const FTransform ToUnit =
+			Part.GetComponentTransform().GetRelativeTransform(Unit.GetActorTransform());
+
+		FAxisAlignedBox3d InUnit = FAxisAlignedBox3d::Empty();
+		for (int32 Corner = 0; Corner < 8; ++Corner)
+		{
+			InUnit.Contain(ToUnit.TransformPosition(Local.GetCorner(Corner)));
+		}
+
+		OutMin = InUnit.Min.X;
+		OutMax = InUnit.Max.X;
+		return true;
+	}
+}
+
+bool FHFSliderOpensBothWaysTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeSlider;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+	if (!TestNotNull(TEXT("A house actor spawns"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); } };
+
+	House->SetSpec(FHFSampleHouse::Make2BHK());
+	House->BuildGeometry();
+
+	int32 Measured = 0;
+
+	for (AActor* Element : House->ElementActors)
+	{
+		AHFOpeningActor* Unit = Cast<AHFOpeningActor>(Element);
+		if (Unit == nullptr || Unit->Opening.Kind != EHFOpeningKind::SlidingDoor)
+		{
+			continue;
+		}
+
+		const FString Which = Unit->ElementId.ToString();
+
+		UDynamicMeshComponent* NearPanel = Unit->GetPartComponent(AHFOpeningActor::NearLeafPartId);
+		UDynamicMeshComponent* FarPanel = Unit->GetPartComponent(AHFOpeningActor::FarLeafPartId);
+
+		if (!TestNotNull(*FString::Printf(TEXT("'%s' has a near panel"), *Which), NearPanel)
+			|| !TestNotNull(*FString::Printf(TEXT("'%s' has a far panel"), *Which), FarPanel))
+		{
+			continue;
+		}
+
+		// The run the pair has to cover: the clear opening inside the outer frame. Taken from where
+		// the two panels stand when both are SHUT rather than from the parameters, so the figure the
+		// aperture is compared against is the one on the geometry.
+		Unit->CloseAllParts();
+
+		double NearShutMin = 0.0, NearShutMax = 0.0, FarShutMin = 0.0, FarShutMax = 0.0;
+		if (!SpanAlongRun(*Unit, *NearPanel, NearShutMin, NearShutMax)
+			|| !SpanAlongRun(*Unit, *FarPanel, FarShutMin, FarShutMax))
+		{
+			AddError(FString::Printf(TEXT("'%s' has panels with no mesh to measure."), *Which));
+			continue;
+		}
+
+		const double RunMin = FMath::Min(NearShutMin, FarShutMin);
+		const double RunMax = FMath::Max(NearShutMax, FarShutMax);
+		const double RunWidth = RunMax - RunMin;
+		const double Lap = NearShutMax - FarShutMin;
+
+		TestTrue(*FString::Printf(TEXT("'%s' is a real run to open (%.1f cm)"), *Which, RunWidth),
+			RunWidth > 100.0);
+
+		// Shut, the pair laps: the panels overlap at the meeting stile rather than leaving daylight
+		// between them. The lap is what the aperture below is allowed to fall short by.
+		TestTrue(*FString::Printf(TEXT("'%s' laps at the meeting stile when shut (%.1f cm)"), *Which, Lap),
+			Lap > 0.0);
+
+		// THE FLOOR THE APERTURE HAS TO CLEAR: half the run less the lap, which is exactly the bay
+		// one panel covers. Anything less means a panel that did not travel its full set-out; the
+		// defect scored zero.
+		const double Required = RunWidth * 0.5 - Lap;
+
+		// -------------------------------------------------------------- opened from the near jamb
+		Unit->OpenRunFrom(AHFOpeningActor::NearLeafPartId, 1.0);
+
+		double NearOpenMin = 0.0, NearOpenMax = 0.0, FarHeldMin = 0.0, FarHeldMax = 0.0;
+		SpanAlongRun(*Unit, *NearPanel, NearOpenMin, NearOpenMax);
+		SpanAlongRun(*Unit, *FarPanel, FarHeldMin, FarHeldMax);
+
+		// OPENING ONE LEAF DOES NOT MOVE THE OTHER. This is the assertion the cancelling defect
+		// would fail: there, both leaves ran and the aperture was zero.
+		TestTrue(*FString::Printf(TEXT("'%s': running the near panel leaves the far one where it was"), *Which),
+			FMath::IsNearlyEqual(FarHeldMin, FarShutMin, 0.01)
+				&& FMath::IsNearlyEqual(FarHeldMax, FarShutMax, 0.01));
+
+		// The daylight, in centimetres: from the start of the run to the near edge of whichever
+		// panel now stands first. Both panels are stacked at the far end, so it is the far panel's
+		// shut position that bounds it.
+		const double NearAperture = FMath::Min(NearOpenMin, FarHeldMin) - RunMin;
+
+		TestTrue(*FString::Printf(
+				TEXT("'%s' opens %.1f cm at the NEAR jamb, and half the run less the lap is %.1f cm"),
+				*Which, NearAperture, Required),
+			NearAperture >= Required - 0.01);
+
+		// --------------------------------------------------------------- opened from the far jamb
+		Unit->OpenRunFrom(AHFOpeningActor::FarLeafPartId, 1.0);
+
+		double FarOpenMin = 0.0, FarOpenMax = 0.0, NearHeldMin = 0.0, NearHeldMax = 0.0;
+		SpanAlongRun(*Unit, *FarPanel, FarOpenMin, FarOpenMax);
+		SpanAlongRun(*Unit, *NearPanel, NearHeldMin, NearHeldMax);
+
+		TestTrue(*FString::Printf(TEXT("'%s': running the far panel leaves the near one where it was"), *Which),
+			FMath::IsNearlyEqual(NearHeldMin, NearShutMin, 0.01)
+				&& FMath::IsNearlyEqual(NearHeldMax, NearShutMax, 0.01));
+
+		const double FarAperture = RunMax - FMath::Max(FarOpenMax, NearHeldMax);
+
+		TestTrue(*FString::Printf(
+				TEXT("'%s' opens %.1f cm at the FAR jamb, and half the run less the lap is %.1f cm"),
+				*Which, FarAperture, Required),
+			FarAperture >= Required - 0.01);
+
+		// AND THE TWO APERTURES ARE AT OPPOSITE ENDS. Both of the measurements above would pass on a
+		// unit that opened the same jamb whichever panel was run - which is precisely the thing that
+		// was reported, so it is asserted rather than inferred.
+		TestTrue(*FString::Printf(
+				TEXT("'%s': the near aperture starts at the run's start and the far one ends at its end"),
+				*Which),
+			NearAperture + FarAperture <= RunWidth + 0.01);
+
+		// Neither panel ever leaves the run. A leaf given travel it was never swept against is a
+		// leaf that slides into the masonry, which is what the single full-width leaf used to do.
+		for (const double Edge : { NearOpenMin, NearOpenMax, FarOpenMin, FarOpenMax })
+		{
+			TestTrue(*FString::Printf(TEXT("'%s' keeps every panel inside its reveal (%.1f in %.1f..%.1f)"),
+					*Which, Edge, RunMin, RunMax),
+				Edge >= RunMin - 0.01 && Edge <= RunMax + 0.01);
+		}
+
+		Unit->CloseAllParts();
+		++Measured;
+	}
+
+	TestTrue(TEXT("The reference flat has sliding doors to open"), Measured >= 2);
 
 	return true;
 }

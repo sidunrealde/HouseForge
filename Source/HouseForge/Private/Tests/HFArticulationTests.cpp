@@ -7,6 +7,7 @@
 #include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFGenerators.h"
 #include "Geometry/HFMeshOps.h"
+#include "Geometry/HFWardrobeKit.h"
 #include "MeshQueries.h"
 #include "Misc/AutomationTest.h"
 #include "Model/HFArticulation.h"
@@ -1527,6 +1528,126 @@ bool FHFFixedOpeningPartsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A door frame is watertight"), FHFMeshOps::IsClosed(DoorFrame));
 	TestTrue(TEXT("Nothing in a door's fixed mesh is glass"),
 		FMath::IsNearlyZero(RoleVolume(DoorFrame, EHFSurfaceRole::Glass), 0.001));
+
+	return true;
+}
+
+/**
+ * Every slider in the plugin is a PAIR, described symmetrically, with exactly one leading leaf.
+ *
+ * The three sliders - a sliding door, a sliding window, a sliding wardrobe run - are built by two
+ * different pieces of code (FHFGenerators' BuildSlidingPair, and FHFWardrobeKit composing
+ * FHFJoineryKit shutters), and the last time those two disagreed about how a slider works the
+ * wardrobe built two runners and the door built one. That is the defect this exists to keep out on
+ * the OTHER side: now that both leaves of every slider run, the thing that has to hold everywhere
+ * is the description of the pair.
+ *
+ * Three properties, and each of them fails silently on its own:
+ *
+ *   - BOTH LEAVES RUN. Take the motion off one and the run opens from one end for ever, which is
+ *     what was reported. Nothing else notices: the unit still opens.
+ *   - EXACTLY ONE LEADS. Two leading leaves is the cancelling pose - both driven by one amount,
+ *     tracks exchanged, nothing uncovered - and zero leading leaves is a fixture that ignores its
+ *     own master control while every part reports a healthy travel.
+ *   - THE PAIRING IS SYMMETRIC. A leaf whose alternate is unset, or names a part that is not there,
+ *     is a leaf OpenRunFrom cannot shut. Open the run from that end and both leaves run out
+ *     together, which is the cancelling pose arrived at by a different route.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSliderPairSymmetryTest,
+	"HouseForge.Articulation.SliderPairsAreSymmetric", HF_TEST_FLAGS)
+
+bool FHFSliderPairSymmetryTest::RunTest(const FString& Parameters)
+{
+	// Whatever produced them, a set of parts that contains sliding leaves has to describe them the
+	// same way. Asked of the parts rather than of the code that made them, which is what lets one
+	// assertion cover three builders.
+	auto CheckPair = [this](const FString& What, const TArray<FHFMeshPart>& Parts)
+	{
+		TArray<const FHFMeshPart*> Leaves;
+		for (const FHFMeshPart& Part : Parts)
+		{
+			if (Part.Motion.Type == EHFMotionType::Slide)
+			{
+				Leaves.Add(&Part);
+			}
+		}
+
+		if (!TestEqual(*FString::Printf(TEXT("%s is two running leaves"), *What), Leaves.Num(), 2))
+		{
+			return;
+		}
+
+		int32 Leading = 0;
+		for (const FHFMeshPart* Leaf : Leaves)
+		{
+			Leading += Leaf->Motion.bMasterOpens ? 1 : 0;
+
+			TestTrue(*FString::Printf(TEXT("%s leaf '%s' has somewhere to run to"),
+					*What, *Leaf->PartId.ToString()),
+				FMath::Abs(Leaf->Motion.MaxTravelCm) > 1.0);
+		}
+
+		TestEqual(*FString::Printf(TEXT("%s has exactly one leaf a single control runs"), *What),
+			Leading, 1);
+
+		TestEqual(*FString::Printf(TEXT("%s: the first leaf names the second"), *What),
+			Leaves[0]->Motion.AlternateToPartId, Leaves[1]->PartId);
+		TestEqual(*FString::Printf(TEXT("%s: the second names the first back"), *What),
+			Leaves[1]->Motion.AlternateToPartId, Leaves[0]->PartId);
+
+		// They run OPPOSITE ways, which is what makes "which leaf you push" mean "which end opens".
+		// Two leaves running the same way would both leave the same bay open and one of them would
+		// leave the reveal doing it.
+		TestTrue(*FString::Printf(TEXT("%s: the leaves run opposite ways"), *What),
+			Leaves[0]->Motion.MaxTravelCm * Leaves[1]->Motion.MaxTravelCm < 0.0);
+	};
+
+	const FHFWall Wall = MakeHostWall();
+
+	TArray<FHFMeshPart> DoorParts;
+	FHFGenerators::BuildOpeningParts(
+		MakeDoorOpening(EHFOpeningKind::SlidingDoor, EHFSwing::None), Wall, DoorParts);
+	CheckPair(TEXT("A sliding door"), DoorParts);
+
+	TArray<FHFMeshPart> WindowParts;
+	FHFGenerators::BuildOpeningParts(MakeWindowOpening(EHFOpeningKind::SlidingWindow), Wall, WindowParts);
+	CheckPair(TEXT("A sliding window"), WindowParts);
+
+	// The wardrobe is built by a different piece of code entirely - FHFWardrobeKit composing
+	// FHFJoineryKit shutters, rather than FHFGenerators' BuildSlidingPair - and the last time those
+	// two disagreed about how a slider works, one of them built two runners and the other built one.
+	// The same assertion is put to both.
+	{
+		FHFWardrobeParams Wardrobe;
+		Wardrobe.Width = 240.0;
+		Wardrobe.Depth = 60.0;
+		Wardrobe.Height = 240.0;
+		Wardrobe.BayCount = 4;
+		Wardrobe.bHasLoft = false;
+		Wardrobe.MotionKind = EHFShutterMotion::Sliding;
+
+		CheckPair(TEXT("A sliding wardrobe run"), FHFWardrobeKit::Build(Wardrobe).Parts);
+	}
+
+	// The drawing's swing arc picks which end a single control opens from, and a slider carried that
+	// field without ever reading it. Both hands are exercised because "the default happens to be
+	// what the enum's zero value is" would pass the check above and mean nothing.
+	for (const EHFSwing Swing : { EHFSwing::InwardLeft, EHFSwing::InwardRight })
+	{
+		TArray<FHFMeshPart> Handed;
+		FHFGenerators::BuildOpeningParts(
+			MakeDoorOpening(EHFOpeningKind::SlidingDoor, Swing), Wall, Handed);
+
+		const FHFMeshPart* Leader = Handed.FindByPredicate(
+			[](const FHFMeshPart& P) { return P.Motion.bMasterOpens; });
+
+		if (TestNotNull(TEXT("A handed sliding door still has a leading panel"), Leader))
+		{
+			const FName Expected = Swing == EHFSwing::InwardRight ? TEXT("LeafFar") : TEXT("LeafNear");
+			TestEqual(TEXT("The drawing's swing arc decides which end the unit opens from"),
+				Leader->PartId, Expected);
+		}
+	}
 
 	return true;
 }
