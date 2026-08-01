@@ -2,6 +2,8 @@
 
 #include "Model/HFSpecValidator.h"
 
+#include "Model/HFCeilingFit.h"
+
 namespace
 {
 	// The two thresholds that used to live here are now FHFValidationLimits, because they are
@@ -1821,31 +1823,73 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 					*Describe(Ceiling.Id), Ceiling.ExplicitPolygon.Num()));
 		}
 
-		// A door that opens into the room must clear the false ceiling above it.
-		for (const FHFOpening& Opening : Spec.Openings)
+	}
+
+	// ------------------------------------------------------ what a ceiling comes down onto: openings
+	//
+	// A DOOR OR WINDOW HEAD IS AT THE EDGE OF A ROOM, WHICH IS WHERE THE CEILING IS DEEPEST. That is
+	// the whole reason this rule had to be rewritten rather than left alone. It used to fire only for
+	// FullDrop and Tray - "a peripheral band may well sit clear of the door" - and to measure against
+	// Ceiling.Drop. Both were true of a ceiling that was one plane, and both are false now: a shallow
+	// band carries a perimeter bulkhead ring hanging a great deal lower, and that ring runs round the
+	// room exactly along the walls every opening is cut into. A Cove at 15 with a ring at 48 would
+	// have been judged against 15 and passed while its ring cut through a 2.4 m door head.
+	//
+	// So it asks positionally, of whatever actually covers the opening, using the same function the
+	// geometry is built from and the fan's rod is resolved against. Style is no longer consulted at
+	// all - the answer for a peripheral band away from the wall really is "nothing covers it", and it
+	// comes out of the same call rather than out of a second list of which styles count.
+	//
+	// Windows and ventilators too. A ventilator sits high in a wall by definition - the common bath's
+	// reaches 2450 - so it is the opening most likely to be buried, and it was the one kind the old
+	// rule never looked at.
+	for (const FHFOpening& Opening : Spec.Openings)
+	{
+		const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+		if (Wall == nullptr)
 		{
-			const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
-			if (!bIsDoor)
+			continue;
+		}
+
+		const double WallLength = Wall->Length();
+		if (WallLength <= UE_KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector2D Along = (Wall->End - Wall->Start) / WallLength;
+		const double HeadZ = Wall->BaseZ + Opening.HeadHeight();
+
+		// The opening as something a soffit can be asked about: its width along the wall, and enough
+		// depth to reach into the room on either side of the centreline it is set out on. A room
+		// boundary IS that centreline, so a probe with no depth would sit exactly on the polygon edge
+		// and be inside or outside it by rounding.
+		FHFFixture Probe;
+		Probe.Position = Wall->Start + Along * Opening.OffsetAlongWall;
+		Probe.Footprint = FVector2D(Opening.Width, Wall->Thickness * 2.0);
+		Probe.RotationDegrees = FMath::RadiansToDegrees(FMath::Atan2(Along.Y, Along.X));
+
+		for (const FHFRoom& Room : Spec.Rooms)
+		{
+			const double SlabZ = Room.FloorZ + Room.CeilingHeight;
+			const double SoffitZ = FHFCeilingFit::LowestSoffitZOver(Probe, Room, Spec.FalseCeilings);
+
+			// Nothing of this room's is over the opening - either the room is elsewhere in the plan or
+			// its ceiling leaves this spot open to the slab.
+			if (SoffitZ >= SlabZ - UE_KINDA_SMALL_NUMBER)
 			{
 				continue;
 			}
 
-			const FHFWall* Wall = Spec.FindWall(Opening.WallId);
-			if (Wall == nullptr)
+			if (HeadZ > SoffitZ + UE_KINDA_SMALL_NUMBER)
 			{
-				continue;
-			}
+				Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingBelowDoorHead"), Opening.Id,
+					FString::Printf(TEXT("Opening '%s' reaches %.1f but the finished ceiling over it in room '%s' sits at %.1f; the soffit would cut through its head. Raise the ceiling over it, narrow the perimeter bulkhead, or lower the opening."),
+						*Describe(Opening.Id), HeadZ, *Describe(Room.Id), SoffitZ));
 
-			// Only meaningful for a full drop; a peripheral band may well sit clear of the door.
-			const bool bCoversWholeRoom =
-				Ceiling.Style == EHFCeilingStyle::FullDrop ||
-				Ceiling.Style == EHFCeilingStyle::Tray;
-
-			if (bCoversWholeRoom && Opening.HeadHeight() > Room->CeilingHeight - Ceiling.Drop + UE_KINDA_SMALL_NUMBER)
-			{
-				Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingBelowDoorHead"), Ceiling.Id,
-					FString::Printf(TEXT("False ceiling '%s' sits at %.1f but door '%s' reaches %.1f; the ceiling would cut through the door head."),
-						*Describe(Ceiling.Id), Room->CeilingHeight - Ceiling.Drop, *Describe(Opening.Id), Opening.HeadHeight()));
+				// One complaint per opening. An opening in a party wall is under two rooms' ceilings
+				// and the fix is the same either way.
+				break;
 			}
 		}
 	}
@@ -1911,6 +1955,33 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 			Result.Add(EHFValidationSeverity::Error, TEXT("UnknownWallReference"), Fixture.Id,
 				FString::Printf(TEXT("Fixture '%s' anchors to wall '%s', which does not exist."),
 					*Describe(Fixture.Id), *Describe(Fixture.AnchorWallId)));
+		}
+
+		// ----------------------------------------- and whether the ceiling leaves room for it at all
+		//
+		// A CHECK ON THE RESOLVER RATHER THAN A SECOND AUTHORITY. FHFCeilingFit is what decides where a
+		// fitting ends up, and it is recomputed at build time precisely so it cannot go stale - see the
+		// note on that class for why declaring it in the spec would be the wrong answer. This asks the
+		// same question of the spec's own numbers, so a spec can be judged before anything is built.
+		//
+		// Only the case NOTHING CAN BE DONE ABOUT. An extract sliding 40 mm down the wall to clear a
+		// soffit is the mechanism working, not a fault, and warning on it would put seven lines of
+		// noise in front of a user for a flat that is correct. What is worth saying is that a fitting
+		// has been left where it was drawn because there was no honest place to put it.
+		//
+		// Asked at zero clearance, deliberately. The gap a project leaves under its plaster is a build
+		// figure on the settings page; "does not fit even touching the soffit" is a fact about the
+		// drawing, and it is the only version of the question a validator should be answering.
+		{
+			const FHFCeilingFitResult Fit = FHFCeilingFit::Fit(Fixture, *Room, Spec.FalseCeilings, 0.0);
+
+			if (Fit.Action == EHFCeilingFitAction::Refused)
+			{
+				Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingLeavesNoRoomForFixture"), Fixture.Id,
+					FString::Printf(TEXT("Fixture '%s' stands %.1f tall from %.1f but the finished ceiling over it in room '%s' sits at %.1f, and it can neither be lowered nor cut down by %.1f. It is built exactly as drawn and will pass through the soffit."),
+						*Describe(Fixture.Id), Fixture.Height, Room->FloorZ + Fixture.BaseZ,
+						*Describe(Room->Id), Fit.SoffitZ, Fit.Shortfall));
+			}
 		}
 	}
 

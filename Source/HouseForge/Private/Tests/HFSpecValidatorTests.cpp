@@ -343,6 +343,52 @@ bool FHFValidatorCeilingRulesTest::RunTest(const FString& Parameters)
 		FHFHouseSpec Spec = WithCeiling(EHFCeilingStyle::FullDrop, 95.0, 60.0);
 		ExpectIssue(*this, Spec, TEXT("CeilingBelowDoorHead"), EHFValidationSeverity::Warning);
 	}
+	{
+		// THE CASE THE OLD RULE COULD NOT SEE, and the reason it had to be rewritten rather than
+		// left alone.
+		//
+		// It fired only for FullDrop and Tray, on the stated grounds that "a peripheral band may well
+		// sit clear of the door", and it measured against Ceiling.Drop. Both were true while a
+		// ceiling was one plane. A shallow band with a perimeter bulkhead ring is not: the ring hangs
+		// a great deal lower and it runs round the room exactly along the walls every opening is cut
+		// into, which is the one place a band certainly does NOT sit clear of the door.
+		FHFHouseSpec Spec = WithCeiling(EHFCeilingStyle::Cove, 15.0, 60.0);
+		Spec.Openings[0].Height = 240.0;
+
+		// The band alone leaves the head 45 clear, and that is the honest answer - the point of a
+		// shallow ceiling is that it does not come down onto anything.
+		TestFalse(TEXT("A shallow band over a 240 door head is not complained about"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("CeilingBelowDoorHead")));
+
+		// Now the ring that buries the beams, hanging at 230 along the wall the door is in. Nothing
+		// about the ceiling's own drop changed; the old rule would still have judged it against 15.
+		Spec.FalseCeilings[0].PerimeterBulkheadWidth = 30.0;
+		Spec.FalseCeilings[0].PerimeterBulkheadDrop = 70.0;
+
+		ExpectIssue(*this, Spec, TEXT("CeilingBelowDoorHead"), EHFValidationSeverity::Warning);
+	}
+	{
+		// A ceiling that leaves nowhere at all for something fixed high on a wall.
+		//
+		// The check on FHFCeilingFit, which is what actually decides where the fitting is built. A
+		// geyser under a soffit lower than the geyser is tall can neither be slid down nor cut, so it
+		// is built exactly as drawn and passes through the ceiling - and that has to be said out loud.
+		FHFHouseSpec Spec = WithCeiling(EHFCeilingStyle::FullDrop, 265.0, 0.0);
+
+		FHFFixture Geyser = MakeFixture(TEXT("F_Geyser"), EHFFixtureType::Geyser, FVector2D(200.0, 150.0));
+		Geyser.BaseZ = 210.0;
+		Geyser.Height = 45.0;
+		Spec.Fixtures.Add(Geyser);
+
+		ExpectIssue(*this, Spec, TEXT("CeilingLeavesNoRoomForFixture"), EHFValidationSeverity::Warning);
+
+		// And a ceiling it CAN be fitted under says nothing. Sliding a fitting down the wall to clear
+		// a soffit is the mechanism working, not a fault, and a rule that reported it would put seven
+		// lines of noise in front of a user for a flat that is correct.
+		Spec.FalseCeilings[0].Drop = 48.0;
+		TestFalse(TEXT("A fitting that can be lowered to clear is not complained about"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("CeilingLeavesNoRoomForFixture")));
+	}
 
 	return true;
 }

@@ -215,9 +215,26 @@ public:
 	 * @param Clearance Gap left between the fixture's head and the finished soffit. Nothing is fixed
 	 *        dead tight to a plastered ceiling, and a fitting that exactly touches one renders as two
 	 *        faces in a plane - which is the flashing FHFStructuralCut exists to prevent.
+	 *
+	 * @param BuiltHeight Overall height of what is ACTUALLY BUILT here, when that is not the height
+	 *        the drawing states. Zero or less means the drawn height stands, which is the answer for
+	 *        almost everything.
+	 *
+	 *        THE DRAWN BOX IS NOT ALWAYS THE OBJECT, and a ceiling lands on the object. A plan marks
+	 *        an extract at the fan that was bought - 250 x 100 - and the case built for it carries a
+	 *        bezel sized to lap the CORNERS of the chase cored behind it, so it stands 316 tall. The
+	 *        first version of this fitted the drawn box under the soffit and left 33 mm of real
+	 *        bezel inside the plasterboard: the same defect this whole mechanism exists to fix,
+	 *        arrived at one step later and found by rendering it.
+	 *
+	 *        Taken as CENTRED on the drawn box, because that is how such a fitting is placed - see
+	 *        AHFFanActor::PlacementFor - and it is the only convention under which a symmetric bezel
+	 *        round a drawn aperture means anything. Only Lowers uses it: a wardrobe is built to the
+	 *        height it is drawn at, and a thing that hangs is placed from its datum rather than sized
+	 *        about its centre.
 	 */
 	static FHFCeilingFitResult Fit(const FHFFixture& Fixture, const FHFRoom& Room,
-		const TArray<FHFFalseCeiling>& Ceilings, double Clearance);
+		const TArray<FHFFalseCeiling>& Ceilings, double Clearance, double BuiltHeight = 0.0);
 
 	/**
 	 * Every fixture in a spec, resolved against the ceilings that end up over them.
@@ -227,10 +244,16 @@ public:
 	 * the actor that builds it, and the preview that draws it all take the same object, and cannot
 	 * disagree about where it is.
 	 *
+	 * @param BuiltHeights Overall built height per fixture id, for the fittings whose built envelope
+	 *        is not their drawn box. Supplied by the COMPOSING LAYER rather than worked out here,
+	 *        exactly as the ceiling's rod hole and the wall's duct already are: how big a fan comes
+	 *        out is a question for AHFFanActor::ParamsFor, which is the one place that knows what fan
+	 *        ends up standing there. Null, or an id that is absent, means the drawn height stands.
+	 *
 	 * @param OutMoved Optional. One line per fixture that moved, for the build log.
 	 */
 	static TArray<FHFFixture> FitAll(const FHFHouseSpec& Spec, double Clearance,
-		TArray<FString>* OutMoved = nullptr);
+		const TMap<FName, double>* BuiltHeights = nullptr, TArray<FString>* OutMoved = nullptr);
 
 	/** One line describing what happened to a fixture, for a build report or a validator message. */
 	static FString Describe(const FHFFixture& Fixture, const FHFCeilingFitResult& Result);

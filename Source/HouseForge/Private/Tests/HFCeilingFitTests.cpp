@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Actors/HFFanActor.h"
 #include "Misc/AutomationTest.h"
 #include "Model/HFCeilingFit.h"
 #include "Model/HFCeilingTemplates.h"
@@ -85,6 +86,34 @@ namespace
 	FString NameOfAction(EHFCeilingFitAction Action)
 	{
 		return StaticEnum<EHFCeilingFitAction>()->GetNameStringByValue(static_cast<int64>(Action));
+	}
+
+	/**
+	 * What the composing layer would tell the resolver about how big these fittings come out.
+	 *
+	 * The same question AHFHouseActor::ResolveFixtures asks, and asked the same way. An extract's
+	 * bezel is sized to lap the corners of the chase cored behind it, so a fan drawn 250 stands 316
+	 * tall - and a test that measured the drawn box would go green while 33 mm of real bezel sat in
+	 * the plasterboard, which is what happened.
+	 */
+	TMap<FName, double> BuiltHeightsFor(const FHFHouseSpec& Spec)
+	{
+		TMap<FName, double> Out;
+		for (const FHFFixture& Fixture : Spec.Fixtures)
+		{
+			if (Fixture.Type == EHFFixtureType::ExhaustFan)
+			{
+				Out.Add(Fixture.Id, AHFFanActor::ParamsFor(Fixture).CaseHalfWidth() * 2.0);
+			}
+		}
+		return Out;
+	}
+
+	/** How far the built thing reaches above the box the drawing states, at the top. */
+	double OverhangOf(const TMap<FName, double>& BuiltHeights, const FHFFixture& Fixture)
+	{
+		const double* Built = BuiltHeights.Find(Fixture.Id);
+		return (Built != nullptr) ? FMath::Max(*Built - Fixture.Height, 0.0) * 0.5 : 0.0;
 	}
 }
 
@@ -182,6 +211,29 @@ bool FHFCeilingFitRulesTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Its head lands exactly the clearance below the soffit"),
 			Result.BaseZ + Result.Height, SoffitZ - Clearance, 0.001);
 		TestTrue(TEXT("It moved downward, never up"), Result.BaseZ < Extract.BaseZ);
+	}
+
+	// -------------------------------------------------------- and the box the drawing states is not
+	//                                                            always the object that gets built
+	{
+		// A fan drawn 250 tall whose bezel comes out 316, centred on what was drawn. Fitting the
+		// drawn box leaves 33 mm of real bezel inside the plasterboard - which is exactly what the
+		// first version of this resolver did, and it went green on every model-level assertion in
+		// this file. It was found by rendering the room.
+		const FHFFixture Extract = MakeWallFixture(TEXT("F_Bezel"), EHFFixtureType::ExhaustFan, 230.0, 25.0);
+		constexpr double BuiltHeight = 31.6;
+		constexpr double Overhang = (BuiltHeight - 25.0) * 0.5;
+
+		const FHFCeilingFitResult Result =
+			FHFCeilingFit::Fit(Extract, Room, { Ceiling }, Clearance, BuiltHeight);
+
+		TestEqual(TEXT("The BUILT head lands the clearance below the soffit, not the drawn one"),
+			Result.BaseZ + Result.Height + Overhang, SoffitZ - Clearance, 0.001);
+
+		// And it really is lower than fitting the drawn box would have put it, or the assertion above
+		// would pass against a resolver that ignored the figure entirely.
+		TestTrue(TEXT("Allowing for the bezel puts it lower than the drawn box would have"),
+			Result.BaseZ < FHFCeilingFit::Fit(Extract, Room, { Ceiling }, Clearance).BaseZ - 0.001);
 	}
 
 	// -------------------------------------------------------------------------------- shortens
@@ -282,8 +334,10 @@ bool FHFCeilingFitIsIdempotentTest::RunTest(const FString& Parameters)
 	FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 	FHFUnits::ConvertToCentimeters(Spec);
 
+	const TMap<FName, double> BuiltHeights = BuiltHeightsFor(Spec);
+
 	TArray<FString> Moved;
-	const TArray<FHFFixture> Once = FHFCeilingFit::FitAll(Spec, 1.0, &Moved);
+	const TArray<FHFFixture> Once = FHFCeilingFit::FitAll(Spec, 1.0, &BuiltHeights, &Moved);
 
 	if (!TestEqual(TEXT("Every fixture comes back, in order"), Once.Num(), Spec.Fixtures.Num()))
 	{
@@ -304,7 +358,7 @@ bool FHFCeilingFitIsIdempotentTest::RunTest(const FString& Parameters)
 	FHFHouseSpec Refitted = Spec;
 	Refitted.Fixtures = Once;
 
-	const TArray<FHFFixture> Twice = FHFCeilingFit::FitAll(Refitted, 1.0, nullptr);
+	const TArray<FHFFixture> Twice = FHFCeilingFit::FitAll(Refitted, 1.0, &BuiltHeights, nullptr);
 
 	int32 Drifted = 0;
 	for (int32 Index = 0; Index < Once.Num(); ++Index)
@@ -369,7 +423,8 @@ bool FHFCeilingFitWholeFlatTest::RunTest(const FString& Parameters)
 
 		FHFCeilingTemplates::Apply(Spec, FHFCeilingDefaults());
 
-		const TArray<FHFFixture> Fitted = FHFCeilingFit::FitAll(Spec, Clearance, nullptr);
+		const TMap<FName, double> BuiltHeights = BuiltHeightsFor(Spec);
+		const TArray<FHFFixture> Fitted = FHFCeilingFit::FitAll(Spec, Clearance, &BuiltHeights, nullptr);
 
 		int32 Buried = 0;
 		int32 Refused = 0;
@@ -386,8 +441,8 @@ bool FHFCeilingFitWholeFlatTest::RunTest(const FString& Parameters)
 				continue;
 			}
 
-			const FHFCeilingFitResult Result =
-				FHFCeilingFit::Fit(Spec.Fixtures[Index], *Room, Spec.FalseCeilings, Clearance);
+			const FHFCeilingFitResult Result = FHFCeilingFit::Fit(Spec.Fixtures[Index], *Room,
+				Spec.FalseCeilings, Clearance, OverhangOf(BuiltHeights, Fixture) * 2.0 + Fixture.Height);
 
 			if (Result.Action == EHFCeilingFitAction::Refused)
 			{
@@ -399,7 +454,9 @@ bool FHFCeilingFitWholeFlatTest::RunTest(const FString& Parameters)
 				continue;
 			}
 
-			const double TopZ = Room->FloorZ + Fixture.BaseZ + Fixture.Height;
+			// The head of what is BUILT, bezel and all - not of the box the drawing states.
+			const double TopZ = Room->FloorZ + Fixture.BaseZ + Fixture.Height
+				+ OverhangOf(BuiltHeights, Fixture);
 			const double SoffitZ = FHFCeilingFit::LowestSoffitZOver(Fixture, *Room, Spec.FalseCeilings);
 
 			if (TopZ > SoffitZ + 0.001)
@@ -449,7 +506,8 @@ bool FHFCeilingFitReportedFittingsTest::RunTest(const FString& Parameters)
 	FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 	FHFUnits::ConvertToCentimeters(Spec);
 
-	const TArray<FHFFixture> Fitted = FHFCeilingFit::FitAll(Spec, 1.0, nullptr);
+	const TMap<FName, double> BuiltHeights = BuiltHeightsFor(Spec);
+	const TArray<FHFFixture> Fitted = FHFCeilingFit::FitAll(Spec, 1.0, &BuiltHeights, nullptr);
 
 	for (const TCHAR* Id : Reported)
 	{
@@ -470,9 +528,10 @@ bool FHFCeilingFitReportedFittingsTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
+		const double Overhang = OverhangOf(BuiltHeights, Drawn);
 		const double SoffitZ = FHFCeilingFit::LowestSoffitZOver(Drawn, *Room, Spec.FalseCeilings);
-		const double DrawnTopZ = Room->FloorZ + Drawn.BaseZ + Drawn.Height;
-		const double FittedTopZ = Room->FloorZ + Fitted[Index].BaseZ + Fitted[Index].Height;
+		const double DrawnTopZ = Room->FloorZ + Drawn.BaseZ + Drawn.Height + Overhang;
+		const double FittedTopZ = Room->FloorZ + Fitted[Index].BaseZ + Fitted[Index].Height + Overhang;
 
 		AddInfo(FString::Printf(TEXT("%s: drawn head %.1f, soffit %.1f, built head %.1f."),
 			Id, DrawnTopZ, SoffitZ, FittedTopZ));

@@ -124,7 +124,7 @@ double FHFCeilingFit::LowestSoffitZOver(const FHFFixture& Fixture, const FHFRoom
 }
 
 FHFCeilingFitResult FHFCeilingFit::Fit(const FHFFixture& Fixture, const FHFRoom& Room,
-	const TArray<FHFFalseCeiling>& Ceilings, double Clearance)
+	const TArray<FHFFalseCeiling>& Ceilings, double Clearance, double BuiltHeight)
 {
 	FHFCeilingFitResult Result;
 	Result.Rule = RuleFor(Fixture.Type);
@@ -157,21 +157,30 @@ FHFCeilingFitResult FHFCeilingFit::Fit(const FHFFixture& Fixture, const FHFRoom&
 	case EHFCeilingFitRule::Lowers:
 	{
 		const double HeadroomZ = Result.SoffitZ - Gap;
-		const double TopZ = Room.FloorZ + Fixture.BaseZ + Fixture.Height;
+
+		// HOW FAR THE BUILT THING REACHES PAST ITS DRAWN BOX, at each end. An extract's bezel is
+		// sized to lap the corners of the chase cored behind it, so a fan drawn 250 comes out 316 -
+		// and it is centred on what was drawn, which is how AHFFanActor::PlacementFor places one.
+		// Fitting the drawn box leaves the real overhang inside the plasterboard.
+		const double Overhang = FMath::Max(BuiltHeight - Fixture.Height, 0.0) * 0.5;
+
+		const double TopZ = Room.FloorZ + Fixture.BaseZ + Fixture.Height + Overhang;
 
 		if (TopZ <= HeadroomZ + UE_KINDA_SMALL_NUMBER)
 		{
 			break;
 		}
 
-		const double WantedBaseZ = HeadroomZ - Fixture.Height - Room.FloorZ;
+		const double WantedBaseZ = HeadroomZ - Overhang - Fixture.Height - Room.FloorZ;
 
-		if (WantedBaseZ < 0.0)
+		// The bottom of the BUILT thing, which hangs as far below the drawn box as the top stands
+		// above it.
+		if (WantedBaseZ - Overhang < 0.0)
 		{
 			// There is not as much wall below the soffit as the fitting is tall. Left where it was
 			// drawn: sinking it into the floor would be a second wrong answer, arrived at silently.
 			Result.Action = EHFCeilingFitAction::Refused;
-			Result.Shortfall = -WantedBaseZ;
+			Result.Shortfall = Overhang - WantedBaseZ;
 			break;
 		}
 
@@ -218,7 +227,7 @@ FHFCeilingFitResult FHFCeilingFit::Fit(const FHFFixture& Fixture, const FHFRoom&
 }
 
 TArray<FHFFixture> FHFCeilingFit::FitAll(const FHFHouseSpec& Spec, double Clearance,
-	TArray<FString>* OutMoved)
+	const TMap<FName, double>* BuiltHeights, TArray<FString>* OutMoved)
 {
 	TArray<FHFFixture> Out;
 	Out.Reserve(Spec.Fixtures.Num());
@@ -230,7 +239,10 @@ TArray<FHFFixture> FHFCeilingFit::FitAll(const FHFHouseSpec& Spec, double Cleara
 		const FHFRoom* Room = Spec.FindRoom(Fixture.RoomId);
 		if (Room != nullptr)
 		{
-			const FHFCeilingFitResult Result = Fit(Fixture, *Room, Spec.FalseCeilings, Clearance);
+			const double* BuiltHeight = (BuiltHeights != nullptr) ? BuiltHeights->Find(Fixture.Id) : nullptr;
+
+			const FHFCeilingFitResult Result = Fit(Fixture, *Room, Spec.FalseCeilings, Clearance,
+				(BuiltHeight != nullptr) ? *BuiltHeight : 0.0);
 
 			// HangsFromSoffit changes the DATUM rather than the figures, and the datum is resolved by
 			// whoever places the actor. Writing SoffitZ into BaseZ here would turn a ceiling-relative

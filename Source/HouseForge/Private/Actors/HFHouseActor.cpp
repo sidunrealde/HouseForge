@@ -1014,7 +1014,28 @@ TArray<FHFFixture> AHFHouseActor::ResolveFixtures(TArray<FString>* OutMoved) con
 	// exactly once at ingest, and the settings page is in centimetres too.
 	const double Clearance = FHFBuildDefaults::FromProjectSettings().Ceiling.FixtureSoffitClearance;
 
-	return FHFCeilingFit::FitAll(Spec, Clearance, OutMoved);
+	// ------------------------------------------------- how big the fittings actually come out
+	//
+	// THE DRAWN BOX IS NOT ALWAYS THE OBJECT. A plan marks an extract at the fan that was bought and
+	// the case built for it carries a bezel sized to lap the CORNERS of the chase cored behind it, so
+	// a fan drawn 250 stands 316 tall. Fitting the drawn box under the soffit leaves the difference
+	// inside the plasterboard - which is this very defect, one step later, and it was found by
+	// rendering the room rather than by any assertion about the spec.
+	//
+	// Answered HERE and not inside the resolver, for the same reason the ceiling's rod hole and the
+	// wall's duct are: AHFFanActor::ParamsFor is the one place that knows what fan ends up standing
+	// there, project figures and all, and three things sized from three different ideas of one fan is
+	// exactly what that function exists to prevent.
+	TMap<FName, double> BuiltHeights;
+	for (const FHFFixture& Fixture : Spec.Fixtures)
+	{
+		if (Fixture.Type == EHFFixtureType::ExhaustFan)
+		{
+			BuiltHeights.Add(Fixture.Id, AHFFanActor::ParamsFor(Fixture).CaseHalfWidth() * 2.0);
+		}
+	}
+
+	return FHFCeilingFit::FitAll(Spec, Clearance, &BuiltHeights, OutMoved);
 }
 
 void AHFHouseActor::PostLoad()
