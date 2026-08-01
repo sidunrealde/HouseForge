@@ -145,8 +145,21 @@ FHFDeskBuild FHFDeskKit::Build(const FHFDeskParams& Params)
 
 	if (P.PedestalWidth > MinSolid && SupportDepth > MinSolid)
 	{
+		// AN APPLIED END PANEL ON THE KNEE-HOLE SIDE, and the carcass narrowed to take it.
+		//
+		// That side of a pedestal is on show - it is what somebody sitting at the desk looks straight
+		// at, from 400 mm away - and a carcass side board is not a finished surface. Built without one
+		// the desk rendered as a laminate top and laminate fronts with a bare ply panel between them,
+		// down the middle of the one face the object is used from: a join where no join exists, and
+		// exactly the sort of thing that measures perfectly and reads as unfinished.
+		//
+		// The carcass gives up the thickness rather than the knee hole, for the same reason Sanitise
+		// takes it out of the pedestal: the hole is what the desk is for.
+		const double EndPanel = FMath::Min(0.6, P.PedestalWidth * 0.25);
+		const double CarcassWidth = P.PedestalWidth - EndPanel;
+
 		FHFCarcassParams Carcass = P.Joinery.Make<FHFCarcassParams>();
-		Carcass.Width = P.PedestalWidth;
+		Carcass.Width = CarcassWidth;
 		Carcass.Depth = SupportDepth;
 		Carcass.Height = TopUnderZ;
 		Carcass.BayCount = 1;
@@ -158,10 +171,23 @@ FHFDeskBuild FHFDeskKit::Build(const FHFDeskParams& Params)
 		Carcass = FHFJoineryKit::SanitiseCarcass(Carcass);
 		Out.PedestalCarcass = Carcass;
 
-		const FVector ToPedestal(Out.PedestalX0, CarcassFrontY, 0.0);
+		// The panel goes on whichever side faces the knee hole, and the carcass sits behind it.
+		const double PanelX0 = P.bPedestalAtRightEnd
+			? Out.PedestalX0
+			: Out.PedestalX0 + CarcassWidth;
+		const double CarcassX0 = P.bPedestalAtRightEnd
+			? Out.PedestalX0 + EndPanel
+			: Out.PedestalX0;
+
+		const FVector ToPedestal(CarcassX0, CarcassFrontY, 0.0);
 
 		FHFMeshOps::AppendPreservingRoles(Out.Pedestal,
 			Placed(FHFJoineryKit::GenerateCarcass(Carcass), ToPedestal));
+
+		AppendSolid(Out.Pedestal,
+			FVector3d(PanelX0, CarcassFrontY, 0.0),
+			FVector3d(PanelX0 + EndPanel, BackY, TopUnderZ),
+			EHFSurfaceRole::ShutterLaminate);
 
 		if (P.DrawerCount > 0)
 		{
@@ -201,12 +227,22 @@ FHFDeskBuild FHFDeskKit::Build(const FHFDeskParams& Params)
 		}
 	}
 
+	// Unwrapped once, after the carcass, its applied end panel and its runner channels are all in it.
+	// The projection is per-polygroup and idempotent, so re-running it over geometry that already
+	// carries UVs costs nothing and cannot leave the end panel as the one unwrapped board in the run.
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Pedestal);
+
 	// ---------------------------------------------------------------------------------- the gable
 
+	// FACED, NOT CARCASS. A gable is the one board of this desk that is on show from every side - it
+	// is the end of the object, standing in the middle of a bedroom floor - so it is finished in the
+	// same laminate as the top rather than in the carcass ply that lives behind a drawer front.
+	// Tagged JoineryCarcass it rendered as a pair of pale legs under a coloured top, which is a desk
+	// nobody makes: measurably correct, and two materials meeting where no join exists.
 	AppendSolid(Out.Gable,
 		FVector3d(Out.GableX0, CarcassFrontY, 0.0),
 		FVector3d(Out.GableX0 + P.GableThickness, BackY, TopUnderZ),
-		EHFSurfaceRole::JoineryCarcass);
+		EHFSurfaceRole::ShutterLaminate);
 
 	FHFMeshOps::ApplyWorldScaleUVs(Out.Gable);
 
@@ -224,10 +260,12 @@ FHFDeskBuild FHFDeskKit::Build(const FHFDeskParams& Params)
 			: Out.PedestalX0 + P.PedestalWidth;
 		const double InnerX1 = P.bPedestalAtRightEnd ? Out.PedestalX0 : Out.GableX0;
 
+		// Faced for the same reason the gable is: it is the surface anybody sitting at this desk looks
+		// straight at, through the knee hole, and the only thing behind it is a wall.
 		AppendSolid(Out.ModestyPanel,
 			FVector3d(InnerX0, FMath::Max(BackY - Board, 0.0), TopUnderZ - P.ModestyPanelHeight),
 			FVector3d(InnerX1, BackY, TopUnderZ),
-			EHFSurfaceRole::JoineryCarcass);
+			EHFSurfaceRole::ShutterLaminate);
 
 		FHFMeshOps::ApplyWorldScaleUVs(Out.ModestyPanel);
 	}
