@@ -630,15 +630,36 @@ void AHFArticulatedActor::PostEditChangeProperty(FPropertyChangedEvent& Property
 
 	// Posing is not a parameter change: it must move parts without rebuilding any geometry, or
 	// dragging the slider would rebuild the whole fixture on every mouse move.
+	//
+	// BUT IT STILL HAS TO PUT THE COMPONENTS BACK, and skipping the whole chain did not.
+	//
+	// The engine's contract is a pair: AActor::PreEditChange calls UnregisterAllComponents whenever
+	// ReregisterComponentsWhenModified is true - which is every actor in a level - and
+	// AActor::PostEditChangeProperty is what registers them again. Returning here without reaching
+	// AActor left every component of the fixture unregistered: no render state, no physics state,
+	// and actor bounds of exactly zero.
+	//
+	// So dragging MasterOpenAmount in the details panel - which is the single most obvious thing
+	// anybody does to check that a fixture opens - made the whole wardrobe VANISH from the viewport.
+	// Not the leaves: the carcass, the shelves, the plinth and the cornice with them. Every part
+	// reported the pose it had been asked for, every automation test passed, and the wardrobe was
+	// gone. It was found by rendering the master bedroom, not by any assertion.
+	//
+	// AActor:: rather than Super:: on purpose. AHFElementActor::PostEditChangeProperty regenerates
+	// for any property declared on an element actor, and both of these are, so going through it
+	// would rebuild the fixture on every frame of a slider drag - the thing this branch exists to
+	// avoid. What is wanted is the engine's half of the contract and nothing else.
 	if (Member == GET_MEMBER_NAME_CHECKED(AHFArticulatedActor, MasterOpenAmount))
 	{
 		SetAllPartsOpenAmount(MasterOpenAmount);
+		AActor::PostEditChangeProperty(PropertyChangedEvent);
 		return;
 	}
 
 	if (Member == GET_MEMBER_NAME_CHECKED(AHFArticulatedActor, Parts))
 	{
 		ApplyOpenAmounts();
+		AActor::PostEditChangeProperty(PropertyChangedEvent);
 		return;
 	}
 

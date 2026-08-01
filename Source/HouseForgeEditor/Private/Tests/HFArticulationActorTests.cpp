@@ -1179,6 +1179,158 @@ bool FHFSliderOpensBothWaysTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * Posing a fixture from the details panel leaves it standing in the level.
+ *
+ * THE FIXTURE VANISHED. Dragging MasterOpenAmount on a wardrobe - the single most obvious thing
+ * anybody does to check that a fixture opens - removed the whole wardrobe from the viewport: not
+ * just its leaves but its carcass, shelves, plinth and cornice with them. Its actor bounds came
+ * back as exactly zero.
+ *
+ * The engine's contract is a pair, and only half of it was being honoured. AActor::PreEditChange
+ * calls UnregisterAllComponents for any actor in a level, and AActor::PostEditChangeProperty is
+ * what registers them again. AHFArticulatedActor::PostEditChangeProperty returned early for the
+ * two posing properties - correctly, so that dragging a slider does not rebuild the geometry on
+ * every mouse move - and in doing so never reached AActor at all. The components stayed
+ * unregistered: no render state, no physics state, nothing in the scene.
+ *
+ * NOT ONE ASSERTION IN THE SUITE COULD SEE IT. Every test poses through SetMasterOpenAmount or
+ * SetPartOpenAmount, which are the Blueprint and code entry points and do not go anywhere near
+ * PreEditChange. The part transforms were all correct, every open amount was what it should be,
+ * and the fixture was not there. It was found by rendering the master bedroom and looking at it.
+ *
+ * So this test goes in through the DETAILS PANEL's path specifically - PreEditChange, write,
+ * PostEditChangeProperty - because that is the path that was broken, and it asserts the two things
+ * a person looking at the viewport would notice: the components are registered, and the actor has
+ * bounds.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFPosingKeepsTheFixtureInTheLevelTest,
+	"HouseForge.Editor.PosingFromTheDetailsPanelKeepsTheFixture", HF_TEST_FLAGS)
+
+namespace HouseForgePosing
+{
+	/** Exactly what the details panel does when a value is committed on a property. */
+	void EditAsThePanelWould(AActor& Actor, FProperty* Changed, TFunctionRef<void()> Write)
+	{
+		Actor.PreEditChange(Changed);
+		Write();
+
+		FPropertyChangedEvent Event(Changed);
+		Actor.PostEditChangeProperty(Event);
+	}
+
+	/** Every scene component on the actor, shell and parts alike. */
+	int32 UnregisteredComponents(const AActor& Actor)
+	{
+		TInlineComponentArray<USceneComponent*> Components;
+		Actor.GetComponents(Components);
+
+		int32 Unregistered = 0;
+		for (const USceneComponent* Component : Components)
+		{
+			if (Component != nullptr && !Component->IsRegistered())
+			{
+				++Unregistered;
+			}
+		}
+		return Unregistered;
+	}
+}
+
+bool FHFPosingKeepsTheFixtureInTheLevelTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgePosing;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFOpeningActor* Door = SpawnTestDoor(World, EHFOpeningKind::SlidingDoor, EHFSwing::None);
+	if (!TestNotNull(TEXT("A sliding door spawns"), Door))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
+
+	FVector ShutOrigin = FVector::ZeroVector;
+	FVector ShutExtent = FVector::ZeroVector;
+	Door->GetActorBounds(/*bOnlyCollidingComponents*/ false, ShutOrigin, ShutExtent);
+
+	if (!TestTrue(TEXT("The unit has bounds before anybody touches it"), ShutExtent.Size() > 1.0))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Every component starts registered"), UnregisteredComponents(*Door), 0);
+
+	// ------------------------------------------------------------------- the master slider
+	FProperty* MasterProperty = AHFArticulatedActor::StaticClass()->FindPropertyByName(
+		GET_MEMBER_NAME_CHECKED(AHFArticulatedActor, MasterOpenAmount));
+
+	if (!TestNotNull(TEXT("MasterOpenAmount is a property the panel can edit"), MasterProperty))
+	{
+		return false;
+	}
+
+	EditAsThePanelWould(*Door, MasterProperty, [Door]()
+	{
+		Door->MasterOpenAmount = 1.0;
+	});
+
+	TestEqual(TEXT("Posing from the panel leaves every component registered"),
+		UnregisteredComponents(*Door), 0);
+
+	FVector OpenOrigin = FVector::ZeroVector;
+	FVector OpenExtent = FVector::ZeroVector;
+	Door->GetActorBounds(false, OpenOrigin, OpenExtent);
+
+	// Bounds at all, and bounds of the right SIZE. Zero was the symptom; a unit whose bounds had
+	// merely shrunk to one surviving component would be the same defect wearing a different number.
+	TestTrue(*FString::Printf(TEXT("The unit still has bounds after posing (extent %.1f x %.1f x %.1f)"),
+			OpenExtent.X, OpenExtent.Y, OpenExtent.Z),
+		OpenExtent.Size() > ShutExtent.Size() * 0.5);
+
+	// And it actually posed, so the fix did not buy visibility by doing nothing.
+	TestNearlyEqual(TEXT("The panel edit still opened the unit"),
+		Door->GetPartOpenAmount(AHFOpeningActor::NearLeafPartId), 1.0, 1e-9);
+
+	// ---------------------------------------------------------------- and a single part's row
+	FProperty* PartsProperty = AHFArticulatedActor::StaticClass()->FindPropertyByName(
+		GET_MEMBER_NAME_CHECKED(AHFArticulatedActor, Parts));
+
+	if (!TestNotNull(TEXT("Parts is a property the panel can edit"), PartsProperty))
+	{
+		return false;
+	}
+
+	// The other way an artist poses one leaf: typing into that part's own row. Same contract, same
+	// early return, and it was broken in exactly the same way.
+	EditAsThePanelWould(*Door, PartsProperty, [Door]()
+	{
+		for (FHFPartState& Part : Door->Parts)
+		{
+			Part.OpenAmount = Part.PartId == AHFOpeningActor::FarLeafPartId ? 1.0 : 0.0;
+		}
+	});
+
+	TestEqual(TEXT("Editing one part's row leaves every component registered"),
+		UnregisteredComponents(*Door), 0);
+
+	FVector OtherOrigin = FVector::ZeroVector;
+	FVector OtherExtent = FVector::ZeroVector;
+	Door->GetActorBounds(false, OtherOrigin, OtherExtent);
+	TestTrue(TEXT("The unit still has bounds after a per-part edit"),
+		OtherExtent.Size() > ShutExtent.Size() * 0.5);
+
+	TestNearlyEqual(TEXT("...and the leaf that was typed into is the one that moved"),
+		Door->GetPartOpenAmount(AHFOpeningActor::FarLeafPartId), 1.0, 1e-9);
+	TestNearlyEqual(TEXT("...and its partner did not"),
+		Door->GetPartOpenAmount(AHFOpeningActor::NearLeafPartId), 0.0, 1e-9);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS
