@@ -434,6 +434,11 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 			// Our own write must not read as an artist edit.
 			TGuardValue<bool> Guard(bGenerating, true);
 
+			// The same render finish the fixed shell gets. A part that missed it would be the one
+			// piece of the flat with sharp arrises and no lightmap channel, which is every shutter,
+			// every drawer front and every door leaf in the room - the things closest to camera.
+			FHFMeshOps::FinishForRender(Part.Mesh, RenderFinish);
+
 			FHFMeshOps::AssignMaterialIdsFromRoles(Part.Mesh);
 
 			Component->SetMesh(MoveTemp(Part.Mesh));

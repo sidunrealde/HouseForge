@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "Geometry/HFRenderFinish.h"
 #include "Model/HFTypes.h"
 
 /**
@@ -217,6 +218,71 @@ public:
 	 */
 	static void ComputeShadingNormals(UE::Geometry::FDynamicMesh3& Mesh,
 		double HardEdgeAngleDegrees = 40.0);
+
+	/**
+	 * Chamfers every convex arris the parameters ask for, with the surface roles intact.
+	 *
+	 * The ONLY way a bevel is applied here, exactly as AppendPreservingRoles is the only way meshes
+	 * are joined, and against the same failure: FMeshBevel calls Mesh.AllocateTriangleGroup() for
+	 * every strip and junction polygon it emits, so the chamfer facets come out in groups no role
+	 * maps to, RoleForGroup falls to WallPaint, and the material panel can never reach the chamfers.
+	 * Invisible in a screenshot and fatal to the material system. This puts them back by flooding the
+	 * role in from the original faces each new triangle touches.
+	 *
+	 * ## What is selected, and what deliberately is not
+	 *
+	 * FMeshBevel's own InitializeFromGroupTopology is useless here. It bevels group-boundary edges,
+	 * and in HouseForge the polygroup IS the surface role - a box's six faces are one group with no
+	 * interior group edges, so it would bevel nothing at all. The edge set is chosen here instead:
+	 *
+	 *   - CONVEX only. Face normals alone cannot tell a convex arris from a concave internal corner
+	 *     (the dot product is the same either way), so convexity is computed as the side of the first
+	 *     triangle's plane the second triangle's far vertex falls on. Chamfering concave edges eats
+	 *     material out of every junction, and a real internal corner is filled, not chamfered.
+	 *   - Above the hard-edge angle. See FHFBevelParams::MinAngleDegrees.
+	 *   - Only where the faces either side are wide enough to lose the chamfer without vanishing.
+	 *     See FHFBevelParams::MinFeatureFactor - this kit's 3 mm shadow gaps depend on it.
+	 *
+	 * Runs one pass per distinct chamfer width present, widest first, and never re-bevels a facet an
+	 * earlier pass created: a fresh chamfer meets its parent faces at 45 degrees, which is above the
+	 * threshold, so without that guard the second pass would chamfer the first pass's chamfers.
+	 *
+	 * NOT IDEMPOTENT, which is what makes it a composing-layer operation rather than a generator one.
+	 * See FHFRenderFinish.
+	 *
+	 * @return true if any edge was chamfered. On failure the mesh is left exactly as it arrived - a
+	 *         partially beveled mesh is worse than a sharp one, because it looks plausible.
+	 */
+	static bool BevelConvexEdges(UE::Geometry::FDynamicMesh3& Mesh, const FHFBevelParams& Params);
+
+	/**
+	 * Builds a non-overlapping second UV channel for baked lighting, leaving UV0 untouched.
+	 *
+	 * UV0 cannot be used for a lightmap and that is not a defect in it: it is world position over
+	 * texel size, so it is deliberately shared between every surface at the same coordinates, and
+	 * two rooms' walls land on top of each other. A lightmap needs the opposite property.
+	 *
+	 * Islands are the mesh's own planar-projection regions - the same dominant-axis grouping UV0
+	 * uses - packed into the unit square by the engine's own UV packer, the one static mesh lightmap
+	 * generation uses. World-scale projection first means the islands arrive at a consistent
+	 * texel-to-world ratio before packing, so a big wall gets proportionally more lightmap than a
+	 * door handle instead of every island being scaled to fit its own slot.
+	 *
+	 * @return false if the mesh has no triangles or the packer could not lay the islands out, in
+	 *         which case no second layer is left half-built.
+	 */
+	static bool BuildLightmapUVs(UE::Geometry::FDynamicMesh3& Mesh, const FHFLightmapParams& Params);
+
+	/**
+	 * Everything between a generator finishing and a component receiving the mesh: bevel, UVs, normals.
+	 *
+	 * Ordered, and the order is the whole point. The bevel runs FIRST so the chamfer facets are
+	 * present when UV0 is projected and the normals are computed - a chamfer with no UVs and no
+	 * normal elements renders as an untextured band shading off the constant normal, which is
+	 * precisely the invisible-in-a-screenshot failure this file keeps guarding against. The lightmap
+	 * unwrap runs LAST, because it packs the islands the projection produced.
+	 */
+	static void FinishForRender(UE::Geometry::FDynamicMesh3& Mesh, const FHFRenderFinish& Finish);
 
 	/**
 	 * Insets a closed polygon inward by Amount, returning the resulting loops.

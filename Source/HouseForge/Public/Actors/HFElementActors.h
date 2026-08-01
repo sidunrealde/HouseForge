@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "GameFramework/Actor.h"
+#include "Geometry/HFRenderFinish.h"
 #include "Model/HFSkirtingPlan.h"
 #include "Model/HFTypes.h"
 #include "HFElementActors.generated.h"
@@ -65,6 +66,17 @@ public:
 	/** Spec element this actor was generated from, so a rebuild can match it back up. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
 	FName ElementId;
+
+	/**
+	 * What is done to this element's geometry on the way to the component: chamfers, UVs, lightmap.
+	 *
+	 * Lives on the actor rather than in the generators because a generator is a pure function of its
+	 * parameters and the bevel is not idempotent - see FHFRenderFinish. It is editable per element
+	 * because the cost is real: chamfering an arris is triangles, and the answer for a wall the
+	 * camera walks past is not the answer for a service duct nobody ever sees.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Render")
+	FHFRenderFinish RenderFinish;
 
 	UDynamicMeshComponent* GetMeshComponent() const { return Mesh; }
 

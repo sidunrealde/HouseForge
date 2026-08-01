@@ -124,6 +124,13 @@ void AHFElementActor::CommitMesh(FDynamicMesh3&& Generated)
 	// Our own write must not look like an artist edit.
 	TGuardValue<bool> Guard(bGenerating, true);
 
+	// The composing layer's single pass over generated geometry: chamfer the arrises, re-project
+	// UV0 over the facets that produced, and lay out the lightmap channel. Here rather than in the
+	// generators because a bevel is the one operation in this plugin that is NOT idempotent, and a
+	// generator that beveled its own output would have its chamfers chamfered again by every
+	// composition it was appended into. See FHFRenderFinish.
+	FHFMeshOps::FinishForRender(Generated, RenderFinish);
+
 	// The last thing done to a generated mesh, after every boolean and every append. The material
 	// id is a pure function of the polygroup, so deriving it here rather than inside the generators
 	// means no mesh operation has to be trusted to carry it - and no generator has to reach for an
