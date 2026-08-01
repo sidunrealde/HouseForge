@@ -5,6 +5,8 @@
 #include "HouseForge.h"
 
 #include "Algo/Reverse.h"
+#include "DynamicMesh/DynamicMeshAABBTree3.h"
+#include "Spatial/FastWinding.h"
 #include "VectorUtil.h"
 
 using namespace UE::Geometry;
@@ -155,6 +157,11 @@ TArray<FHFCoplanarOverlap> FHFCoplanarScan::Find(TArrayView<const FHFScanSurface
 	// ------------------------------------------------------------------ flatten to world triangles
 	TArray<FScanTri> Tris;
 
+	// Kept for the seal probe, which asks many times whether a point is inside a surface and must
+	// not recompute a mesh's bounds to reject it.
+	TArray<FAxisAlignedBox3d> LocalBounds;
+	LocalBounds.SetNum(Surfaces.Num());
+
 	for (int32 SurfaceIndex = 0; SurfaceIndex < Surfaces.Num(); ++SurfaceIndex)
 	{
 		const FHFScanSurface& Surface = Surfaces[SurfaceIndex];
@@ -162,6 +169,8 @@ TArray<FHFCoplanarOverlap> FHFCoplanarScan::Find(TArrayView<const FHFScanSurface
 		{
 			continue;
 		}
+
+		LocalBounds[SurfaceIndex] = Surface.Mesh->GetBounds();
 
 		for (const int32 Tid : Surface.Mesh->TriangleIndicesItr())
 		{
@@ -347,6 +356,46 @@ TArray<FHFCoplanarOverlap> FHFCoplanarScan::Find(TArrayView<const FHFScanSurface
 		}
 	}
 
+	// ------------------------------------------------------------------------------- seal probe
+	//
+	// Built lazily and only for the surfaces a probe actually lands in: a flat is a couple of
+	// hundred meshes and most of them are nowhere near any given plane.
+	TArray<TUniquePtr<FDynamicMeshAABBTree3>> Trees;
+	TArray<TUniquePtr<TFastWindingTree<FDynamicMesh3>>> Windings;
+	Trees.SetNum(Surfaces.Num());
+	Windings.SetNum(Surfaces.Num());
+
+	auto IsInsideSolid = [&Surfaces, &LocalBounds, &Trees, &Windings](const FVector3d& World)
+	{
+		for (int32 Index = 0; Index < Surfaces.Num(); ++Index)
+		{
+			const FHFScanSurface& Surface = Surfaces[Index];
+			if (Surface.Mesh == nullptr)
+			{
+				continue;
+			}
+
+			const FVector3d Local = Surface.ToWorld.InverseTransformPosition(World);
+			if (!LocalBounds[Index].Contains(Local))
+			{
+				continue;
+			}
+
+			if (!Trees[Index].IsValid())
+			{
+				Trees[Index] = MakeUnique<FDynamicMeshAABBTree3>(Surface.Mesh, true);
+				Windings[Index] = MakeUnique<TFastWindingTree<FDynamicMesh3>>(Trees[Index].Get());
+			}
+
+			if (Windings[Index]->FastWindingNumber(Local) > 0.5)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	};
+
 	for (const TPair<uint64, FPairTotal>& Entry : Totals)
 	{
 		if (Entry.Value.AreaCm2 < Params.MinAreaCm2)
@@ -364,11 +413,20 @@ TArray<FHFCoplanarOverlap> FHFCoplanarScan::Find(TArrayView<const FHFScanSurface
 		Overlap.AreaCm2 = Entry.Value.AreaCm2;
 		Overlap.SeparationCm = Entry.Value.SeparationCm;
 		Overlap.Sample = Entry.Value.Sample;
+
+		// One step into the side both faces look at. Solid there means nothing can ever draw them.
+		Overlap.bSealed = IsInsideSolid(Entry.Value.Sample + Entry.Value.Normal * Params.SealProbeCm);
+
 		Result.Add(MoveTemp(Overlap));
 	}
 
+	// Exposed first and largest first, so a failure message opens with the thing to go and look at.
 	Result.Sort([](const FHFCoplanarOverlap& A, const FHFCoplanarOverlap& B)
 	{
+		if (A.bSealed != B.bSealed)
+		{
+			return B.bSealed;
+		}
 		return A.AreaCm2 > B.AreaCm2;
 	});
 
@@ -385,6 +443,16 @@ double FHFCoplanarScan::TotalAreaCm2(TArrayView<const FHFCoplanarOverlap> Overla
 	return Total;
 }
 
+double FHFCoplanarScan::ExposedAreaCm2(TArrayView<const FHFCoplanarOverlap> Overlaps)
+{
+	double Total = 0.0;
+	for (const FHFCoplanarOverlap& Overlap : Overlaps)
+	{
+		Total += Overlap.bSealed ? 0.0 : Overlap.AreaCm2;
+	}
+	return Total;
+}
+
 TArray<FString> FHFCoplanarScan::Describe(TArrayView<const FHFCoplanarOverlap> Overlaps, int32 MaxLines)
 {
 	TArray<FString> Lines;
@@ -394,7 +462,8 @@ TArray<FString> FHFCoplanarScan::Describe(TArrayView<const FHFCoplanarOverlap> O
 	{
 		const FHFCoplanarOverlap& Overlap = Overlaps[Index];
 		Lines.Add(FString::Printf(
-			TEXT("%s vs %s: %.1f cm2 co-facing, gap %.4f cm, normal (%.2f %.2f %.2f) at (%.1f %.1f %.1f)"),
+			TEXT("%s%s vs %s: %.1f cm2 co-facing, gap %.4f cm, normal (%.2f %.2f %.2f) at (%.1f %.1f %.1f)"),
+			Overlap.bSealed ? TEXT("[sealed] ") : TEXT(""),
 			*Overlap.NameA, *Overlap.NameB, Overlap.AreaCm2, Overlap.SeparationCm,
 			Overlap.Normal.X, Overlap.Normal.Y, Overlap.Normal.Z,
 			Overlap.Sample.X, Overlap.Sample.Y, Overlap.Sample.Z));

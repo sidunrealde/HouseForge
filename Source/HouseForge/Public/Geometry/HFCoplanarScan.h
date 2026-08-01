@@ -56,6 +56,14 @@ struct HOUSEFORGE_API FHFCoplanarScanParams
 	double MinAreaCm2 = 1.0;
 
 	/**
+	 * How far off the shared plane the visibility probe is taken, in centimetres.
+	 *
+	 * Small enough to stay inside the thinnest thing that could be sealing the pair - a 15 cm floor
+	 * slab, a 11.5 cm partition - and large enough to be clear of the plane itself.
+	 */
+	double SealProbeCm = 0.1;
+
+	/**
 	 * Cell size of the broad-phase grid, in centimetres.
 	 *
 	 * Performance only - the result does not depend on it. Coplanar faces must be spatially
@@ -82,6 +90,13 @@ struct HOUSEFORGE_API FHFCoplanarOverlap
 
 	/** A world point inside the overlap, so the report says WHERE to go and look. */
 	FVector3d Sample = FVector3d::Zero();
+
+	/**
+	 * True when the side both faces look at is solid, so neither is ever drawn.
+	 *
+	 * A coincidence buried in material cannot flash. See the note on sealed pairs below.
+	 */
+	bool bSealed = false;
 };
 
 /**
@@ -109,6 +124,27 @@ struct HOUSEFORGE_API FHFCoplanarOverlap
  *
  * **A surface against itself.** A single mesh's own faces are the generator's business, and a
  * boolean routinely leaves coincident triangles inside a solid where nothing can see them.
+ *
+ * ## Sealed pairs, which are reported but do not count
+ *
+ * Z-fighting needs a camera. Two co-facing surfaces buried inside material - a skirting's underside
+ * and the wall's base, both pressed onto the floor slab; a ceiling's top cap and a beam's top, both
+ * under the structural slab - are drawn by nothing, ever, and no amount of moving the camera will
+ * make them strobe.
+ *
+ * This is not a loophole, it is the shape of the building. Every room element in HouseForge runs to
+ * the WALL CENTRELINES, because that is the boundary a plan gives you: the floor slab laps into the
+ * masonry it bears on, the skirting stops in it, the ceiling dies into it. Those laps are what
+ * guarantee there is no hairline gap at the junction, and abandoning the convention to satisfy an
+ * area figure would trade an invisible coincidence for a visible crack.
+ *
+ * So each pair is probed: one step along the shared normal, into the side both faces look at. If
+ * that point is inside any element's solid the pair is marked sealed and left out of the exposed
+ * total. It is still reported, because a pair that becomes sealed by accident is worth seeing.
+ *
+ * The probe is taken at the centre of the pair's LARGEST patch, so a pair that is sealed over part
+ * of its area and open over the rest is judged by the bigger part. Every case in this plugin is
+ * uniform - a whole face is either buried or it is not - but it is an approximation and it is one.
  */
 class HOUSEFORGE_API FHFCoplanarScan
 {
@@ -117,8 +153,11 @@ public:
 	static TArray<FHFCoplanarOverlap> Find(TArrayView<const FHFScanSurface> Surfaces,
 		const FHFCoplanarScanParams& Params = FHFCoplanarScanParams());
 
-	/** Sum of every reported overlap, in square centimetres. */
+	/** Sum of every reported overlap, in square centimetres, sealed or not. */
 	static double TotalAreaCm2(TArrayView<const FHFCoplanarOverlap> Overlaps);
+
+	/** Sum of the overlaps something can actually see - the figure that means "this flashes". */
+	static double ExposedAreaCm2(TArrayView<const FHFCoplanarOverlap> Overlaps);
 
 	/** One line per overlap, worst first, for a test failure message or a log. */
 	static TArray<FString> Describe(TArrayView<const FHFCoplanarOverlap> Overlaps, int32 MaxLines = 20);

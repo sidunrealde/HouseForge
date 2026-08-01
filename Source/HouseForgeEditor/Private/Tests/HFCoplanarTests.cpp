@@ -185,9 +185,22 @@ bool FHFCoplanarFlatTest::RunTest(const FString& Parameters)
 	}
 
 	const TArray<FHFCoplanarOverlap> Overlaps = FHFCoplanarScan::Find(Surfaces);
-	const double TotalCm2 = FHFCoplanarScan::TotalAreaCm2(Overlaps);
+	const double ExposedCm2 = FHFCoplanarScan::ExposedAreaCm2(Overlaps);
+	const double SealedCm2 = FHFCoplanarScan::TotalAreaCm2(Overlaps) - ExposedCm2;
 
-	if (TotalCm2 > 0.0)
+	int32 Exposed = 0;
+	for (const FHFCoplanarOverlap& Overlap : Overlaps)
+	{
+		Exposed += Overlap.bSealed ? 0 : 1;
+	}
+
+	// Logged whether or not this passes, so the sealed figure is visible in a green run too. It is
+	// the number that would quietly grow if a room element started lapping somewhere new.
+	AddInfo(FString::Printf(
+		TEXT("Reference flat: %d exposed pair(s), %.0f cm2; %d sealed pair(s), %.0f cm2 buried in solid."),
+		Exposed, ExposedCm2, Overlaps.Num() - Exposed, SealedCm2));
+
+	if (ExposedCm2 > 0.0)
 	{
 		for (const FString& Line : FHFCoplanarScan::Describe(Overlaps, 25))
 		{
@@ -195,13 +208,13 @@ bool FHFCoplanarFlatTest::RunTest(const FString& Parameters)
 		}
 
 		AddError(FString::Printf(
-			TEXT("%d surface pair(s) in the reference flat present %.0f cm2 of co-facing coplanar faces. That is z-fighting: both faces are drawn, the depth test picks a different winner each frame, and the surface strobes as the camera moves. Decide which element owns the plane - structure displaces masonry, a finish has a real thickness - rather than nudging one by an epsilon."),
-			Overlaps.Num(), TotalCm2));
+			TEXT("%d surface pair(s) in the reference flat present %.0f cm2 of co-facing coplanar faces that something can see. That is z-fighting: both faces are drawn, the depth test picks a different winner each frame, and the surface strobes as the camera moves. Decide which element owns the plane - structure displaces masonry, a finish has a real thickness - rather than nudging one by an epsilon."),
+			Exposed, ExposedCm2));
 	}
 
-	// Zero, to within a square centimetre. Not "small" - a plane is owned by exactly one element or
-	// it is a defect, and a threshold here is how the next one gets in.
-	TestEqual(TEXT("Co-facing coplanar overlap in the reference flat, in cm2"), TotalCm2, 0.0, 1.0);
+	// Zero, to within a square centimetre. Not "small" - a visible plane is owned by exactly one
+	// element or it is a defect, and a threshold here is how the next one gets in.
+	TestEqual(TEXT("Co-facing coplanar overlap the flat can show, in cm2"), ExposedCm2, 0.0, 1.0);
 
 	ClearHouseForgeActors(World);
 	return true;

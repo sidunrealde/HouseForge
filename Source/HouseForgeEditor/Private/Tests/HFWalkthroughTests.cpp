@@ -447,11 +447,34 @@ bool FHFWalkthroughWallTest::RunTest(const FString& Parameters)
 
 	int32 Checked = 0;
 
+	// How much of each end of a wall belongs to the wall it butts against.
+	//
+	// Walls are set out on their CENTRELINES, so where two meet they both own the footprint of the
+	// junction. One of them is built through and the other stops at its face - see the build order
+	// in AHFHouseActor - so the last half-thickness of the wall that stops is masonry, but it is the
+	// OTHER wall's masonry. Traced there, this test asked whether a wall blocks at a point that wall
+	// does not occupy, and the honest answer is that the flat is solid and the question was wrong.
+	//
+	// The thickest wall in the spec bounds how much any junction can take, so no wall has to be
+	// looked up and nothing has to be assumed about which one wins.
+	double JunctionMargin = 0.0;
+	for (const FHFWall& Wall : Spec.Walls)
+	{
+		JunctionMargin = FMath::Max(JunctionMargin, Wall.Thickness * 0.5);
+	}
+	JunctionMargin += 5.0;
+
 	for (const FHFWall& Wall : Spec.Walls)
 	{
 		const double Length = Wall.Length();
 		if (Length <= UE_KINDA_SMALL_NUMBER || Wall.Thickness <= 0.0)
 		{
+			continue;
+		}
+
+		if (Length <= JunctionMargin * 2.0)
+		{
+			// Shorter than its own two junctions. Nothing here is unambiguously this wall's.
 			continue;
 		}
 
@@ -479,9 +502,10 @@ bool FHFWalkthroughWallTest::RunTest(const FString& Parameters)
 
 		double SolidAlong = -1.0;
 		constexpr int32 Steps = 40;
-		for (int32 i = 1; i < Steps; ++i)
+		const double Span = Length - JunctionMargin * 2.0;
+		for (int32 i = 0; i <= Steps; ++i)
 		{
-			const double Along = Length * double(i) / Steps;
+			const double Along = JunctionMargin + Span * double(i) / Steps;
 			if (IsClear(Along))
 			{
 				SolidAlong = Along;

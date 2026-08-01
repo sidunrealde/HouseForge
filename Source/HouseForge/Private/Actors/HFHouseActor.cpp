@@ -82,7 +82,13 @@ namespace
 	//   2. Beams   - frame into every column they land on. Where two cross, the LONGER one runs
 	//                through and the shorter stops at its face, which is what primary and secondary
 	//                beams are. Equal lengths break on id so a rebuild is deterministic.
-	//   3. Walls   - blockwork infills around all of it.
+	//   3. Walls   - blockwork infills around all of it, and around each other. Walls are set out on
+	//                their CENTRELINES, so wherever two meet, both own the footprint of the junction.
+	//                On site one run is built through and the other butts to its face: the THICKER
+	//                wall runs, a 230 external through a 115 partition, and at equal thickness the
+	//                longer one does. Without it a balcony parapet buried its last 115 in the main
+	//                wall and the two undersides fought - which is the one defect the flat had left
+	//                once the frame was right, and it is on show from outside the building.
 
 	/** World-space bounds of an oriented structural volume. */
 	FBox BoundsOf(const FHFStructuralCut& Cut)
@@ -138,6 +144,26 @@ namespace
 		{
 			return A > B;
 		}
+		return Candidate.Id.LexicalLess(Other.Id);
+	}
+
+	/** True when the first wall is the one built through at a junction, and the other butts to it. */
+	bool WallRunsThrough(const FHFWall& Candidate, const FHFWall& Other)
+	{
+		if (!FMath::IsNearlyEqual(Candidate.Thickness, Other.Thickness, 0.1))
+		{
+			return Candidate.Thickness > Other.Thickness;
+		}
+
+		const double A = Candidate.Length();
+		const double B = Other.Length();
+		if (!FMath::IsNearlyEqual(A, B, 0.1))
+		{
+			return A > B;
+		}
+
+		// Two identical walls meeting is not a real building, but a rebuild still has to make the
+		// same choice twice or the flat changes shape between runs.
 		return Candidate.Id.LexicalLess(Other.Id);
 	}
 }
@@ -326,11 +352,33 @@ void AHFHouseActor::BuildGeometry()
 		}
 	}
 
-	// Masonry is displaced by all of it.
-	auto StructureInWall = [&ColumnCuts, &ColumnBounds, &BeamCuts, &BeamBounds](const FHFWall& Wall)
+	TArray<FHFStructuralCut> WallCuts;
+	TArray<FBox> WallBounds;
+	WallCuts.Reserve(Spec.Walls.Num());
+	WallBounds.Reserve(Spec.Walls.Num());
+
+	for (const FHFWall& Wall : Spec.Walls)
+	{
+		WallCuts.Add(FHFGenerators::StructuralCutFor(Wall));
+		WallBounds.Add(BoundsOf(WallCuts.Last()));
+	}
+
+	// Masonry is displaced by all of it, including by the masonry that outranks it.
+	auto StructureInWall = [&Spec = Spec, &ColumnCuts, &ColumnBounds, &BeamCuts, &BeamBounds,
+		&WallCuts, &WallBounds](const FHFWall& Wall)
 	{
 		const FBox Bounds = BoundsOf(Wall);
 		TArray<FHFStructuralCut> Cuts;
+
+		for (int32 Index = 0; Index < WallCuts.Num(); ++Index)
+		{
+			if (Spec.Walls[Index].Id != Wall.Id && WallCuts[Index].IsValid()
+				&& VolumesOverlap(Bounds, WallBounds[Index])
+				&& WallRunsThrough(Spec.Walls[Index], Wall))
+			{
+				Cuts.Add(WallCuts[Index]);
+			}
+		}
 
 		for (int32 Index = 0; Index < ColumnCuts.Num(); ++Index)
 		{

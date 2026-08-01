@@ -298,6 +298,24 @@ FHFStructuralCut FHFGenerators::StructuralCutFor(const FHFBeam& Beam)
 	return Cut;
 }
 
+FHFStructuralCut FHFGenerators::StructuralCutFor(const FHFWall& Wall)
+{
+	FHFStructuralCut Cut;
+	Cut.SourceId = Wall.Id;
+
+	const FWallFrame Frame = MakeWallFrame(Wall.Start, Wall.End);
+	if (!Frame.bValid || Wall.Thickness <= 0.0 || Wall.Height <= 0.0)
+	{
+		return Cut;
+	}
+
+	const FVector2D Midpoint = (Wall.Start + Wall.End) * 0.5;
+	Cut.Centre = FVector(Midpoint.X, Midpoint.Y, Wall.BaseZ + Wall.Height * 0.5);
+	Cut.Extents = FVector(Frame.Length * 0.5, Wall.Thickness * 0.5, Wall.Height * 0.5);
+	Cut.YawDegrees = Frame.YawDegrees;
+	return Cut;
+}
+
 FHFStructuralCut FHFGenerators::StructuralCutFor(const FHFColumn& Column)
 {
 	FHFStructuralCut Cut;

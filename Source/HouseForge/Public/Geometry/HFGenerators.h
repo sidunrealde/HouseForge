@@ -53,6 +53,16 @@ public:
 	static FHFStructuralCut StructuralCutFor(const FHFColumn& Column);
 
 	/**
+	 * A wall as a volume, for the wall it is built through.
+	 *
+	 * Masonry displaces masonry too. Walls are set out on their CENTRELINES, so a balcony parapet
+	 * running to the main wall's centreline buries its last 115 in it and the two share a footprint.
+	 * On site one run is built through and the other butts to its face; here the one that runs
+	 * through is handed to the one that stops, exactly as a beam is.
+	 */
+	static FHFStructuralCut StructuralCutFor(const FHFWall& Wall);
+
+	/**
 	 * A room's floor slab, plus skirting swept around its boundary.
 	 *
 	 * Doorways are omitted from the skirting: a continuous skirting across a door opening is one

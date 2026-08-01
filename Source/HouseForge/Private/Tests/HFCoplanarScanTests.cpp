@@ -221,6 +221,63 @@ bool FHFCoplanarScanSeparationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A coincidence buried in material is not a defect, because nothing ever draws it.
+ *
+ * Z-fighting needs a camera. Every room element in this plugin runs to the WALL CENTRELINES - the
+ * boundary a plan gives you - so a skirting's underside stops inside the masonry and a ceiling's
+ * top cap dies into it. Those laps are what guarantee there is no hairline gap at the junction, and
+ * on the reference flat they account for 87,000 cm2 of coincidence that no camera can reach.
+ *
+ * The distinction has to be measured rather than assumed, or it is just an excuse. Here the SAME
+ * pair is scanned twice: once in the open, where it must be reported, and once inside a solid,
+ * where it must not.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCoplanarScanSealedTest,
+	"HouseForge.Geometry.CoplanarScanIgnoresWhatNothingCanSee", HF_TEST_FLAGS)
+
+bool FHFCoplanarScanSealedTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeCoplanarScanTests;
+
+	const FDynamicMesh3 Wall = MakeBox(FVector3d(0.0, 0.0, 50.0), FVector3d(100.0, 10.0, 50.0));
+	const FDynamicMesh3 Beam = MakeBox(FVector3d(0.0, 0.0, 85.0), FVector3d(100.0, 10.0, 15.0));
+
+	TArray<FHFScanSurface> Open;
+	Open.Add({ TEXT("Wall"), &Wall, FTransform::Identity });
+	Open.Add({ TEXT("Beam"), &Beam, FTransform::Identity });
+
+	const TArray<FHFCoplanarOverlap> Exposed = FHFCoplanarScan::Find(Open);
+	TestTrue(TEXT("In the open, the pair is exposed"), Exposed.Num() == 1 && !Exposed[0].bSealed);
+	TestEqual(TEXT("An exposed pair counts towards what the flat can show"),
+		FHFCoplanarScan::ExposedAreaCm2(Exposed), FHFCoplanarScan::TotalAreaCm2(Exposed), 1e-6);
+
+	// The same two solids, now cast into a block of material. Every face of both is buried.
+	const FDynamicMesh3 Encasing = MakeBox(FVector3d(0.0, 0.0, 50.0), FVector3d(200.0, 40.0, 120.0));
+
+	TArray<FHFScanSurface> Buried = Open;
+	Buried.Add({ TEXT("Encasing"), &Encasing, FTransform::Identity });
+
+	const TArray<FHFCoplanarOverlap> Sealed = FHFCoplanarScan::Find(Buried);
+
+	const FHFCoplanarOverlap* WallBeam = Sealed.FindByPredicate([](const FHFCoplanarOverlap& Overlap)
+	{
+		return Overlap.NameA != TEXT("Encasing") && Overlap.NameB != TEXT("Encasing");
+	});
+
+	if (TestNotNull(TEXT("The buried pair is still found and reported"), WallBeam))
+	{
+		TestTrue(TEXT("Buried in solid, the pair is sealed"), WallBeam->bSealed);
+		TestTrue(TEXT("A sealed pair still reports its area, so it can be seen to have grown"),
+			WallBeam->AreaCm2 > 1000.0);
+	}
+
+	TestEqual(TEXT("Nothing in the buried assembly can be seen to flash, in cm2"),
+		FHFCoplanarScan::ExposedAreaCm2(Sealed), 0.0, 1e-6);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS
