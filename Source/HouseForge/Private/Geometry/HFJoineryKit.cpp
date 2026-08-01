@@ -681,21 +681,21 @@ FHFPartMotion FHFJoineryKit::ShutterMotion(const FHFShutterParams& Params)
 
 	if (Params.IsSliding())
 	{
-		// THE STANDING LEAF OF THE PAIR DOES NOT RUN, and that is the whole of how a slider opens.
-		// Two leaves driven outward from the meeting line by one amount exchange tracks and uncover
-		// nothing; see FHFShutterParams::bStandingLeaf, which is what the master bedroom wardrobe was
-		// doing while both its leaves reported 118 cm of travel.
-		if (Params.bStandingLeaf)
-		{
-			Motion.Type = EHFMotionType::None;
-			return Motion;
-		}
-
-		// It runs along the module, towards its neighbour's bay, and comes to rest exactly over it -
-		// the same stopping rule a sliding door's panel obeys, from the same set-out.
+		// EVERY LEAF OF A SLIDING RUN RUNS. It goes along the module, towards its neighbour's bay,
+		// and comes to rest exactly over it - the same stopping rule a sliding door's panel obeys,
+		// from the same set-out.
 		Motion.Type = EHFMotionType::Slide;
 		Motion.Axis = FVector::XAxisVector;
 		Motion.MaxTravelCm = Params.SlideSign() * Params.SlideTravel();
+
+		// What separates the pair is not whether they move but which of them ONE control moves. Two
+		// leaves driven outward from the meeting line by a single amount exchange tracks and uncover
+		// nothing, which is what the master bedroom wardrobe was doing while both its leaves
+		// reported 118 cm of travel. See FHFShutterParams::bLeadsTheRun.
+		//
+		// The pairing itself - AlternateToPartId - is the composer's to set, because a leaf on its
+		// own does not know its partner's id.
+		Motion.bMasterOpens = Params.bLeadsTheRun;
 		return Motion;
 	}
 

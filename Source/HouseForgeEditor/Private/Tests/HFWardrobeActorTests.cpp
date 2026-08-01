@@ -886,9 +886,14 @@ bool FHFWardrobeApertureTest::RunTest(const FString& Parameters)
 		// stops articulating in a run where its neighbours already uncover the elevation would not
 		// move the coverage figure at all.
 		//
-		// A part declared FIXED is allowed not to move, and exactly one leaf of a sliding pair is:
-		// see FHFShutterParams::bStandingLeaf. It is proved to be at most one below, because a pair
-		// with both leaves standing is a wardrobe that does not open and would otherwise be silent.
+		// EXACTLY ONE LEAF OF A SLIDING PAIR IS ALLOWED TO SIT OUT A MASTER OPEN, and it is not
+		// because it cannot move - both leaves of a run slide, and either can be the one you push.
+		// It is because two leaves driven by ONE amount exchange tracks and uncover nothing; see
+		// FHFPartMotion::bMasterOpens. HouseForge.Editor.WardrobeOpensBothWays is where the other
+		// leaf is proved to move when it is asked directly.
+		//
+		// At most one, because a pair with both leaves sitting out is a wardrobe that does not open
+		// and would otherwise be silent.
 		int32 Standing = 0;
 		TArray<UDynamicMeshComponent*> AllLeaves = Body;
 		AllLeaves.Append(Loft);

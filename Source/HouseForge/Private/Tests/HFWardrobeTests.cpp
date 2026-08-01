@@ -323,15 +323,23 @@ bool FHFWardrobeSlidingRunTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("An applied handle on a sliding run is routed instead"),
 		FHFWardrobeKit::Sanitise(P).HandleStyle, EHFHandleStyle::HandlelessGroove);
 
-	// ---------------------------------------------------------- ONE RUNS AND ONE STANDS
+	// -------------------------------------------- BOTH LEAVES RUN, AND ONLY ONE AT A TIME
 	//
-	// This used to require BOTH leaves to slide, and both did: each travelled its full 118.45 cm off
-	// one open amount, in opposite directions, out from the meeting line. They exchanged tracks and
-	// the run stayed covered at every value from shut to open - the master bedroom wardrobe that was
-	// reported as "the bottom section is not opening". A pair of leaves that both move is not a pose
-	// a slider can be in, and "does this part move" is exactly the assertion that could not see it.
+	// Two things have to be true at once, and the plugin has held each of them alone at some point
+	// while breaking the other.
+	//
+	// BOTH RUN, because a real two-track wardrobe has gear on each leaf and a person slides
+	// whichever one they want. Take the motion off one of them and the run opens from one end for
+	// ever, which is what the user reported.
+	//
+	// ONE AT A TIME, because two leaves driven out together by a single amount exchange tracks and
+	// the run stays covered at every value from shut to open - the master bedroom wardrobe reported
+	// as "the bottom section is not opening", where both leaves travelled their full 118.45 cm and
+	// every "does this part move" assertion passed. The pose is measured below rather than argued
+	// about; see FHFPartMotion::bMasterOpens, which is what withholds a master amount from one leaf
+	// without withholding its motion.
 	int32 Running = 0;
-	int32 Standing = 0;
+	int32 Leading = 0;
 
 	for (const FHFMeshPart& Part : W.Parts)
 	{
@@ -339,14 +347,21 @@ bool FHFWardrobeSlidingRunTest::RunTest(const FString& Parameters)
 		{
 			++Running;
 		}
-		else if (Part.Motion.Type == EHFMotionType::None)
+		if (Part.Motion.bMasterOpens)
 		{
-			++Standing;
+			++Leading;
 		}
 	}
 
-	TestEqual(TEXT("Exactly one leaf of the pair runs"), Running, 1);
-	TestEqual(TEXT("...and exactly one stands, as its partner slides across it"), Standing, 1);
+	TestEqual(TEXT("Both leaves of the pair can run"), Running, 2);
+	TestEqual(TEXT("...and exactly one of them is what a single control runs"), Leading, 1);
+
+	// Each names the other, so "open the run from this end" knows which leaf to shut. A dangling
+	// alternate is a shut command sent nowhere, and the pose it leaves is the cancelling one.
+	TestEqual(TEXT("The near leaf names its partner"),
+		W.Parts[0].Motion.AlternateToPartId, W.Parts[1].PartId);
+	TestEqual(TEXT("The far leaf names it back"),
+		W.Parts[1].Motion.AlternateToPartId, W.Parts[0].PartId);
 
 	const FAxisAlignedBox3d Left = Posed(W.Parts[0], 0.0).GetBounds();
 	const FAxisAlignedBox3d Right = Posed(W.Parts[1], 0.0).GetBounds();
@@ -367,38 +382,66 @@ bool FHFWardrobeSlidingRunTest::RunTest(const FString& Parameters)
 		FMath::Min(Left.Min.X, Right.Min.X) <= 1.0
 		&& FMath::Max(Left.Max.X, Right.Max.X) >= P.Width - 1.0);
 
-	// ---------------------------------------------------------------- AND IT REALLY OPENS
+	// ------------------------------------------------ AND IT REALLY OPENS, FROM EITHER END
 	//
 	// Measured as APERTURE - a stretch of the run with no leaf in front of it - and not as travel.
 	// Travel was never the problem: both leaves had 118 cm of it and the wardrobe was shut at every
 	// value of it. What follows is the same question a person standing in front of the wardrobe asks.
-	const FAxisAlignedBox3d LeftOpen = Posed(W.Parts[0], 1.0).GetBounds();
-	const FAxisAlignedBox3d RightOpen = Posed(W.Parts[1], 1.0).GetBounds();
-
-	// The widest stretch of the run that no leaf covers, at full open. Sampled rather than reasoned
-	// about, because the two leaves lap and their uncovered stretches are not simply the complement
-	// of their widths.
-	constexpr int32 Samples = 240;
-	int32 Uncovered = 0;
-
-	for (int32 i = 0; i < Samples; ++i)
+	//
+	// How much of the run is clear at a given pose, and where the clear stretch is. Sampled rather
+	// than reasoned about, because the two leaves lap and their uncovered stretches are not simply
+	// the complement of their widths.
+	auto Aperture = [&W, &P](double LeftAmount, double RightAmount, double& OutCentreX)
 	{
-		const double X = P.Width * (i + 0.5) / Samples;
-		const bool bCovered =
-			(X >= LeftOpen.Min.X && X <= LeftOpen.Max.X) || (X >= RightOpen.Min.X && X <= RightOpen.Max.X);
+		const FAxisAlignedBox3d L = Posed(W.Parts[0], LeftAmount).GetBounds();
+		const FAxisAlignedBox3d R = Posed(W.Parts[1], RightAmount).GetBounds();
 
-		if (!bCovered)
+		constexpr int32 Samples = 240;
+		int32 Uncovered = 0;
+		double SumX = 0.0;
+
+		for (int32 i = 0; i < Samples; ++i)
 		{
-			++Uncovered;
+			const double X = P.Width * (i + 0.5) / Samples;
+			if (!((X >= L.Min.X && X <= L.Max.X) || (X >= R.Min.X && X <= R.Max.X)))
+			{
+				++Uncovered;
+				SumX += X;
+			}
 		}
-	}
 
-	const double OpenFraction = double(Uncovered) / double(Samples);
+		OutCentreX = Uncovered > 0 ? SumX / Uncovered : P.Width * 0.5;
+		return double(Uncovered) / double(Samples);
+	};
 
 	// A two-leaf slider gives up about half its width: one leaf parks over the other and the bay it
 	// left is open. A third is the floor, and the defect scored exactly zero.
-	TestTrue(*FString::Printf(TEXT("Opening the run uncovers a bay to reach into (%.0f%% of the width)"),
-		OpenFraction * 100.0), OpenFraction > 0.33);
+	//
+	// AND WHICH HALF DEPENDS ON WHICH LEAF YOU RAN. That is the whole of "I might want to open them
+	// both ways": run the left leaf and it parks over the right one, leaving the LEFT bay open; run
+	// the right leaf and the aperture is on the right. Both are asserted, and the side is asserted
+	// rather than only the amount - a slider that opened the same end whichever leaf moved would
+	// pass a bare coverage figure twice over.
+	double CentreX = 0.0;
+
+	const double LeftRuns = Aperture(1.0, 0.0, CentreX);
+	TestTrue(*FString::Printf(TEXT("Running the left leaf uncovers a bay (%.0f%% of the width)"),
+		LeftRuns * 100.0), LeftRuns > 0.33);
+	TestTrue(*FString::Printf(TEXT("...and the aperture is at the LEFT end (centred at %.0f of %.0f)"),
+		CentreX, P.Width), CentreX < P.Width * 0.5);
+
+	const double RightRuns = Aperture(0.0, 1.0, CentreX);
+	TestTrue(*FString::Printf(TEXT("Running the right leaf uncovers a bay (%.0f%% of the width)"),
+		RightRuns * 100.0), RightRuns > 0.33);
+	TestTrue(*FString::Printf(TEXT("...and the aperture is at the RIGHT end (centred at %.0f of %.0f)"),
+		CentreX, P.Width), CentreX > P.Width * 0.5);
+
+	// THE POSE THAT MUST NEVER BE WHAT A MASTER AMOUNT PRODUCES, stated as a measurement so the
+	// reason bMasterOpens exists cannot be quietly deleted. Both leaves run out together, both
+	// report their full travel, and the run is exactly as covered as it was shut.
+	const double BothRun = Aperture(1.0, 1.0, CentreX);
+	TestNearlyEqual(TEXT("Both leaves driven together uncover nothing - they exchange tracks"),
+		BothRun, 0.0, 0.005);
 
 	return true;
 }

@@ -8,9 +8,11 @@
 using namespace UE::Geometry;
 
 const FName AHFOpeningActor::LeafPartId(TEXT("Leaf"));
-const FName AHFOpeningActor::FixedPanelPartId(TEXT("PanelFixed"));
 const FName AHFOpeningActor::SashPartId(TEXT("Sash"));
-const FName AHFOpeningActor::FixedSashPartId(TEXT("SashFixed"));
+const FName AHFOpeningActor::NearLeafPartId(TEXT("LeafNear"));
+const FName AHFOpeningActor::FarLeafPartId(TEXT("LeafFar"));
+const FName AHFOpeningActor::NearSashPartId(TEXT("SashNear"));
+const FName AHFOpeningActor::FarSashPartId(TEXT("SashFar"));
 
 void AHFOpeningActor::ApplyProjectDefaults()
 {

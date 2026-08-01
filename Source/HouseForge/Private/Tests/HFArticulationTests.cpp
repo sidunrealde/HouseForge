@@ -412,12 +412,17 @@ bool FHFDoorLeafPartTest::RunTest(const FString& Parameters)
 }
 
 /**
- * A sliding unit is two panels, and the one that moves has somewhere to move to.
+ * A sliding unit is two panels, and EITHER of them has somewhere to move to.
  *
  * One leaf the full width of the opening had nowhere to go: sliding it its own width drove 1.65 m
  * of it into the masonry beside the jamb, and in the reference flat straight through the next
  * window along. Half the opening each, on two tracks, is both what a sliding unit is and what
  * keeps every panel inside the reveal at every open amount.
+ *
+ * The panel that used to be furniture now runs too - see HouseForge.Articulation.SliderOpensBothWays
+ * for the aperture that produces. What is measured here is that giving it a motion did not cost it
+ * anything: it is still a glazed solid, still inside the reveal at every amount, and still on its
+ * own track.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSlidingDoorPartTest, "HouseForge.Articulation.SlidingDoorPart", HF_TEST_FLAGS)
 
@@ -434,21 +439,29 @@ bool FHFSlidingDoorPartTest::RunTest(const FString& Parameters)
 	}
 
 	const FHFMeshPart* Fixed = Parts.FindByPredicate(
-		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("PanelFixed")); });
+		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("LeafFar")); });
 	const FHFMeshPart* Leaf = Parts.FindByPredicate(
-		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("Leaf")); });
+		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("LeafNear")); });
 
-	if (!TestNotNull(TEXT("It has a fixed panel"), Fixed) || !TestNotNull(TEXT("It has a running panel"), Leaf))
+	if (!TestNotNull(TEXT("It has a far panel"), Fixed) || !TestNotNull(TEXT("It has a near panel"), Leaf))
 	{
 		return false;
 	}
 
-	TestTrue(TEXT("The fixed panel does not move"), !Fixed->Motion.Moves());
-	TestTrue(TEXT("The running panel slides"), Leaf->Motion.Type == EHFMotionType::Slide);
+	// BOTH SLIDE. Neither panel is furniture: a real two-track unit has gear on each leaf and you
+	// push whichever one you want.
+	TestTrue(TEXT("The far panel slides"), Fixed->Motion.Type == EHFMotionType::Slide);
+	TestTrue(TEXT("The near panel slides"), Leaf->Motion.Type == EHFMotionType::Slide);
+	TestTrue(TEXT("They run opposite ways"), Fixed->Motion.MaxTravelCm * Leaf->Motion.MaxTravelCm < 0.0);
+
+	// An undrawn swing opens from the near jamb, matching the hinged case where an undrawn swing
+	// hangs on the near jamb too.
+	TestTrue(TEXT("One control runs the near panel by default"), Leaf->Motion.bMasterOpens);
+	TestFalse(TEXT("and leaves the far one alone"), Fixed->Motion.bMasterOpens);
 
 	// Both panels are solids in their own right, because a bake treats each as a mesh of its own.
-	TestTrue(TEXT("The fixed panel is watertight"), FHFMeshOps::IsClosed(Fixed->Mesh));
-	TestTrue(TEXT("The running panel is watertight"), FHFMeshOps::IsClosed(Leaf->Mesh));
+	TestTrue(TEXT("The far panel is watertight"), FHFMeshOps::IsClosed(Fixed->Mesh));
+	TestTrue(TEXT("The near panel is watertight"), FHFMeshOps::IsClosed(Leaf->Mesh));
 
 	// Both panels are GLAZED, and the glass is a solid with thickness rather than a plane. A pane
 	// modelled as a plane has area but no volume at all, and every bounds and triangle-count check
@@ -486,18 +499,24 @@ bool FHFSlidingDoorPartTest::RunTest(const FString& Parameters)
 	constexpr double OpeningMax = 245.0;
 
 	const FAxisAlignedBox3d FixedBounds = PosedBounds(*Fixed, 0.0);
-	TestTrue(TEXT("The fixed panel sits inside the opening"),
+	TestTrue(TEXT("The far panel sits inside the opening"),
 		FixedBounds.Min.X >= OpeningMin - 0.01 && FixedBounds.Max.X <= OpeningMax + 0.01);
 
-	for (double Alpha = 0.0; Alpha <= 1.0001; Alpha += 0.05)
+	// BOTH panels are swept now, not just the one that used to move. A leaf given a travel it was
+	// never checked against is a leaf that can run into the masonry, and the far one is set out from
+	// the other jamb - so it is the one whose sign could be wrong without anything else noticing.
+	for (const FHFMeshPart* Panel : { Leaf, Fixed })
 	{
-		const FAxisAlignedBox3d Posed = PosedBounds(*Leaf, Alpha);
-		if (Posed.Min.X < OpeningMin - 0.01 || Posed.Max.X > OpeningMax + 0.01)
+		for (double Alpha = 0.0; Alpha <= 1.0001; Alpha += 0.05)
 		{
-			AddError(FString::Printf(
-				TEXT("At %.2f open, the running panel spans %.2f..%.2f and leaves the %.0f..%.0f opening; it is sliding into the wall."),
-				Alpha, Posed.Min.X, Posed.Max.X, OpeningMin, OpeningMax));
-			break;
+			const FAxisAlignedBox3d Posed = PosedBounds(*Panel, Alpha);
+			if (Posed.Min.X < OpeningMin - 0.01 || Posed.Max.X > OpeningMax + 0.01)
+			{
+				AddError(FString::Printf(
+					TEXT("At %.2f open, panel '%s' spans %.2f..%.2f and leaves the %.0f..%.0f opening; it is sliding into the wall."),
+					Alpha, *Panel->PartId.ToString(), Posed.Min.X, Posed.Max.X, OpeningMin, OpeningMax));
+				break;
+			}
 		}
 	}
 
@@ -530,9 +549,14 @@ bool FHFSlidingDoorPartTest::RunTest(const FString& Parameters)
 	TestNearlyEqual(TEXT("The threshold stands on the floor"), OuterBounds.Min.Z, 0.0, 0.01);
 	TestTrue(TEXT("The panels stand on the threshold rather than on the floor"), Closed.Min.Z >= 2.99);
 
-	// Open, the running panel has come to rest exactly over its fixed partner, which is as far as
-	// it can travel without leaving the reveal.
-	TestNearlyEqual(TEXT("Open, the running panel stacks on the fixed one"), Open.Max.X, FixedBounds.Max.X, 0.01);
+	// Open, the near panel has come to rest exactly over its partner, which is as far as it can
+	// travel without leaving the reveal.
+	TestNearlyEqual(TEXT("Open, the near panel stacks on the far one"), Open.Max.X, FixedBounds.Max.X, 0.01);
+
+	// And the far panel does the mirror of it: run the other leaf and it comes to rest exactly over
+	// the near one's shut position. Same rule, mirrored, which is the point of FHFSlidingSetOut.
+	TestNearlyEqual(TEXT("Run the other way, the far panel stacks on the near one"),
+		PosedBounds(*Fixed, 1.0).Min.X, Closed.Min.X, 0.01);
 	TestTrue(TEXT("Open, roughly half the opening is clear"),
 		Open.Min.X - OpeningMin >= (OpeningMax - OpeningMin) * 0.4);
 
@@ -583,23 +607,48 @@ bool FHFSlidingWindowSashTest::RunTest(const FString& Parameters)
 	}
 
 	const FHFMeshPart* Fixed = Parts.FindByPredicate(
-		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("SashFixed")); });
+		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("SashFar")); });
 	const FHFMeshPart* Sash = Parts.FindByPredicate(
-		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("Sash")); });
+		[](const FHFMeshPart& P) { return P.PartId == FName(TEXT("SashNear")); });
 
-	if (!TestNotNull(TEXT("It has a fixed sash"), Fixed) || !TestNotNull(TEXT("It has a running sash"), Sash))
+	if (!TestNotNull(TEXT("It has a far sash"), Fixed) || !TestNotNull(TEXT("It has a near sash"), Sash))
 	{
 		return false;
 	}
 
-	TestTrue(TEXT("The fixed sash does not move"), !Fixed->Motion.Moves());
-	TestTrue(TEXT("The operable sash slides"), Sash->Motion.Type == EHFMotionType::Slide);
+	// Both sashes run. A two-track Domal unit has a roller carriage under each sash and a catch on
+	// each meeting stile; which one you slide is which end of the window ends up open.
+	TestTrue(TEXT("The far sash slides"), Fixed->Motion.Type == EHFMotionType::Slide);
+	TestTrue(TEXT("The near sash slides"), Sash->Motion.Type == EHFMotionType::Slide);
+	TestTrue(TEXT("They run opposite ways"), Fixed->Motion.MaxTravelCm * Sash->Motion.MaxTravelCm < 0.0);
 	TestTrue(TEXT("It slides along the wall, not through it"),
 		Sash->Motion.UnitAxis().Equals(FVector::XAxisVector, 0.0001));
 
 	// Each sash is a solid in its own right, because a bake treats every part as a mesh of its own.
-	TestTrue(TEXT("The fixed sash is watertight"), FHFMeshOps::IsClosed(Fixed->Mesh));
-	TestTrue(TEXT("The running sash is watertight"), FHFMeshOps::IsClosed(Sash->Mesh));
+	TestTrue(TEXT("The far sash is watertight"), FHFMeshOps::IsClosed(Fixed->Mesh));
+	TestTrue(TEXT("The near sash is watertight"), FHFMeshOps::IsClosed(Sash->Mesh));
+
+	// Each carries its own catch, because either of them is the one somebody reaches for. A unit
+	// with one handle is a unit half of which cannot be operated - invisible in a still of a shut
+	// window, and the first thing anybody notices sliding it the other way.
+	TestTrue(TEXT("Each sash carries its own catch"),
+		RoleVolume(Fixed->Mesh, EHFSurfaceRole::MetalHardware) > 0.0
+			&& RoleVolume(Sash->Mesh, EHFSurfaceRole::MetalHardware) > 0.0);
+
+	// And they are on OPPOSITE stiles - both leaves meet in the middle, so the near sash's catch is
+	// on its far edge and the far sash's on its near edge. Read off the geometry, because deriving
+	// it inside the sash builder is exactly what would put both pulls at the same end.
+	{
+		const FAxisAlignedBox3d NearCatch = RoleBounds(Sash->Mesh, EHFSurfaceRole::MetalHardware);
+		const FAxisAlignedBox3d FarCatch = RoleBounds(Fixed->Mesh, EHFSurfaceRole::MetalHardware);
+		const FAxisAlignedBox3d NearSash = RoleBounds(Sash->Mesh, EHFSurfaceRole::WindowFrame);
+		const FAxisAlignedBox3d FarSash = RoleBounds(Fixed->Mesh, EHFSurfaceRole::WindowFrame);
+
+		TestTrue(TEXT("The near sash's catch is on its meeting stile"),
+			NearCatch.Center().X > NearSash.Center().X);
+		TestTrue(TEXT("The far sash's catch is on its meeting stile"),
+			FarCatch.Center().X < FarSash.Center().X);
+	}
 
 	// Every triangle carries a role, and all three of the ones a window is made of are present. An
 	// untagged triangle can never be re-materialled, and the failure is invisible in a screenshot.
@@ -654,29 +703,39 @@ bool FHFSlidingWindowSashTest::RunTest(const FString& Parameters)
 	constexpr double ClearTop = 220.5;
 
 	const FAxisAlignedBox3d FixedBounds = PosedBounds(*Fixed, 0.0);
-	TestTrue(TEXT("The fixed sash sits inside the clear opening"),
+	TestTrue(TEXT("The far sash sits inside the clear opening"),
 		FixedBounds.Min.X >= ClearMin - 0.01 && FixedBounds.Max.X <= ClearMax + 0.01);
 
-	for (double Alpha = 0.0; Alpha <= 1.0001; Alpha += 0.05)
+	// EITHER sash may be the one that runs, so both are swept - and each is swept against its
+	// partner SHUT, which is the pose the partner is actually in while this one is running. The
+	// interlock this proves is the one that matters: a leaf must never leave its reveal and must
+	// never pass through the other leaf, whichever of the two is doing the moving.
+	for (const FHFMeshPart* Runner : { Sash, Fixed })
 	{
-		const FAxisAlignedBox3d Posed = PosedBounds(*Sash, Alpha);
+		const FHFMeshPart* Partner = Runner == Sash ? Fixed : Sash;
+		const FAxisAlignedBox3d PartnerShut = PosedBounds(*Partner, 0.0);
 
-		if (Posed.Min.X < ClearMin - 0.01 || Posed.Max.X > ClearMax + 0.01
-			|| Posed.Min.Z < ClearBottom - 0.01 || Posed.Max.Z > ClearTop + 0.01)
+		for (double Alpha = 0.0; Alpha <= 1.0001; Alpha += 0.05)
 		{
-			AddError(FString::Printf(
-				TEXT("At %.2f open, the running sash spans %.2f..%.2f along the wall and %.2f..%.2f up, and leaves the %.1f..%.1f x %.1f..%.1f clear opening; it is running into the frame."),
-				Alpha, Posed.Min.X, Posed.Max.X, Posed.Min.Z, Posed.Max.Z,
-				ClearMin, ClearMax, ClearBottom, ClearTop));
-			break;
-		}
+			const FAxisAlignedBox3d Posed = PosedBounds(*Runner, Alpha);
 
-		if (BoxesOverlap(Posed, FixedBounds))
-		{
-			AddError(FString::Printf(
-				TEXT("At %.2f open, the running sash shares volume with the fixed one; they are not on separate tracks."),
-				Alpha));
-			break;
+			if (Posed.Min.X < ClearMin - 0.01 || Posed.Max.X > ClearMax + 0.01
+				|| Posed.Min.Z < ClearBottom - 0.01 || Posed.Max.Z > ClearTop + 0.01)
+			{
+				AddError(FString::Printf(
+					TEXT("At %.2f open, sash '%s' spans %.2f..%.2f along the wall and %.2f..%.2f up, and leaves the %.1f..%.1f x %.1f..%.1f clear opening; it is running into the frame."),
+					Alpha, *Runner->PartId.ToString(), Posed.Min.X, Posed.Max.X, Posed.Min.Z, Posed.Max.Z,
+					ClearMin, ClearMax, ClearBottom, ClearTop));
+				break;
+			}
+
+			if (BoxesOverlap(Posed, PartnerShut))
+			{
+				AddError(FString::Printf(
+					TEXT("At %.2f open, sash '%s' shares volume with its partner; they are not on separate tracks."),
+					Alpha, *Runner->PartId.ToString()));
+				break;
+			}
 		}
 	}
 
@@ -690,11 +749,21 @@ bool FHFSlidingWindowSashTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Closed, the pair fills the clear opening"),
 		Closed.Min.X <= ClearMin + 0.01 && FixedBounds.Max.X >= ClearMax - 0.01);
 
-	// Open, the running sash has come to rest exactly over its fixed partner - as far as it can go
-	// without leaving the reveal.
-	TestNearlyEqual(TEXT("Open, the running sash stacks on the fixed one"), Open.Max.X, FixedBounds.Max.X, 0.01);
+	// Open, the near sash has come to rest exactly over its partner - as far as it can go without
+	// leaving the reveal - and the aperture is at the NEAR jamb, which is the end its own bay was.
+	TestNearlyEqual(TEXT("Open, the near sash stacks on the far one"), Open.Max.X, FixedBounds.Max.X, 0.01);
 	TestTrue(TEXT("Open, roughly half the window is clear"),
 		Open.Min.X - ClearMin >= (ClearMax - ClearMin) * 0.4);
+
+	// Run the OTHER sash and the aperture is at the far jamb instead. Same rule mirrored, which is
+	// the whole of what "open it both ways" means for a two-track unit.
+	{
+		const FAxisAlignedBox3d FarOpen = PosedBounds(*Fixed, 1.0);
+		TestNearlyEqual(TEXT("Run the other way, the far sash stacks on the near one"),
+			FarOpen.Min.X, Closed.Min.X, 0.01);
+		TestTrue(TEXT("...and roughly half the window is clear at the FAR jamb"),
+			ClearMax - FarOpen.Max.X >= (ClearMax - ClearMin) * 0.4);
+	}
 
 	// It slides: the declared travel, along the wall, with nothing else disturbed.
 	TestNearlyEqual(TEXT("It travels its declared distance"),

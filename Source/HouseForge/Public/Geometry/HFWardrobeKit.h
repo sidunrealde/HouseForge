@@ -160,6 +160,32 @@ struct HOUSEFORGE_API FHFWardrobeParams
 		meta = (EditCondition = "bHasLoft"))
 	EHFShutterMotion LoftMotionKind = EHFShutterMotion::SideHung;
 
+	/**
+	 * Sliding body only: which end of the run one control opens it from. The other leaf still slides.
+	 *
+	 * A TWO-TRACK RUN OPENS FROM EITHER END, because both leaves have gear on them and you push
+	 * whichever one you want. The leaf you push is the leaf that stops covering its own bay, so
+	 * running the left-hand leaf uncovers the LEFT half and running the right-hand one uncovers the
+	 * right. This picks which of the two a single "open it" reaches for; the other stays operable by
+	 * hand, from Sequencer, and through AHFArticulatedActor::OpenRunFrom. It is not a choice between
+	 * a leaf that moves and a leaf that does not - both of them move.
+	 *
+	 * Right by default, which is the leaf on the FRONT track: the one somebody standing in the room
+	 * can reach without going through the other, and the one whose handle is on show.
+	 *
+	 * WHAT THIS MEANS FOR A RUN OF MORE THAN TWO LEAVES: nothing, because a sliding run here is
+	 * always two. Leaves and tracks are the same count on a slider - a leaf can only run to where
+	 * another leaf is NOT - so three leaves need three tracks, and each further track stands another
+	 * leaf thickness and running clearance out into the room. A three-track wardrobe visibly
+	 * projects, is rare in this class of flat, and would make "which end" into "which of three
+	 * leaves and in which of two directions". Two leaves have exactly two poses, aperture left and
+	 * aperture right, and those two are what was asked for. LeafCountFor in the kit's .cpp is where
+	 * the count is fixed, and it is fixed at two whatever the carcass behind it is divided into.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Shutters",
+		meta = (EditCondition = "MotionKind == EHFShutterMotion::Sliding"))
+	EHFShutterHinge SlideOpensFrom = EHFShutterHinge::Right;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Shutters")
 	EHFHandleStyle HandleStyle = EHFHandleStyle::Bar;
 

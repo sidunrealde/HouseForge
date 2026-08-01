@@ -399,24 +399,30 @@ struct HOUSEFORGE_API FHFShutterParams
 	int32 Track = 0;
 
 	/**
-	 * Sliding only: this is the STANDING leaf of the pair, so it does not run.
+	 * Sliding only: this is the leaf a single "open it" runs. Its partner still slides.
 	 *
-	 * A SLIDER OPENS BY MOVING ONE LEAF. Two leaves on two tracks, each set out from its own jamb
-	 * and each running towards the other's bay, is a pair that cancels: driven together by one open
-	 * amount they simply exchange tracks and the run stays covered at every value from 0 to 1. That
+	 * A SLIDER OPENS BY MOVING ONE LEAF AT A TIME. Two leaves on two tracks, each set out from its
+	 * own jamb and each running towards the other's bay, is a pair that CANCELS if one amount drives
+	 * both: they simply exchange tracks and the run stays covered at every value from 0 to 1. That
 	 * is exactly what the master bedroom's 2400 wardrobe did. Both leaves travelled their full
 	 * 118.45 cm, every "does this part move" assertion passed, and the bottom section never opened
 	 * by a millimetre of visible aperture.
 	 *
-	 * So the asymmetry is stated rather than left to emerge. It belongs on the leaf because
-	 * ShutterMotion is a function of one leaf, and it is set by whoever composes the PAIR - which is
-	 * the only place that knows there is another leaf to stand still. The sliding door has had this
-	 * shape all along: BuildSlidingPair builds a PanelFixed and a running Leaf, and the wardrobe was
-	 * the one slider in the plugin that built two runners.
+	 * The first cure was to take the motion away from the other leaf altogether, which fixed the
+	 * cancellation and left a wardrobe that opened one way and one way only. A real two-track run
+	 * has gear on both leaves and you slide whichever one you want; the aperture appears wherever
+	 * the leaf you moved came from. So both leaves keep a real Slide motion and their difference is
+	 * only this: which of them a MASTER control drives. See FHFPartMotion::bMasterOpens, which is
+	 * where that lands, and AHFArticulatedActor::OpenRunFrom, which opens the run the other way.
+	 *
+	 * Exactly one leaf of a pair should carry it. It belongs on the leaf because ShutterMotion is a
+	 * function of one leaf, and it is set by whoever composes the PAIR - which is the only place
+	 * that knows there is another leaf to defer to. True by default so a leaf built on its own is
+	 * operable rather than mysteriously inert.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
 		meta = (EditCondition = "MotionKind == EHFShutterMotion::Sliding"))
-	bool bStandingLeaf = false;
+	bool bLeadsTheRun = true;
 
 	/** The gap a hinge leaves between the closed leaf's back and the carcass front edges. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))

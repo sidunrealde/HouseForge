@@ -86,6 +86,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "HouseForge|Articulation")
 	bool SetPartOpenAmount(FName PartId, double OpenAmount);
 
+	/**
+	 * Opens a sliding run by running THIS leaf, and shuts the leaf it shares its aperture with.
+	 *
+	 * "Open it the other way", as one call. A two-panel slider has two leaves on two tracks and
+	 * either of them can be the one you push; which one you push decides which end of the run the
+	 * daylight appears at, because the leaf that moves is the leaf that stops covering its own bay.
+	 * Both leaves therefore carry a real Slide motion, and the only thing that separates them is
+	 * which one the master control drives - see FHFPartMotion::bMasterOpens.
+	 *
+	 * The partner is shut rather than left alone, and that is the point of having a verb for this at
+	 * all. Two leaves of one run driven out together simply exchange tracks: every part reports its
+	 * full travel and the elevation is exactly as covered as it was shut. A caller reaching for
+	 * SetPartOpenAmount twice can make that pose by accident; this cannot.
+	 *
+	 * On a part with no alternate it is just SetPartOpenAmount, so it is safe to call on any part.
+	 *
+	 * @return false if no part carries that id.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Articulation")
+	bool OpenRunFrom(FName PartId, double OpenAmount);
+
 	/** Current open amount of a part, or 0 if there is no such part. */
 	UFUNCTION(BlueprintPure, Category = "HouseForge|Articulation")
 	double GetPartOpenAmount(FName PartId) const;

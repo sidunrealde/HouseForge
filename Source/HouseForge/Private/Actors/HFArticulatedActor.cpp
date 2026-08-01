@@ -79,6 +79,38 @@ bool AHFArticulatedActor::SetPartOpenAmount(FName PartId, double OpenAmount)
 	return false;
 }
 
+bool AHFArticulatedActor::OpenRunFrom(FName PartId, double OpenAmount)
+{
+	const FHFPartState* Leaf = FindPart(PartId);
+	if (Leaf == nullptr)
+	{
+		return false;
+	}
+
+	// Read the link before anything is written, because the loop below writes through Parts and the
+	// pointer above does not survive being reasoned about afterwards.
+	const FName Partner = Leaf->Motion.AlternateToPartId;
+	const double Clamped = FMath::Clamp(OpenAmount, 0.0, 1.0);
+
+	for (FHFPartState& Part : Parts)
+	{
+		if (Part.PartId == PartId)
+		{
+			Part.OpenAmount = Clamped;
+		}
+		else if (!Partner.IsNone() && Part.PartId == Partner)
+		{
+			// THE OTHER LEAF IS SHUT, not left where it was. Two leaves of one run driven out
+			// together exchange tracks and uncover nothing, which is the exact shape of the defect
+			// this whole mechanism exists to keep out - see FHFPartMotion::bMasterOpens.
+			Part.OpenAmount = 0.0;
+		}
+	}
+
+	ApplyOpenAmounts();
+	return true;
+}
+
 double AHFArticulatedActor::GetPartOpenAmount(FName PartId) const
 {
 	const FHFPartState* Part = FindPart(PartId);
@@ -157,7 +189,14 @@ void AHFArticulatedActor::SetAllPartsOpenAmount(double OpenAmount)
 			continue;
 		}
 
-		Part.OpenAmount = Clamped;
+		// ONE OF A PAIR OF SLIDING LEAVES IS NOT WHAT "OPEN EVERYTHING" REACHES FOR, and it is driven
+		// SHUT rather than left alone. Both leaves of a slider can run, and both driven to the same
+		// amount exchange tracks and uncover nothing - see FHFPartMotion::bMasterOpens, which is the
+		// whole of why the master bedroom wardrobe passed every motion assertion while never opening.
+		//
+		// Shut rather than untouched, because a master amount has to be a definite pose: a partner
+		// leaf left half open from an earlier hand pose would halve the aperture asked for.
+		Part.OpenAmount = Part.Motion.bMasterOpens ? Clamped : 0.0;
 	}
 
 	// Every part ASKED for the same amount; what they are left holding is whatever the orderings

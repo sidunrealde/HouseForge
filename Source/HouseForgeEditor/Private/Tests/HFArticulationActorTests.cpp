@@ -192,16 +192,16 @@ bool FHFArticulatedSlideTest::RunTest(const FString& Parameters)
 	}
 	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
 
-	UDynamicMeshComponent* Leaf = Door->GetPartComponent(AHFOpeningActor::LeafPartId);
-	UDynamicMeshComponent* Fixed = Door->GetPartComponent(AHFOpeningActor::FixedPanelPartId);
-	if (!TestNotNull(TEXT("The running panel has its own component"), Leaf) ||
-		!TestNotNull(TEXT("The fixed panel has its own component"), Fixed))
+	UDynamicMeshComponent* Leaf = Door->GetPartComponent(AHFOpeningActor::NearLeafPartId);
+	UDynamicMeshComponent* Fixed = Door->GetPartComponent(AHFOpeningActor::FarLeafPartId);
+	if (!TestNotNull(TEXT("The near panel has its own component"), Leaf) ||
+		!TestNotNull(TEXT("The far panel has its own component"), Fixed))
 	{
 		return false;
 	}
 
-	const double Travel = Door->FindPart(AHFOpeningActor::LeafPartId)->Motion.MaxTravelCm;
-	TestTrue(TEXT("The running panel actually travels"), Travel > 1.0);
+	const double Travel = Door->FindPart(AHFOpeningActor::NearLeafPartId)->Motion.MaxTravelCm;
+	TestTrue(TEXT("The near panel actually travels"), Travel > 1.0);
 
 	const FVector LocalCentre(24.0, 2.5, 105.0);
 	const FVector Closed = Leaf->GetComponentTransform().TransformPosition(LocalCentre);
@@ -217,8 +217,14 @@ bool FHFArticulatedSlideTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A slide does not rotate the part"),
 		Leaf->GetComponentTransform().GetRotation().Equals(FQuat::Identity, 0.0001));
 
-	// The fixed panel is a part in its own right, and "open everything" leaves it exactly alone.
-	TestTrue(TEXT("Opening the unit does not move its fixed panel"),
+	// THE FAR PANEL CAN RUN, AND "OPEN EVERYTHING" MUST STILL NOT RUN IT. Both leaves driven by one
+	// amount exchange tracks and uncover nothing, which is the defect this whole mechanism exists to
+	// keep out; FHFPartMotion::bMasterOpens is what withholds the master's attention from one of
+	// them without taking its motion away. See HouseForge.Editor.SliderOpensBothWays for the half
+	// this cannot show: that it moves perfectly well when asked directly.
+	TestTrue(TEXT("The far panel is capable of running"),
+		Door->FindPart(AHFOpeningActor::FarLeafPartId)->Motion.Type == EHFMotionType::Slide);
+	TestTrue(TEXT("Opening the unit does not move its far panel"),
 		Fixed->GetComponentTransform().TransformPosition(LocalCentre).Equals(FixedClosed, 0.0001));
 
 	// The whole unit stays inside the 155..245 opening; a panel that left it would be in the wall.
@@ -239,7 +245,7 @@ bool FHFArticulatedSlideTest::RunTest(const FString& Parameters)
 	}
 
 	// Half the open amount is half the travel.
-	Door->SetPartOpenAmount(AHFOpeningActor::LeafPartId, 0.5);
+	Door->SetPartOpenAmount(AHFOpeningActor::NearLeafPartId, 0.5);
 	TestNearlyEqual(TEXT("Travel is linear in the open amount"),
 		FVector::Distance(Leaf->GetComponentTransform().TransformPosition(LocalCentre), Closed), Travel * 0.5, 0.01);
 
@@ -823,8 +829,8 @@ bool FHFSequencedPartOnActorTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// A sliding door gives two parts on one actor: the running panel stands in for the shutter, and
-	// the fixed one is made into the drawer sequenced behind it.
+	// A sliding door gives two parts on one actor: the near panel stands in for the shutter, and the
+	// far one is made into the drawer sequenced behind it.
 	AHFOpeningActor* Door = SpawnTestDoor(World, EHFOpeningKind::SlidingDoor, EHFSwing::None);
 	if (!TestNotNull(TEXT("A two-part actor spawns"), Door))
 	{
@@ -832,8 +838,8 @@ bool FHFSequencedPartOnActorTest::RunTest(const FString& Parameters)
 	}
 	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
 
-	const FName BlockerId = AHFOpeningActor::LeafPartId;
-	const FName BlockedId = AHFOpeningActor::FixedPanelPartId;
+	const FName BlockerId = AHFOpeningActor::NearLeafPartId;
+	const FName BlockedId = AHFOpeningActor::FarLeafPartId;
 
 	FHFPartState* Blocked = Door->Parts.FindByPredicate(
 		[BlockedId](const FHFPartState& Part) { return Part.PartId == BlockedId; });
@@ -850,6 +856,14 @@ bool FHFSequencedPartOnActorTest::RunTest(const FString& Parameters)
 	Blocked->Motion.MaxTravelCm = 40.0;
 	Blocked->Motion.SequencedAfterPartId = BlockerId;
 	Blocked->Motion.SequenceThreshold = 0.5;
+
+	// What is being built here is a DRAWER, not the other leaf of a slider - so its slider identity
+	// goes with the rest of the motion it is overwriting. A part that is one of a pair of alternates
+	// is deliberately not driven by a master amount (FHFPartMotion::bMasterOpens), and leaving that
+	// on would make the ordering below look like it was holding the part back when nothing had asked
+	// the part to move at all.
+	Blocked->Motion.bMasterOpens = true;
+	Blocked->Motion.AlternateToPartId = NAME_None;
 
 	Door->SetAllPartsOpenAmount(0.0);
 	const FVector Shut = BlockedComponent->GetRelativeLocation();
@@ -933,7 +947,7 @@ bool FHFDanglingOrderingIsReportedTest::RunTest(const FString& Parameters)
 	}
 	ON_SCOPE_EXIT{ if (IsValid(Door)) { Door->Destroy(); } };
 
-	const FName BlockedId = AHFOpeningActor::FixedPanelPartId;
+	const FName BlockedId = AHFOpeningActor::FarLeafPartId;
 
 	FHFPartState* Blocked = Door->Parts.FindByPredicate(
 		[BlockedId](const FHFPartState& Part) { return Part.PartId == BlockedId; });
@@ -947,6 +961,10 @@ bool FHFDanglingOrderingIsReportedTest::RunTest(const FString& Parameters)
 	Blocked->Motion.MaxTravelCm = 40.0;
 	Blocked->Motion.SequencedAfterPartId = TEXT("NoSuchLeaf");
 	Blocked->Motion.SequenceThreshold = 0.5;
+
+	// Standing in for a drawer, not for the other leaf of a slider - so the pairing goes with the
+	// rest of the motion being overwritten. See the sequencing test above.
+	Blocked->Motion.AlternateToPartId = NAME_None;
 
 	// Expected rather than merely tolerated: if the warning stops being emitted this test fails on
 	// the missing message, which is the whole point of asserting a diagnostic.

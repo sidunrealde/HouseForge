@@ -752,7 +752,7 @@ bool FHFWalkthroughSashTest::RunTest(const FString& Parameters)
 		}
 		ON_SCOPE_EXIT{ if (IsValid(Window)) { Window->Destroy(); } };
 
-		UDynamicMeshComponent* Sash = Window->GetPartComponent(AHFOpeningActor::SashPartId);
+		UDynamicMeshComponent* Sash = Window->GetPartComponent(AHFOpeningActor::NearSashPartId);
 		if (!TestNotNull(TEXT("The running sash has a component"), Sash))
 		{
 			return false;
@@ -779,19 +779,19 @@ bool FHFWalkthroughSashTest::RunTest(const FString& Parameters)
 			return false;
 		};
 
-		Window->SetPartOpenAmount(AHFOpeningActor::SashPartId, 0.0);
+		Window->SetPartOpenAmount(AHFOpeningActor::NearSashPartId, 0.0);
 		TestTrue(TEXT("Shut, the sash blocks the half of the window it covers"), SashBlocksAt(150.0));
-		TestFalse(TEXT("Shut, it does not block the half its fixed partner covers"), SashBlocksAt(250.0));
+		TestFalse(TEXT("Shut, it does not block the half its partner covers"), SashBlocksAt(250.0));
 
 		// Ajar is still shut as far as walking through that half goes.
-		Window->SetPartOpenAmount(AHFOpeningActor::SashPartId, 0.5);
+		Window->SetPartOpenAmount(AHFOpeningActor::NearSashPartId, 0.5);
 		TestTrue(TEXT("Half open, the sash is still in the way partway across"), SashBlocksAt(200.0));
 
-		Window->SetPartOpenAmount(AHFOpeningActor::SashPartId, 1.0);
+		Window->SetPartOpenAmount(AHFOpeningActor::NearSashPartId, 1.0);
 		TestFalse(TEXT("Open, the half the sash left is clear to walk through"), SashBlocksAt(150.0));
 		TestTrue(TEXT("Open, the sash blocks where it has moved TO"), SashBlocksAt(250.0));
 
-		Window->SetPartOpenAmount(AHFOpeningActor::SashPartId, 0.0);
+		Window->SetPartOpenAmount(AHFOpeningActor::NearSashPartId, 0.0);
 	}
 
 	// -------------------------------------------------------------------- top-hung ventilator

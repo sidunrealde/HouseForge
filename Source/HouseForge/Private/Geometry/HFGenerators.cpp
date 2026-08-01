@@ -1370,7 +1370,7 @@ namespace
 	 * replaces - both balcony doors in the reference flat were solid boards in a bare hole.
 	 */
 	FDynamicMesh3 MakeSlidingSash(double XMin, double XMax, double TrackY, double ZMin, double ZMax,
-		bool bWithHandle, const FHFSlidingSashSection& Section)
+		bool bMeetingStileAtMaxX, const FHFSlidingSashSection& Section)
 	{
 		FDynamicMesh3 Mesh;
 		FHFMeshOps::InitialiseMesh(Mesh);
@@ -1420,12 +1420,17 @@ namespace
 				0.0, EHFSurfaceRole::Glass);
 		}
 
-		if (bWithHandle)
+		// EVERY SASH OF A TWO-TRACK UNIT CARRIES A PULL, because either of them is the one you push.
+		// A real Domal or UPVC slider has a D-pull or a flush catch on BOTH meeting stiles - it has
+		// to, or half the unit could not be operated - and the plugin used to fit one only to the
+		// leaf it had designated the runner. That reads as correct in a still of a shut door and is
+		// a missing handle the moment anybody opens the unit from the other end.
 		{
 			// On the meeting stile, projecting away from the other sash's track - which is the face
-			// a hand can reach and the side the catch is fitted on. A window's catch sits at mid
-			// height because a window is small; a door's pull is at hand height whatever the door
-			// is, so where it goes is the section's to say. Kept inside the sash either way.
+			// a hand can reach and the side the catch is fitted on. Which END the meeting stile is on
+			// is the caller's to say: the leaf set out from the near jamb meets its partner at its
+			// far edge, and the leaf set out from the far jamb meets it at its near edge. Reading it
+			// off the geometry here would put both pulls on the same side of the unit.
 			const double Side = TrackY >= 0.0 ? 1.0 : -1.0;
 			const double Half = Section.HandleHeight * 0.5;
 			const double Lowest = ZMin + Rail + Half;
@@ -1433,9 +1438,10 @@ namespace
 			const double HandleZ = Section.HandleAboveSill > 0.0
 				? FMath::Clamp(ZMin + Section.HandleAboveSill, Lowest, Highest)
 				: (ZMin + ZMax) * 0.5;
+			const double HandleX = bMeetingStileAtMaxX ? XMax - Face * 0.5 : XMin + Face * 0.5;
 
 			FHFMeshOps::AppendBox(Mesh,
-				FVector3d(XMax - Face * 0.5,
+				FVector3d(HandleX,
 					TrackY + Side * (Section.SashDepth + Section.HandleProjection) * 0.5,
 					HandleZ),
 				FVector3d(Section.HandleWidth * 0.5, Section.HandleProjection * 0.5, Half),
@@ -1508,51 +1514,97 @@ namespace
 	}
 
 	/**
-	 * Two leaves on two tracks: one fixed, one running.
+	 * Which leaf of a sliding unit a single "open it" runs.
+	 *
+	 * A TWO-PANEL SLIDER OPENS FROM EITHER END, and which end is a property of the drawing rather
+	 * than of the construction. It is exactly the handedness the plan already carries: a swing arc
+	 * drawn to the left says the left half of the unit is the part that gets used, and for a slider
+	 * that means the leaf set out from the near jamb is the one that runs and the daylight appears
+	 * at that jamb. So EHFSwing is read here rather than a second handedness field being invented
+	 * for sliders, which would be one more thing a spec could contradict itself about.
+	 *
+	 * The leaf that does NOT lead still slides - see FHFPartMotion::bMasterOpens. This decides which
+	 * one a master control reaches for, not which one is capable of moving.
+	 *
+	 * None means the near jamb, matching the hinged case where an undrawn swing hangs on the near
+	 * jamb too.
+	 */
+	bool NearLeafLeads(EHFSwing Swing)
+	{
+		return Swing != EHFSwing::InwardRight && Swing != EHFSwing::OutwardRight;
+	}
+
+	/**
+	 * Two leaves on two tracks, EITHER of which runs.
 	 *
 	 * A single leaf the width of the opening has nowhere to go - sliding it its own width buries it
 	 * in the masonry beside the jamb - so each leaf takes half the clear opening, laps past the
-	 * meeting line, and the running one travels until its far edge meets its partner's. That keeps
+	 * meeting line, and a running leaf travels until its far edge meets its partner's. That keeps
 	 * every leaf wholly inside the reveal at every open amount, and it is also what a sliding unit
 	 * IS. Both balcony doors in the reference flat were rebuilt around this after one of them slid
 	 * bodily through the window next to it.
+	 *
+	 * BOTH LEAVES RUN, AND THAT IS THE CHANGE. The unit used to be one fixed panel and one runner,
+	 * which opened it and opened it one way only: the aperture appeared at the same jamb whatever
+	 * anybody wanted. A real two-track unit has gear on both leaves and you slide whichever one you
+	 * like. So both carry a Slide motion, each set out from its own jamb and travelling towards the
+	 * other's bay, and each names the other as its alternate.
+	 *
+	 * What stops that collapsing back into the defect it came from is bMasterOpens. Two leaves
+	 * driven out TOGETHER by one amount exchange tracks and uncover nothing - the run is as covered
+	 * at full open as it was shut - so exactly one of the pair is the one a master control drives,
+	 * and the other is shut whenever the master speaks. Either can still be posed by hand or through
+	 * AHFArticulatedActor::OpenRunFrom, which is what "open it both ways" actually needs.
 	 *
 	 * One function for the sliding window and the sliding door, with the set-out itself in
 	 * FHFSlidingSetOut where a sliding wardrobe shutter reaches it too. Two implementations of this
 	 * rule is how the two drifted apart in the first place.
 	 *
-	 * @param NearX  Where the clear opening starts, measured from the unit's pivot.
+	 * @param NearX          Where the clear opening starts, measured from the unit's pivot.
+	 * @param bNearLeafLeads Which of the pair a master control runs. The other still slides.
 	 */
 	void BuildSlidingPair(const FTransform& UnitPivot, TArray<FHFMeshPart>& OutParts,
 		double NearX, double ClearWidth, double ZMin, double ZMax,
 		double TrackPitch, double InterlockOverlap, const FHFSlidingSashSection& Section,
-		const FName& FixedPartId, const FName& RunningPartId)
+		const FName& NearPartId, const FName& FarPartId, bool bNearLeafLeads)
 	{
-		const FHFSlidingSetOut Running =
+		// Set out once, from the near jamb, and mirrored for the far leaf. The mirror carries the
+		// signed travel with it, so the far leaf's run is the near leaf's rule rather than a second
+		// piece of arithmetic that can drift from it.
+		const FHFSlidingSetOut Near =
 			FHFSlidingSetOut::Leaf(ClearWidth * 0.5, InterlockOverlap * 0.5, /*EndGap*/ 0.0);
-		const FHFSlidingSetOut Standing = Running.MirroredIn(ClearWidth);
+		const FHFSlidingSetOut Far = Near.MirroredIn(ClearWidth);
 
 		const double TrackY = TrackPitch * 0.5;
 
-		FHFMeshPart Fixed;
-		Fixed.PartId = FixedPartId;
-		Fixed.Mesh = MakeSlidingSash(NearX + Standing.NearEdge, NearX + Standing.FarEdge, -TrackY,
-			ZMin, ZMax, /*bWithHandle*/ false, Section);
-		Fixed.PivotTransform = UnitPivot;
-		OutParts.Add(MoveTemp(Fixed));
+		// The near leaf runs on the room-side track and the far one behind it, unchanged from when
+		// the far one was fixed: the tracks are what let the pair lap without sharing a volume.
+		FHFMeshPart NearLeaf;
+		NearLeaf.PartId = NearPartId;
+		NearLeaf.Mesh = MakeSlidingSash(NearX + Near.NearEdge, NearX + Near.FarEdge, TrackY,
+			ZMin, ZMax, /*bMeetingStileAtMaxX*/ true, Section);
+		NearLeaf.PivotTransform = UnitPivot;
+		NearLeaf.Motion.Type = EHFMotionType::Slide;
+		NearLeaf.Motion.Axis = FVector::XAxisVector;
 
-		FHFMeshPart Sash;
-		Sash.PartId = RunningPartId;
-		Sash.Mesh = MakeSlidingSash(NearX + Running.NearEdge, NearX + Running.FarEdge, TrackY,
-			ZMin, ZMax, /*bWithHandle*/ true, Section);
-		Sash.PivotTransform = UnitPivot;
-		Sash.Motion.Type = EHFMotionType::Slide;
-		Sash.Motion.Axis = FVector::XAxisVector;
+		// Far edge to far edge: a running leaf comes to rest exactly over its partner, so it is
+		// still wholly inside the reveal at full travel.
+		NearLeaf.Motion.MaxTravelCm = Near.Travel;
+		NearLeaf.Motion.AlternateToPartId = FarPartId;
+		NearLeaf.Motion.bMasterOpens = bNearLeafLeads;
+		OutParts.Add(MoveTemp(NearLeaf));
 
-		// Far edge to far edge: the running leaf comes to rest exactly over its fixed partner, so it
-		// is still wholly inside the reveal at full travel.
-		Sash.Motion.MaxTravelCm = FMath::Max(0.0, Running.Travel);
-		OutParts.Add(MoveTemp(Sash));
+		FHFMeshPart FarLeaf;
+		FarLeaf.PartId = FarPartId;
+		FarLeaf.Mesh = MakeSlidingSash(NearX + Far.NearEdge, NearX + Far.FarEdge, -TrackY,
+			ZMin, ZMax, /*bMeetingStileAtMaxX*/ false, Section);
+		FarLeaf.PivotTransform = UnitPivot;
+		FarLeaf.Motion.Type = EHFMotionType::Slide;
+		FarLeaf.Motion.Axis = FVector::XAxisVector;
+		FarLeaf.Motion.MaxTravelCm = Far.Travel;
+		FarLeaf.Motion.AlternateToPartId = NearPartId;
+		FarLeaf.Motion.bMasterOpens = !bNearLeafLeads;
+		OutParts.Add(MoveTemp(FarLeaf));
 	}
 
 	/** The two sashes of a sliding window, set out between its outer frame's members. */
@@ -1563,7 +1615,7 @@ namespace
 			/*NearX*/ Params.FrameFace, Params.ClearWidth(Opening.Width),
 			/*ZMin*/ Params.FrameFace, /*ZMax*/ Opening.Height - Params.FrameFace,
 			Params.TrackPitch, Params.InterlockOverlap, Params.SashSection(),
-			TEXT("SashFixed"), TEXT("Sash"));
+			TEXT("SashNear"), TEXT("SashFar"), NearLeafLeads(Opening.Swing));
 	}
 
 	/**
@@ -1580,7 +1632,7 @@ namespace
 			/*NearX*/ Params.FrameFace, Params.ClearWidth(Opening.Width),
 			/*ZMin*/ Params.ThresholdHeight, /*ZMax*/ Opening.Height - Params.FrameFace,
 			Params.TrackPitch, Params.InterlockOverlap, Params.SashSection(),
-			TEXT("PanelFixed"), TEXT("Leaf"));
+			TEXT("LeafNear"), TEXT("LeafFar"), NearLeafLeads(Opening.Swing));
 	}
 
 	/** One top-hung sash, hinged along the head of the clear opening. */
