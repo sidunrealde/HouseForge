@@ -6,6 +6,7 @@
 #include "Actors/HFCasedGoodsActor.h"
 #include "Actors/HFCounterActor.h"
 #include "Actors/HFElementActors.h"
+#include "Actors/HFFittingActors.h"
 #include "Actors/HFOpeningActor.h"
 #include "Actors/HFFanActor.h"
 #include "Actors/HFWardrobeActor.h"
@@ -380,6 +381,77 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	/**
+	 * A fixture set INTO a counter: levelled to the host's built top and turned with the host.
+	 *
+	 * Falls back to the drawing's own base and rotation where there is no host, which is what the
+	 * utility sink is - a bowl at counter height with no counter under it, and the drawn figure is
+	 * all there is to go on.
+	 */
+	FTransform SetInPlacement(const FHFFixtureContext& C)
+	{
+		if (C.SetIn != nullptr)
+		{
+			const double* SurfaceZ = C.SetIn->SurfaceZ.Find(C.Fixture->Id);
+			const double* SurfaceYaw = C.SetIn->SurfaceYaw.Find(C.Fixture->Id);
+
+			if (SurfaceZ != nullptr && SurfaceYaw != nullptr)
+			{
+				return FHFFixturePlacement::OnSurface(*C.Fixture, *SurfaceZ, *SurfaceYaw);
+			}
+		}
+
+		// The drawn rim: a sink's height is its bowl depth measured DOWN from the rim, so the rim is
+		// the top of the drawn box and not its base.
+		return FHFFixturePlacement::OnSurface(*C.Fixture,
+			C.FloorZ() + C.Fixture->BaseZ + C.Fixture->Height, C.Fixture->RotationDegrees);
+	}
+
+	void SeedSink(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFSinkActor& Actor = static_cast<AHFSinkActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(SetInPlacement(C));
+	}
+
+	void SeedHob(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFHobActor& Actor = static_cast<AHFHobActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// A HOB'S Z = 0 IS THE STONE, so it goes exactly where the counter's top is - not where the
+		// drawing's BaseZ put it, for the same reason a sink does not.
+		Actor.SetActorTransform(SetInPlacement(C));
+	}
+
+	void SeedChimney(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFChimneyActor& Actor = static_cast<AHFChimneyActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// THE DUCT HAS TO REACH THE SOFFIT, and the soffit is a false ceiling whose depth is a project
+		// setting. Measured here, where the room and its ceilings are both visible, and handed in as a
+		// length - exactly as a ceiling fan's rod is. A chimney built to a fixed duct length in a room
+		// whose ceiling somebody deepened has its flue buried in plasterboard.
+		double SoffitAboveCanopy = 0.0;
+
+		if (C.Room != nullptr)
+		{
+			const double SoffitZ = C.Room->CeilingHeight - C.SoffitDrop;
+			const double CanopyTopZ = C.Fixture->BaseZ + C.Fixture->Height;
+			SoffitAboveCanopy = SoffitZ - CanopyTopZ;
+		}
+
+		Actor.ApplyCeilingAbove(SoffitAboveCanopy);
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
 	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFFanActor& Actor = static_cast<AHFFanActor&>(Element);
@@ -433,6 +505,13 @@ namespace
 
 			{ EHFFixtureType::CounterTop, AHFCounterActor::StaticClass(),
 				TEXT("Counter"), &SeedCounter },
+
+			{ EHFFixtureType::Sink, AHFSinkActor::StaticClass(),
+				TEXT("Sink"), &SeedSink },
+			{ EHFFixtureType::Hob, AHFHobActor::StaticClass(),
+				TEXT("Hob"), &SeedHob },
+			{ EHFFixtureType::Chimney, AHFChimneyActor::StaticClass(),
+				TEXT("Chimney"), &SeedChimney },
 
 			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
 				TEXT("Fan"), &SeedCeilingFan },
