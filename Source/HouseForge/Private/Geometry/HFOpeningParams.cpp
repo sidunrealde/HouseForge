@@ -52,18 +52,91 @@ FHFDoorParams FHFDoorParams::Sanitised(double OpeningWidth, double OpeningHeight
 	FHFDoorParams Out = *this;
 
 	Out.LeafThickness = FMath::Max(Out.LeafThickness, MinSection);
-	Out.SlidingTrackGap = FMath::Max(Out.SlidingTrackGap, 0.0);
+	Out.FrameEmbed = FMath::Max(Out.FrameEmbed, 0.0);
+	Out.FrameProud = FMath::Max(Out.FrameProud, 0.0);
+
+	// The frame eats into the opening on both jambs and at the head, so the same rule as every other
+	// frame face: past this there is no daylight left to hang a leaf in.
+	Out.FrameFace = ClampFrameFace(Out.FrameFace, OpeningWidth, OpeningHeight);
+
+	// The check is cut out of the sight line, so a stop as wide as the face leaves no rebate for the
+	// leaf to lap into and the leaf shuts against nothing. The same shoulder rule the glazing groove
+	// obeys, for the same reason.
+	Out.RebateStop = FMath::Clamp(Out.RebateStop, 0.0, Out.FrameFace * MaxRebateFraction);
+
+	// What is left of the opening once both frames are in it. Everything below is measured from this
+	// rather than from the masonry, which is the whole point of there being a frame at all.
+	const double Inset = Out.LeafInset();
+	const double ClearWidth = FMath::Max(OpeningWidth - Inset * 2.0, 0.0);
+	const double ClearHeight = FMath::Max(OpeningHeight - Inset, 0.0);
 
 	// The gap is taken off every side of the leaf, so twice it has to leave a leaf behind on both
-	// axes. Past that the leaf is not thin, it is absent - AppendBox declines the box.
+	// axes. Past that the leaf is not thin, it is absent - AppendBox declines the box. Measured
+	// against the DAYLIGHT rather than the masonry, or a face and a gap that each clear their own
+	// clamp can still between them consume the whole opening.
 	Out.LeafFrameGap = FMath::Clamp(Out.LeafFrameGap, 0.0,
-		FMath::Max(FMath::Min(OpeningWidth, OpeningHeight) * MaxFrameFaceFraction, 0.0));
+		FMath::Max(FMath::Min(ClearWidth, ClearHeight) * MaxFrameFaceFraction, 0.0));
 
-	// A sliding unit's panels each run this far past the centreline. Past a quarter of the opening
-	// the fixed panel starts before the jamb it is measured from, and the running one has no travel
-	// left - a two-panel unit that neither closes nor opens.
-	Out.SlidingPanelOverlap = FMath::Clamp(Out.SlidingPanelOverlap, 0.0,
-		FMath::Max(OpeningWidth * 0.25 - Out.LeafFrameGap, 0.0));
+	// The leaf is lifted off the floor rather than closing onto a member that is not there. It comes
+	// out of the leaf's height, so it cannot be allowed to eat the leaf.
+	Out.LeafUndercut = FMath::Clamp(Out.LeafUndercut, 0.0,
+		FMath::Max((ClearHeight - Out.LeafFrameGap) * 0.5, 0.0));
+
+	// The section has to be deeper than the check cut into it, or the frame is nothing but rebate and
+	// the leaf shuts against fresh air. The generator clamps this again to the wall the frame lands
+	// in - a section deeper than the masonry would come out through the far face.
+	Out.FrameDepth = FMath::Max(Out.FrameDepth, Out.RebateDepth() + MinSection);
+
+	return Out;
+}
+
+FHFSlidingDoorParams FHFSlidingDoorParams::Sanitised(double OpeningWidth, double OpeningHeight) const
+{
+	FHFSlidingDoorParams Out = *this;
+
+	Out.SashDepth = FMath::Max(Out.SashDepth, MinSection);
+	Out.SashFaceWidth = FMath::Max(Out.SashFaceWidth, MinSection);
+	Out.BottomRailWidth = FMath::Max(Out.BottomRailWidth, MinSection);
+	Out.GlassThickness = FMath::Max(Out.GlassThickness, MinSection);
+	Out.TrackWidth = FMath::Max(Out.TrackWidth, MinSection);
+	Out.TrackUpstand = FMath::Max(Out.TrackUpstand, 0.0);
+	Out.MinSashWidth = FMath::Max(Out.MinSashWidth, MinSection);
+	Out.MinSashHeight = FMath::Max(Out.MinSashHeight, MinSection);
+
+	Out.FrameFace = ClampFrameFace(Out.FrameFace, OpeningWidth, OpeningHeight);
+
+	// The threshold and the head between them are subtracted from the height, so the threshold has to
+	// leave a sash standing on it.
+	Out.ThresholdHeight = FMath::Clamp(Out.ThresholdHeight, MinSection,
+		FMath::Max(OpeningHeight - Out.FrameFace - MinSection, MinSection));
+
+	// A sash has to fit between its own stiles and rails before it can hold any glass, on both axes.
+	// Half the clear opening is one panel's share of the width; the clear height is what a panel has
+	// between the threshold and the head.
+	const double Half = FMath::Max(Out.ClearWidth(OpeningWidth), 0.0) * 0.5;
+	const double PanelHeight = FMath::Max(Out.ClearHeight(OpeningHeight), 0.0);
+
+	Out.SashFaceWidth = FMath::Clamp(Out.SashFaceWidth, MinSection,
+		FMath::Max(FMath::Min(Half, PanelHeight) * MaxFrameFaceFraction, MinSection));
+	Out.BottomRailWidth = FMath::Clamp(Out.BottomRailWidth, MinSection,
+		FMath::Max(PanelHeight - Out.SashFaceWidth - MinSection, MinSection));
+
+	// The upstand runs up inside the hollow bottom rail, which is where a real one sits. Taller than
+	// the rail and it comes out through the top of it as a fin standing in the glass line.
+	Out.TrackUpstand = FMath::Min(Out.TrackUpstand, Out.BottomRailWidth);
+
+	// Every rule the sliding WINDOW's section obeys, because it is the same section at a bigger size:
+	// a groove that leaves a shoulder, two tracks that do not share a band of wall, and a frame deep
+	// enough to contain what runs in it.
+	Out.GlassRebate = FMath::Clamp(Out.GlassRebate, 0.0,
+		FMath::Min(Out.SashFaceWidth, Out.BottomRailWidth) * MaxRebateFraction);
+	Out.TrackPitch = FMath::Max(Out.TrackPitch, Out.SashDepth + MinRunningClearance);
+	Out.FrameDepth = FMath::Max(Out.FrameDepth, Out.TrackPitch + Out.SashDepth);
+
+	// The interlock is shared between the two panels, half each side of the midline, and it is also
+	// subtracted from the travel. Wider than half the clear opening and the running panel is asked to
+	// come to rest before it starts.
+	Out.InterlockOverlap = FMath::Clamp(Out.InterlockOverlap, 0.0, FMath::Max(Half, 0.0));
 
 	return Out;
 }
@@ -147,6 +220,7 @@ FHFOpeningBuildParams FHFOpeningBuildParams::Sanitised(double OpeningWidth, doub
 	FHFOpeningBuildParams Out;
 
 	Out.Door = Door.Sanitised(OpeningWidth, OpeningHeight);
+	Out.SlidingDoor = SlidingDoor.Sanitised(OpeningWidth, OpeningHeight);
 	Out.SlidingWindow = SlidingWindow.Sanitised(OpeningWidth, OpeningHeight);
 	Out.Ventilator = Ventilator.Sanitised(OpeningWidth, OpeningHeight);
 	Out.FixedWindow = FixedWindow.Sanitised(OpeningWidth, OpeningHeight);

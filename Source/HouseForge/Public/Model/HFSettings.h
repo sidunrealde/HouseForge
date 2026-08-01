@@ -119,10 +119,15 @@ public:
 
 	// ================================================================================= openings
 
-	/** Door leaves and sliding door panels. */
+	/** Door leaves and the timber chowkhat they are hung in. */
 	UPROPERTY(config, EditAnywhere, Category = "Openings|Doors",
 		meta = (ShowOnlyInnerProperties))
 	FHFDoorParams Door;
+
+	/** The glazed two-track sliding balcony door: a full-height sliding window with a threshold. */
+	UPROPERTY(config, EditAnywhere, Category = "Openings|Sliding Doors",
+		meta = (ShowOnlyInnerProperties))
+	FHFSlidingDoorParams SlidingDoor;
 
 	/** The two-track aluminium sliding window: the standard window of the flats this plugin builds. */
 	UPROPERTY(config, EditAnywhere, Category = "Openings|Sliding Windows",

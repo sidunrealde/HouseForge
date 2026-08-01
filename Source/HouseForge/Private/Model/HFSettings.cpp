@@ -22,6 +22,7 @@ FHFBuildDefaults UHFSettings::Resolve() const
 	FHFBuildDefaults Out;
 
 	Out.Opening.Door = Door;
+	Out.Opening.SlidingDoor = SlidingDoor;
 	Out.Opening.SlidingWindow = SlidingWindow;
 	Out.Opening.Ventilator = Ventilator;
 	Out.Opening.FixedWindow = FixedWindow;

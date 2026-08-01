@@ -20,6 +20,17 @@ using namespace UE::Geometry;
 
 namespace
 {
+	// The shipped chowkhat, spelled out. A leaf is hung IN a frame, so none of the arithmetic below
+	// measures from the masonry any more: the hinge line is in from the jamb by the frame's sight
+	// line less the lap into its check, and out to the frame's room-side face.
+	constexpr double FrameInset = 6.2 - 1.5;
+	constexpr double LeafGap = 0.5;
+	constexpr double LeafUndercut = 1.0;
+	constexpr double FrameProud = 0.6;
+
+	double LeafWidthFor(double OpeningWidth) { return OpeningWidth - (FrameInset + LeafGap) * 2.0; }
+	double LeafHeightFor(double OpeningHeight) { return OpeningHeight - FrameInset - LeafGap - LeafUndercut; }
+
 	/** A door in a 400 cm wall running along +X, so the wall normal is +Y. */
 	AHFOpeningActor* SpawnTestDoor(UWorld* World, EHFOpeningKind Kind = EHFOpeningKind::Door,
 		EHFSwing Swing = EHFSwing::InwardLeft)
@@ -107,15 +118,21 @@ bool FHFArticulatedHingeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A fresh leaf is not marked as hand-edited"),
 		!Door->IsPartArtistEdited(AHFOpeningActor::LeafPartId));
 
-	// The far top corner of the leaf, in leaf-local space.
-	const FVector LocalTip(89.5, 0.0, 105.0);
+	// The far edge of the leaf at mid height, in leaf-local space. Local X starts at the running
+	// clearance off the check rather than at zero, because the leaf is hung in a frame.
+	const double LeafReach = LeafGap + LeafWidthFor(90.0);
+	const FVector LocalTip(LeafReach, 0.0, LeafUndercut + LeafHeightFor(210.0) * 0.5);
+
+	// Where that hinge line actually is: in from the 155 jamb by the frame, and out to the frame's
+	// room-side face on the half wall it is fixed to.
+	const FVector2D HingeLine(155.0 + FrameInset, 10.0 + FrameProud);
 
 	TestNearlyEqual(TEXT("A new part starts closed"),
 		Door->GetPartOpenAmount(AHFOpeningActor::LeafPartId), 0.0, 0.0001);
 
 	const FVector ClosedTip = Leaf->GetComponentTransform().TransformPosition(LocalTip);
-	TestTrue(TEXT("Closed, the leaf fills the opening in the plane of the wall"),
-		ClosedTip.Equals(FVector(244.5, 0.0, 105.0), 0.05));
+	TestTrue(TEXT("Closed, the leaf fills the daylight opening its frame leaves"),
+		ClosedTip.Equals(FVector(HingeLine.X + LeafReach, HingeLine.Y, LocalTip.Z), 0.05));
 
 	// At the limit, the leaf stands square to the wall, hinged at the near jamb, swung inward.
 	TestTrue(TEXT("Opening a part by id succeeds"),
@@ -123,11 +140,10 @@ bool FHFArticulatedHingeTest::RunTest(const FString& Parameters)
 
 	const FVector OpenTip = Leaf->GetComponentTransform().TransformPosition(LocalTip);
 	TestTrue(TEXT("Open, the leaf sits at its declared limit"),
-		OpenTip.Equals(FVector(155.0, 89.5, 105.0), 0.05));
+		OpenTip.Equals(FVector(HingeLine.X, HingeLine.Y + LeafReach, LocalTip.Z), 0.05));
 
 	// A hinge is a rotation about a fixed line: the leaf's far edge keeps its distance from the
 	// hinge line and its height, which a part translated instead of rotated would not.
-	const FVector2D HingeLine(155.0, 0.0);
 	TestNearlyEqual(TEXT("The leaf stays attached to its hinge line"),
 		FVector2D(FVector2D(OpenTip.X, OpenTip.Y) - HingeLine).Size(),
 		FVector2D(FVector2D(ClosedTip.X, ClosedTip.Y) - HingeLine).Size(), 0.05);
@@ -137,7 +153,7 @@ bool FHFArticulatedHingeTest::RunTest(const FString& Parameters)
 	Door->SetPartOpenAmount(AHFOpeningActor::LeafPartId, 0.5);
 	const FVector HalfTip = Leaf->GetComponentTransform().TransformPosition(LocalTip);
 	TestNearlyEqual(TEXT("Half open is 45 degrees off the wall"),
-		FMath::RadiansToDegrees(FMath::Atan2(HalfTip.Y - 0.0, HalfTip.X - 155.0)), 45.0, 0.1);
+		FMath::RadiansToDegrees(FMath::Atan2(HalfTip.Y - HingeLine.Y, HalfTip.X - HingeLine.X)), 45.0, 0.1);
 
 	// Closing puts it back exactly, not approximately.
 	Door->CloseAllParts();
@@ -277,15 +293,18 @@ bool FHFArticulatedRegenerationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Regeneration reuses the part's component rather than replacing it"), Rebuilt == Leaf);
 
 	// The geometry did change, measured as the solid it is rather than as a triangle count.
-	const double ExpectedVolume = (90.0 - 1.0) * 4.0 * (240.0 - 1.0);
+	const double ExpectedVolume = LeafWidthFor(90.0) * 4.0 * LeafHeightFor(240.0);
 	TestNearlyEqual(TEXT("The part rebuilt at the new height"),
 		TMeshQueries<FDynamicMesh3>::GetVolumeArea(Rebuilt->GetDynamicMesh()->GetMeshRef()).X,
 		ExpectedVolume, ExpectedVolume * 0.01);
 
-	// And the pose still corresponds to 60% of a right angle, using the new pivot.
-	const FVector Tip = Rebuilt->GetComponentTransform().TransformPosition(FVector(89.5, 0.0, 10.0));
+	// And the pose still corresponds to 60% of a right angle, using the new pivot - which is on the
+	// frame, so the angle is read from the hinge line rather than from the masonry jamb.
+	const FVector2D HingeLine(155.0 + FrameInset, 10.0 + FrameProud);
+	const FVector Tip = Rebuilt->GetComponentTransform().TransformPosition(
+		FVector(LeafGap + LeafWidthFor(90.0), 0.0, 10.0));
 	TestNearlyEqual(TEXT("The part is still posed where it was left"),
-		FMath::RadiansToDegrees(FMath::Atan2(Tip.Y - 0.0, Tip.X - 155.0)), 54.0, 0.1);
+		FMath::RadiansToDegrees(FMath::Atan2(Tip.Y - HingeLine.Y, Tip.X - HingeLine.X)), 54.0, 0.1);
 
 	// Regeneration on its own does not make anything look hand-edited.
 	TestFalse(TEXT("Regeneration does not mark parts as hand-edited"),
@@ -360,7 +379,7 @@ bool FHFArticulatedPartEditTest::RunTest(const FString& Parameters)
 	UDynamicMeshComponent* Reverted = Door->GetPartComponent(AHFOpeningActor::LeafPartId);
 	if (TestNotNull(TEXT("Reverting leaves a generated part behind"), Reverted))
 	{
-		const double ExpectedVolume = (120.0 - 1.0) * 4.0 * (210.0 - 1.0);
+		const double ExpectedVolume = LeafWidthFor(120.0) * 4.0 * LeafHeightFor(210.0);
 		TestNearlyEqual(TEXT("Reverting restores generated geometry at the current parameters"),
 			TMeshQueries<FDynamicMesh3>::GetVolumeArea(Reverted->GetDynamicMesh()->GetMeshRef()).X,
 			ExpectedVolume, ExpectedVolume * 0.01);

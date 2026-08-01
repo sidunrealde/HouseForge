@@ -520,9 +520,15 @@ bool FHFOpeningInfillTest::RunTest(const FString& Parameters)
 
 	const FDynamicMesh3 Leaf = FHFGenerators::GenerateOpeningInfill(MakeDoor(), Wall);
 	TestTrue(TEXT("A door produces a leaf"), Leaf.TriangleCount() > 0);
+
+	// A door's infill is its leaf AND the frame that leaf is hung in. The frame is buried a few
+	// millimetres in the lintel and in the floor, which is deliberate: a member finishing exactly in
+	// the plane of the construction around it is two coplanar surfaces fighting for every pixel.
 	const FAxisAlignedBox3d LeafBounds = Leaf.GetBounds();
-	TestTrue(TEXT("The leaf sits within the opening's height"),
-		LeafBounds.Min.Z >= -0.01 && LeafBounds.Max.Z <= 210.01);
+	TestTrue(TEXT("The infill sits within the opening's height plus the frame's embedment"),
+		LeafBounds.Min.Z >= -1.0 && LeafBounds.Max.Z <= 211.0);
+	TestTrue(TEXT("The frame is buried in the construction rather than flush with it"),
+		LeafBounds.Min.Z < -0.01 && LeafBounds.Max.Z > 210.01);
 
 	FHFOpening Window = MakeDoor(200.0, 150.0, 135.0);
 	Window.Id = TEXT("Win1");
@@ -530,7 +536,8 @@ bool FHFOpeningInfillTest::RunTest(const FString& Parameters)
 	Window.SillHeight = 90.0;
 
 	const FDynamicMesh3 Glazed = FHFGenerators::GenerateOpeningInfill(Window, Wall);
-	TestTrue(TEXT("A window produces a frame and glazing"), Glazed.TriangleCount() > Leaf.TriangleCount());
+	TestTrue(TEXT("A window produces a frame and glazing"),
+		TMeshQueries<FDynamicMesh3>::GetVolumeArea(Glazed).X > 0.0);
 
 	const FAxisAlignedBox3d GlazedBounds = Glazed.GetBounds();
 	TestNearlyEqual(TEXT("The window sits on its sill"), GlazedBounds.Min.Z, 90.0, 0.5);
