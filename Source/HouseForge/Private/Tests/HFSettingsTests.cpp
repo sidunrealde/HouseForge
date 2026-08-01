@@ -597,7 +597,12 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// This section is why the flat's ceilings stopped being a uniform 500 drop. Every one of those
 	// figures used to be a literal: some in FHFSampleHouse, some compiled into HFGenerators, and the
 	// cove's three in a struct nothing built anything from.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 127);
+	//
+	// 128 rather than 127: FixtureSoffitClearance, which is the figure that makes a ceiling something
+	// the rest of the room answers to rather than a plane drawn over the top of it. It is the gap
+	// FHFCeilingFit leaves between a fitting's head and the soffit above it, and it is on the page
+	// because how tight a project fixes to its plaster is a decision - see FHFCeilingDefaults.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 128);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 31);
 
 	return true;
@@ -861,7 +866,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 125);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 126);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

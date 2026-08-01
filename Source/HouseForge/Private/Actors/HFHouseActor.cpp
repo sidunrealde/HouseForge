@@ -12,6 +12,7 @@
 #include "Geometry/HFGenerators.h"
 #include "HouseForge.h"
 #include "Model/HFBuildDefaults.h"
+#include "Model/HFCeilingFit.h"
 #include "Model/HFCeilingTemplates.h"
 
 namespace
@@ -247,6 +248,53 @@ namespace
 		// same choice twice or the flat changes shape between runs.
 		return Candidate.Id.LexicalLess(Other.Id);
 	}
+
+	/**
+	 * Every hole cut into one wall: the openings the drawing put in it, and the ducts it is cored for.
+	 *
+	 * ONE FUNCTION BECAUSE THE HOLE HAS TO FOLLOW THE FAN. An extract that a false ceiling forces
+	 * down takes its duct with it - the case covers exactly the spot where the hole is, so a hole
+	 * that stayed put would be a bare square opening in a finished wall with the fan 40 mm below it.
+	 * The house builds walls once and re-seeds them when the ceilings move, and the two paths have to
+	 * cut the same holes or the second one would quietly undo the first.
+	 *
+	 * @param Fixtures The FITTED fixtures, not the spec's. The hole is derived from the fan that ends
+	 *        up standing in it, which is not always the fan the drawing described.
+	 */
+	TArray<FHFOpening> OpeningsInWall(const FHFHouseSpec& Spec, const TArray<FHFFixture>& Fixtures,
+		const FHFWall& Wall)
+	{
+		TArray<FHFOpening> Out;
+
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			if (Opening.WallId == Wall.Id)
+			{
+				Out.Add(Opening);
+			}
+		}
+
+		// AN EXTRACT HAS TO BLOW THROUGH THE WALL IT IS SCREWED TO. The fan's case carries an aperture
+		// and its blades turn inside it, and none of that is worth anything while the masonry behind is
+		// solid - which it was for all three extracts in the flat. Invisible from the room, because the
+		// case covers precisely the spot where the hole is not.
+		//
+		// Derived from the fan rather than asked of the drawing, and never added to the spec's
+		// openings - only to the wall's - so the hole is cut but no ventilator sash is built in it.
+		// See AHFFanActor::DuctOpeningFor.
+		for (const FHFFixture& Fixture : Fixtures)
+		{
+			if (Fixture.Type == EHFFixtureType::ExhaustFan && Fixture.AnchorWallId == Wall.Id)
+			{
+				// The ROOM as well as the wall: a fixture's BaseZ is measured above the room floor and
+				// an opening's sill above the wall's base, and the hole has to land on the fan's own
+				// centre rather than on whichever of the two datums happened to be handy.
+				Out.Add(AHFFanActor::DuctOpeningFor(Fixture, Wall, Spec.FindRoom(Fixture.RoomId)));
+			}
+		}
+
+		return Out;
+	}
 }
 
 AHFHouseActor::AHFHouseActor()
@@ -354,6 +402,21 @@ void AHFHouseActor::BuildGeometry()
 
 	ElementActors = MoveTemp(Survivors);
 	const int32 PreservedCount = ElementActors.Num();
+
+	// ------------------------------------------------- what the ceilings do to everything under them
+	//
+	// RESOLVED ONCE, HERE, AND READ BY EVERYTHING BELOW. A fitting near the ceiling is placed by its
+	// actor, drawn by the preview, and - for an extract - is the thing a hole in a wall is cored for.
+	// Three consumers of one answer, and while each of them read Spec.Fixtures directly they were three
+	// chances to resolve it differently. See FHFCeilingFit for why this is recomputed rather than
+	// declared in the spec.
+	TArray<FString> Moved;
+	const TArray<FHFFixture> Fixtures = ResolveFixtures(&Moved);
+
+	for (const FString& Line : Moved)
+	{
+		UE_LOG(LogHouseForge, Log, TEXT("HouseForge ceiling fit: %s"), *Line);
+	}
 
 	FActorSpawnParameters Params;
 	Params.Owner = this;
@@ -503,35 +566,7 @@ void AHFHouseActor::BuildGeometry()
 
 		WallActor->Wall = Wall;
 		WallActor->Structure = StructureInWall(Wall);
-
-		for (const FHFOpening& Opening : Spec.Openings)
-		{
-			if (Opening.WallId == Wall.Id)
-			{
-				WallActor->Openings.Add(Opening);
-			}
-		}
-
-		// AN EXTRACT HAS TO BLOW THROUGH THE WALL IT IS SCREWED TO. The fan's case carries an
-		// aperture and its blades turn inside it, and none of that is worth anything while the
-		// masonry behind is solid - which it was for all three extracts in the flat. Invisible from
-		// the room, because the case covers precisely the spot where the hole is not.
-		//
-		// Derived from the fan rather than asked of the drawing, and added to the WALL's openings
-		// only - never to the spec's - so the hole is cut but no ventilator sash is built in it. See
-		// AHFFanActor::DuctOpeningFor.
-		for (const FHFFixture& Fixture : Spec.Fixtures)
-		{
-			if (Fixture.Type == EHFFixtureType::ExhaustFan && Fixture.AnchorWallId == Wall.Id)
-			{
-				// The ROOM as well as the wall: a fixture's BaseZ is measured above the room floor
-				// and an opening's sill above the wall's base, and the hole has to land on the fan's
-				// own centre rather than on whichever of the two datums happened to be handy.
-				WallActor->Openings.Add(
-					AHFFanActor::DuctOpeningFor(Fixture, Wall, Spec.FindRoom(Fixture.RoomId)));
-			}
-		}
-
+		WallActor->Openings = OpeningsInWall(Spec, Fixtures, Wall);
 		WallActor->Regenerate();
 	}
 
@@ -597,7 +632,7 @@ void AHFHouseActor::BuildGeometry()
 		// canopy is sized to cover it, so the two cannot drift.
 		double HoleHalfSide = 0.0;
 
-		for (const FHFFixture& Fixture : Spec.Fixtures)
+		for (const FHFFixture& Fixture : Fixtures)
 		{
 			if (Fixture.Type == EHFFixtureType::CeilingFan && Fixture.RoomId == Ceiling.RoomId)
 			{
@@ -669,7 +704,7 @@ void AHFHouseActor::BuildGeometry()
 	// Joinery. One fixture type so far - a wardrobe - and it is the first thing in the flat built out
 	// of FHFJoineryKit rather than out of a bespoke generator. The rest of the catalogue composes from
 	// the same kit and lands with milestone 9.
-	for (const FHFFixture& Fixture : Spec.Fixtures)
+	for (const FHFFixture& Fixture : Fixtures)
 	{
 		if (Fixture.Type != EHFFixtureType::Wardrobe)
 		{
@@ -706,7 +741,7 @@ void AHFHouseActor::BuildGeometry()
 	// the only production consumer of EHFMotionType::Spin was nothing at all: the mechanism was
 	// complete and tested, CeilingFan was read here solely to punch a rod hole in the false ceiling
 	// above a fan that did not exist, and ExhaustFan was not read anywhere.
-	for (const FHFFixture& Fixture : Spec.Fixtures)
+	for (const FHFFixture& Fixture : Fixtures)
 	{
 		if (Fixture.Type != EHFFixtureType::CeilingFan && Fixture.Type != EHFFixtureType::ExhaustFan)
 		{
@@ -834,47 +869,152 @@ int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
 		++Rebuilt;
 	}
 
-	// -------------------------------------------------------------------------- and the fans
+	// ---------------------------------------------------------- and everything that answers to them
 	//
-	// Re-seeded in full - project figures, then the drawing, then the ceiling - because the rod
-	// length is cumulative and there is no way to subtract the ceiling that used to be there.
-	for (const FHFFixture& Fixture : Spec.Fixtures)
+	// THE DEPENDENCY SET, not the two elements that were noticed first. A ceiling figure does not
+	// change one thing in place: it changes what hangs between the room and the slab, and every
+	// fitting near the top of a room is set out against it. FHFCeilingFit works out what gives, once,
+	// and the loops below put the answer on whatever carries part of it.
+	const TArray<FHFFixture> Fixtures = ResolveFixtures(nullptr);
+
+	// Walls whose duct has moved with the extract that blows through it. Collected rather than
+	// rebuilt in place: a wall can carry more than one, and it is cheaper and safer to cut all of its
+	// holes once from the fitted list than to edit its opening array.
+	TSet<FName> WallsToRecut;
+
+	for (const FHFFixture& Fixture : Fixtures)
 	{
-		if (Fixture.Type != EHFFixtureType::CeilingFan)
+		const FHFRoom* FixtureRoom = Spec.FindRoom(Fixture.RoomId);
+		if (FixtureRoom == nullptr)
 		{
 			continue;
 		}
 
-		AHFFanActor* FanActor = Cast<AHFFanActor>(FindElement(AHFFanActor::StaticClass(), Fixture.Id));
-		if (FanActor == nullptr || FanActor->ShouldPreserveOnRebuild())
+		switch (Fixture.Type)
 		{
-			continue;
-		}
-
-		const FHFRoom* FanRoom = Spec.FindRoom(Fixture.RoomId);
-		if (FanRoom == nullptr)
+		case EHFFixtureType::CeilingFan:
 		{
-			continue;
-		}
-
-		double SoffitDrop = 0.0;
-		for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
-		{
-			if (Ceiling.RoomId == Fixture.RoomId)
+			AHFFanActor* FanActor = Cast<AHFFanActor>(FindElement(AHFFanActor::StaticClass(), Fixture.Id));
+			if (FanActor == nullptr || FanActor->ShouldPreserveOnRebuild())
 			{
-				SoffitDrop = FMath::Max(SoffitDrop,
-					FHFGenerators::CeilingSoffitDropAt(Ceiling, *FanRoom, Fixture.Position));
+				break;
 			}
+
+			// Re-seeded in full - project figures, then the drawing, then the ceiling - because the
+			// rod length is CUMULATIVE and there is no way to subtract the ceiling that used to be
+			// there. ApplyCeilingAbove adds to the project's figure by design, so calling it twice
+			// would hang the fan a ceiling lower each time.
+			double SoffitDrop = 0.0;
+			for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+			{
+				if (Ceiling.RoomId == Fixture.RoomId)
+				{
+					SoffitDrop = FMath::Max(SoffitDrop,
+						FHFGenerators::CeilingSoffitDropAt(Ceiling, *FixtureRoom, Fixture.Position));
+				}
+			}
+
+			FanActor->ApplyProjectDefaults(EHFFanKind::Ceiling);
+			FanActor->ApplyFixture(Fixture);
+			FanActor->ApplyCeilingAbove(SoffitDrop);
+			FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture, FixtureRoom, nullptr));
+			FanActor->Regenerate();
+			++Rebuilt;
+			break;
 		}
 
-		FanActor->ApplyProjectDefaults(EHFFanKind::Ceiling);
-		FanActor->ApplyFixture(Fixture);
-		FanActor->ApplyCeilingAbove(SoffitDrop);
-		FanActor->Regenerate();
+		case EHFFixtureType::ExhaustFan:
+		{
+			AHFFanActor* FanActor = Cast<AHFFanActor>(FindElement(AHFFanActor::StaticClass(), Fixture.Id));
+			if (FanActor == nullptr || FanActor->ShouldPreserveOnRebuild())
+			{
+				break;
+			}
+
+			const FHFWall* FanWall = Spec.FindWall(Fixture.AnchorWallId);
+
+			FanActor->ApplyProjectDefaults(EHFFanKind::Exhaust);
+			FanActor->ApplyFixture(Fixture);
+			if (FanWall != nullptr)
+			{
+				FanActor->Fan.HostWallThickness = FanWall->Thickness;
+
+				// The hole goes with the fan. A case that moved and a duct that did not is a bare
+				// square opening in a finished wall with the fan sitting below it - the same
+				// invisible-from-the-room failure DuctOpeningFor exists to fix, only the other way up.
+				WallsToRecut.Add(FanWall->Id);
+			}
+
+			FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture, FixtureRoom, FanWall));
+			FanActor->Regenerate();
+			++Rebuilt;
+			break;
+		}
+
+		case EHFFixtureType::Wardrobe:
+		{
+			AHFWardrobeActor* WardrobeActor =
+				Cast<AHFWardrobeActor>(FindElement(AHFWardrobeActor::StaticClass(), Fixture.Id));
+			if (WardrobeActor == nullptr || WardrobeActor->ShouldPreserveOnRebuild())
+			{
+				break;
+			}
+
+			// A wardrobe under a ceiling that has come down is CUT SHORTER, not lowered - it stands on
+			// the floor. Re-seeded in full for the same reason a fan is: the bay count and the loft
+			// are derived from the height, so half-applying a new one would leave a carcass built for
+			// the old.
+			WardrobeActor->ApplyProjectDefaults();
+			WardrobeActor->ApplyFixture(Fixture);
+			WardrobeActor->SetActorTransform(AHFWardrobeActor::PlacementFor(Fixture,
+				FixtureRoom->FloorZ, Spec.FindWall(Fixture.AnchorWallId)));
+			WardrobeActor->Regenerate();
+			++Rebuilt;
+			break;
+		}
+
+		default:
+			break;
+		}
+	}
+
+	for (const FHFWall& Wall : Spec.Walls)
+	{
+		if (!WallsToRecut.Contains(Wall.Id))
+		{
+			continue;
+		}
+
+		AHFWallActor* WallActor = Cast<AHFWallActor>(FindElement(AHFWallActor::StaticClass(), Wall.Id));
+		if (WallActor == nullptr || WallActor->ShouldPreserveOnRebuild())
+		{
+			continue;
+		}
+
+		WallActor->Openings = OpeningsInWall(Spec, Fixtures, Wall);
+		WallActor->Regenerate();
 		++Rebuilt;
 	}
 
 	return Rebuilt;
+}
+
+TArray<FHFFixture> AHFHouseActor::FittedFixtures() const
+{
+	return ResolveFixtures(nullptr);
+}
+
+TArray<FHFFixture> AHFHouseActor::ResolveFixtures(TArray<FString>* OutMoved) const
+{
+	// The composing layer's job, and the only line here that knows a settings object could exist.
+	// FHFCeilingFit takes the clearance as a value, exactly as every generator takes its figures -
+	// see .claude/rules/04-conventions.md.
+	//
+	// No unit conversion: the spec on this actor is already in centimetres, because SetSpec converts
+	// exactly once at ingest, and the settings page is in centimetres too.
+	const double Clearance = FHFBuildDefaults::FromProjectSettings().Ceiling.FixtureSoffitClearance;
+
+	return FHFCeilingFit::FitAll(Spec, Clearance, OutMoved);
 }
 
 void AHFHouseActor::PostLoad()
@@ -1095,7 +1235,10 @@ void AHFHouseActor::DrawStructure()
 
 void AHFHouseActor::DrawFixtures()
 {
-	for (const FHFFixture& Fixture : Spec.Fixtures)
+	// The fitted list, not the spec's. A preview drawn from the drawing while the level is built from
+	// the resolved figures is a preview that disagrees with the thing it is previewing, and the whole
+	// point of the wireframe is to be checkable against what was built.
+	for (const FHFFixture& Fixture : ResolveFixtures(nullptr))
 	{
 		if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0)
 		{
@@ -1104,10 +1247,29 @@ void AHFHouseActor::DrawFixtures()
 
 		const FHFRoom* Room = Spec.FindRoom(Fixture.RoomId);
 		const double FloorZ = Room ? Room->FloorZ : 0.0;
-		const double BottomZ = FloorZ + Fixture.BaseZ;
+
+		// A CEILING-MOUNTED FIXTURE HANGS, and its BaseZ is a drop measured DOWN from the ceiling -
+		// see FHFFixture::IsCeilingMounted. Drawn from the floor it came out at 30 to 60 cm above the
+		// carpet, which is not where any fan in this flat is and is why the preview never showed one
+		// where the level put it.
+		//
+		// WHICH ceiling depends on how the thing is fixed, and that is the whole of the difference
+		// between the two hanging rules: a fan reaches the structural slab on a rod that lengthens to
+		// suit, and a surface-mounted fitting is screwed to the finished soffit and follows it down.
+		double TopZ = FloorZ + Fixture.BaseZ + Fixture.Height;
+
+		if (Fixture.IsCeilingMounted() && Room != nullptr)
+		{
+			const double MountZ =
+				(FHFCeilingFit::RuleFor(Fixture.Type) == EHFCeilingFitRule::HangsFromSoffit)
+					? FHFCeilingFit::LowestSoffitZOver(Fixture, *Room, Spec.FalseCeilings)
+					: FloorZ + Room->CeilingHeight;
+
+			TopZ = MountZ - Fixture.BaseZ;
+		}
 
 		DrawPrism(RectFootprint(Fixture.Position, Fixture.Footprint, Fixture.RotationDegrees),
-			BottomZ, BottomZ + Fixture.Height, ColourFixture, 1.5f);
+			TopZ - Fixture.Height, TopZ, ColourFixture, 1.5f);
 	}
 }
 

@@ -130,6 +130,25 @@ struct HOUSEFORGE_API FHFCeilingDefaults
 	/** Narrowest ring worth building, in centimetres. Narrower reads as a fault line, not a level change. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	double MinBeamBulkheadWidth = 30.0;
+
+	// ------------------------------------------------------ what else in the room has to clear it
+
+	/**
+	 * Gap left between the head of a fitting and the finished soffit above it, in centimetres.
+	 *
+	 * THE FIGURE THAT MAKES A CEILING SOMETHING THE REST OF THE ROOM ANSWERS TO. Everything in this
+	 * flat used to be set out against the structural slab, so a false ceiling and the fittings under
+	 * it only agreed while the drop stayed small - and when the depth model changed, seven fittings
+	 * ended up 30 mm inside their own ceilings: both bathroom geysers, both bathroom extracts, and
+	 * all three curtain pelmets. Every one of them validated.
+	 *
+	 * FHFCeilingFit resolves each fixture against the soffit that actually ends up over it, and this
+	 * is the clearance it leaves. Never zero: nothing on site is fixed dead tight to a plastered
+	 * soffit, and a fitting whose top face lands exactly in the soffit plane is two faces in one
+	 * plane facing the same way - which is the flashing FHFStructuralCut exists to prevent.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double FixtureSoffitClearance = 1.0;
 };
 
 /**
