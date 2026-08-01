@@ -77,3 +77,4 @@ DerivedDataCache/*
 # Local Python environment for the drawing generator (Scripts/gen_sample_drawings.py).
 # Created on first run so nothing is installed globally; never committed.
 Scripts/.venv/
+Scripts/__pycache__/
