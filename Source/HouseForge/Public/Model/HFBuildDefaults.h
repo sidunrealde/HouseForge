@@ -6,6 +6,7 @@
 #include "Geometry/HFFanKit.h"
 #include "Geometry/HFJoineryKit.h"
 #include "Geometry/HFOpeningParams.h"
+#include "Geometry/HFRenderFinish.h"
 #include "Model/HFCeilingTemplates.h"
 #include "Model/HFSkirtingPlan.h"
 #include "Model/HFSpecValidator.h"
@@ -347,6 +348,16 @@ struct HOUSEFORGE_API FHFBuildDefaults
 	/** What the validator judges a spec against. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFValidationLimits Validation;
+
+	/**
+	 * Chamfers, UVs and the lightmap channel - what is done to geometry on its way to a component.
+	 *
+	 * Carried here rather than reached for by a generator, like every other figure on this struct,
+	 * and for a sharper reason than usual: the bevel is not idempotent. It is applied exactly once,
+	 * by the composing layer, so this is where the project's answer has to be handed over.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFRenderFinish Render;
 
 	/**
 	 * The project's settings, resolved.

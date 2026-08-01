@@ -35,28 +35,28 @@ struct HOUSEFORGE_API FHFBevelParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	bool bEnabled = true;
 
-	/** Plaster, paint and concrete: walls, ceilings, coves, slabs, exposed beams and columns. */
+	/** Chamfer in centimetres on plaster, paint and concrete: walls, ceilings, coves, slabs, beams, columns. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double PlasterWidth = 0.15;
 
-	/** Timber, laminate, ply and uPVC: carcasses, shutters, door leaves, window frames, appliances. */
+	/** Chamfer in centimetres on timber, laminate, ply and uPVC: carcasses, shutters, leaves, frames. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double JoineryWidth = 0.10;
 
-	/** Stone and vitreous: counter noses, skirting tops, sanitaryware. */
+	/** Chamfer in centimetres on stone and vitreous: counter noses, skirting tops, sanitaryware. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double StoneWidth = 0.20;
 
-	/** Metal hardware - handles, tracks, flanges. Small, because the stock itself is small. */
+	/** Chamfer in centimetres on metal hardware - handles, tracks, flanges. Small, because the stock is. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double MetalWidth = 0.05;
 
-	/** A seamed glass arris. */
+	/** Chamfer in centimetres on a glass arris - the seam a glazier puts on a cut edge. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double GlassWidth = 0.05;
 
 	/**
-	 * Dihedral angle above which an edge is chamfered at all.
+	 * Dihedral angle in degrees above which an edge is chamfered at all.
 	 *
 	 * Deliberately the same figure FHFMeshOps::ComputeShadingNormals splits normals at, so the rule
 	 * is one rule: EVERY EDGE THAT STAYS HARD GETS A CHAMFER. Below it, the edge is a facet seam on
@@ -67,7 +67,7 @@ struct HOUSEFORGE_API FHFBevelParams
 	double MinAngleDegrees = 40.0;
 
 	/**
-	 * How much wider than the chamfer a face has to be before its edges are chamfered.
+	 * How much wider than the chamfer a face has to be before its edges are chamfered - a ratio.
 	 *
 	 * The guard that stops a bevel eating a feature. This kit is full of deliberate 3 mm shadow gaps
 	 * between shutters and 1 mm clearances behind them; chamfering both arrises of a 3 mm reveal at
@@ -136,7 +136,7 @@ struct HOUSEFORGE_API FHFLightmapParams
 	bool bEnabled = true;
 
 	/**
-	 * Lightmap resolution the gutter is sized against.
+	 * Lightmap resolution the gutter is sized against, as a pixel count along one edge.
 	 *
 	 * The packer works in UV space and converts a pixel gutter into it with this, so getting it
 	 * wrong does not misplace an island - it makes the gutter the wrong number of texels wide, and
@@ -145,7 +145,7 @@ struct HOUSEFORGE_API FHFLightmapParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "16"))
 	int32 TextureResolution = 128;
 
-	/** Gutter between islands, in texels at the resolution above. */
+	/** Gutter between islands, as a texel count at the resolution above. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "1"))
 	int32 GutterPixels = 2;
 };
@@ -173,7 +173,34 @@ struct HOUSEFORGE_API FHFRenderFinish
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFLightmapParams Lightmap;
 
-	/** World size one UV0 tile covers. The figure the material panel expresses tiling against. */
+	/** World size in centimetres that one UV0 tile covers. What the material panel states tiling against. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.1"))
 	double TexelSizeCm = 100.0;
+
+	/**
+	 * True when two finishes would produce the same geometry.
+	 *
+	 * Exists so a project-settings change can rebuild only what it actually altered. Applying the
+	 * page re-seeds this onto every element in the level - it is the one section that reaches all of
+	 * them - and without a comparison the only options are to rebuild the entire flat whenever any
+	 * unrelated figure moves, or to leave a changed chamfer width sitting on elements that never
+	 * pick it up. Both have been the wrong answer here before.
+	 */
+	bool operator==(const FHFRenderFinish& Other) const
+	{
+		return Bevel.bEnabled == Other.Bevel.bEnabled
+			&& FMath::IsNearlyEqual(Bevel.PlasterWidth, Other.Bevel.PlasterWidth)
+			&& FMath::IsNearlyEqual(Bevel.JoineryWidth, Other.Bevel.JoineryWidth)
+			&& FMath::IsNearlyEqual(Bevel.StoneWidth, Other.Bevel.StoneWidth)
+			&& FMath::IsNearlyEqual(Bevel.MetalWidth, Other.Bevel.MetalWidth)
+			&& FMath::IsNearlyEqual(Bevel.GlassWidth, Other.Bevel.GlassWidth)
+			&& FMath::IsNearlyEqual(Bevel.MinAngleDegrees, Other.Bevel.MinAngleDegrees)
+			&& FMath::IsNearlyEqual(Bevel.MinFeatureFactor, Other.Bevel.MinFeatureFactor)
+			&& Lightmap.bEnabled == Other.Lightmap.bEnabled
+			&& Lightmap.TextureResolution == Other.Lightmap.TextureResolution
+			&& Lightmap.GutterPixels == Other.Lightmap.GutterPixels
+			&& FMath::IsNearlyEqual(TexelSizeCm, Other.TexelSizeCm);
+	}
+
+	bool operator!=(const FHFRenderFinish& Other) const { return !(*this == Other); }
 };

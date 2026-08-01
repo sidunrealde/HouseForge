@@ -79,6 +79,7 @@ FHFBuildDefaults UHFSettings::Resolve() const
 	Out.Ceiling = Ceiling;
 	Out.Skirting = Skirting;
 	Out.Validation = Validation;
+	Out.Render = Render;
 
 	return Out;
 }

@@ -608,7 +608,13 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// them and the joinery scribed to them, and is resolved per room by FHFSkirting::For. What is
 	// left for a page to hold is what a joiner sets out before cutting: the board's thickness, and
 	// how far clear of each jamb it stops.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 130);
+	//
+	// 142 rather than 130: the render finish's twelve. That section is the only one on the page that
+	// costs triangles rather than moving them - chamfering every arris in the reference flat takes it
+	// from 39,074 to 86,626 - and it is the only one that reaches EVERY element rather than a class of
+	// them, since a wall, a slab, a beam and a shutter all get an arris. Both are reasons it has to be
+	// a setting rather than a constant compiled into the composing layer.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 142);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 31);
 
 	return true;
@@ -872,7 +878,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 128);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 138);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

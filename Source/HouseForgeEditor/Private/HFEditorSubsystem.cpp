@@ -940,6 +940,14 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 	int32 Rebuilt = 0;
 	int32 Preserved = 0;
 
+	// The render finish is the one section on the page that reaches EVERY element rather than a
+	// class of them - a chamfer is put on a wall, a slab, a beam and a shutter alike - so it is
+	// resolved once here and compared per element below. Without the comparison the choice would be
+	// between rebuilding the whole flat whenever any unrelated figure moved, and leaving a changed
+	// chamfer width sitting on elements that never picked it up. The second is the failure this page
+	// has already had once, when the joinery section was inert on wardrobes already in the level.
+	const FHFRenderFinish RenderDefaults = FHFBuildDefaults::FromProjectSettings().Render;
+
 	// Every house in the level, not just the first. FindHouseActor answers "the house" for the tools,
 	// which is the right answer there; a project-wide setting change is different - a level holding
 	// two houses would otherwise leave the second one built to the old figures with nothing saying so.
@@ -974,13 +982,24 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 			continue;
 		}
 
+		// The render finish reaches every element rather than a class of them - a chamfer goes on a
+		// wall, a slab, a beam and a shutter alike - so it is re-seeded here on anything whose finish
+		// the page has moved. Flagged rather than rebuilt on the spot, because an element can need
+		// BOTH this and its own section's figures, and rebuilding it twice for one settings change
+		// would be waste that grows with the size of the flat.
+		bool bNeedsRebuild = false;
+		if (Typed->RenderFinish != RenderDefaults)
+		{
+			Typed->RenderFinish = RenderDefaults;
+			bNeedsRebuild = true;
+		}
+
 		// Only elements whose construction the settings actually feed. Re-seeding is the composing
 		// layer's job and is done HERE, not inside any generator.
 		if (AHFOpeningActor* Opening = Cast<AHFOpeningActor>(Typed))
 		{
 			Opening->ApplyProjectDefaults();
-			Opening->Regenerate();
-			++Rebuilt;
+			bNeedsRebuild = true;
 		}
 		else if (AHFWardrobeActor* Wardrobe = Cast<AHFWardrobeActor>(Typed))
 		{
@@ -994,7 +1013,12 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 			// inside the kit rather than derived here - re-seeding Joinery re-derives the bay count
 			// with it, so ShutterModuleWidth moves geometry on an existing wardrobe too.
 			Wardrobe->ApplyProjectDefaults();
-			Wardrobe->Regenerate();
+			bNeedsRebuild = true;
+		}
+
+		if (bNeedsRebuild)
+		{
+			Typed->Regenerate();
 			++Rebuilt;
 		}
 	}

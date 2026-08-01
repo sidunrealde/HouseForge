@@ -483,6 +483,24 @@ public:
 		meta = (ShowOnlyInnerProperties))
 	FHFValidationLimits Validation;
 
+	// =============================================================================== render finish
+
+	/**
+	 * What is done to generated geometry on its way to a component: chamfers, UVs, lightmap channel.
+	 *
+	 * THE ONE SECTION ON THIS PAGE THAT COSTS TRIANGLES RATHER THAN MOVING THEM. Chamfering every
+	 * arris in the reference flat takes it from 39,074 triangles to 86,626 - a little over double -
+	 * and buys the thing .claude/rules/04-conventions.md asks for by name: an edge that catches
+	 * light instead of a mathematically sharp one that reads as CG under any lighting. It is a
+	 * setting because that trade is a project's to make, and because a service duct nobody ever sees
+	 * does not deserve the same answer as the wall a camera walks past.
+	 *
+	 * ALL IN CENTIMETRES, like every other construction figure here.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Render Finish",
+		meta = (ShowOnlyInnerProperties))
+	FHFRenderFinish Render;
+
 	// ================================================================================ resolving
 
 	/**

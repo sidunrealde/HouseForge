@@ -343,6 +343,12 @@ void AHFHouseActor::BuildGeometry()
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 
+	// The project's answer to chamfers, UVs and the lightmap channel, resolved once for the whole
+	// house. Stamped on every element below rather than left to each actor's compiled-in default,
+	// which is the same rule the ceiling and skirting figures follow: only the composing layer reads
+	// the settings, and everything under it is handed a plain value.
+	const FHFRenderFinish RenderDefaults = FHFBuildDefaults::FromProjectSettings().Render;
+
 	// Returns null when an element was preserved, which tells the caller to leave it alone.
 	auto Spawn = [&](UClass* Class, const FName& Id, const FString& Label) -> AActor*
 	{
@@ -360,6 +366,7 @@ void AHFHouseActor::BuildGeometry()
 			if (AHFElementActor* Typed = Cast<AHFElementActor>(Actor))
 			{
 				Typed->ElementId = Id;
+				Typed->RenderFinish = RenderDefaults;
 			}
 			Actor->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
 			ElementActors.Add(Actor);

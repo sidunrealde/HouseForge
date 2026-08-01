@@ -14,7 +14,10 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Geometry/HFMeshOps.h"
+#include "HFEditorSubsystem.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
+#include "Model/HFSettings.h"
 #include "Model/HFSampleHouse.h"
 #include "Model/HFTypes.h"
 #include "UDynamicMesh.h"
@@ -533,6 +536,70 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 	AddInfo(FString::Printf(TEXT("%d sliding parts traced at five open amounts each."), SlidingParts));
 	TestEqual(TEXT("Every sliding part blocks at every open amount"), MissedSomewhere, 0);
 	TestEqual(TEXT("No sliding part left its collision behind"), BodiesThatNeverMoved, 0);
+
+	return true;
+}
+
+/**
+ * The chamfer is a project setting, and the setting reaches a flat that is already standing.
+ *
+ * A control that only takes effect on the next full rebuild is a control the page is lying about,
+ * and this page has already told that lie once - the whole Joinery section was inert on wardrobes
+ * already in the level. The render finish is the widest-reaching section on it: every element in
+ * the flat carries one, so the failure mode is bigger here than anywhere else.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFRenderFinishSettingTest,
+	"HouseForge.Photoreal.TheChamferIsAProjectSetting", HF_TEST_FLAGS)
+
+bool FHFRenderFinishSettingTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgePhotoreal;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UHFEditorSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<UHFEditorSubsystem>() : nullptr;
+	UHFSettings* Settings = GetMutableDefault<UHFSettings>();
+
+	if (!TestNotNull(TEXT("An editor world is open"), World)
+		|| !TestNotNull(TEXT("The HouseForge subsystem is up"), Subsystem)
+		|| !TestNotNull(TEXT("The settings object exists"), Settings))
+	{
+		return false;
+	}
+
+	const FHFRenderFinish Original = Settings->Render;
+	ON_SCOPE_EXIT
+	{
+		Settings->Render = Original;
+		ClearHouseForgeActors(World);
+	};
+
+	AHFHouseActor* House = BuildReferenceFlat(World);
+	if (!TestNotNull(TEXT("The reference flat builds"), House))
+	{
+		return false;
+	}
+
+	const int32 Chamfered = TotalTriangles(House);
+
+	// A house built while the page says no chamfers has to come out of the spawn funnel with none,
+	// which is the half of this that a full rebuild covers.
+	Settings->Render.Bevel.bEnabled = false;
+	const int32 Rebuilt = Subsystem->ApplyProjectSettingsToLevel();
+	const int32 Sharp = TotalTriangles(House);
+
+	TestTrue(TEXT("Turning chamfers off rebuilds the flat that is already standing"), Rebuilt > 100);
+	TestTrue(TEXT("And the flat really loses its chamfers"), Sharp < Chamfered);
+
+	// Applying the same settings twice must not rebuild anything the second time: an element whose
+	// finish already matches is not a reason to throw its geometry away, and on a flat this size
+	// that would be a second full rebuild for no change at all.
+	const int32 Again = Subsystem->ApplyProjectSettingsToLevel();
+	TestTrue(TEXT("Applying an unchanged finish rebuilds nothing extra for it"), Again < Rebuilt);
+
+	Settings->Render = Original;
+	Subsystem->ApplyProjectSettingsToLevel();
+	TestEqual(TEXT("Turning them back on restores exactly what was there"),
+		TotalTriangles(House), Chamfered);
 
 	return true;
 }
