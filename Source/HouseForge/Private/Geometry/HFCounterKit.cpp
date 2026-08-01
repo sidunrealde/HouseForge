@@ -17,9 +17,6 @@ namespace
 	/** How far back from the front face the groove is routed. */
 	constexpr double DripGrooveSetback = 1.5;
 
-	/** Steps a bullnose is approximated in. Three chamfers read as a round at any sane camera range. */
-	constexpr int32 BullnoseSteps = 3;
-
 	/** A rectangle in plan, wound counter-clockwise. */
 	TArray<FVector2D> PlanRect(double X0, double Y0, double X1, double Y1)
 	{
@@ -116,7 +113,14 @@ FHFCounterBuild FHFCounterKit::Build(const FHFCounterParams& Params)
 			Aperture.Centre.X + Half.X, Aperture.Centre.Y + Half.Y));
 	}
 
-	const TArray<FVector2D> Outline = PlanRect(0.0, P.FrontY(), P.Width, P.Depth);
+	// A BULLNOSE IS MODELLED RATHER THAN CUT, so the slab body stops short of the front and the worked
+	// edge is a swept strip in front of it - see the front edge below for why. Every other edge keeps
+	// the full-depth slab it always had.
+	const double EdgeStripDepth = P.Edge == EHFCounterEdge::Bullnose
+		? FMath::Min(P.Thickness * 0.4, 1.0) : 0.0;
+
+	const TArray<FVector2D> Outline =
+		PlanRect(0.0, P.FrontY() + EdgeStripDepth, P.Width, P.Depth);
 
 	if (!FHFMeshOps::AppendPrismWithHoles(Out.Shell, Outline, Holes, 0.0, P.TopZ(),
 		EHFSurfaceRole::CounterStone))
@@ -176,39 +180,71 @@ FHFCounterBuild FHFCounterKit::Build(const FHFCounterParams& Params)
 
 		FHFMeshOps::SubtractInPlace(Out.Shell, Groove);
 	}
-	else if (P.Edge == EHFCounterEdge::Bullnose)
+	else if (EdgeStripDepth > 0.0)
 	{
-		// A half-round eased off the front arris in a few steps. Approximated rather than swept as a
-		// true arc because at three steps the silhouette is already inside a millimetre of the real
-		// thing at any range somebody stands at, and the render chamfer softens what is left.
-		const double Radius = FMath::Min(P.Thickness * 0.5, 1.0);
+		// ------------------------------------------------------- a real arc, MODELLED and not cut
+		//
+		// ## Why this is no longer a boolean at all
+		//
+		// It was three box cuts per arris, approximating the round in steps - and the profile was
+		// written the WRONG WAY ROUND, insetting further as it went DOWN from the arris rather than
+		// less. That undercuts: each step removed strictly more than the one above it, the steps
+		// subsumed one another instead of stacking, and what came out was a single square notch under
+		// an untouched square arris. Nothing had ever seen it, because every worktop in the flat is a
+		// drip groove and nothing had asked this kit for a bullnose until a vanity did.
+		//
+		// Corrected, and then reduced to one swept cutter per arris, it STILL failed one boolean of the
+		// two every time. A bullnose meets the faces it eases TANGENTIALLY - that is what makes it a
+		// bullnose - and a tool touching its target at zero degrees along a whole edge is the hardest
+		// case a mesh boolean has. What it left behind was a slab worked on one arris and square on the
+		// other, with a line in a log and nothing whatever to see in a render.
+		//
+		// So the edge is built rather than removed: the slab body stops one radius short of the front
+		// and this strip is swept in front of it with the round already in its section. Exact, one
+		// primitive, and it cannot half-succeed. The strip laps the body rather than butting to it,
+		// because two solids meeting in a shared plane is the same tangency problem in another form.
+		const double Radius = EdgeStripDepth;
+		const double Lap = FMath::Min(Radius * 0.5, 0.3);
 
-		for (int32 Step = 1; Step <= BullnoseSteps; ++Step)
+		constexpr int32 ArcSteps = 6;
+
+		TArray<FVector2D> Section;
+		Section.Reserve(2 * ArcSteps + 6);
+
+		// Bottom, from behind the lap forward to where the lower round begins.
+		Section.Add(FVector2D(FrontY + Radius + Lap, 0.0));
+
+		// The lower quadrant: centre one radius in and one radius up, so the arris pulls back the full
+		// radius and the profile returns to the front face a radius above the underside.
+		for (int32 Step = 0; Step <= ArcSteps; ++Step)
 		{
-			const double Alpha = static_cast<double>(Step) / static_cast<double>(BullnoseSteps + 1);
+			const double Angle = HALF_PI * static_cast<double>(Step) / static_cast<double>(ArcSteps);
 
-			// Walk in from the face as we walk down from the top and up from the bottom, so the two
-			// chamfers together approximate a round rather than a single flat.
-			const double In = Radius * (1.0 - FMath::Cos(Alpha * PI * 0.5));
-			const double Down = Radius * FMath::Sin(Alpha * PI * 0.5);
+			Section.Add(FVector2D(
+				FrontY + Radius - Radius * FMath::Sin(Angle),
+				Radius - Radius * FMath::Cos(Angle)));
+		}
 
-			for (const bool bTop : { true, false })
-			{
-				const double Z = bTop ? P.TopZ() - Down : Down;
+		// The face between the two rounds, and then the upper quadrant back onto the top.
+		for (int32 Step = 0; Step <= ArcSteps; ++Step)
+		{
+			const double Angle = HALF_PI * static_cast<double>(Step) / static_cast<double>(ArcSteps);
 
-				FDynamicMesh3 Cutter;
-				FHFMeshOps::InitialiseMesh(Cutter);
+			Section.Add(FVector2D(
+				FrontY + Radius - Radius * FMath::Cos(Angle),
+				P.TopZ() - Radius + Radius * FMath::Sin(Angle)));
+		}
 
-				FHFMeshOps::AppendBox(Cutter,
-					FVector3d(P.Width * 0.5, FrontY + In * 0.5, bTop ? Z + Radius : Z - Radius),
-					FVector3d(P.Width * 0.5 + 1.0, In * 0.5, Radius),
-					0.0, EHFSurfaceRole::CounterStone);
+		Section.Add(FVector2D(FrontY + Radius + Lap, P.TopZ()));
 
-				if (In > UE_KINDA_SMALL_NUMBER)
-				{
-					FHFMeshOps::SubtractInPlace(Out.Shell, Cutter);
-				}
-			}
+		FDynamicMesh3 Edge;
+		FHFMeshOps::InitialiseMesh(Edge);
+
+		if (FHFMeshOps::AppendExtrudedSection(Edge, Section,
+			FVector3d(0.0, 0.0, 0.0), FVector3d::UnitY(), FVector3d::UnitX(),
+			P.Width, EHFSurfaceRole::CounterStone))
+		{
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Edge);
 		}
 	}
 

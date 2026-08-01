@@ -10,6 +10,7 @@
 #include "Actors/HFFurnitureActors.h"
 #include "Actors/HFOpeningActor.h"
 #include "Actors/HFFanActor.h"
+#include "Actors/HFSanitaryActors.h"
 #include "Actors/HFWardrobeActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
@@ -289,6 +290,9 @@ namespace
 
 		/** The host's resolved yaw, by set-in fixture id. A hob set into a run turns WITH the run. */
 		TMap<FName, double> SurfaceYaw;
+
+		/** True when this fixture found a host to stand on at all. */
+		bool HasHost(const FName& Id) const { return SurfaceZ.Contains(Id) && SurfaceYaw.Contains(Id); }
 	};
 
 	struct FHFFixtureContext
@@ -567,6 +571,98 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	// -------------------------------------------------------------------------- the bathroom fittings
+	//
+	// SIX TYPES, ONE PLACEMENT RULE. A WC, a shower, a wall-hung basin, a geyser, a mirror and a towel
+	// rail are all bought to a fixed size and screwed to plaster, so every one of them is placed by
+	// FHFFixturePlacement::OnWallFace - back on the finished face, position along the wall and height
+	// exactly as drawn. Not one of them is scribed to a gap the way a run of joinery is.
+	//
+	// That is not a tidiness argument. The drawn depth positions in this flat are approximate by
+	// nature and two of them are badly wrong: both geysers are drawn with 107.5 mm of their back
+	// INSIDE W_Mid_Upper, and both mirrors hang 47.5 mm off the plaster. See OnWallFace.
+
+	void SeedWC(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFWCActor& Actor = static_cast<AHFWCActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	/**
+	 * A basin, which is the one fitting in the group that may or may not have something under it.
+	 *
+	 * BOTH BATHROOMS DRAW A "COUNTER BASIN" AND ONLY ONE OF THEM HAS A COUNTER. The master's sits on
+	 * the vanity at exactly the vanity's own centre; the common bathroom has no vanity at all, so the
+	 * same drawn box is a wall-hung basin and everything holding it up - the shroud over its trap - is
+	 * below the drawn box and outside it.
+	 *
+	 * Which it is cannot be answered by the basin, by its actor or by its generator: it is a question
+	 * about another fixture. So it is resolved here, in the one layer that can see both, exactly as
+	 * "which counter is this sink cut into" already is.
+	 */
+	void SeedBasin(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFBasinActor& Actor = static_cast<AHFBasinActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		const bool bOnAHost = C.SetIn != nullptr && C.SetIn->HasHost(C.Fixture->Id);
+
+		Actor.ApplyMount(bOnAHost ? EHFBasinMount::CounterTop : EHFBasinMount::WallHung);
+
+		if (bOnAHost)
+		{
+			// Levelled to what the vanity's stone actually came out at, not to the 800 the drawing
+			// gave it: that figure is a carcass plus a slab added up, and the slab's thickness is a
+			// figure this project owns. The same rule a sink's rim follows.
+			Actor.SetActorTransform(SetInPlacement(C));
+			return;
+		}
+
+		// Nothing under it, so it hangs on the wall - and the wall face is where its back goes.
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedShower(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFShowerActor& Actor = static_cast<AHFShowerActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedGeyser(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFGeyserActor& Actor = static_cast<AHFGeyserActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedMirror(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFMirrorActor& Actor = static_cast<AHFMirrorActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedTowelRail(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFTowelRailActor& Actor = static_cast<AHFTowelRailActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
 	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFFanActor& Actor = static_cast<AHFFanActor&>(Element);
@@ -630,6 +726,13 @@ namespace
 			{ EHFFixtureType::ShoeRack, AHFCasedGoodsActor::StaticClass(),
 				TEXT("Case"), &SeedCasedGoods },
 
+			// A VANITY IS A CASED GOOD, and it goes through the same actor and the same seeding as the
+			// five above it. What separates it from a kitchen base unit is that its stone top is part of
+			// the same object rather than a fixture of its own - which is a line in the recipe, not a
+			// difference this layer can see.
+			{ EHFFixtureType::Vanity, AHFCasedGoodsActor::StaticClass(),
+				TEXT("Case"), &SeedCasedGoods },
+
 			{ EHFFixtureType::Bed, AHFBedActor::StaticClass(),
 				TEXT("Bed"), &SeedBed },
 			{ EHFFixtureType::StudyTable, AHFDeskActor::StaticClass(),
@@ -644,6 +747,19 @@ namespace
 				TEXT("Hob"), &SeedHob },
 			{ EHFFixtureType::Chimney, AHFChimneyActor::StaticClass(),
 				TEXT("Chimney"), &SeedChimney },
+
+			{ EHFFixtureType::WC, AHFWCActor::StaticClass(),
+				TEXT("WC"), &SeedWC },
+			{ EHFFixtureType::Basin, AHFBasinActor::StaticClass(),
+				TEXT("Basin"), &SeedBasin },
+			{ EHFFixtureType::Shower, AHFShowerActor::StaticClass(),
+				TEXT("Shower"), &SeedShower },
+			{ EHFFixtureType::Geyser, AHFGeyserActor::StaticClass(),
+				TEXT("Geyser"), &SeedGeyser },
+			{ EHFFixtureType::Mirror, AHFMirrorActor::StaticClass(),
+				TEXT("Mirror"), &SeedMirror },
+			{ EHFFixtureType::TowelRail, AHFTowelRailActor::StaticClass(),
+				TEXT("TowelRail"), &SeedTowelRail },
 
 			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
 				TEXT("Fan"), &SeedCeilingFan },
@@ -666,10 +782,55 @@ namespace
 		return nullptr;
 	}
 
-	/** True for a fixture that is set INTO a worktop rather than standing on the floor. */
+	/** True for a fixture that stands ON another fixture's top rather than on the floor. */
 	bool IsSetIntoASurface(EHFFixtureType Type)
 	{
-		return Type == EHFFixtureType::Sink || Type == EHFFixtureType::Hob;
+		return Type == EHFFixtureType::Sink || Type == EHFFixtureType::Hob
+			|| Type == EHFFixtureType::Basin;
+	}
+
+	/**
+	 * True for a fixture that can carry another one on its top.
+	 *
+	 * A VANITY IS A HOST TOO, and it is a host of a different kind from a worktop: it carries its own
+	 * stone rather than having a separate CounterTop fixture over it. Both present a finished surface
+	 * at a height this project's figures decide, which is all "host" means here.
+	 */
+	bool IsSetInHost(EHFFixtureType Type)
+	{
+		return AHFCounterActor::Builds(Type) || Type == EHFFixtureType::Vanity;
+	}
+
+	/**
+	 * How far above the room floor a host's finished top comes out.
+	 *
+	 * Resolved from what is BUILT rather than from the drawn box, for both kinds of host and for the
+	 * same reason: a counter's slab thickness and a vanity's top are project figures, so a set-in
+	 * fixture placed at its own drawn BaseZ goes stale the moment either is edited.
+	 */
+	double HostTopZ(const FHFFixture& Host)
+	{
+		if (AHFCounterActor::Builds(Host.Type))
+		{
+			return AHFCounterActor::BuiltTopZ(Host);
+		}
+
+		// A cased good's stone is INSIDE its drawn height - see FHFCasedGoodsParams::TopThickness -
+		// so its finished surface is the run's own height, and a run with no top at all presents its
+		// top board at exactly the same place.
+		return Host.BaseZ + AHFCasedGoodsActor::ParamsFor(Host).Height;
+	}
+
+	/**
+	 * True when a set-in fixture drops THROUGH its host's top rather than standing on it.
+	 *
+	 * A sink and a hob are cut in; a counter basin is a vessel that stands on the stone with only its
+	 * waste through it. Cutting the basin's footprint out of the vanity would leave a 500 x 400 hole
+	 * with a bowl balanced over it and daylight round three of its sides.
+	 */
+	bool CutsThroughItsHost(EHFFixtureType Type)
+	{
+		return Type != EHFFixtureType::Basin;
 	}
 
 	/**
@@ -696,7 +857,7 @@ namespace
 
 			for (const FHFFixture& Host : Fixtures)
 			{
-				if (!AHFCounterActor::Builds(Host.Type) || Host.RoomId != SetIn.RoomId
+				if (!IsSetInHost(Host.Type) || Host.RoomId != SetIn.RoomId
 					|| !FHFFixturePlacement::FootprintContains(Host, SetIn.Position))
 				{
 					continue;
@@ -705,36 +866,38 @@ namespace
 				const FHFWall* HostWall = Spec.FindWall(Host.AnchorWallId);
 				const double HostYaw = FHFFixturePlacement::FacingYaw(Host, HostWall);
 
-				// Into the HOST's own frame: undo the host's yaw about its footprint centre, then
-				// measure from the front-left corner the host is set out from. Done here rather than
-				// inside the counter because only this layer knows both transforms.
-				const double Radians = FMath::DegreesToRadians(HostYaw);
-				const double C = FMath::Cos(Radians);
-				const double S = FMath::Sin(Radians);
+				if (CutsThroughItsHost(SetIn.Type))
+				{
+					// Into the HOST's own frame: undo the host's yaw about its footprint centre, then
+					// measure from the front-left corner the host is set out from. Done here rather than
+					// inside the counter because only this layer knows both transforms.
+					const double Radians = FMath::DegreesToRadians(HostYaw);
+					const double C = FMath::Cos(Radians);
+					const double S = FMath::Sin(Radians);
 
-				const FVector2D Delta = SetIn.Position - Host.Position;
-				const FVector2D InHost(Delta.X * C + Delta.Y * S, -Delta.X * S + Delta.Y * C);
+					const FVector2D Delta = SetIn.Position - Host.Position;
+					const FVector2D InHost(Delta.X * C + Delta.Y * S, -Delta.X * S + Delta.Y * C);
 
-				FHFCounterAperture Aperture;
-				Aperture.FixtureId = SetIn.Id;
-				Aperture.Centre = InHost + Host.Footprint * 0.5;
+					FHFCounterAperture Aperture;
+					Aperture.FixtureId = SetIn.Id;
+					Aperture.Centre = InHost + Host.Footprint * 0.5;
 
-				// THE HOLE IS SMALLER THAN THE APPLIANCE. Both of these sit on a rim that laps the cut
-				// edge, and cutting the footprint itself would leave the appliance resting on nothing
-				// with a slot of daylight all round it.
-				const double Lap = AHFCounterActor::RimLapFor(SetIn.Type);
-				Aperture.Size = FVector2D(
-					FMath::Max(SetIn.Footprint.X - 2.0 * Lap, 0.0),
-					FMath::Max(SetIn.Footprint.Y - 2.0 * Lap, 0.0));
+					// THE HOLE IS SMALLER THAN THE APPLIANCE. Both of these sit on a rim that laps the
+					// cut edge, and cutting the footprint itself would leave the appliance resting on
+					// nothing with a slot of daylight all round it.
+					const double Lap = AHFCounterActor::RimLapFor(SetIn.Type);
+					Aperture.Size = FVector2D(
+						FMath::Max(SetIn.Footprint.X - 2.0 * Lap, 0.0),
+						FMath::Max(SetIn.Footprint.Y - 2.0 * Lap, 0.0));
 
-				Out.AperturesByHost.FindOrAdd(Host.Id).Add(Aperture);
+					Out.AperturesByHost.FindOrAdd(Host.Id).Add(Aperture);
+				}
 
-				// Where the appliance's own rim goes, resolved from what is BUILT rather than from
+				// Where the fitting's own datum goes, resolved from what is BUILT rather than from
 				// the BaseZ the drawing gave it: that figure was arrived at by adding up a carcass, a
 				// plinth and a slab, and it goes stale the moment any of the three changes.
 				const FHFRoom* Room = Spec.FindRoom(Host.RoomId);
-				Out.SurfaceZ.Add(SetIn.Id,
-					(Room != nullptr ? Room->FloorZ : 0.0) + AHFCounterActor::BuiltTopZ(Host));
+				Out.SurfaceZ.Add(SetIn.Id, (Room != nullptr ? Room->FloorZ : 0.0) + HostTopZ(Host));
 
 				// And turned WITH the host. A hob set square to the drawing, in a run turned through a
 				// right angle, is a hob across the run.
@@ -1460,6 +1623,15 @@ TArray<FHFFixture> AHFHouseActor::ResolveFixtures(TArray<FString>* OutMoved) con
 			// matter, and that is exactly why it is supplied: the answer must not depend on the room
 			// happening to be tall.
 			BuiltHeights.Add(Fixture.Id, AHFBedActor::ParamsFor(Fixture).BuiltHeight());
+		}
+		else if (AHFWCActor::Builds(Fixture.Type))
+		{
+			// A WC DRAWN 400 HIGH STANDS 764, and the difference is its cistern. The drawn figure is
+			// the SEAT, because that is what a plan dimensions a WC by and what has to agree with the
+			// rest of the room - so the drawn box is barely half the object every single time. As with
+			// the bed, nothing in this flat has a ceiling low enough for it to matter, and that is
+			// exactly why it is supplied: the answer must not depend on the room happening to be tall.
+			BuiltHeights.Add(Fixture.Id, AHFWCActor::ParamsFor(Fixture).BuiltHeight());
 		}
 		else if (AHFCasedGoodsActor::Builds(Fixture.Type))
 		{

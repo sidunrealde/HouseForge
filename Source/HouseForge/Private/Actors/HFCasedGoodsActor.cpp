@@ -226,6 +226,39 @@ namespace
 			}
 			break;
 
+		case EHFFixtureType::Vanity:
+			// ------------------------------------------------------------------ a bathroom vanity
+			//
+			// ## On a plinth, not wall-hung, and that is a real decision with a consequence
+			//
+			// Both are built. A wall-hung vanity has the skirting running UNDERNEATH it and a
+			// plinth-mounted one is scribed into it, and FHFSkirting::IsScribedJoinery already answers
+			// true for Vanity - so building this wall-hung would take 900 mm out of the master
+			// bathroom's skirting and leave nothing standing in the gap. That is precisely the failure
+			// BuiltFixtureIds exists to prevent, reached from the other side.
+			//
+			// The drawing decides it anyway: the vanity is drawn from the floor to 800, which is a unit
+			// standing on the floor. A wall-hung one would have been drawn with a base above it.
+			P.Mount = EHFCaseMount::Plinth;
+
+			// A STONE TOP, AND IT COMES OUT OF THE 800 RATHER THAN STANDING ON IT. The drawn height of
+			// a vanity is the height of its working surface, because that is what the basin, the tap
+			// and the mirror above are all set out from - see FHFCasedGoodsParams::TopThickness. Built
+			// above the 800 instead, the counter basin resolved onto this top would sit 20 mm high and
+			// the mirror would be 20 mm closer to it than the drawing said.
+			// 18 mm of stone on 12 mm of ply, which is what a vanity top is built up from - and thin
+			// enough that it found a real fault in FHFCounterKit's bullnose, where the two eased arrises
+			// met in the middle of the slab and the boolean gave up and left the edge square.
+			P.TopThickness = 3.0;
+			P.TopEdge = EHFCounterEdge::Bullnose;
+
+			// No upstand. A vanity in a fully tiled wet room has tiling behind it, not a stone
+			// splashback, and an upstand here would stand in front of the tile as a second skirting.
+			P.TopUpstandHeight = 0.0;
+
+			ComposeBays(Unit, Spec, Spec.ShutterMotion, EHFShelfMaterial::Ply, bBankAtStart);
+			break;
+
 		default:
 			P.Mount = EHFCaseMount::Plinth;
 			ComposeBays(Unit, Spec, Spec.ShutterMotion, EHFShelfMaterial::Ply, bBankAtStart);
@@ -246,12 +279,17 @@ bool AHFCasedGoodsActor::Builds(EHFFixtureType Type)
 	case EHFFixtureType::TVUnit:
 	case EHFFixtureType::Nightstand:
 	case EHFFixtureType::ShoeRack:
+
+	// Landed with the sanitary group, and it is a cased good like the rest of them: a carcass divided
+	// into bays, on a plinth, with a stone top. The only thing that separates it from a kitchen base
+	// unit is that its top is part of the same object rather than a fixture of its own.
+	case EHFFixtureType::Vanity:
 		return true;
 
 	default:
-		// The vanity lands with the sanitary group. A study table is deliberately NOT here: it is a
-		// top on legs with a pedestal under one end, and a stack of carcasses cannot express the
-		// knee space that makes it a desk rather than a sideboard. See FHFDeskKit.
+		// A study table is deliberately NOT here: it is a top on legs with a pedestal under one end,
+		// and a stack of carcasses cannot express the knee space that makes it a desk rather than a
+		// sideboard. See FHFDeskKit.
 		return false;
 	}
 }

@@ -16,6 +16,16 @@ namespace
 	/** Below this a unit in a stack is not a box, it is a gap. */
 	constexpr double MinUnitHeight = 1.0;
 
+	/**
+	 * How far a stone top stands proud of the shutter face it covers.
+	 *
+	 * A slab flush with the doors is a slab you cannot see the edge of, and the drip that runs off it
+	 * runs straight down the door faces. 20-30 mm is what a fabricator leaves, and the figure is here
+	 * rather than on the params because it is a property of the JOINT between stone and joinery,
+	 * exactly as FHFCounterKit::ApertureRimLap is a property of the joint between stone and appliance.
+	 */
+	constexpr double TopOversail = 2.0;
+
 	/** Placing a mesh in unit space. Translation only; nothing here is ever mirrored. */
 	FDynamicMesh3 Placed(FDynamicMesh3&& Mesh, const FVector& Where)
 	{
@@ -123,6 +133,12 @@ FHFCasedGoodsParams FHFCasedGoodsKit::Sanitise(const FHFCasedGoodsParams& Params
 	P.Height = FMath::Max(P.Height, 0.0);
 	P.CorniceHeight = FMath::Max(P.CorniceHeight, 0.0);
 
+	// The top comes OUT of the run's height rather than being added to it - see
+	// FHFCasedGoodsParams::TopThickness - so it may not take more of the height than there is. Clamped
+	// to half, because a slab thicker than the carcass under it is not a run with a top on it.
+	P.TopThickness = FMath::Clamp(P.TopThickness, 0.0, P.Height * 0.5);
+	P.TopUpstandHeight = FMath::Max(P.TopUpstandHeight, 0.0);
+
 	// A WALL-HUNG UNIT HAS NOTHING UNDER IT, and that is not the same as a plinth of zero height: the
 	// skirting runs underneath one and dies into the other. Cleared here so a caller that set both
 	// cannot end up with a toe kick hanging in the air at 1400 above the floor.
@@ -202,9 +218,21 @@ FHFCasedGoodsParams FHFCasedGoodsKit::Sanitise(const FHFCasedGoodsParams& Params
 		{
 			Unit.Bays.Add(FHFCaseBay());
 		}
-		while (Unit.Bays.Num() < Unit.BayCount)
+		// COPIED OUT OF THE ARRAY BEFORE ANYTHING IS ADDED TO IT. Add(Bays.Last()) hands TArray a
+		// reference INTO its own storage: if the append reallocates, the element is read from a buffer
+		// that has just been freed, and the padded bays come out as whatever is now at that address.
+		// UE 5.8 checks for it and fails the assertion outright, which is how this was found - by a
+		// bare parameter struct that stated fewer bays than the module width divides the run into.
+		//
+		// Every fixture in the flat happens to state exactly as many bays as it has, so nothing has
+		// ever reached this loop; it would have fired the first time anybody hand-edited a bay list.
+		if (Unit.Bays.Num() < Unit.BayCount)
 		{
-			Unit.Bays.Add(Unit.Bays.Last());
+			const FHFCaseBay Pattern = Unit.Bays.Last();
+			while (Unit.Bays.Num() < Unit.BayCount)
+			{
+				Unit.Bays.Add(Pattern);
+			}
 		}
 		Unit.Bays.SetNum(Unit.BayCount);
 
@@ -280,6 +308,7 @@ FHFCasedGoodsBuild FHFCasedGoodsKit::Build(const FHFCasedGoodsParams& Params)
 	FHFMeshOps::InitialiseMesh(Out.Plinth);
 	FHFMeshOps::InitialiseMesh(Out.Cornice);
 	FHFMeshOps::InitialiseMesh(Out.Interior);
+	FHFMeshOps::InitialiseMesh(Out.Top);
 
 	const FHFCasedGoodsParams P = Sanitise(Params);
 	Out.Used = P;
@@ -554,6 +583,38 @@ FHFCasedGoodsBuild FHFCasedGoodsKit::Build(const FHFCasedGoodsParams& Params)
 		FHFMeshOps::ApplyWorldScaleUVs(Out.Cornice);
 	}
 
+	// ---------------------------------------------------------------------------------------- top
+	//
+	// After the fronts, for exactly the reason the plinth is: the OVERHANG is measured past the
+	// shutter face and not past the carcass, and that face is not known until the leaves have been set
+	// out. A slab flush with the carcass finishes BEHIND the doors it covers, which is the one
+	// arrangement that exists nowhere and reads as wrong immediately - see FHFCounterParams::Overhang,
+	// where the same figure is resolved for a kitchen worktop by the composing layer.
+	//
+	// Here it is resolved inside the kit rather than handed in, and that is not an inconsistency: a
+	// worktop is its OWN fixture over somebody else's carcasses, so only the composing layer can see
+	// both; a vanity's top is part of the same object as the carcass under it, and this function is
+	// already holding the shutter face it needs.
+
+	if (P.TopThickness > 0.0)
+	{
+		Out.TopParams.Width = P.Width;
+		Out.TopParams.Depth = P.Depth;
+		Out.TopParams.Thickness = P.TopThickness;
+		Out.TopParams.Overhang = -Out.ShutterFaceY + TopOversail;
+		Out.TopParams.UpstandHeight = P.TopUpstandHeight;
+		Out.TopParams.Edge = P.TopEdge;
+
+		FHFCounterBuild TopBuild = FHFCounterKit::Build(Out.TopParams);
+		Out.TopParams = TopBuild.Used;
+
+		if (TopBuild.bValid)
+		{
+			MeshTransforms::Translate(TopBuild.Shell, FVector3d(0.0, 0.0, P.TopBottomZ()));
+			Out.Top = MoveTemp(TopBuild.Shell);
+		}
+	}
+
 	// -------------------------------------------------------------------------------------- shell
 
 	for (const FDynamicMesh3& Carcass : Out.Carcasses)
@@ -563,6 +624,7 @@ FHFCasedGoodsBuild FHFCasedGoodsKit::Build(const FHFCasedGoodsParams& Params)
 	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.Interior);
 	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.Plinth);
 	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.Cornice);
+	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.Top);
 
 	Out.bValid = Out.Shell.TriangleCount() > 0;
 	return Out;

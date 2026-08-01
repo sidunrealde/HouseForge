@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "Geometry/HFCounterKit.h"
 #include "Geometry/HFJoineryKit.h"
 #include "Model/HFArticulation.h"
 #include "Model/HFBuildDefaults.h"
@@ -273,6 +274,38 @@ struct HOUSEFORGE_API FHFCasedGoodsParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
 	double CorniceHeight = 0.0;
 
+	/**
+	 * A stone top on the run. Zero for none, which is every cased good in the kitchen and the bedroom.
+	 *
+	 * ## Why this is INSIDE Height and a cornice is not
+	 *
+	 * They are opposite kinds of thing, and the difference is what a drawing means by the figure it
+	 * gives. A cornice is a MOULDING STUCK ON TOP of a finished run - restyle it or take it off and
+	 * the run is still the height it was drawn - so it stands above Height and BuiltHeight adds it. A
+	 * top is a WORKING SURFACE, and the height a vanity is drawn at IS the height of that surface,
+	 * because that is the figure a basin, a tap and a mirror are all set out from. Built above Height
+	 * instead, a vanity drawn 800 would present its stone at 830 and the basin resolved onto it would
+	 * float 30 mm over the china below it.
+	 *
+	 * So the carcass stack loses the top's thickness rather than the run gaining it - see StackHeight.
+	 *
+	 * ## Why the counter kit rather than a board
+	 *
+	 * Because it is the same object. A vanity top and a kitchen worktop are both a slab with a worked
+	 * front edge and an upstand at the wall, and the kitchen's already exists with its own tests; a
+	 * second one here would be a second answer to a solved question. See FHFCounterParams.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double TopThickness = 0.0;
+
+	/** How the top's front edge is worked. Ignored with no top. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions")
+	EHFCounterEdge TopEdge = EHFCounterEdge::Bullnose;
+
+	/** Splashback standing on the top at the wall. Zero for none. Ignored with no top. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double TopUpstandHeight = 0.0;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Front")
 	EHFHandleStyle HandleStyle = EHFHandleStyle::Bar;
 
@@ -298,8 +331,11 @@ struct HOUSEFORGE_API FHFCasedGoodsParams
 	/** Underside of the bottom carcass. */
 	double BodyBottomZ() const { return MountHeight(); }
 
-	/** Height available to the whole stack of carcasses. */
-	double StackHeight() const { return Height - MountHeight(); }
+	/** Height available to the whole stack of carcasses: what the mount and the top have left. */
+	double StackHeight() const { return Height - MountHeight() - FMath::Max(TopThickness, 0.0); }
+
+	/** Underside of the top slab, which is the top of the carcass stack. */
+	double TopBottomZ() const { return Height - FMath::Max(TopThickness, 0.0); }
 
 	/**
 	 * Overall height of what is actually BUILT, cornice included.
@@ -333,6 +369,9 @@ struct HOUSEFORGE_API FHFCasedGoodsBuild
 	UE::Geometry::FDynamicMesh3 Plinth;
 	UE::Geometry::FDynamicMesh3 Cornice;
 
+	/** The stone top, where there is one, already placed in unit space. */
+	UE::Geometry::FDynamicMesh3 Top;
+
 	/** One per unit of the stack, bottom-up, already placed in unit space. */
 	TArray<UE::Geometry::FDynamicMesh3> Carcasses;
 
@@ -347,6 +386,9 @@ struct HOUSEFORGE_API FHFCasedGoodsBuild
 
 	FHFPlinthParams PlinthParams;
 	FHFCorniceParams CorniceParams;
+
+	/** What the top was actually cut from, empty-width where there is no top. */
+	FHFCounterParams TopParams;
 
 	/** Where the outermost closed front's face sits, in unit space. Negative. */
 	double ShutterFaceY = 0.0;

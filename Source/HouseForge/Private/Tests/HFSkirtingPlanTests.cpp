@@ -636,6 +636,17 @@ bool FHFSkirtingUnbuiltJoineryTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
+		// A ROOM WITH NO SKIRTING HAS NO BOARD TO INTERRUPT, and both bathrooms are exactly that -
+		// tiled to the ceiling, SkirtingHeight zero, so the resolver never reaches its scribed-joinery
+		// pass at all. The master bathroom's vanity is scribed joinery and IS built, and it still
+		// cannot appear in this set; asking it to would be asking for a break in a board that was
+		// never specified, which is the mirror image of the missing board this test exists to catch.
+		const FHFRoom* Room = Spec.FindRoom(Fixture.RoomId);
+		if (Room == nullptr || Room->SkirtingHeight <= 0.0)
+		{
+			continue;
+		}
+
 		TestTrue(*FString::Printf(TEXT("%s is scribed joinery and is really built"),
 			*Fixture.Id.ToString()), AHFHouseActor::BuildsGeometryFor(Fixture.Type));
 

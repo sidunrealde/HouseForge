@@ -142,6 +142,50 @@ public:
 		double SweepLength, EHFSurfaceRole Role);
 
 	/**
+	 * Skins a stack of horizontal sections into a solid: a loft.
+	 *
+	 * THE PRIMITIVE SANITARYWARE NEEDS AND NOTHING ELSE IN THE KIT COULD GIVE IT. A prism is one
+	 * section swept, which is a box; a revolve is one profile turned, which is round about an axis. A
+	 * WC pan and a wash basin are neither: they are a rounded rectangle at the rim drawing in, and
+	 * usually also FORWARD, to a smaller one at the foot, and there is no axis anything is symmetric
+	 * about. Built as a prism a pan is a bucket, and built as a revolve it is a bowl on a bollard;
+	 * both read as a placeholder at any distance a person actually stands from a WC.
+	 *
+	 * Sections are joined by INDEX, so all of them must carry the same number of points and each
+	 * point must be the same feature of the outline in every one - which is easy to hold to when the
+	 * outlines come from one generator at different sizes, and is why this takes rings rather than a
+	 * profile and a rule. Winding is normalised on the first section and the SAME reversal is applied
+	 * to all of them, because reversing one alone would twist the skin into a bow tie whose volume is
+	 * still positive and whose silhouette is still right from one side.
+	 *
+	 * @param Sections  Two or more closed loops, bottom-up, all of the same length.
+	 * @param SectionZ  Height of each section. Must be non-decreasing, one per section.
+	 * @param bCapBottom Close the bottom. Off for a form that another solid closes.
+	 * @param bCapTop    Close the top.
+	 * @return false if the sections do not describe a loftable solid, with nothing appended.
+	 */
+	static bool AppendLoft(UE::Geometry::FDynamicMesh3& Mesh, const TArray<TArray<FVector2D>>& Sections,
+		const TArray<double>& SectionZ, bool bCapBottom, bool bCapTop, EHFSurfaceRole Role);
+
+	/**
+	 * A closed rounded rectangle in plan, counter-clockwise, at a fixed vertex count.
+	 *
+	 * Public because a loft's sections have to correspond point for point, and the only reliable way
+	 * to guarantee that is for every ring to come out of one function at one step count. Sanitaryware
+	 * is the caller: a pressed or cast ceramic form has no square corners anywhere, because neither
+	 * pressing nor slip casting can make one, and the corner radius is the first thing the eye picks
+	 * up when light runs round the inside of a bowl.
+	 *
+	 * The radius is clamped to what the half-extents can carry, and a zero radius still emits the same
+	 * number of points - repeated at the corner - so a ring with square corners can be lofted to a
+	 * rounded one without the correspondence breaking.
+	 *
+	 * @param CornerSteps Segments each quarter-turn is drawn in. The ring is 4 * (CornerSteps + 1) long.
+	 */
+	static TArray<FVector2D> RoundedRectangle(const FVector2D& Centre, const FVector2D& HalfExtents,
+		double CornerRadius, int32 CornerSteps = 4);
+
+	/**
 	 * Revolves a profile about an axis and appends the resulting solid.
 	 *
 	 * Profile points are (distance along the axis from Origin, radius). A zero radius at either end

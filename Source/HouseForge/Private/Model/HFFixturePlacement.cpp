@@ -55,6 +55,61 @@ FTransform FHFFixturePlacement::OnSurface(const FHFFixture& Fixture, double Surf
 		FVector(Fixture.Position.X, Fixture.Position.Y, SurfaceZ));
 }
 
+double FHFFixturePlacement::WallFaceCorrection(const FHFFixture& Fixture, const FHFWall* AnchorWall)
+{
+	if (AnchorWall == nullptr)
+	{
+		return 0.0;
+	}
+
+	// Which way the back of the fitting looks once it has been turned to face the room. The same
+	// (-sin, cos) as FacingYaw, read at the yaw FacingYaw settled on rather than at the drawn one -
+	// a fitting the half turn caught has its back where the half turn left it.
+	const double Radians = FMath::DegreesToRadians(FacingYaw(Fixture, AnchorWall));
+	const FVector2D Back(-FMath::Sin(Radians), FMath::Cos(Radians));
+
+	// The finished face on THIS fitting's side of the wall, not the centreline. Which side is decided
+	// by where the fitting is: a partition has a face in each room and both are real.
+	const FVector2D OnCentreline =
+		FMath::ClosestPointOnSegment2D(Fixture.Position, AnchorWall->Start, AnchorWall->End);
+
+	FVector2D ToFixture = Fixture.Position - OnCentreline;
+	if (ToFixture.IsNearlyZero())
+	{
+		// Dead on the centreline, which is a fixture drawn inside its own wall. The back direction is
+		// the only side information left, and it points at the face this fitting hangs on.
+		ToFixture = -Back;
+	}
+
+	const FVector2D Face = OnCentreline + ToFixture.GetSafeNormal() * (AnchorWall->Thickness * 0.5);
+
+	// The fitting's own back plane, at the drawn position, and how far past the plaster it is.
+	const FVector2D BackPoint = Fixture.Position + Back * (Fixture.Footprint.Y * 0.5);
+
+	return FVector2D::DotProduct(BackPoint - Face, Back);
+}
+
+FTransform FHFFixturePlacement::OnWallFace(const FHFFixture& Fixture, double FloorZ,
+	const FHFWall* AnchorWall)
+{
+	if (AnchorWall == nullptr)
+	{
+		return FreeStanding(Fixture, FloorZ);
+	}
+
+	const double Yaw = FacingYaw(Fixture, AnchorWall);
+	const double Radians = FMath::DegreesToRadians(Yaw);
+	const FVector2D Back(-FMath::Sin(Radians), FMath::Cos(Radians));
+
+	// ALONG ITS OWN BACK DIRECTION AND NOWHERE ELSE. The drawing's position along the wall is a real
+	// decision - a mirror is over the basin, a geyser over the shower - and sliding sideways to
+	// satisfy a face would move the fitting off the thing it belongs to. Only the depth is corrected.
+	const FVector2D Corrected = Fixture.Position - Back * WallFaceCorrection(Fixture, AnchorWall);
+
+	return FTransform(FRotator(0.0, Yaw, 0.0),
+		FVector(Corrected.X, Corrected.Y, FloorZ + Fixture.BaseZ));
+}
+
 bool FHFFixturePlacement::FootprintContains(const FHFFixture& Fixture, const FVector2D& Point, double Margin)
 {
 	const double Radians = FMath::DegreesToRadians(Fixture.RotationDegrees);

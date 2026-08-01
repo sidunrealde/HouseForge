@@ -871,16 +871,36 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// mirrored about its own door when the band was re-cut - the WC that used to sit at the far
 		// end from the doorway ended up beside the hinge without moving relative to the room.
 		//
-		// 2900 puts it 360 clear of the arc, with the basin 235 west of it and the shower north.
-		B.AddFixture(TEXT("F_CBath_WC"), TEXT("R_CBath"), EHFFixtureType::WC,
+		// --------------------------------------------------- why every fitting in here names a wall
+		//
+		// NONE OF THEM DID, and all of them are bolted to one. A WC's soil connection, a shower's
+		// riser, a basin's brackets and a geyser's straps are all in a particular wall, and until each
+		// of these said which, the geometry had nothing to orient against: a WC placed off its drawn
+		// yaw alone is a one-in-two chance of facing the wall, and there is no half turn to resolve
+		// without an anchor. The anchor also drives FHFFixturePlacement::OnWallFace, which is what
+		// puts each fitting's back on the finished face instead of on the centreline the plan drew it
+		// against - see the geysers below, which are drawn 107.5 mm inside the masonry.
+		//
+		// It moves nothing in plan along the wall and it changes no room area.
+		FHFFixture& CBathWC = B.AddFixture(TEXT("F_CBath_WC"), TEXT("R_CBath"), EHFFixtureType::WC,
 			TEXT("Wall-hung WC"), FVector2D(2900.0, 3960.0), FVector2D(380.0, 600.0), 400.0);
-		B.AddFixture(TEXT("F_CBath_Basin"), TEXT("R_CBath"), EHFFixtureType::Basin,
-			TEXT("Counter basin"), FVector2D(2200.0, 3900.0), FVector2D(550.0, 450.0), 200.0, 0.0, 800.0);
+		CBathWC.AnchorWallId = TEXT("W_Mid_Lower");
+
+		// NO VANITY IN THIS ROOM, which is what makes this one a wall-hung basin where the master's is
+		// a vessel on a counter - same drawn box, two different fittings. The composing layer works
+		// that out from what is standing under it; see AHFBasinActor.
+		FHFFixture& CBathBasin = B.AddFixture(TEXT("F_CBath_Basin"), TEXT("R_CBath"),
+			EHFFixtureType::Basin, TEXT("Counter basin"), FVector2D(2200.0, 3900.0),
+			FVector2D(550.0, 450.0), 200.0, 0.0, 800.0);
+		CBathBasin.AnchorWallId = TEXT("W_Mid_Lower");
+
 		// The service band runs Y 3600..5400, so a 900-deep shower must centre at 4900 to keep
 		// its far edge at 5350 rather than pushing through the partition. 2900 rather than the
 		// room's centre at 3000 leaves 100 clear of D_CBath's leaf tip at 3450.
-		B.AddFixture(TEXT("F_CBath_Shower"), TEXT("R_CBath"), EHFFixtureType::Shower,
-			TEXT("Shower area"), FVector2D(2900.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
+		FHFFixture& CBathShower = B.AddFixture(TEXT("F_CBath_Shower"), TEXT("R_CBath"),
+			EHFFixtureType::Shower, TEXT("Shower area"), FVector2D(2900.0, 4900.0),
+			FVector2D(900.0, 900.0), 2100.0);
+		CBathShower.AnchorWallId = TEXT("W_Mid_Upper");
 
 		// Master bath, X 8100..10800 clear 8157.5..10685, Y 3600..5400 clear 3657.5..5342.5. Two
 		// doors: D_MBath in the north wall at X 9200..9950, and D_BalcE in the east wall at
@@ -894,8 +914,10 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		//
 		// So the shower goes to the WEST end, which moving D_MBath east has now freed, and the two
 		// doors face each other across an open floor instead of fighting over one corner.
-		B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"), EHFFixtureType::Shower,
-			TEXT("Shower area"), FVector2D(8610.0, 4890.0), FVector2D(900.0, 900.0), 2100.0);
+		FHFFixture& MBathShower = B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"),
+			EHFFixtureType::Shower, TEXT("Shower area"), FVector2D(8610.0, 4890.0),
+			FVector2D(900.0, 900.0), 2100.0);
+		MBathShower.AnchorWallId = TEXT("W_Mid_Upper");
 
 		FHFFixture& Vanity = B.AddFixture(TEXT("F_MBath_Vanity"), TEXT("R_MBath"), EHFFixtureType::Vanity,
 			TEXT("Vanity unit"), FVector2D(8700.0, 3910.0), FVector2D(900.0, 500.0), 800.0);
@@ -904,13 +926,20 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Vanity.Params.DrawerCount = 1;
 		Vanity.Params.HandleStyle = EHFHandleStyle::Knob;
 
-		B.AddFixture(TEXT("F_MBath_Basin"), TEXT("R_MBath"), EHFFixtureType::Basin,
-			TEXT("Counter basin"), FVector2D(8700.0, 3910.0), FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
+		// AT EXACTLY THE VANITY'S OWN CENTRE, which is what makes this one a vessel basin standing on
+		// the vanity's stone rather than a wall-hung one: BaseZ 800 is the vanity's top and the 180 is
+		// how far the bowl stands above it. The composing layer matches the two by footprint, the same
+		// way it matches a sink to the counter it is cut into.
+		FHFFixture& MBathBasin = B.AddFixture(TEXT("F_MBath_Basin"), TEXT("R_MBath"),
+			EHFFixtureType::Basin, TEXT("Counter basin"), FVector2D(8700.0, 3910.0),
+			FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
+		MBathBasin.AnchorWallId = TEXT("W_Mid_Lower");
 
 		// On the south wall between the vanity and the balcony door's approach, 350 clear of the one
 		// and 55 clear of the other.
-		B.AddFixture(TEXT("F_MBath_WC"), TEXT("R_MBath"), EHFFixtureType::WC,
+		FHFFixture& MBathWC = B.AddFixture(TEXT("F_MBath_WC"), TEXT("R_MBath"), EHFFixtureType::WC,
 			TEXT("Wall-hung WC"), FVector2D(9690.0, 3960.0), FVector2D(380.0, 600.0), 400.0);
+		MBathWC.AnchorWallId = TEXT("W_Mid_Lower");
 	}
 
 	// Utility, off the kitchen, with the machine under its own window and against the outside wall

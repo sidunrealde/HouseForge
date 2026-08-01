@@ -133,6 +133,75 @@ struct HOUSEFORGE_API FHFChimneyParams
 	bool IsValid() const { return Width > 0.0 && Depth > 0.0 && CanopyHeight > 0.0; }
 };
 
+/**
+ * A storage water heater: a horizontal pressure vessel on wall brackets, high up in a bathroom.
+ *
+ * ## Frame
+ *
+ * Centimetres, origin at the CENTRE of the drawn footprint at the BOTTOM of the drawn box, +Y back
+ * towards the wall. The centre rather than a corner because a geyser is a bought cylinder hung on
+ * two brackets and is set out from its own middle, not scribed to anything.
+ *
+ * ## Round, and it has to be
+ *
+ * A geyser is a welded steel cylinder inside a moulded shell, and the shell is the shape of the
+ * cylinder. There is no version of this that reads correctly as a box: it is the one fitting in a
+ * bathroom whose silhouette is entirely its curvature, it hangs at 2100 where it is seen against the
+ * ceiling from every part of the room, and a rectangular one is the loudest possible statement that
+ * nobody modelled it.
+ *
+ * The DIAMETER is derived rather than declared - the largest cylinder the drawn box can hold - so a
+ * drawing that gave a 450 x 400 x 450 box gets a 400 vessel with its brackets in the difference,
+ * which is what a 25 litre horizontal geyser actually is.
+ *
+ * ## What moves
+ *
+ * The thermostat dial on its end cap. Small, and a real control that a person turns.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFGeyserParams
+{
+	GENERATED_BODY()
+
+	/** Along the wall, which is the cylinder's own axis. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Length = 45.0;
+
+	/** Out from the wall. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Depth = 40.0;
+
+	/** Overall height of the drawn box, brackets included. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Height = 45.0;
+
+	/** Thickness of the plate the vessel is strapped to the wall on. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double BracketThickness = 1.6;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double DialRadius = 2.2;
+
+	/** How far the thermostat turns from cold to hot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double DialSweepDegrees = 270.0;
+
+	/** Inlet and outlet, dropping out of the underside. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double PipeRadius = 0.85;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double PipeDrop = 9.0;
+
+	/** The largest vessel the drawn box will hold, once the brackets have had their share. */
+	double VesselDiameter() const
+	{
+		return FMath::Max(FMath::Min(Depth - BracketThickness, Height), 0.0);
+	}
+
+	bool IsValid() const { return Length > 0.0 && VesselDiameter() > 0.0; }
+};
+
 /** A composed appliance. Plain data carrying meshes by value. */
 struct HOUSEFORGE_API FHFApplianceBuild
 {
@@ -152,6 +221,7 @@ class HOUSEFORGE_API FHFApplianceKit
 public:
 	static FHFHobParams SanitiseHob(const FHFHobParams& Params);
 	static FHFChimneyParams SanitiseChimney(const FHFChimneyParams& Params);
+	static FHFGeyserParams SanitiseGeyser(const FHFGeyserParams& Params);
 
 	/** Glass, burners, grates, body, and a part per knob. */
 	static FHFApplianceBuild BuildHob(const FHFHobParams& Params);
@@ -159,9 +229,15 @@ public:
 	/** Canopy, duct, and the baffle filter as its own part. */
 	static FHFApplianceBuild BuildChimney(const FHFChimneyParams& Params);
 
+	/** Vessel, end caps, wall bracket, pipework, and the thermostat dial as its own part. */
+	static FHFApplianceBuild BuildGeyser(const FHFGeyserParams& Params);
+
 	/** Part id of a hob knob, left to right. */
 	static FName KnobPartId(int32 Index);
 
 	/** Part id of the chimney's baffle filter. */
 	static FName FilterPartId() { return TEXT("Filter"); }
+
+	/** Part id of the geyser's thermostat dial. */
+	static FName ThermostatPartId() { return TEXT("Thermostat"); }
 };

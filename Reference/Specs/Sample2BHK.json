@@ -2990,7 +2990,7 @@
 			},
 			"height": 400,
 			"baseZ": 0,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3028,7 +3028,7 @@
 			},
 			"height": 200,
 			"baseZ": 800,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3066,7 +3066,7 @@
 			},
 			"height": 2100,
 			"baseZ": 0,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Upper",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3104,7 +3104,7 @@
 			},
 			"height": 2100,
 			"baseZ": 0,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Upper",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3180,7 +3180,7 @@
 			},
 			"height": 180,
 			"baseZ": 800,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3218,7 +3218,7 @@
 			},
 			"height": 400,
 			"baseZ": 0,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
 				"shutterCount": 0,

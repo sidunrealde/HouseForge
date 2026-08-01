@@ -722,6 +722,171 @@ bool FHFMeshOps::AppendPrismWithHoles(FDynamicMesh3& Mesh, const TArray<FVector2
 	return true;
 }
 
+TArray<FVector2D> FHFMeshOps::RoundedRectangle(const FVector2D& Centre, const FVector2D& HalfExtents,
+	double CornerRadius, int32 CornerSteps)
+{
+	const int32 Steps = FMath::Max(CornerSteps, 0);
+	const FVector2D Half(FMath::Max(HalfExtents.X, 0.0), FMath::Max(HalfExtents.Y, 0.0));
+	const double R = FMath::Clamp(CornerRadius, 0.0, FMath::Min(Half.X, Half.Y));
+
+	TArray<FVector2D> Out;
+	Out.Reserve(4 * (Steps + 1));
+
+	// Corner centres, counter-clockwise from the front-left. At a zero radius all four collapse onto
+	// the rectangle's own corners and every step of the arc lands on the same point - which is a
+	// degenerate edge and NOT a degenerate face, so a triangulator drops it and a loft skinning a
+	// square ring to a rounded one keeps its point correspondence. That is the whole reason the count
+	// is fixed rather than reduced when there is no radius to draw.
+	const FVector2D Corners[4] = {
+		Centre + FVector2D(-(Half.X - R), -(Half.Y - R)),
+		Centre + FVector2D(Half.X - R, -(Half.Y - R)),
+		Centre + FVector2D(Half.X - R, Half.Y - R),
+		Centre + FVector2D(-(Half.X - R), Half.Y - R)
+	};
+
+	for (int32 Corner = 0; Corner < 4; ++Corner)
+	{
+		const double Start = -HALF_PI + Corner * HALF_PI;
+
+		for (int32 Step = 0; Step <= Steps; ++Step)
+		{
+			const double Angle = Steps > 0
+				? Start + HALF_PI * static_cast<double>(Step) / static_cast<double>(Steps)
+				: Start;
+			Out.Add(Corners[Corner] + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * R);
+		}
+	}
+
+	return Out;
+}
+
+bool FHFMeshOps::AppendLoft(FDynamicMesh3& Mesh, const TArray<TArray<FVector2D>>& Sections,
+	const TArray<double>& SectionZ, bool bCapBottom, bool bCapTop, EHFSurfaceRole Role)
+{
+	if (Sections.Num() < 2 || Sections.Num() != SectionZ.Num())
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Loft not built: %d sections against %d heights; no geometry emitted."),
+			Sections.Num(), SectionZ.Num());
+		return false;
+	}
+
+	const int32 Ring = Sections[0].Num();
+	if (Ring < 3)
+	{
+		return false;
+	}
+
+	for (int32 Index = 0; Index < Sections.Num(); ++Index)
+	{
+		if (Sections[Index].Num() != Ring)
+		{
+			// Refused rather than resampled. A caller whose rings disagree has not asked for a loft
+			// with a bad section, it has asked for two different outlines and has no correspondence in
+			// mind - and any correspondence invented here would be wrong in a way that still produces a
+			// closed solid with a plausible silhouette.
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("Loft not built: section %d has %d points against the first section's %d."),
+				Index, Sections[Index].Num(), Ring);
+			return false;
+		}
+
+		if (Index > 0 && SectionZ[Index] < SectionZ[Index - 1] - UE_KINDA_SMALL_NUMBER)
+		{
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("Loft not built: section %d is below section %d."), Index, Index - 1);
+			return false;
+		}
+	}
+
+	// ONE reversal decision, applied to every ring. Normalising each section on its own area would
+	// flip only the ones authored the other way, and a loft between a counter-clockwise ring and a
+	// clockwise one is skinned into a twisted band - closed, positive in volume, and correct in
+	// silhouette from whichever side the twist is not on.
+	TArray<TArray<FVector2D>> Rings = Sections;
+	if (SignedArea(Rings[0]) < 0.0)
+	{
+		for (TArray<FVector2D>& Loop : Rings)
+		{
+			Algo::Reverse(Loop);
+		}
+	}
+
+	const int32 Group = GroupForRole(Role);
+
+	TArray<TArray<int32>> Verts;
+	Verts.Reserve(Rings.Num());
+
+	for (int32 Index = 0; Index < Rings.Num(); ++Index)
+	{
+		TArray<int32> Row;
+		Row.Reserve(Ring);
+		for (const FVector2D& Point : Rings[Index])
+		{
+			Row.Add(Mesh.AppendVertex(FVector3d(Point.X, Point.Y, SectionZ[Index])));
+		}
+		Verts.Add(MoveTemp(Row));
+	}
+
+	// The skin, wound exactly as AppendPrism winds its sides so that a lofted solid and an extruded
+	// one face the same way and can be joined or subtracted from each other.
+	for (int32 Level = 0; Level + 1 < Rings.Num(); ++Level)
+	{
+		const TArray<int32>& Lower = Verts[Level];
+		const TArray<int32>& Upper = Verts[Level + 1];
+
+		for (int32 i = 0; i < Ring; ++i)
+		{
+			const int32 Next = (i + 1) % Ring;
+			Mesh.AppendTriangle(Lower[i], Upper[Next], Lower[Next], Group);
+			Mesh.AppendTriangle(Lower[i], Upper[i], Upper[Next], Group);
+		}
+	}
+
+	auto Cap = [&Mesh, Group](const TArray<FVector2D>& Loop, const TArray<int32>& Row, bool bFacingDown)
+	{
+		TArray<FVector2d> Flat;
+		Flat.Reserve(Loop.Num());
+		for (const FVector2D& Point : Loop)
+		{
+			Flat.Add(FVector2d(Point.X, Point.Y));
+		}
+
+		TArray<FIndex3i> Triangles;
+		PolygonTriangulation::TriangulateSimplePolygon(Flat, Triangles, /*bOrientAsHoleFill*/ false);
+		if (Triangles.IsEmpty())
+		{
+			return false;
+		}
+
+		OrientCapCounterClockwise(Triangles, Flat);
+
+		for (const FIndex3i& Tri : Triangles)
+		{
+			if (bFacingDown)
+			{
+				Mesh.AppendTriangle(Row[Tri.A], Row[Tri.B], Row[Tri.C], Group);
+			}
+			else
+			{
+				Mesh.AppendTriangle(Row[Tri.C], Row[Tri.B], Row[Tri.A], Group);
+			}
+		}
+		return true;
+	};
+
+	if (bCapBottom)
+	{
+		Cap(Rings[0], Verts[0], /*bFacingDown*/ true);
+	}
+	if (bCapTop)
+	{
+		Cap(Rings.Last(), Verts.Last(), /*bFacingDown*/ false);
+	}
+
+	return true;
+}
+
 bool FHFMeshOps::AppendExtrudedSection(FDynamicMesh3& Mesh, const TArray<FVector2D>& Section,
 	const FVector3d& Origin, const FVector3d& SectionU, const FVector3d& SweepDir,
 	double SweepLength, EHFSurfaceRole Role)
