@@ -417,7 +417,7 @@ FDynamicMesh3 FHFGenerators::GenerateWall(const FHFWall& Wall, const TArray<FHFO
 }
 
 FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThickness,
-	const TArray<FVector2D>& SkirtingGaps, double GapWidth, const TArray<double>& WallFaceInsets)
+	const FHFSkirtingPlan& Skirting)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -441,10 +441,11 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 		return Mesh;
 	}
 
-	if (Room.SkirtingHeight > 0.0)
+	// THE HEIGHT COMES FROM THE ROOM, the runs from the plan. A drawing states a skirting height and
+	// the details panel edits it; where the skirting runs is composed from the walls round it. Copying
+	// the height onto the plan would make typing a new one do nothing until the house was rebuilt.
+	if (Room.SkirtingHeight > 0.0 && Skirting.Depth > 0.0)
 	{
-		constexpr double SkirtingDepth = 1.8;
-
 		/**
 		 * How far the skirting is buried in the masonry behind it.
 		 *
@@ -456,74 +457,48 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 		 */
 		constexpr double Embed = 0.5;
 
-		const int32 Count = Room.Boundary.Num();
-
-		for (int32 i = 0; i < Count; ++i)
+		for (const FHFSkirtingEdge& Edge : Skirting.Edges)
 		{
-			const FVector2D& A = Room.Boundary[i];
-			const FVector2D& B = Room.Boundary[(i + 1) % Count];
-
-			const FWallFrame Edge = MakeWallFrame(A, B);
-			if (!Edge.bValid)
+			const FWallFrame Frame = MakeWallFrame(Edge.Start, Edge.End);
+			if (!Frame.bValid)
 			{
 				continue;
 			}
 
-			// Walk the edge, skipping the stretch in front of each doorway. Running skirting
-			// straight across an opening is one of the most obvious tells that geometry was
-			// generated rather than modelled.
-			TArray<TPair<double, double>> Gaps;
-			for (const FVector2D& Gap : SkirtingGaps)
+			for (const FHFSkirtingRun& Run : Edge.Runs)
 			{
-				const FVector2D ToGap = Gap - A;
-				const double Along = FVector2D::DotProduct(ToGap, Edge.Direction);
-				const double Across = FMath::Abs(FVector2D::DotProduct(ToGap, Edge.Normal));
-
-				if (Across < 30.0 && Along > -GapWidth && Along < Edge.Length + GapWidth)
+				const double RunLength = Run.Length();
+				if (RunLength <= MinMemberSize)
 				{
-					Gaps.Add({ Along - GapWidth * 0.5, Along + GapWidth * 0.5 });
-				}
-			}
-			Gaps.Sort([](const TPair<double, double>& L, const TPair<double, double>& R) { return L.Key < R.Key; });
-
-			double Cursor = 0.0;
-			auto EmitRun = [&](double From, double To)
-			{
-				const double RunLength = To - From;
-				if (RunLength <= 1.0)
-				{
-					return;
+					continue;
 				}
 
-				const FVector2D RunCentre = A + Edge.Direction * ((From + To) * 0.5);
+				const FVector2D RunCentre = Edge.Start + Frame.Direction * ((Run.Start + Run.End) * 0.5);
 
 				// AGAINST THE PLASTER, WHICH IS NOT WHERE THE BOUNDARY IS.
 				//
 				// A room boundary is the wall CENTRELINE, so the finished face of the wall stands
 				// half a wall's thickness inside it - 11.5 cm on a 230, 5.75 on a 115. This offset
-				// used to be SkirtingDepth * 0.5 and nothing else, which put a 100 mm skirting
-				// between 0 and 18 mm of the centreline: entirely inside the masonry, in every room,
-				// on every edge. Seven rooms in the reference flat declare a skirting and not one of
-				// them had a skirting you could see.
+				// was once Depth * 0.5 and nothing else, which put a 100 mm skirting between 0 and
+				// 18 mm of the centreline: entirely inside the masonry, in every room, on every edge.
+				// Seven rooms in the reference flat declare a skirting and not one of them had a
+				// skirting you could see.
 				//
-				// The inset is per EDGE because the walls round a room are not all the same
-				// thickness, and it is passed in rather than derived because a generator cannot see
-				// the walls - see .claude/rules/04-conventions.md.
-				const double FaceInset = WallFaceInsets.IsValidIndex(i) ? WallFaceInsets[i] : 0.0;
-				const FVector2D Offset = Edge.Normal * (FaceInset - Embed + SkirtingDepth * 0.5);
+				// Per EDGE because the walls round a room are not all the same thickness, and
+				// resolved by FHFSkirting rather than here because a generator cannot see the walls.
+				const FVector2D Offset = Frame.Normal * (Edge.FaceInset - Embed + Skirting.Depth * 0.5);
 
+				// The run reaches the CENTRELINE corner at each end of its edge, so at a corner the
+				// two runs overlap through the masonry and their union fills it. That overlap is the
+				// mitre: a butt joint would leave the end grain of one in the plane of the back of
+				// the other, and a run trimmed to the face would leave a notch you can see from
+				// across the room.
 				FHFMeshOps::AppendBox(Mesh,
-					FVector3d(RunCentre.X + Offset.X, RunCentre.Y + Offset.Y, Room.FloorZ + Room.SkirtingHeight * 0.5),
-					FVector3d(RunLength * 0.5, SkirtingDepth * 0.5, Room.SkirtingHeight * 0.5),
-					Edge.YawDegrees, EHFSurfaceRole::Skirting);
-			};
-
-			for (const TPair<double, double>& Gap : Gaps)
-			{
-				EmitRun(Cursor, FMath::Min(Gap.Key, Edge.Length));
-				Cursor = FMath::Max(Cursor, Gap.Value);
+					FVector3d(RunCentre.X + Offset.X, RunCentre.Y + Offset.Y,
+						Room.FloorZ + Room.SkirtingHeight * 0.5),
+					FVector3d(RunLength * 0.5, Skirting.Depth * 0.5, Room.SkirtingHeight * 0.5),
+					Frame.YawDegrees, EHFSurfaceRole::Skirting);
 			}
-			EmitRun(Cursor, Edge.Length);
 		}
 	}
 

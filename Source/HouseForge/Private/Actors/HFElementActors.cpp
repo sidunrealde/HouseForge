@@ -196,8 +196,22 @@ FDynamicMesh3 AHFWallActor::BuildMesh() const
 
 FDynamicMesh3 AHFRoomActor::BuildMesh() const
 {
-	FDynamicMesh3 Result = FHFGenerators::GenerateFloor(Room, SlabThickness, DoorwayCentres, DoorwayWidth,
-		WallFaceInsets);
+	// A ROOM ACTOR CAN EXIST WITHOUT A HOUSE. Dropped into a level by hand, or with its boundary
+	// retyped in the details panel, it has no composed plan and no walls to compose one from - and
+	// the honest answer for a room with nothing known round it is to skirt the whole perimeter, which
+	// is exactly what the resolver returns when handed no walls, openings or fixtures.
+	//
+	// Keyed on the edge count because that is the one way the stored plan can be wrong without being
+	// absent: a boundary edited to a different number of corners leaves runs measured along edges
+	// that no longer exist.
+	FHFSkirtingParams Section;
+	Section.Depth = Skirting.Depth;
+
+	const FHFSkirtingPlan Resolved = (Skirting.Edges.Num() == Room.Boundary.Num())
+		? Skirting
+		: FHFSkirting::For(Room, {}, {}, {}, Section);
+
+	FDynamicMesh3 Result = FHFGenerators::GenerateFloor(Room, SlabThickness, Resolved);
 
 	if (bGenerateCeilingSlab)
 	{

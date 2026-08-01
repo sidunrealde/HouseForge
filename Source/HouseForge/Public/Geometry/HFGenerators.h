@@ -6,6 +6,7 @@
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Geometry/HFOpeningParams.h"
 #include "Model/HFArticulation.h"
+#include "Model/HFSkirtingPlan.h"
 #include "Model/HFTypes.h"
 
 /**
@@ -63,20 +64,19 @@ public:
 	static FHFStructuralCut StructuralCutFor(const FHFWall& Wall);
 
 	/**
-	 * A room's floor slab, plus skirting swept around its boundary.
+	 * A room's floor slab, plus the skirting the plan says runs round it.
 	 *
-	 * Doorways are omitted from the skirting: a continuous skirting across a door opening is one
-	 * of the most obvious tells that geometry was generated rather than modelled.
+	 * WHERE THE SKIRTING RUNS IS NOT DECIDED HERE. Which walls are on a room's edges, which openings
+	 * are in them and which joinery stands against them are all questions about the spec, and a
+	 * generator may not go looking - see .claude/rules/04-conventions.md. FHFSkirting::For answers
+	 * them once in the composing layer and this builds the answer.
 	 *
-	 * @param WallFaceInsets How far the finished wall face stands in from each boundary EDGE - edge
-	 *        i running Boundary[i] to Boundary[i+1] - normally half the thickness of the wall set
-	 *        out on that line. A room boundary is a centreline, so without this the skirting is
-	 *        laid along the middle of the masonry and buried in it. Empty, or short, means zero for
-	 *        the edges it does not cover, which is what a caller with no walls to consult wants.
+	 * @param Skirting Runs, plaster offsets and section, per boundary edge. A default-constructed
+	 *        plan has no edges and emits no skirting, which is what a caller with no walls to consult
+	 *        wants; its Height, not FHFRoom::SkirtingHeight, is what gets built.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateFloor(const FHFRoom& Room, double SlabThickness,
-		const TArray<FVector2D>& SkirtingGaps, double GapWidth,
-		const TArray<double>& WallFaceInsets = TArray<double>());
+		const FHFSkirtingPlan& Skirting = FHFSkirtingPlan());
 
 	/**
 	 * A false ceiling.

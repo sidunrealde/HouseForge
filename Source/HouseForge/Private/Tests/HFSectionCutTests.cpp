@@ -323,7 +323,7 @@ bool FHFSectionDropsTheCeilingKeepsTheFloorTest::RunTest(const FString& Paramete
 	constexpr double Slab = 15.0;
 
 	// The room actor's mesh: floor slab and skirting, plus the structural ceiling slab overhead.
-	FDynamicMesh3 RoomMesh = FHFGenerators::GenerateFloor(Room, Slab, {}, 100.0);
+	FDynamicMesh3 RoomMesh = FHFGenerators::GenerateFloor(Room, Slab, FHFSkirting::For(Room, {}, {}, {}));
 	const FDynamicMesh3 CeilingSlab = FHFGenerators::GenerateCeilingSlab(Room, Slab);
 	FHFMeshOps::AppendPreservingRoles(RoomMesh, CeilingSlab);
 

@@ -14,6 +14,7 @@
 #include "Model/HFBuildDefaults.h"
 #include "Model/HFCeilingFit.h"
 #include "Model/HFCeilingTemplates.h"
+#include "Model/HFSkirtingPlan.h"
 
 namespace
 {
@@ -148,85 +149,6 @@ namespace
 			return A > B;
 		}
 		return Candidate.Id.LexicalLess(Other.Id);
-	}
-
-	/**
-	 * How far the finished wall face stands in from each edge of a room boundary.
-	 *
-	 * A ROOM BOUNDARY IS A CENTRELINE. Every room in this model is set out on the middle of the
-	 * walls round it, so the plaster a skirting is fixed to is half a wall's thickness inside the
-	 * polygon - 11.5 on a 230, 5.75 on a 115, and both on the same room. A skirting laid on the
-	 * boundary itself is laid down the middle of the masonry, which is exactly where all seven of
-	 * this flat's skirtings were: declared, generated, watertight, correctly tagged, and invisible.
-	 *
-	 * Worked out here because a generator may not go looking for the walls - see
-	 * .claude/rules/04-conventions.md. Per edge rather than per room, because the thickness changes
-	 * from one side of a room to the other.
-	 */
-	TArray<double> WallFaceInsetsFor(const FHFRoom& Room, const TArray<FHFWall>& Walls)
-	{
-		TArray<double> Insets;
-		const int32 Count = Room.Boundary.Num();
-		Insets.SetNumZeroed(Count);
-
-		if (Count < 3)
-		{
-			return Insets;
-		}
-
-		// A wall counts for an edge when it is set out ON that edge: parallel to it, its centreline
-		// in the same line, and overlapping it along its length. Half a centimetre of slack, which
-		// is far below any thickness in this domain and far above the arithmetic.
-		constexpr double OnTheLine = 0.5;
-
-		for (int32 i = 0; i < Count; ++i)
-		{
-			const FVector2D& A = Room.Boundary[i];
-			const FVector2D& B = Room.Boundary[(i + 1) % Count];
-
-			const double EdgeLength = FVector2D::Distance(A, B);
-			if (EdgeLength <= UE_KINDA_SMALL_NUMBER)
-			{
-				continue;
-			}
-
-			const FVector2D Direction = (B - A) / EdgeLength;
-			const FVector2D Normal(-Direction.Y, Direction.X);
-
-			for (const FHFWall& Wall : Walls)
-			{
-				const double WallLength = Wall.Length();
-				if (WallLength <= UE_KINDA_SMALL_NUMBER)
-				{
-					continue;
-				}
-
-				const FVector2D WallDirection = (Wall.End - Wall.Start) / WallLength;
-				if (FMath::Abs(FVector2D::DotProduct(WallDirection, Direction)) < 0.999)
-				{
-					continue;
-				}
-
-				if (FMath::Abs(FVector2D::DotProduct(Wall.Start - A, Normal)) > OnTheLine)
-				{
-					continue;
-				}
-
-				const double T0 = FVector2D::DotProduct(Wall.Start - A, Direction);
-				const double T1 = FVector2D::DotProduct(Wall.End - A, Direction);
-
-				if (FMath::Max(T0, T1) <= OnTheLine || FMath::Min(T0, T1) >= EdgeLength - OnTheLine)
-				{
-					continue;
-				}
-
-				// The thickest, because where a 230 and a 115 both run along one edge the skirting
-				// has to clear the one that stands furthest into the room.
-				Insets[i] = FMath::Max(Insets[i], Wall.Thickness * 0.5);
-			}
-		}
-
-		return Insets;
 	}
 
 	/** True when the first wall is the one built through at a junction, and the other butts to it. */
@@ -570,7 +492,13 @@ void AHFHouseActor::BuildGeometry()
 		WallActor->Regenerate();
 	}
 
-	// Doorway positions per room, so skirting stops at each opening instead of running across it.
+	// WHERE EACH ROOM'S SKIRTING RUNS, resolved once per room and handed over as a value.
+	//
+	// The fixtures are the FITTED ones, so a wardrobe that lost height to a ceiling is still the
+	// wardrobe the skirting is cut around - the fit never moves a carcass in plan, but taking the
+	// same list everything else takes is what stops the two drifting.
+	const FHFSkirtingParams SkirtingParams = FHFBuildDefaults::FromProjectSettings().Skirting;
+
 	for (const FHFRoom& Room : Spec.Rooms)
 	{
 		AHFRoomActor* RoomActor = Cast<AHFRoomActor>(Spawn(AHFRoomActor::StaticClass(), Room.Id,
@@ -582,28 +510,7 @@ void AHFHouseActor::BuildGeometry()
 
 		RoomActor->Room = Room;
 		RoomActor->SlabThickness = SlabThickness;
-		RoomActor->WallFaceInsets = WallFaceInsetsFor(Room, Spec.Walls);
-
-		double WidestDoor = 100.0;
-		for (const FHFOpening& Opening : Spec.Openings)
-		{
-			const bool bIsDoorway =
-				Opening.Kind == EHFOpeningKind::Door ||
-				Opening.Kind == EHFOpeningKind::SlidingDoor ||
-				Opening.Kind == EHFOpeningKind::Archway;
-
-			if (!bIsDoorway || Opening.SillHeight > 1.0)
-			{
-				continue;
-			}
-
-			if (const FHFWall* Wall = Spec.FindWall(Opening.WallId))
-			{
-				RoomActor->DoorwayCentres.Add(FHFGenerators::OpeningCentre(Opening, *Wall));
-				WidestDoor = FMath::Max(WidestDoor, Opening.Width);
-			}
-		}
-		RoomActor->DoorwayWidth = WidestDoor;
+		RoomActor->Skirting = FHFSkirting::For(Room, Spec.Walls, Spec.Openings, Fixtures, SkirtingParams);
 		RoomActor->Regenerate();
 	}
 

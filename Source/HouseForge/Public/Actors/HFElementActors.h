@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "GameFramework/Actor.h"
+#include "Model/HFSkirtingPlan.h"
 #include "Model/HFTypes.h"
 #include "HFElementActors.generated.h"
 
@@ -151,22 +152,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "1.0"))
 	double SlabThickness = 15.0;
 
-	/** Plan positions where skirting stops, so it does not run across a doorway. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
-	TArray<FVector2D> DoorwayCentres;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "1.0"))
-	double DoorwayWidth = 100.0;
-
 	/**
-	 * How far the finished wall face stands in from each boundary edge, one entry per edge.
+	 * Where the skirting runs, where it stops and why - the whole answer for this room.
 	 *
-	 * A room boundary is a wall CENTRELINE, so the plaster is half a wall's thickness inside it.
-	 * The skirting is laid against that face, and only the composing layer can see which wall is on
-	 * which edge - so it works this out and puts the answer here, and the generator is handed it.
+	 * Resolved by FHFSkirting::For in the composing layer, because every question behind it is a
+	 * question about the SPEC: which walls are set out on this room's edges, which openings are in
+	 * those walls, and which joinery is scribed to them. A generator may not go looking - see
+	 * .claude/rules/04-conventions.md - and the three fields this replaced were the composing layer
+	 * trying to answer all three with a bag of points and one number, which is how a 750 bathroom
+	 * door came to remove 1800 of skirting and how the common bathroom collected four gaps for doors
+	 * in other people's rooms.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
-	TArray<double> WallFaceInsets;
+	FHFSkirtingPlan Skirting;
 
 	/**
 	 * Also emit the structural slab soffit over this room.
