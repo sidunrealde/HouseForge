@@ -202,6 +202,31 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double FanDropRadius = 8.0;
 
+	/**
+	 * The beams showing in this room, deepest first - what a perimeter bulkhead ring has to bury.
+	 *
+	 * CARRIED, NOT LOOKED UP. Which beams show in a room is a fact about the frame and the
+	 * partitions under it, and only the composing layer can see either; this actor holds a room and
+	 * a ceiling and nothing else. Without them, changing a ceiling figure on the settings page would
+	 * re-stamp the band and silently drop the ring that was burying the beam - the exact defect the
+	 * whole depth model exists to prevent, arrived at by turning a dial.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FHFBeam> BeamsShowingInRoom;
+
+	/**
+	 * Re-resolve this ceiling's template against the project's current figures.
+	 *
+	 * The composing layer's job and the only line in this actor that knows a settings object can
+	 * exist. Does nothing to a ceiling whose template is Custom, which is what keeps a hand-tuned
+	 * one hand-tuned.
+	 */
+	void ApplyProjectDefaults();
+
+	/** Where this ceiling's downlights are in the world, for whatever will light them. */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge")
+	TArray<FVector> DownlightPositions() const;
+
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;
 };

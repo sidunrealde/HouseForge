@@ -86,11 +86,34 @@ public:
 	 * structure above, a full drop covers everything, a tray steps between two levels, a cove adds
 	 * a shielded channel for an LED strip, and a bulkhead follows its own polygon.
 	 *
+	 * On top of the style, three things any of them can carry:
+	 *
+	 *   - a PERIMETER BULKHEAD ring, deeper than the ceiling inside it, boxing in the beams that
+	 *     run round the room so the rest of the ceiling does not have to be as deep as they are;
+	 *   - a CENTRE PANEL filling the middle higher than the band, which is what turns a band into a
+	 *     frame and gives a cove something to wash;
+	 *   - RECESSED DOWNLIGHTS at FHFFalseCeiling::LightPositions - a bore through the soffit, a trim
+	 *     ring proud of it and an aperture up the can, rather than a dot on a plan.
+	 *
 	 * @param FanDrops Plan positions of ceiling fans, whose drop rods must pass through the
 	 *        ceiling. A fan hanging from a soffit it does not penetrate is an obvious tell.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateCeiling(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
 		const TArray<FVector2D>& FanDrops, double FanDropRadius);
+
+	/**
+	 * Where this ceiling's recessed downlights actually are, in three dimensions.
+	 *
+	 * WHAT THE LIGHTING MILESTONE ATTACHES TO. LightPositions is a list of plan coordinates and says
+	 * nothing about height, about which of them fitted, or about how far up the can the emitter
+	 * sits - and a spotlight parented at the soffit plane instead of at the lens is shaded by its
+	 * own trim. This answers all three from the same layout the geometry was built from, so a
+	 * fitting that was skipped for not fitting the band does not come back as a light hanging in
+	 * open air.
+	 *
+	 * Pure, like everything else here. The composing layer asks; nothing is spawned.
+	 */
+	static TArray<FVector> CeilingDownlights(const FHFFalseCeiling& Ceiling, const FHFRoom& Room);
 
 	/**
 	 * How far below the structural slab this ceiling's panel hangs over a plan point. 0 if none does.

@@ -553,247 +553,6 @@ FDynamicMesh3 FHFGenerators::GenerateCeilingSlab(const FHFRoom& Room, double Sla
 	return Mesh;
 }
 
-FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
-	const TArray<FVector2D>& FanDrops, double FanDropRadius)
-{
-	FDynamicMesh3 Mesh;
-	FHFMeshOps::InitialiseMesh(Mesh);
-
-	if (Ceiling.Style == EHFCeilingStyle::None || Ceiling.Drop <= 0.0)
-	{
-		return Mesh;
-	}
-
-	// Bulkheads follow their own polygon; everything else follows the room.
-	const TArray<FVector2D>& Outline = (Ceiling.ExplicitPolygon.Num() >= 3)
-		? Ceiling.ExplicitPolygon
-		: Room.Boundary;
-
-	if (Outline.Num() < 3)
-	{
-		return Mesh;
-	}
-
-	const double StructuralZ = Room.FloorZ + Room.CeilingHeight;
-	const double SoffitZ = StructuralZ - Ceiling.Drop;
-
-	if (SoffitZ <= Room.FloorZ)
-	{
-		// Validated against elsewhere, but refusing here too keeps the generator honest when it is
-		// called directly.
-		return Mesh;
-	}
-
-	// Fan rods pass through the ceiling as holes in the panel rather than as boolean cuts. The
-	// boolean returned geometry that was not closed for a cut this simple, and a hole in a
-	// triangulation cannot half-succeed.
-	TArray<TArray<FVector2D>> FanHoles;
-	if (FanDropRadius > 0.0)
-	{
-		for (const FVector2D& Drop : FanDrops)
-		{
-			FanHoles.Add({
-				FVector2D(Drop.X - FanDropRadius, Drop.Y - FanDropRadius),
-				FVector2D(Drop.X + FanDropRadius, Drop.Y - FanDropRadius),
-				FVector2D(Drop.X + FanDropRadius, Drop.Y + FanDropRadius),
-				FVector2D(Drop.X - FanDropRadius, Drop.Y + FanDropRadius)
-			});
-		}
-	}
-
-	// Every piece of a false ceiling is a triangulation that can decline, and a ceiling missing one
-	// of its pieces is still an actor with a plausible element count and a correct outline from
-	// above. Counted rather than dropped, and reported once at the end.
-	int32 Refused = 0;
-	auto Checked = [&Refused](bool bBuilt)
-	{
-		Refused += bBuilt ? 0 : 1;
-		return bBuilt;
-	};
-
-	/**
-	 * Builds a band between an outer loop and its inset.
-	 *
-	 * Triangulated as a polygon with a hole rather than subtracted as one solid from another. A
-	 * mesh boolean resolves that case imperfectly - it returned geometry that was not closed and
-	 * reported failure, which silently left every ceiling band solid. The annulus is exact.
-	 * The hole also gives the inner fascia for free: the vertical face you actually see standing
-	 * under a peripheral ceiling.
-	 */
-	auto AppendBand = [&Mesh](const TArray<FVector2D>& OuterLoop, double BandWidth,
-		double BottomZ, double TopZ, EHFSurfaceRole Role) -> bool
-	{
-		const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(OuterLoop, BandWidth);
-		if (Inner.IsEmpty())
-		{
-			// The band is wider than the room, so it becomes a full drop. That is the honest
-			// result rather than an error - the geometry is still correct.
-			return FHFMeshOps::AppendPrism(Mesh, OuterLoop, BottomZ, TopZ, Role);
-		}
-
-		return FHFMeshOps::AppendPrismWithHoles(Mesh, OuterLoop, Inner, BottomZ, TopZ, Role);
-	};
-
-	constexpr double PanelThickness = 2.0;
-
-	/**
-	 * How far a piece laps into the one beside it, rather than stopping in its face.
-	 *
-	 * TWO FACES IN THE SAME PLANE FACING THE SAME WAY IS A COIN TOSS the depth test re-tosses every
-	 * frame, which is the flashing this flat was reported for. Two faces in the same plane facing
-	 * OPPOSITE ways is not: one of them is always the back of a solid the other one closes, so the
-	 * pair is sealed inside the assembly and neither is ever drawn. That distinction decides where a
-	 * lap is needed and where it would cause the very thing it is meant to prevent:
-	 *
-	 *   - Sideways, into a piece that stands beside this one - lap it. The tray's inner panel would
-	 *     otherwise stop in the band's inner face, two vertical faces in a plane the room can see.
-	 *   - Upward, onto a piece that stands ON this one - do NOT lap it. A fascia lapped down into
-	 *     its panel would leave 5 mm of both their outer faces in the same plane facing the same
-	 *     way, all the way round the edge. Sitting it exactly on the panel's top face instead
-	 *     leaves the two outer faces edge to edge, reading as one continuous face, and seals the
-	 *     horizontal pair between them.
-	 *
-	 * 5 mm is under any board tolerance a builder would measure and far above what the depth buffer
-	 * confuses at room distances.
-	 */
-	constexpr double Lap = 0.5;
-
-	/**
-	 * THE FASCIA RULE. It is general, so a style added later inherits it instead of re-deriving it:
-	 *
-	 *   ANY HORIZONTAL SOFFIT EDGE A PERSON IN THE ROOM CAN SEE IS CLOSED TO THE SURFACE ABOVE IT.
-	 *
-	 * A soffit panel is a 20 mm board. Where its edge stops in mid-air the plenum behind it is on
-	 * show, and 20 mm of board with 280 mm of black gap above it does not read as a ceiling - it
-	 * reads as a sheet hanging in the room, which is exactly what was reported. The vertical fascia
-	 * from the top of the panel up to the structure is what turns the drop into a boxed soffit.
-	 *
-	 * Applied unconditionally rather than per style, because a generator cannot see the room. The
-	 * outline of a full drop usually dies into the walls, and there the fascia is buried in the
-	 * masonry and costs a few triangles. Judging per style where the edge happens to be visible is
-	 * how this file came to describe a fascia in its own comment and build one only for Bulkhead.
-	 *
-	 * Hollow, never a plug: the plenum has to stay a plenum for the services that run in it, and a
-	 * solid fill would also put a second downward face in the soffit plane, which flashes.
-	 */
-	auto AppendFascia = [&AppendBand](const TArray<FVector2D>& Loop, double BottomZ, double TopZ) -> bool
-	{
-		// The panel already meets the structure; there is no edge to close.
-		if (TopZ - BottomZ <= Lap)
-		{
-			return true;
-		}
-
-		return AppendBand(Loop, PanelThickness, BottomZ, TopZ, EHFSurfaceRole::CeilingSoffit);
-	};
-
-	switch (Ceiling.Style)
-	{
-	case EHFCeilingStyle::FullDrop:
-	case EHFCeilingStyle::Bulkhead:
-	{
-		// A flat panel across the whole outline, plus the fascia that closes its edge to the slab.
-		//
-		// Both styles now. The fascia used to be added for Bulkhead alone, so every full drop in
-		// the flat was a 20 mm sheet with the plenum open behind it wherever its outline did not
-		// happen to die into a wall.
-		Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Outline, FanHoles, SoffitZ, SoffitZ + PanelThickness,
-			EHFSurfaceRole::CeilingSoffit));
-
-		// Standing on the panel's top face - see the note on Lap - and never at the soffit, which
-		// would put a second horizontal face in the one plane the room certainly can see.
-		Checked(AppendFascia(Outline, SoffitZ + PanelThickness, StructuralZ));
-		break;
-	}
-
-	case EHFCeilingStyle::Peripheral:
-	{
-		// The band is its own fascia. It is a solid annulus from the soffit to the structure: the
-		// inner face is the vertical edge you see standing under it, and the outer edge dies into
-		// the wall. Nothing to add here - said out loud so the next style copies the right one.
-		Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
-		break;
-	}
-
-	case EHFCeilingStyle::Tray:
-	{
-		// Outer band at the full drop, inner region stepped back up to half of it.
-		Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
-
-		const double InnerSoffitZ = StructuralZ - Ceiling.Drop * 0.5;
-
-		// The inner panel laps into the band instead of stopping in its face, so the two never share
-		// a vertical plane. It needs no fascia of its own: the band IS the fascia for this step -
-		// it runs from the lower soffit to the slab and the panel's edge ends inside it - and a
-		// fascia here would stand a fin of its own proud of the band's inner face.
-		const double InnerInset = (Ceiling.BandWidth > Lap) ? Ceiling.BandWidth - Lap : Ceiling.BandWidth;
-		for (const TArray<FVector2D>& Loop : FHFMeshOps::InsetPolygon(Outline, InnerInset))
-		{
-			Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, InnerSoffitZ,
-				InnerSoffitZ + PanelThickness, EHFSurfaceRole::CeilingSoffit));
-		}
-		break;
-	}
-
-	case EHFCeilingStyle::Cove:
-	{
-		// A cove is a peripheral band with a trough at its inner edge. The strip lies in the trough,
-		// the lip in front of it keeps the strip out of sight, and the light leaves UPWARD and
-		// washes the slab.
-		//
-		// So the trough is OPEN TO THE SLAB AND CLOSED TO THE ROOM, and that is the whole
-		// difference between a cove and a groove. The old profile had it the other way round: a
-		// recess facing down into the room, with the strip in plain view of anyone who looked up
-		// and no path for the light to reach the slab at all. FHFCoveProfile::LipHeight already
-		// documented the lip as rising above the band soffit to shield the strip; nothing built it.
-		//
-		// Measured inward from the wall:
-		//   0          .. SolidBand    band, soffit to slab, exactly as Peripheral
-		//   SolidBand  .. +Channel     the trough: soffit board only, open to the slab above it
-		//   ..         .. +LipWidth    the lip: the same board, plus an upstand standing LipHeight
-		//                              above the soffit
-		const double ChannelWidth = FMath::Max(Ceiling.Cove.ChannelWidth, 1.0);
-		const double LipWidth = FMath::Max(Ceiling.Cove.Setback, 1.0);
-
-		// The upstand has to clear the board it stands on or it shields nothing.
-		const double LipRise = FMath::Max(Ceiling.Cove.LipHeight, PanelThickness + 1.0);
-		const double SolidBand = FMath::Max(Ceiling.BandWidth - ChannelWidth - LipWidth, 1.0);
-		const double BoardTopZ = SoffitZ + PanelThickness;
-
-		// ONE board across the whole band. Band, trough floor and lip all show the room the same
-		// plane, and one piece is what keeps it one face: a board per zone would butt them together
-		// in the soffit, which is the plane a person in the room is looking straight at.
-		Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, BoardTopZ, EHFSurfaceRole::CeilingSoffit));
-
-		// The band above the board, solid to the slab, standing on the board rather than lapped
-		// into it - see the note on Lap.
-		Checked(AppendBand(Outline, SolidBand, BoardTopZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
-
-		// The upstand. CoveInterior rather than CeilingSoffit: the faces that matter here are the
-		// trough side the strip washes and the sliver the room sees above the soffit line, and both
-		// belong to the cove detail rather than to the flat ceiling around it.
-		for (const TArray<FVector2D>& LipLoop : FHFMeshOps::InsetPolygon(Outline, SolidBand + ChannelWidth))
-		{
-			Checked(AppendBand(LipLoop, LipWidth, BoardTopZ, SoffitZ + LipRise, EHFSurfaceRole::CoveInterior));
-		}
-		break;
-	}
-
-	default:
-		break;
-	}
-
-	if (Refused > 0)
-	{
-		UE_LOG(LogHouseForge, Warning,
-			TEXT("False ceiling '%s' is missing %d of its pieces: their outlines could not be triangulated."),
-			*Ceiling.Id.ToString(), Refused);
-	}
-
-	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
-	return Mesh;
-}
-
 namespace
 {
 	/**
@@ -835,30 +594,634 @@ namespace
 		}
 		return false;
 	}
+
+	/**
+	 * How far inside a loop a point sits, measured to the nearest edge. Negative when outside.
+	 *
+	 * The figure every zone question here reduces to. "Is this downlight in the band" and "does the
+	 * perimeter ring cover this beam" are both "how far from the wall is it", and asking it this way
+	 * needs no second polygon offset and cannot disagree with one.
+	 */
+	double InsetDepth(const TArray<FVector2D>& Loop, const FVector2D& Point)
+	{
+		if (Loop.Num() < 3)
+		{
+			return -1.0;
+		}
+
+		double Nearest = TNumericLimits<double>::Max();
+		for (int32 Index = 0; Index < Loop.Num(); ++Index)
+		{
+			const FVector2D& A = Loop[Index];
+			const FVector2D& B = Loop[(Index + 1) % Loop.Num()];
+
+			const FVector2D Edge = B - A;
+			const double LengthSquared = Edge.SizeSquared();
+			const double T = (LengthSquared > UE_KINDA_SMALL_NUMBER)
+				? FMath::Clamp(FVector2D::DotProduct(Point - A, Edge) / LengthSquared, 0.0, 1.0)
+				: 0.0;
+
+			Nearest = FMath::Min(Nearest, FVector2D::Distance(Point, A + Edge * T));
+		}
+
+		return PointInPolygon2D(Loop, Point) ? Nearest : -Nearest;
+	}
+
+	/** A circle as a closed polygon, for a hole cut through a soffit. */
+	TArray<FVector2D> CirclePolygon(const FVector2D& Centre, double Radius, int32 Sides = 16)
+	{
+		TArray<FVector2D> Out;
+		if (Radius <= 0.0)
+		{
+			return Out;
+		}
+
+		Out.Reserve(Sides);
+		for (int32 Index = 0; Index < Sides; ++Index)
+		{
+			const double Angle = 2.0 * PI * static_cast<double>(Index) / Sides;
+			Out.Add(Centre + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius);
+		}
+		return Out;
+	}
+
+	/** Soffit board thickness. A 12.5 plasterboard with its skim, or a POP soffit. */
+	constexpr double HFCeilingPanel = 2.0;
+
+	/**
+	 * How far a piece laps into the one beside it, rather than stopping in its face.
+	 *
+	 * TWO FACES IN THE SAME PLANE FACING THE SAME WAY IS A COIN TOSS the depth test re-tosses every
+	 * frame, which is the flashing this flat was reported for. Two faces in the same plane facing
+	 * OPPOSITE ways is not: one of them is always the back of a solid the other one closes, so the
+	 * pair is sealed inside the assembly and neither is ever drawn. That distinction decides where a
+	 * lap is needed and where it would cause the very thing it is meant to prevent:
+	 *
+	 *   - Sideways, into a piece that stands beside this one - lap it. The tray's inner panel would
+	 *     otherwise stop in the band's inner face, two vertical faces in a plane the room can see.
+	 *   - Upward, onto a piece that stands ON this one - do NOT lap it. A fascia lapped down into
+	 *     its panel would leave 5 mm of both their outer faces in the same plane facing the same
+	 *     way, all the way round the edge. Sitting it exactly on the panel's top face instead
+	 *     leaves the two outer faces edge to edge, reading as one continuous face, and seals the
+	 *     horizontal pair between them.
+	 *
+	 * 5 mm is under any board tolerance a builder would measure and far above what the depth buffer
+	 * confuses at room distances.
+	 */
+	constexpr double HFCeilingLap = 0.5;
+
+	/**
+	 * Where the pieces of one false ceiling go, worked out once.
+	 *
+	 * THE GEOMETRY AND EVERY QUESTION ASKED ABOUT IT COME FROM THE SAME PLACE. GenerateCeiling
+	 * builds the ceiling, CeilingSoffitDropAt tells a fan's rod how far it has to reach, and
+	 * CeilingDownlights tells the lighting milestone where the fittings are - three answers about
+	 * one object, and the first two used to be two hand-copied switch statements that had to be
+	 * kept in step by reading them side by side. Adding a perimeter ring and a centre panel would
+	 * have made that three copies of a five-branch switch.
+	 */
+	struct FHFCeilingLayout
+	{
+		bool bValid = false;
+
+		/** The outline the ceiling is set out from: the bulkhead's own polygon, or the room. */
+		TArray<FVector2D> Outline;
+
+		/**
+		 * The loops the STYLED ceiling is built on - the outline, or what is left of it inside the
+		 * perimeter ring. More than one when a deep ring pinches an L-shaped room into two.
+		 */
+		TArray<TArray<FVector2D>> StyledLoops;
+
+		double StructuralZ = 0.0;
+
+		/** Soffit of the styled ceiling: the shallow one. */
+		double SoffitZ = 0.0;
+
+		/** Soffit of the perimeter ring, when there is one. */
+		double RingSoffitZ = 0.0;
+		bool bRing = false;
+
+		/**
+		 * The zone a downlight may sit in, as insets from a styled loop.
+		 *
+		 * A fitting has to bore through solid ceiling for its whole diameter. In a band style that
+		 * means the solid part of the band - not the cove trough, and not past the inner edge into
+		 * open air - and in a panelled style it means anywhere clear of the fascia.
+		 */
+		double LightZoneInner = 0.0;
+		double LightZoneOuter = 0.0;
+	};
+
+	FHFCeilingLayout ResolveCeilingLayout(const FHFFalseCeiling& Ceiling, const FHFRoom& Room)
+	{
+		FHFCeilingLayout Layout;
+
+		if (Ceiling.Style == EHFCeilingStyle::None || Ceiling.Drop <= 0.0)
+		{
+			return Layout;
+		}
+
+		// Bulkheads follow their own polygon; everything else follows the room.
+		Layout.Outline = (Ceiling.ExplicitPolygon.Num() >= 3) ? Ceiling.ExplicitPolygon : Room.Boundary;
+		if (Layout.Outline.Num() < 3)
+		{
+			return Layout;
+		}
+
+		Layout.StructuralZ = Room.FloorZ + Room.CeilingHeight;
+		Layout.SoffitZ = Layout.StructuralZ - Ceiling.Drop;
+
+		if (Layout.SoffitZ <= Room.FloorZ)
+		{
+			// Validated against elsewhere, but refusing here too keeps the generator honest when it
+			// is called directly.
+			return Layout;
+		}
+
+		Layout.bValid = true;
+		Layout.StyledLoops = { Layout.Outline };
+
+		// THE PERIMETER RING GOES ON FIRST AND THE STYLE IS BUILT INSIDE IT. That order is what
+		// makes the level change local: the ring buries the beams round the edge of the room, and
+		// everything further in than the ring is free to be as shallow as the design wants.
+		if (Ceiling.HasPerimeterBulkhead())
+		{
+			Layout.bRing = true;
+			Layout.RingSoffitZ = Layout.StructuralZ - Ceiling.PerimeterBulkheadDrop;
+
+			const double Inward = Ceiling.PerimeterBulkheadWidth - HFCeilingLap;
+			TArray<TArray<FVector2D>> Inside = (Inward > 0.0)
+				? FHFMeshOps::InsetPolygon(Layout.Outline, Inward)
+				: TArray<TArray<FVector2D>>{ Layout.Outline };
+
+			// The ring swallowed the room. That is an honest answer for a small bathroom rather
+			// than an error - what is left is a full drop at the ring's depth - and it is what
+			// AppendBand does with an over-wide band for the same reason.
+			Layout.StyledLoops = MoveTemp(Inside);
+		}
+
+		switch (Ceiling.Style)
+		{
+		case EHFCeilingStyle::Cove:
+		{
+			// Only the solid part of the band takes a fitting: the trough and the lip are hollow,
+			// and a bore through them would open the cove channel into the room below.
+			const double ChannelWidth = FMath::Max(Ceiling.Cove.ChannelWidth, 1.0);
+			const double LipWidth = FMath::Max(Ceiling.Cove.Setback, 1.0);
+			Layout.LightZoneInner = HFCeilingPanel + HFCeilingLap;
+			Layout.LightZoneOuter = FMath::Max(Ceiling.BandWidth - ChannelWidth - LipWidth, 1.0);
+			break;
+		}
+
+		case EHFCeilingStyle::Peripheral:
+		case EHFCeilingStyle::Tray:
+			Layout.LightZoneInner = HFCeilingPanel + HFCeilingLap;
+			Layout.LightZoneOuter = FMath::Max(Ceiling.BandWidth, 1.0);
+			break;
+
+		case EHFCeilingStyle::FullDrop:
+		case EHFCeilingStyle::Bulkhead:
+		default:
+			// Clear of the fascia ring standing on the panel's edge, and otherwise anywhere.
+			Layout.LightZoneInner = HFCeilingPanel + HFCeilingLap;
+			Layout.LightZoneOuter = TNumericLimits<double>::Max();
+			break;
+		}
+
+		return Layout;
+	}
+
+	/**
+	 * The downlights that will actually be built into a given loop, with the loop's zone applied.
+	 *
+	 * A position that does not fit is dropped rather than forced. A fitting straddling the inner
+	 * edge of a band would bore a hole half in plasterboard and half in nothing, which is watertight,
+	 * plausible in plan, and a slot in the ceiling from underneath.
+	 */
+	void FittingDownlights(const FHFFalseCeiling& Ceiling, const FHFCeilingLayout& Layout,
+		const TArray<FVector2D>& Loop, TArray<FVector2D>& OutPositions)
+	{
+		if (!Ceiling.Downlight.bRecessed)
+		{
+			return;
+		}
+
+		const double Radius = Ceiling.Downlight.FlangeRadius();
+		if (Radius <= 0.0)
+		{
+			return;
+		}
+
+		for (const FVector2D& Position : Ceiling.LightPositions)
+		{
+			const double Depth = InsetDepth(Loop, Position);
+			if (Depth - Radius >= Layout.LightZoneInner && Depth + Radius <= Layout.LightZoneOuter)
+			{
+				OutPositions.Add(Position);
+			}
+		}
+	}
+}
+
+FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
+	const TArray<FVector2D>& FanDrops, double FanDropRadius)
+{
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	const FHFCeilingLayout Layout = ResolveCeilingLayout(Ceiling, Room);
+	if (!Layout.bValid)
+	{
+		return Mesh;
+	}
+
+	const double StructuralZ = Layout.StructuralZ;
+	const double SoffitZ = Layout.SoffitZ;
+
+	// Fan rods pass through the ceiling as holes in the panel rather than as boolean cuts. The
+	// boolean returned geometry that was not closed for a cut this simple, and a hole in a
+	// triangulation cannot half-succeed.
+	TArray<TArray<FVector2D>> FanHoles;
+	if (FanDropRadius > 0.0)
+	{
+		for (const FVector2D& Drop : FanDrops)
+		{
+			FanHoles.Add({
+				FVector2D(Drop.X - FanDropRadius, Drop.Y - FanDropRadius),
+				FVector2D(Drop.X + FanDropRadius, Drop.Y - FanDropRadius),
+				FVector2D(Drop.X + FanDropRadius, Drop.Y + FanDropRadius),
+				FVector2D(Drop.X - FanDropRadius, Drop.Y + FanDropRadius)
+			});
+		}
+	}
+
+	// Every piece of a false ceiling is a triangulation that can decline, and a ceiling missing one
+	// of its pieces is still an actor with a plausible element count and a correct outline from
+	// above. Counted rather than dropped, and reported once at the end.
+	int32 Refused = 0;
+	auto Checked = [&Refused](bool bBuilt)
+	{
+		Refused += bBuilt ? 0 : 1;
+		return bBuilt;
+	};
+
+	/**
+	 * Builds a band between an outer loop and its inset, with anything else that has to pass
+	 * through it punched out at the same time.
+	 *
+	 * Triangulated as a polygon with holes rather than subtracted as one solid from another. A
+	 * mesh boolean resolves that case imperfectly - it returned geometry that was not closed and
+	 * reported failure, which silently left every ceiling band solid. The annulus is exact.
+	 * The hole also gives the inner fascia for free: the vertical face you actually see standing
+	 * under a peripheral ceiling.
+	 */
+	auto AppendBand = [&Mesh](const TArray<FVector2D>& OuterLoop, double BandWidth,
+		double BottomZ, double TopZ, EHFSurfaceRole Role,
+		const TArray<TArray<FVector2D>>& ExtraHoles = TArray<TArray<FVector2D>>()) -> bool
+	{
+		TArray<TArray<FVector2D>> Holes = FHFMeshOps::InsetPolygon(OuterLoop, BandWidth);
+		const bool bSwallowed = Holes.IsEmpty();
+
+		Holes.Append(ExtraHoles);
+
+		if (bSwallowed && Holes.IsEmpty())
+		{
+			// The band is wider than the room, so it becomes a full drop. That is the honest
+			// result rather than an error - the geometry is still correct.
+			return FHFMeshOps::AppendPrism(Mesh, OuterLoop, BottomZ, TopZ, Role);
+		}
+
+		return FHFMeshOps::AppendPrismWithHoles(Mesh, OuterLoop, Holes, BottomZ, TopZ, Role);
+	};
+
+	/**
+	 * THE FASCIA RULE. It is general, so a style added later inherits it instead of re-deriving it:
+	 *
+	 *   ANY HORIZONTAL SOFFIT EDGE A PERSON IN THE ROOM CAN SEE IS CLOSED TO THE SURFACE ABOVE IT.
+	 *
+	 * A soffit panel is a 20 mm board. Where its edge stops in mid-air the plenum behind it is on
+	 * show, and 20 mm of board with 280 mm of black gap above it does not read as a ceiling - it
+	 * reads as a sheet hanging in the room, which is exactly what was reported. The vertical fascia
+	 * from the top of the panel up to the structure is what turns the drop into a boxed soffit.
+	 *
+	 * Applied unconditionally rather than per style, because a generator cannot see the room. The
+	 * outline of a full drop usually dies into the walls, and there the fascia is buried in the
+	 * masonry and costs a few triangles. Judging per style where the edge happens to be visible is
+	 * how this file came to describe a fascia in its own comment and build one only for Bulkhead.
+	 *
+	 * Hollow, never a plug: the plenum has to stay a plenum for the services that run in it, and a
+	 * solid fill would also put a second downward face in the soffit plane, which flashes.
+	 */
+	auto AppendFascia = [&AppendBand](const TArray<FVector2D>& Loop, double BottomZ, double TopZ) -> bool
+	{
+		// The panel already meets the structure; there is no edge to close.
+		if (TopZ - BottomZ <= HFCeilingLap)
+		{
+			return true;
+		}
+
+		return AppendBand(Loop, HFCeilingPanel, BottomZ, TopZ, EHFSurfaceRole::CeilingSoffit);
+	};
+
+	/**
+	 * A recessed downlight: the trim you see, and the aperture you look up into.
+	 *
+	 * The bore itself is punched through the soffit by whichever piece carries it, because a hole
+	 * in a triangulation is exact where a boolean through a 20 mm board is a coin toss. What is
+	 * added here is the two things a bore alone is not: the trim ring standing proud of the plaster,
+	 * which is the part that catches light and reads as a fitting rather than as a hole, and the
+	 * aperture disc up inside the recess that the lighting milestone will make emissive.
+	 */
+	auto AppendDownlight = [&Mesh, &Ceiling](const FVector2D& Position, double SoffitPlaneZ) -> bool
+	{
+		const FHFDownlightProfile& Fitting = Ceiling.Downlight;
+		const double CutRadius = Fitting.CutoutRadius();
+		const double FlangeRadius = Fitting.FlangeRadius();
+
+		bool bBuilt = true;
+
+		if (Fitting.FlangeProjection > 0.0 && FlangeRadius > CutRadius)
+		{
+			bBuilt &= FHFMeshOps::AppendPrismWithHoles(Mesh,
+				CirclePolygon(Position, FlangeRadius, 20),
+				{ CirclePolygon(Position, CutRadius, 20) },
+				SoffitPlaneZ - Fitting.FlangeProjection, SoffitPlaneZ,
+				EHFSurfaceRole::MetalHardware);
+		}
+
+		// The lens, set back up the can. Glass rather than metal because it is the emitting face:
+		// this is the surface a real light gets parented to, and a role the material panel can
+		// already reach is what makes that possible without a new one.
+		if (Fitting.BodyDepth > 0.0)
+		{
+			const double LensZ = SoffitPlaneZ + Fitting.BodyDepth;
+			bBuilt &= FHFMeshOps::AppendPrism(Mesh,
+				CirclePolygon(Position, FMath::Max(CutRadius - 0.2, 0.1), 20),
+				LensZ, LensZ + 0.4, EHFSurfaceRole::Glass);
+		}
+
+		return bBuilt;
+	};
+
+	// ---------------------------------------------------------------- the perimeter beam bulkhead
+	//
+	// A solid ring from its own soffit up to the slab, exactly as Peripheral is - so its inner face
+	// IS the fascia of the level change, and there is no edge left open by construction.
+	if (Layout.bRing)
+	{
+		Checked(AppendBand(Layout.Outline, Ceiling.PerimeterBulkheadWidth,
+			Layout.RingSoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit, FanHoles));
+	}
+
+	// ------------------------------------------------------------------------ the styled ceiling
+	for (const TArray<FVector2D>& Outline : Layout.StyledLoops)
+	{
+		TArray<FVector2D> Downlights;
+		FittingDownlights(Ceiling, Layout, Outline, Downlights);
+
+		// The bores, as holes to be punched through whatever carries the soffit here, and the fan
+		// rods with them: both are things that pass through the ceiling rather than sit on it.
+		TArray<TArray<FVector2D>> SoffitHoles = FanHoles;
+		for (const FVector2D& Position : Downlights)
+		{
+			SoffitHoles.Add(CirclePolygon(Position, Ceiling.Downlight.CutoutRadius(), 16));
+		}
+
+		switch (Ceiling.Style)
+		{
+		case EHFCeilingStyle::FullDrop:
+		case EHFCeilingStyle::Bulkhead:
+		{
+			// A flat panel across the whole outline, plus the fascia that closes its edge to the slab.
+			//
+			// Both styles now. The fascia used to be added for Bulkhead alone, so every full drop in
+			// the flat was a 20 mm sheet with the plenum open behind it wherever its outline did not
+			// happen to die into a wall.
+			Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Outline, SoffitHoles, SoffitZ,
+				SoffitZ + HFCeilingPanel, EHFSurfaceRole::CeilingSoffit));
+
+			// Standing on the panel's top face - see the note on the lap - and never at the soffit,
+			// which would put a second horizontal face in the one plane the room certainly can see.
+			Checked(AppendFascia(Outline, SoffitZ + HFCeilingPanel, StructuralZ));
+			break;
+		}
+
+		case EHFCeilingStyle::Peripheral:
+		{
+			// The band is its own fascia. It is a solid annulus from the soffit to the structure: the
+			// inner face is the vertical edge you see standing under it, and the outer edge dies into
+			// the wall. Nothing to add here - said out loud so the next style copies the right one.
+			Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ,
+				EHFSurfaceRole::CeilingSoffit, SoffitHoles));
+			break;
+		}
+
+		case EHFCeilingStyle::Tray:
+		{
+			// Outer band at the full drop, inner region stepped back up.
+			Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, StructuralZ,
+				EHFSurfaceRole::CeilingSoffit, SoffitHoles));
+
+			// A REAL SECOND LEVEL, not a halving. On site a two-level tray is 200 outside and 100
+			// inside; halving the outer drop makes the step follow the band instead of being a
+			// figure in its own right, and made a shallow tray step by 75 mm - under the board it
+			// is cut from. Zero keeps the old behaviour for a ceiling written before the field.
+			const double InnerDrop = (Ceiling.InnerDrop > 0.0) ? Ceiling.InnerDrop : Ceiling.Drop * 0.5;
+			const double InnerSoffitZ = StructuralZ - FMath::Min(InnerDrop, Ceiling.Drop);
+
+			// The inner panel laps into the band instead of stopping in its face, so the two never share
+			// a vertical plane. It needs no fascia of its own: the band IS the fascia for this step -
+			// it runs from the lower soffit to the slab and the panel's edge ends inside it - and a
+			// fascia here would stand a fin of its own proud of the band's inner face.
+			const double InnerInset = (Ceiling.BandWidth > HFCeilingLap)
+				? Ceiling.BandWidth - HFCeilingLap
+				: Ceiling.BandWidth;
+
+			for (const TArray<FVector2D>& Loop : FHFMeshOps::InsetPolygon(Outline, InnerInset))
+			{
+				Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, InnerSoffitZ,
+					InnerSoffitZ + HFCeilingPanel, EHFSurfaceRole::CeilingSoffit));
+			}
+			break;
+		}
+
+		case EHFCeilingStyle::Cove:
+		{
+			// A cove is a peripheral band with a trough at its inner edge. The strip lies in the trough,
+			// the lip in front of it keeps the strip out of sight, and the light leaves UPWARD and
+			// washes whatever is above - the slab, or the centre panel when there is one.
+			//
+			// So the trough is OPEN TO THE SLAB AND CLOSED TO THE ROOM, and that is the whole
+			// difference between a cove and a groove. The old profile had it the other way round: a
+			// recess facing down into the room, with the strip in plain view of anyone who looked up
+			// and no path for the light to reach the slab at all. FHFCoveProfile::LipHeight already
+			// documented the lip as rising above the band soffit to shield the strip; nothing built it.
+			//
+			// Measured inward from the wall:
+			//   0          .. SolidBand    band, soffit to slab, exactly as Peripheral
+			//   SolidBand  .. +Channel     the trough: soffit board only, open to the slab above it
+			//   ..         .. +LipWidth    the lip: the same board, plus an upstand standing LipHeight
+			//                              above the soffit
+			const double ChannelWidth = FMath::Max(Ceiling.Cove.ChannelWidth, 1.0);
+			const double LipWidth = FMath::Max(Ceiling.Cove.Setback, 1.0);
+
+			// The upstand has to clear the board it stands on or it shields nothing.
+			const double LipRise = FMath::Max(Ceiling.Cove.LipHeight, HFCeilingPanel + 1.0);
+			const double SolidBand = FMath::Max(Ceiling.BandWidth - ChannelWidth - LipWidth, 1.0);
+			const double BoardTopZ = SoffitZ + HFCeilingPanel;
+
+			// ONE board across the whole band. Band, trough floor and lip all show the room the same
+			// plane, and one piece is what keeps it one face: a board per zone would butt them together
+			// in the soffit, which is the plane a person in the room is looking straight at.
+			Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, BoardTopZ,
+				EHFSurfaceRole::CeilingSoffit, SoffitHoles));
+
+			// The band above the board, solid to the slab, standing on the board rather than lapped
+			// into it - see the note on the lap.
+			Checked(AppendBand(Outline, SolidBand, BoardTopZ, StructuralZ,
+				EHFSurfaceRole::CeilingSoffit, SoffitHoles));
+
+			// The upstand. CoveInterior rather than CeilingSoffit: the faces that matter here are the
+			// trough side the strip washes and the sliver the room sees above the soffit line, and both
+			// belong to the cove detail rather than to the flat ceiling around it.
+			for (const TArray<FVector2D>& LipLoop : FHFMeshOps::InsetPolygon(Outline, SolidBand + ChannelWidth))
+			{
+				Checked(AppendBand(LipLoop, LipWidth, BoardTopZ, SoffitZ + LipRise, EHFSurfaceRole::CoveInterior));
+			}
+
+			// THE STRIP ITSELF, lying in the trough. Its top has to stay below the lip top or the
+			// cove conceals nothing - that single inequality is the whole of the sight line, because
+			// a strip throwing upward sends every ray that clears the lip AWAY from the eye, so the
+			// lowest thing any ray from below can reach over the trough is the lip top.
+			//
+			// Set back from the lip rather than shoved against the far wall of the trough: the
+			// setback is what decides how far inboard the wash starts, and a strip in the corner of
+			// a trough leaves a dark gap along the surface it is meant to be lighting.
+			const double StripWidth = FMath::Min(FMath::Max(Ceiling.Cove.StripWidth, 0.0), ChannelWidth);
+			const double StripOuter = SolidBand + ChannelWidth
+				- FMath::Clamp(Ceiling.Cove.StripSetback, 0.0, ChannelWidth - StripWidth) - StripWidth;
+
+			if (Ceiling.Cove.bHasLedStrip && StripWidth > 0.0 && Ceiling.Cove.StripHeight > 0.0
+				&& StripOuter > 0.0)
+			{
+				for (const TArray<FVector2D>& StripLoop : FHFMeshOps::InsetPolygon(Outline, StripOuter))
+				{
+					Checked(AppendBand(StripLoop, StripWidth, BoardTopZ,
+						BoardTopZ + Ceiling.Cove.StripHeight, EHFSurfaceRole::MetalHardware));
+				}
+			}
+			break;
+		}
+
+		default:
+			break;
+		}
+
+		// ------------------------------------------------------------------- the centre panel
+		//
+		// What turns a band into a FRAME: a panel filling the middle, hanging higher than the band
+		// it sits inside, so the cove throws its light onto something rather than at bare concrete.
+		// Its own fascia closes its edge to the slab, by the same rule every other soffit edge is.
+		if (Ceiling.CentrePanelDrop > 0.0 && Ceiling.CentrePanelDrop < Ceiling.Drop)
+		{
+			const double PanelSoffitZ = StructuralZ - Ceiling.CentrePanelDrop;
+			const double PanelInset = FMath::Max(Ceiling.BandWidth - HFCeilingLap, HFCeilingLap);
+
+			for (const TArray<FVector2D>& Loop : FHFMeshOps::InsetPolygon(Outline, PanelInset))
+			{
+				Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, PanelSoffitZ,
+					PanelSoffitZ + HFCeilingPanel, EHFSurfaceRole::CeilingSoffit));
+				Checked(AppendFascia(Loop, PanelSoffitZ + HFCeilingPanel, StructuralZ));
+			}
+		}
+
+		// -------------------------------------------------------------------- the fittings
+		for (const FVector2D& Position : Downlights)
+		{
+			Checked(AppendDownlight(Position, SoffitZ));
+		}
+	}
+
+	if (Refused > 0)
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("False ceiling '%s' is missing %d of its pieces: their outlines could not be triangulated."),
+			*Ceiling.Id.ToString(), Refused);
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+	return Mesh;
+}
+
+TArray<FVector> FHFGenerators::CeilingDownlights(const FHFFalseCeiling& Ceiling, const FHFRoom& Room)
+{
+	TArray<FVector> Out;
+
+	const FHFCeilingLayout Layout = ResolveCeilingLayout(Ceiling, Room);
+	if (!Layout.bValid)
+	{
+		return Out;
+	}
+
+	for (const TArray<FVector2D>& Loop : Layout.StyledLoops)
+	{
+		TArray<FVector2D> Positions;
+		FittingDownlights(Ceiling, Layout, Loop, Positions);
+
+		for (const FVector2D& Position : Positions)
+		{
+			// The APERTURE, not the plan dot: a real light belongs up inside the can at the lens,
+			// so that the trim shades it exactly as the fitting does and the scallop on the wall
+			// starts where the reflector says it does rather than at the plasterboard.
+			Out.Add(FVector(Position.X, Position.Y, Layout.SoffitZ + Ceiling.Downlight.BodyDepth));
+		}
+	}
+
+	return Out;
 }
 
 double FHFGenerators::CeilingSoffitDropAt(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
 	const FVector2D& Point)
 {
-	if (Ceiling.Style == EHFCeilingStyle::None || Ceiling.Drop <= 0.0)
+	const FHFCeilingLayout Layout = ResolveCeilingLayout(Ceiling, Room);
+	if (!Layout.bValid || !PointInPolygon2D(Layout.Outline, Point))
 	{
 		return 0.0;
 	}
 
-	// The same outline GenerateCeiling triangulates: a bulkhead follows its own polygon and
-	// everything else follows the room.
-	const TArray<FVector2D>& Outline = (Ceiling.ExplicitPolygon.Num() >= 3)
-		? Ceiling.ExplicitPolygon
-		: Room.Boundary;
+	// Inside the perimeter ring, which covers everything under it whatever the style does further in.
+	if (Layout.bRing && !InsideAnyLoop(Layout.StyledLoops, Point))
+	{
+		return Ceiling.PerimeterBulkheadDrop;
+	}
 
-	if (Outline.Num() < 3 || !PointInPolygon2D(Outline, Point))
+	const TArray<FVector2D>* Outline = nullptr;
+	for (const TArray<FVector2D>& Loop : Layout.StyledLoops)
+	{
+		if (PointInPolygon2D(Loop, Point))
+		{
+			Outline = &Loop;
+			break;
+		}
+	}
+
+	if (Outline == nullptr)
 	{
 		return 0.0;
 	}
 
-	// Mirrors GenerateCeiling's switch case for case. The two answer the same question about the
-	// same geometry - what covers this spot - and a fan resolved against a different answer from the
-	// one the panel was built with is a fan in the plasterboard.
+	// Inside the band, the centre panel is what a rod meets first.
+	auto CentreDrop = [&Ceiling]() -> double
+	{
+		return (Ceiling.CentrePanelDrop > 0.0 && Ceiling.CentrePanelDrop < Ceiling.Drop)
+			? Ceiling.CentrePanelDrop
+			: 0.0;
+	};
+
+	// Mirrors the switch above case for case. The two answer the same question about the same
+	// geometry - what covers this spot - and a fan resolved against a different answer from the one
+	// the panel was built with is a fan in the plasterboard.
 	switch (Ceiling.Style)
 	{
 	case EHFCeilingStyle::FullDrop:
@@ -869,31 +1232,32 @@ double FHFGenerators::CeilingSoffitDropAt(const FHFFalseCeiling& Ceiling, const 
 	case EHFCeilingStyle::Peripheral:
 	case EHFCeilingStyle::Cove:
 	{
-		// Band only; the centre is open to the slab, which is why the three fans in the reference
-		// flat hang in clear air and why nothing caught this.
+		// Band only; the centre is open to the slab unless a centre panel fills it, which is why
+		// the three fans in the reference flat hang in clear air and why nothing caught this.
 		//
 		// A cove answers the same way. Its trough and its lip are cut out of the top of the band,
 		// so the soffit under the whole band width is one plane at the full drop - there is no
 		// longer a step in the underside for a fan to be resolved against.
-		const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(Outline, Ceiling.BandWidth);
+		const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(*Outline, Ceiling.BandWidth);
 		if (Inner.IsEmpty())
 		{
 			// The band swallowed the room, so it built as a full drop. Same answer here.
 			return Ceiling.Drop;
 		}
-		return InsideAnyLoop(Inner, Point) ? 0.0 : Ceiling.Drop;
+		return InsideAnyLoop(Inner, Point) ? CentreDrop() : Ceiling.Drop;
 	}
 
 	case EHFCeilingStyle::Tray:
 	{
-		const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(Outline, Ceiling.BandWidth);
+		const TArray<TArray<FVector2D>> Inner = FHFMeshOps::InsetPolygon(*Outline, Ceiling.BandWidth);
 		if (Inner.IsEmpty())
 		{
 			return Ceiling.Drop;
 		}
 
-		// The inner region steps back up to half the drop, and it is still a panel.
-		return InsideAnyLoop(Inner, Point) ? Ceiling.Drop * 0.5 : Ceiling.Drop;
+		// The inner region steps back up, and it is still a panel.
+		const double InnerDrop = (Ceiling.InnerDrop > 0.0) ? Ceiling.InnerDrop : Ceiling.Drop * 0.5;
+		return InsideAnyLoop(Inner, Point) ? FMath::Min(InnerDrop, Ceiling.Drop) : Ceiling.Drop;
 	}
 
 	default:

@@ -1262,82 +1262,371 @@
 			"id": "FC_Living",
 			"roomId": "R_Living",
 			"style": "Cove",
-			"drop": 500,
+			"template": "Cove",
+			"drop": 150,
 			"bandWidth": 600,
+			"innerDrop": 0,
+			"centrePanelDrop": 0,
 			"cove":
 			{
-				"channelWidth": 80,
+				"channelWidth": 100,
 				"lipHeight": 50,
 				"setback": 20,
-				"bHasLedStrip": true
+				"bHasLedStrip": true,
+				"stripWidth": 20,
+				"stripHeight": 16,
+				"stripSetback": 25
 			},
+			"downlight":
+			{
+				"cutoutDiameter": 75,
+				"flangeDiameter": 90,
+				"flangeProjection": 3,
+				"bodyDepth": 60,
+				"bRecessed": true
+			},
+			"perimeterBulkheadWidth": 300,
+			"perimeterBulkheadDrop": 480,
 			"explicitPolygon": [],
 			"lightPositions": [
 				{
-					"x": 1200,
-					"y": 1200
+					"x": 6049.9999999999991,
+					"y": 549.99999999999966
 				},
 				{
-					"x": 1200,
-					"y": 2400
+					"x": 6049.9999999999991,
+					"y": 1311.9047619047615
 				},
 				{
-					"x": 5400,
-					"y": 1200
+					"x": 6049.9999999999991,
+					"y": 2073.8095238095229
 				},
 				{
-					"x": 5400,
-					"y": 2400
+					"x": 6049.9999999999991,
+					"y": 2835.7142857142849
+				},
+				{
+					"x": 5502.3809523809514,
+					"y": 3049.9999999999986
+				},
+				{
+					"x": 4740.4761904761899,
+					"y": 3049.9999999999986
+				},
+				{
+					"x": 3978.5714285714275,
+					"y": 3049.9999999999986
+				},
+				{
+					"x": 3216.6666666666665,
+					"y": 3049.9999999999986
+				},
+				{
+					"x": 2454.7619047619046,
+					"y": 3049.9999999999986
+				},
+				{
+					"x": 1692.8571428571431,
+					"y": 3049.9999999999986
+				},
+				{
+					"x": 930.95238095238165,
+					"y": 3049.9999999999986
+				},
+				{
+					"x": 549.99999999999966,
+					"y": 2669.0476190476188
+				},
+				{
+					"x": 549.99999999999966,
+					"y": 1907.1428571428555
+				},
+				{
+					"x": 549.99999999999966,
+					"y": 1145.238095238094
+				},
+				{
+					"x": 716.66666666666663,
+					"y": 549.99999999999966
+				},
+				{
+					"x": 1478.5714285714289,
+					"y": 549.99999999999966
+				},
+				{
+					"x": 2240.476190476189,
+					"y": 549.99999999999966
+				},
+				{
+					"x": 3002.3809523809518,
+					"y": 549.99999999999966
+				},
+				{
+					"x": 3764.2857142857115,
+					"y": 549.99999999999966
+				},
+				{
+					"x": 4526.1904761904752,
+					"y": 549.99999999999966
+				},
+				{
+					"x": 5288.0952380952349,
+					"y": 549.99999999999966
 				}
 			]
 		},
 		{
 			"id": "FC_MBed",
 			"roomId": "R_MBed",
-			"style": "Peripheral",
-			"drop": 500,
-			"bandWidth": 600,
+			"style": "Cove",
+			"template": "FramedPanel",
+			"drop": 150,
+			"bandWidth": 450,
+			"innerDrop": 0,
+			"centrePanelDrop": 40,
 			"cove":
 			{
-				"channelWidth": 80,
+				"channelWidth": 100,
 				"lipHeight": 50,
 				"setback": 20,
-				"bHasLedStrip": false
+				"bHasLedStrip": true,
+				"stripWidth": 20,
+				"stripHeight": 16,
+				"stripSetback": 25
 			},
+			"downlight":
+			{
+				"cutoutDiameter": 75,
+				"flangeDiameter": 90,
+				"flangeProjection": 3,
+				"bodyDepth": 60,
+				"bRecessed": true
+			},
+			"perimeterBulkheadWidth": 300,
+			"perimeterBulkheadDrop": 480,
 			"explicitPolygon": [],
 			"lightPositions": [
 				{
-					"x": 5100,
-					"y": 6300
+					"x": 10250,
+					"y": 5950
 				},
 				{
-					"x": 8100,
-					"y": 6300
+					"x": 10250,
+					"y": 6690
+				},
+				{
+					"x": 10250,
+					"y": 7430
+				},
+				{
+					"x": 9930,
+					"y": 7849.9999999999991
+				},
+				{
+					"x": 9190,
+					"y": 7849.9999999999991
+				},
+				{
+					"x": 8450,
+					"y": 7849.9999999999991
+				},
+				{
+					"x": 7710,
+					"y": 7849.9999999999991
+				},
+				{
+					"x": 6970,
+					"y": 7849.9999999999991
+				},
+				{
+					"x": 6230,
+					"y": 7849.9999999999991
+				},
+				{
+					"x": 5490,
+					"y": 7849.9999999999991
+				},
+				{
+					"x": 4750,
+					"y": 7849.9999999999991
+				},
+				{
+					"x": 4750,
+					"y": 7109.9999999999991
+				},
+				{
+					"x": 4750,
+					"y": 6370
+				},
+				{
+					"x": 5070,
+					"y": 5950
+				},
+				{
+					"x": 5810.0000000000009,
+					"y": 5950
+				},
+				{
+					"x": 6550.0000000000009,
+					"y": 5950
+				},
+				{
+					"x": 7290.0000000000009,
+					"y": 5950
+				},
+				{
+					"x": 8030.0000000000009,
+					"y": 5950
+				},
+				{
+					"x": 8770,
+					"y": 5950
+				},
+				{
+					"x": 9510,
+					"y": 5950
 				}
 			]
 		},
 		{
 			"id": "FC_Bed2",
 			"roomId": "R_Bed2",
-			"style": "Peripheral",
-			"drop": 500,
-			"bandWidth": 500,
+			"style": "Tray",
+			"template": "SteppedTray",
+			"drop": 200,
+			"bandWidth": 450,
+			"innerDrop": 100,
+			"centrePanelDrop": 0,
 			"cove":
 			{
-				"channelWidth": 80,
+				"channelWidth": 100,
 				"lipHeight": 50,
 				"setback": 20,
-				"bHasLedStrip": false
+				"bHasLedStrip": false,
+				"stripWidth": 20,
+				"stripHeight": 16,
+				"stripSetback": 25
 			},
+			"downlight":
+			{
+				"cutoutDiameter": 75,
+				"flangeDiameter": 90,
+				"flangeProjection": 3,
+				"bodyDepth": 60,
+				"bRecessed": true
+			},
+			"perimeterBulkheadWidth": 300,
+			"perimeterBulkheadDrop": 480,
 			"explicitPolygon": [],
 			"lightPositions": [
 				{
-					"x": 7500,
-					"y": 1200
+					"x": 10250,
+					"y": 549.9999999999992
 				},
 				{
-					"x": 9600,
-					"y": 1200
+					"x": 10250,
+					"y": 1296.6666666666661
+				},
+				{
+					"x": 10250,
+					"y": 2043.3333333333326
+				},
+				{
+					"x": 10250,
+					"y": 2789.9999999999991
+				},
+				{
+					"x": 9763.3333333333321,
+					"y": 3049.9999999999991
+				},
+				{
+					"x": 9016.6666666666661,
+					"y": 3049.9999999999991
+				},
+				{
+					"x": 8270,
+					"y": 3049.9999999999991
+				},
+				{
+					"x": 7523.333333333333,
+					"y": 3049.9999999999991
+				},
+				{
+					"x": 7149.9999999999991,
+					"y": 2676.6666666666661
+				},
+				{
+					"x": 7149.9999999999991,
+					"y": 1929.9999999999991
+				},
+				{
+					"x": 7149.9999999999991,
+					"y": 1183.3333333333321
+				},
+				{
+					"x": 7263.3333333333321,
+					"y": 549.9999999999992
+				},
+				{
+					"x": 8009.9999999999982,
+					"y": 549.9999999999992
+				},
+				{
+					"x": 8756.6666666666661,
+					"y": 549.9999999999992
+				},
+				{
+					"x": 9503.3333333333321,
+					"y": 549.9999999999992
+				}
+			]
+		},
+		{
+			"id": "FC_Foyer",
+			"roomId": "R_Foyer",
+			"style": "Peripheral",
+			"template": "PlainBand",
+			"drop": 150,
+			"bandWidth": 450,
+			"innerDrop": 0,
+			"centrePanelDrop": 0,
+			"cove":
+			{
+				"channelWidth": 100,
+				"lipHeight": 50,
+				"setback": 20,
+				"bHasLedStrip": false,
+				"stripWidth": 20,
+				"stripHeight": 16,
+				"stripSetback": 25
+			},
+			"downlight":
+			{
+				"cutoutDiameter": 75,
+				"flangeDiameter": 90,
+				"flangeProjection": 3,
+				"bodyDepth": 60,
+				"bRecessed": true
+			},
+			"perimeterBulkheadWidth": 300,
+			"perimeterBulkheadDrop": 480,
+			"explicitPolygon": [],
+			"lightPositions": [
+				{
+					"x": 1250,
+					"y": 4150
+				},
+				{
+					"x": 1250,
+					"y": 4850
+				},
+				{
+					"x": 550,
+					"y": 4850
+				},
+				{
+					"x": 550,
+					"y": 4150
 				}
 			]
 		},
@@ -1345,15 +1634,31 @@
 			"id": "FC_Kitchen",
 			"roomId": "R_Kitchen",
 			"style": "FullDrop",
-			"drop": 500,
+			"template": "Custom",
+			"drop": 480,
 			"bandWidth": 0,
+			"innerDrop": 0,
+			"centrePanelDrop": 0,
 			"cove":
 			{
-				"channelWidth": 80,
-				"lipHeight": 50,
-				"setback": 20,
-				"bHasLedStrip": false
+				"channelWidth": 10,
+				"lipHeight": 5,
+				"setback": 2,
+				"bHasLedStrip": false,
+				"stripWidth": 2,
+				"stripHeight": 1.6000000000000001,
+				"stripSetback": 2.5
 			},
+			"downlight":
+			{
+				"cutoutDiameter": 75,
+				"flangeDiameter": 90,
+				"flangeProjection": 3,
+				"bodyDepth": 60,
+				"bRecessed": true
+			},
+			"perimeterBulkheadWidth": 0,
+			"perimeterBulkheadDrop": 0,
 			"explicitPolygon": [],
 			"lightPositions": [
 				{
@@ -1378,15 +1683,31 @@
 			"id": "FC_CBath",
 			"roomId": "R_CBath",
 			"style": "FullDrop",
-			"drop": 500,
+			"template": "Custom",
+			"drop": 480,
 			"bandWidth": 0,
+			"innerDrop": 0,
+			"centrePanelDrop": 0,
 			"cove":
 			{
-				"channelWidth": 80,
-				"lipHeight": 50,
-				"setback": 20,
-				"bHasLedStrip": false
+				"channelWidth": 10,
+				"lipHeight": 5,
+				"setback": 2,
+				"bHasLedStrip": false,
+				"stripWidth": 2,
+				"stripHeight": 1.6000000000000001,
+				"stripSetback": 2.5
 			},
+			"downlight":
+			{
+				"cutoutDiameter": 75,
+				"flangeDiameter": 90,
+				"flangeProjection": 3,
+				"bodyDepth": 60,
+				"bRecessed": true
+			},
+			"perimeterBulkheadWidth": 0,
+			"perimeterBulkheadDrop": 0,
 			"explicitPolygon": [],
 			"lightPositions": [
 				{
@@ -1399,15 +1720,31 @@
 			"id": "FC_MBath",
 			"roomId": "R_MBath",
 			"style": "FullDrop",
-			"drop": 500,
+			"template": "Custom",
+			"drop": 480,
 			"bandWidth": 0,
+			"innerDrop": 0,
+			"centrePanelDrop": 0,
 			"cove":
 			{
-				"channelWidth": 80,
-				"lipHeight": 50,
-				"setback": 20,
-				"bHasLedStrip": false
+				"channelWidth": 10,
+				"lipHeight": 5,
+				"setback": 2,
+				"bHasLedStrip": false,
+				"stripWidth": 2,
+				"stripHeight": 1.6000000000000001,
+				"stripSetback": 2.5
 			},
+			"downlight":
+			{
+				"cutoutDiameter": 75,
+				"flangeDiameter": 90,
+				"flangeProjection": 3,
+				"bodyDepth": 60,
+				"bRecessed": true
+			},
+			"perimeterBulkheadWidth": 0,
+			"perimeterBulkheadDrop": 0,
 			"explicitPolygon": [],
 			"lightPositions": [
 				{
@@ -1420,15 +1757,31 @@
 			"id": "FC_Corridor",
 			"roomId": "R_Corridor",
 			"style": "Bulkhead",
-			"drop": 500,
+			"template": "Custom",
+			"drop": 480,
 			"bandWidth": 0,
+			"innerDrop": 0,
+			"centrePanelDrop": 0,
 			"cove":
 			{
 				"channelWidth": 10,
 				"lipHeight": 5,
 				"setback": 2,
-				"bHasLedStrip": true
+				"bHasLedStrip": true,
+				"stripWidth": 2,
+				"stripHeight": 1.6000000000000001,
+				"stripSetback": 2.5
 			},
+			"downlight":
+			{
+				"cutoutDiameter": 75,
+				"flangeDiameter": 90,
+				"flangeProjection": 3,
+				"bodyDepth": 60,
+				"bRecessed": true
+			},
+			"perimeterBulkheadWidth": 0,
+			"perimeterBulkheadDrop": 0,
 			"explicitPolygon": [
 				{
 					"x": 4200,

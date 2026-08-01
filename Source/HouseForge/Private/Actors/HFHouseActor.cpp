@@ -11,6 +11,8 @@
 #include "Engine/World.h"
 #include "Geometry/HFGenerators.h"
 #include "HouseForge.h"
+#include "Model/HFBuildDefaults.h"
+#include "Model/HFCeilingTemplates.h"
 
 namespace
 {
@@ -269,6 +271,16 @@ void AHFHouseActor::SetSpec(const FHFHouseSpec& InSpec)
 	// One conversion, here. Everything downstream - preview, tools, geometry - works in
 	// centimetres and never has to ask what units a spec arrived in.
 	FHFUnits::ConvertToCentimeters(Spec);
+
+	// AND ONE TEMPLATE RESOLUTION, here, for the same reason. A ceiling that names a design carries
+	// no figures until this runs, and after it the spec holds plain numbers that the preview, the
+	// tools and the geometry all read the same way. Re-applied rather than trusted from the incoming
+	// spec, because the design belongs to the project: a drawing says "cove", and how deep a cove is
+	// in this project is what the settings page is for.
+	//
+	// Idempotent, so a spec that arrived already resolved is unchanged, and Custom ceilings are left
+	// exactly as authored.
+	FHFCeilingTemplates::Apply(Spec, FHFBuildDefaults::FromProjectSettings().Ceiling);
 
 	if (!Spec.SourceDrawing.IsEmpty())
 	{
@@ -578,6 +590,16 @@ void AHFHouseActor::BuildGeometry()
 
 		CeilingActor->Ceiling = Ceiling;
 		CeilingActor->Room = *Room;
+
+		// The beams this ceiling has to bury, carried onto the actor so a later settings change can
+		// re-derive the perimeter ring instead of quietly dropping it. Deliberately every beam that
+		// SHOWS rather than every beam in the room: a 230 beam flush in the 230 wall under it is
+		// invisible and needs no ring, and that distinction is the whole reason the uniform 500 drop
+		// was wrong.
+		if (const FHFBeam* Showing = Spec.DeepestBeamOverRoom(Ceiling.RoomId))
+		{
+			CeilingActor->BeamsShowingInRoom.Add(*Showing);
+		}
 
 		// THE HOLE IS A CONSEQUENCE OF THE FAN, exactly as an extract's duct is. It was a fixed 8 -
 		// a 16 cm square opening for a 2.2 cm rod - whose corners showed past the 15 cm motor

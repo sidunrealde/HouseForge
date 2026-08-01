@@ -440,6 +440,100 @@ namespace
 		return bSawBeamInsideRoom;
 	}
 
+	/**
+	 * Shortest distance from a point to a polygon's boundary, whichever side of it the point is on.
+	 *
+	 * How far a spot is from the nearest wall, which is what a perimeter ring is measured in. Done
+	 * this way rather than by offsetting the room and testing containment: an offset can legitimately
+	 * split an L-shaped room into two loops or consume it entirely, and neither of those is an
+	 * answer to "how far in is this point".
+	 */
+	double DistanceToBoundary(const TArray<FVector2D>& Polygon, const FVector2D& Point)
+	{
+		double Nearest = TNumericLimits<double>::Max();
+
+		for (int32 Index = 0; Index < Polygon.Num(); ++Index)
+		{
+			const FVector2D& A = Polygon[Index];
+			const FVector2D& B = Polygon[(Index + 1) % Polygon.Num()];
+
+			const FVector2D Edge = B - A;
+			const double LengthSquared = Edge.SizeSquared();
+			const double T = (LengthSquared > UE_KINDA_SMALL_NUMBER)
+				? FMath::Clamp(FVector2D::DotProduct(Point - A, Edge) / LengthSquared, 0.0, 1.0)
+				: 0.0;
+
+			Nearest = FMath::Min(Nearest, FVector2D::Distance(Point, A + Edge * T));
+		}
+
+		return Nearest;
+	}
+
+	/**
+	 * Whether a ceiling's own perimeter bulkhead ring buries a beam where it crosses a room.
+	 *
+	 * The same question BulkheadCoversBeamOverRoom asks of a sibling bulkhead, put to a ring: over
+	 * every part of the beam that is inside this room, is the beam within the ring's width of the
+	 * wall.
+	 *
+	 * ON THE BEAM'S FOOTPRINT, not on its centreline, and that is the one place this is stricter
+	 * than the sibling test. A sibling bulkhead is drawn by hand a little wider than the beam it
+	 * boxes in, so a few centimetres either way there is drafting rounding. A ring is DERIVED from
+	 * the beam - its width is chosen as half the beam plus a shoulder - so if the arithmetic that
+	 * chose it is wrong the error is systematic and shows on every room in the flat at once.
+	 * Checking the edge of the beam rather than its middle is what would catch that.
+	 */
+	bool PerimeterRingCoversBeamOverRoom(const FHFFalseCeiling& Ceiling, const FHFBeam& Beam,
+		const FHFRoom& Room)
+	{
+
+		const TArray<FVector2D>& Outline = (Ceiling.ExplicitPolygon.Num() >= 3)
+			? Ceiling.ExplicitPolygon
+			: Room.Boundary;
+
+		if (Outline.Num() < 3 || Beam.Length() <= UE_KINDA_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		// Sampled at the same rate as everything else that walks a beam, so the rule that finds a
+		// beam over a room and the rule that asks whether it is covered agree about where it is.
+		constexpr int32 SampleCount = 24;
+
+		bool bSawBeam = false;
+		for (int32 Sample = 0; Sample <= SampleCount; ++Sample)
+		{
+			const FVector2D Point = FMath::Lerp(Beam.Start, Beam.End,
+				static_cast<double>(Sample) / SampleCount);
+
+			// HOW FAR THE BEAM REACHES IN, on the same footing DeepestBeamOverRoom measures it. A
+			// containment test alone is the wrong question here and would have made this clause
+			// never fire: every beam in this flat is set out ON a wall line, so its centreline lies
+			// exactly on the room boundary, where an even-odd test is a coin toss. What reaches the
+			// room is the beam's own half width past that line.
+			const double Distance = DistanceToBoundary(Outline, Point);
+			const double Inside = HFPolygonContainsPoint(Outline, Point) ? Distance : -Distance;
+			const double Reach = Inside + Beam.Width * 0.5;
+
+			// Nothing of the beam is over the ceiling here; further along it may be.
+			if (Reach <= 0.0)
+			{
+				continue;
+			}
+
+			bSawBeam = true;
+
+			// The far edge of the beam, not its middle. The ring has to reach at least as far in as
+			// the beam does, or the beam's inner face hangs out of the box that was sized for it.
+			if (Reach > Ceiling.PerimeterBulkheadWidth + UE_KINDA_SMALL_NUMBER)
+			{
+				return false;
+			}
+		}
+
+		return bSawBeam;
+	}
+
 	/** Reports any id used more than once, since later lookups would silently take the first. */
 	template <typename ElementType, typename GetIdFunc>
 	void CheckDuplicateIds(
@@ -1597,22 +1691,47 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 				FString::Printf(TEXT("False ceiling '%s' has drop %.2f; a false ceiling must hang below the slab."),
 					*Describe(Ceiling.Id), Ceiling.Drop));
 		}
-		else if (Ceiling.Drop >= Room->CeilingHeight)
+		// THE DEEPEST PART OF THE CEILING, not its nominal drop. A ceiling is no longer one plane:
+		// a shallow band can carry a perimeter bulkhead ring hanging a great deal lower, and that
+		// ring is what somebody walks under at the edge of the room. Measuring headroom against
+		// Drop would report 285 cm of clearance under a ceiling whose ring hangs at 252.
+		else if (Ceiling.DeepestDrop() >= Room->CeilingHeight)
 		{
 			Result.Add(EHFValidationSeverity::Error, TEXT("CeilingDropExceedsRoom"), Ceiling.Id,
 				FString::Printf(TEXT("False ceiling '%s' drops %.1f but room '%s' is only %.1f tall; it would land at or below the floor."),
-					*Describe(Ceiling.Id), Ceiling.Drop, *Describe(Room->Id), Room->CeilingHeight));
+					*Describe(Ceiling.Id), Ceiling.DeepestDrop(), *Describe(Room->Id), Room->CeilingHeight));
 		}
 		// Scaled to centimetres, for the same reason BeamLowHeadroom above is: the limit is a
 		// centimetre figure and the spec is in whatever it declares.
-		else if ((Room->CeilingHeight - Ceiling.Drop) * FHFUnits::ToCentimeterScale(Spec.Units)
+		else if ((Room->CeilingHeight - Ceiling.DeepestDrop()) * FHFUnits::ToCentimeterScale(Spec.Units)
 			< Limits.MinHeadroomCm)
 		{
 			Result.Add(EHFValidationSeverity::Warning, TEXT("LowHeadroom"), Ceiling.Id,
 				FString::Printf(TEXT("False ceiling '%s' leaves %.1f cm clear in room '%s', below the %.0f cm usually treated as minimum headroom."),
 					*Describe(Ceiling.Id),
-					(Room->CeilingHeight - Ceiling.Drop) * FHFUnits::ToCentimeterScale(Spec.Units),
+					(Room->CeilingHeight - Ceiling.DeepestDrop()) * FHFUnits::ToCentimeterScale(Spec.Units),
 					*Describe(Room->Id), Limits.MinHeadroomCm));
+		}
+
+		// A ring no deeper than the ceiling inside it builds nothing at all - HasPerimeterBulkhead
+		// answers false and the geometry is a plain band - so a spec asking for one and getting
+		// none would be a beam left showing with nothing said about it.
+		if (Ceiling.PerimeterBulkheadWidth > 0.0 && Ceiling.PerimeterBulkheadDrop <= Ceiling.Drop)
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("PerimeterBulkheadNotDeeper"), Ceiling.Id,
+				FString::Printf(TEXT("False ceiling '%s' asks for a %.1f wide perimeter bulkhead dropping %.1f, which is not deeper than the ceiling's own %.1f; no ring is built."),
+					*Describe(Ceiling.Id), Ceiling.PerimeterBulkheadWidth,
+					Ceiling.PerimeterBulkheadDrop, Ceiling.Drop));
+		}
+
+		// A centre panel is a RECESS: it sits higher than the band that frames it. Hung lower it is
+		// not a framed panel, it is a full drop with a rebate round the edge, and the cove under it
+		// would be throwing its light at the top of a box.
+		if (Ceiling.CentrePanelDrop > 0.0 && Ceiling.CentrePanelDrop >= Ceiling.Drop)
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("CentrePanelNotRecessed"), Ceiling.Id,
+				FString::Printf(TEXT("False ceiling '%s' has a centre panel dropping %.1f inside a band dropping %.1f; a centre panel sits higher than its frame, so nothing is built."),
+					*Describe(Ceiling.Id), Ceiling.CentrePanelDrop, Ceiling.Drop));
 		}
 
 		const bool bNeedsBand =
@@ -1634,6 +1753,30 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 		{
 			if (Ceiling.Drop + UE_KINDA_SMALL_NUMBER < Beam->Depth)
 			{
+				// THE CEILING'S OWN PERIMETER RING, and this is the clause that had to be added for
+				// the depth model to change at all.
+				//
+				// The rule and its bulkhead exemption were right about the principle - a beam must
+				// be boxed in where it runs, not excused by a drop somewhere else - and the
+				// exemption was made positional for exactly that reason. What it could not see was
+				// a bulkhead that is not a separate element. Every beam in this flat runs along a
+				// wall line, so what has to be boxed in is a strip round the EDGE of each room, and
+				// expressing that as sibling FHFFalseCeilings would mean one Bulkhead element per
+				// room edge per room - a spec four times the size carrying no information the beam
+				// list does not already carry, and every one of those polygons a chance to drift
+				// out of step with the beam it was drawn against.
+				//
+				// So the ring is a property of the ceiling, derived from the beams rather than
+				// authored, and this asks the same positional question of it that
+				// BulkheadCoversBeamOverRoom asks of a sibling: is the beam INSIDE the ring, along
+				// its whole run over this room. Measured on the beam's own footprint rather than on
+				// its centreline - a ring is sized to bury a beam's full width, and a ring that
+				// covers the centreline while the beam's edge hangs out of it has boxed in nothing.
+				const bool bRingCoversIt =
+					Ceiling.HasPerimeterBulkhead()
+					&& Ceiling.PerimeterBulkheadDrop + UE_KINDA_SMALL_NUMBER >= Beam->Depth
+					&& PerimeterRingCoversBeamOverRoom(Ceiling, *Beam, *Room);
+
 				// A peripheral band leaves the centre of the room at slab height, so it conceals
 				// nothing mid-span. It is only excusable when a bulkhead boxes the beam in - which
 				// is exactly how this is detailed in practice.
@@ -1662,10 +1805,10 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 							&& BulkheadCoversBeamOverRoom(Other, *Beam, *Room);
 					});
 
-				if (!(bIsPerimeterOnly && bBulkheadCoversIt))
+				if (!bRingCoversIt && !(bIsPerimeterOnly && bBulkheadCoversIt))
 				{
 					Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingDoesNotClearBeam"), Ceiling.Id,
-						FString::Printf(TEXT("False ceiling '%s' drops %.1f but beam '%s' over room '%s' hangs %.1f; the beam would show through the soffit. Deepen the ceiling or add a bulkhead over the beam."),
+						FString::Printf(TEXT("False ceiling '%s' drops %.1f but beam '%s' over room '%s' hangs %.1f; the beam would show through the soffit. Give it a perimeter bulkhead deep and wide enough to bury the beam where it runs round the room, add a bulkhead over it, or deepen the ceiling."),
 							*Describe(Ceiling.Id), Ceiling.Drop, *Describe(Beam->Id), *Describe(Room->Id), Beam->Depth));
 				}
 			}

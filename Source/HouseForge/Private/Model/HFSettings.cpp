@@ -76,6 +76,7 @@ FHFBuildDefaults UHFSettings::Resolve() const
 	F.ExhaustFanBladePitchDegrees = ExhaustFanBladePitchDegrees;
 	F.CeilingFanDropLength = CeilingFanDropLength;
 
+	Out.Ceiling = Ceiling;
 	Out.Validation = Validation;
 
 	return Out;

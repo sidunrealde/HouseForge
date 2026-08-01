@@ -22,6 +22,7 @@
 #include "Misc/ScopeExit.h"
 #include "Model/HFSpecSerializer.h"
 #include "Model/HFBuildDefaults.h"
+#include "Model/HFCeilingTemplates.h"
 #include "Model/HFSpecValidator.h"
 #include "Model/HFSettings.h"
 #include "Actors/HFElementActors.h"
@@ -52,6 +53,18 @@ namespace
 	FHFValidationLimits ProjectValidationLimits()
 	{
 		return FHFBuildDefaults::FromProjectSettings().Validation;
+	}
+
+	/**
+	 * The project's ceiling designs, for the same reason and with the same discipline.
+	 *
+	 * Every entry point that reads a spec has to resolve its templates before doing anything with
+	 * it, or the two tools disagree about what the same JSON means: a ceiling naming a template has
+	 * a drop of zero until this runs, so validate would refuse a spec that apply would build.
+	 */
+	FHFCeilingDefaults ProjectCeilingDefaults()
+	{
+		return FHFBuildDefaults::FromProjectSettings().Ceiling;
 	}
 }
 
@@ -277,6 +290,11 @@ FHFOperationResult UHFEditorSubsystem::ValidateSpecJson(const FString& SpecJson)
 		return FHFOperationResult::Fail(Error);
 	}
 
+	// RESOLVED BEFORE IT IS JUDGED. A ceiling that names a template carries no drop, no band and no
+	// cove section until the project's figures are stamped onto it, so validating first would judge
+	// a ceiling with a drop of zero and report a spec that is perfectly good as broken.
+	FHFCeilingTemplates::Apply(Spec, ProjectCeilingDefaults());
+
 	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec, ProjectValidationLimits());
 	if (Validation.HasErrors())
 	{
@@ -294,6 +312,8 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 	{
 		return FHFOperationResult::Fail(Error);
 	}
+
+	FHFCeilingTemplates::Apply(Spec, ProjectCeilingDefaults());
 
 	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec, ProjectValidationLimits());
 	if (Validation.HasErrors())
@@ -952,6 +972,16 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 		{
 			Opening->ApplyProjectDefaults();
 			Opening->Regenerate();
+			++Rebuilt;
+		}
+		else if (AHFCeilingActor* CeilingActor = Cast<AHFCeilingActor>(Typed))
+		{
+			// The False Ceilings section reaches these and nothing else. Left out, every template
+			// figure on the page would be inert on a level already built - the same failure the
+			// Joinery section had, where dragging a control rebuilt every door in the flat and left
+			// every wardrobe exactly as it was.
+			CeilingActor->ApplyProjectDefaults();
+			CeilingActor->Regenerate();
 			++Rebuilt;
 		}
 		else if (AHFWardrobeActor* Wardrobe = Cast<AHFWardrobeActor>(Typed))

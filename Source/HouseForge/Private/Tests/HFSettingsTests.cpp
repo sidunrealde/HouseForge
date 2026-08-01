@@ -588,7 +588,16 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// not exist while every door in the flat was a bare leaf in a bare hole; and the two sliding
 	// panel figures that used to live under Doors moved into the eighteen of the glazed sliding
 	// DOOR section, which is a sliding window with a threshold rather than a pair of boards.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 100);
+	// 127 rather than 100: the False Ceilings section. Twenty-five numeric figures - the band and
+	// the drop for each of the four named designs, the six of the cove section, the four of the
+	// downlight fitting with its pitch and setback, and the three that size the ring which buries a
+	// beam - plus two switches, bHasLedStrip and bRecessed, which are the two places a design says
+	// "not this one" rather than giving a number.
+	//
+	// This section is why the flat's ceilings stopped being a uniform 500 drop. Every one of those
+	// figures used to be a literal: some in FHFSampleHouse, some compiled into HFGenerators, and the
+	// cove's three in a struct nothing built anything from.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 127);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 31);
 
 	return true;
@@ -852,7 +861,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 100);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 125);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

@@ -6,6 +6,7 @@
 #include "Geometry/HFFanKit.h"
 #include "Geometry/HFJoineryKit.h"
 #include "Geometry/HFOpeningParams.h"
+#include "Model/HFCeilingTemplates.h"
 #include "Model/HFSpecValidator.h"
 #include "HFBuildDefaults.generated.h"
 
@@ -333,6 +334,10 @@ struct HOUSEFORGE_API FHFBuildDefaults
 	/** How fast the fans turn, and how they are built. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFFanDefaults Fan;
+
+	/** The figures behind the named false-ceiling designs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFCeilingDefaults Ceiling;
 
 	/** What the validator judges a spec against. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")

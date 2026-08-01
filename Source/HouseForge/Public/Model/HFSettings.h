@@ -438,6 +438,27 @@ public:
 		meta = (ClampMin = "0.0", ClampMax = "120.0", UIMin = "10.0", UIMax = "90.0"))
 	double CeilingFanDropLength = 30.0;
 
+	// =========================================================================== false ceilings
+
+	/**
+	 * The named false-ceiling designs, and the figures behind them.
+	 *
+	 * A TEMPLATE IS THE UNIT OF CHOICE HERE, not a drop. A spec names one - PlainBand, Cove,
+	 * SteppedTray, FramedPanel - and this page decides what that name means for this project: how
+	 * wide the band, how deep the drop, the cove section, the downlight pitch, and how big a ring
+	 * has to be to bury a beam running round a room. Change a figure here and every templated
+	 * ceiling already standing in the level rebuilds to it.
+	 *
+	 * ALL IN CENTIMETRES, whatever units a drawing is dimensioned in. A ceiling design is a
+	 * statement about the building; the drawing's units are a statement about the drawing.
+	 *
+	 * A ceiling whose template is Custom is left completely alone by this section, which is what
+	 * makes hand-tuning one still possible.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "False Ceilings",
+		meta = (ShowOnlyInnerProperties))
+	FHFCeilingDefaults Ceiling;
+
 	// ======================================================================= validation limits
 
 	/** What the spec validator judges a house against, before anything is built from it. */

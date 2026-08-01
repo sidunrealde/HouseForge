@@ -564,13 +564,19 @@ bool FHFCoveTroughTest::RunTest(const FString& Parameters)
 	Ceiling.Cove.ChannelWidth = 8.0;
 	Ceiling.Cove.LipHeight = 5.0;
 	Ceiling.Cove.Setback = 2.0;
+	Ceiling.Cove.StripWidth = 2.0;
+	Ceiling.Cove.StripHeight = 1.6;
+	Ceiling.Cove.StripSetback = 2.5;
 
-	// Measured in from the south wall: band 0..50, trough 50..58, lip 58..60.
+	// Measured in from the south wall: band 0..50, trough 50..58, lip 58..60. The strip lies in the
+	// trough set back from the lip: 58 - 2.5 - 2 = 53.5 out to 55.5.
 	constexpr double ProbeX = 173.0;
 	const double TroughY = 54.0;
+	const double EmptyTroughY = 57.0;
 	const double LipY = 59.0;
 	const double BoardTopZ = SoffitZ + PanelThickness;
 	const double LipTopZ = SoffitZ + Ceiling.Cove.LipHeight;
+	const double StripTopZ = BoardTopZ + Ceiling.Cove.StripHeight;
 
 	const FCeilingSolid Cove(FHFGenerators::GenerateCeiling(Ceiling, Room, {}, 0.0));
 	if (!TestTrue(TEXT("A cove generates"), Cove.Mesh.TriangleCount() > 0))
@@ -590,14 +596,27 @@ bool FHFCoveTroughTest::RunTest(const FString& Parameters)
 	TestNearlyEqual(TEXT("The band runs from the soffit to the slab"), Band.Lowest, SoffitZ, 0.05);
 	TestNearlyEqual(TEXT("The band closes against the slab"), Band.Highest, StructuralZ, 0.05);
 
-	// THE TROUGH IS A TROUGH: a floor to lay a strip on, and nothing at all over it, so the light
-	// leaves upward and washes the slab.
+	// THE TROUGH IS A TROUGH: a floor to lay a strip on, the strip lying on it, and nothing at all
+	// over either, so the light leaves upward and washes the slab.
 	const FColumn Trough = ColumnAt(Cove.Mesh, ProbeX, TroughY);
 	AddInfo(FString::Printf(TEXT("Over the trough: %.2f up to %.2f, slab at %.2f."),
 		Trough.Lowest, Trough.Highest, StructuralZ));
 
 	TestNearlyEqual(TEXT("The trough has a floor at the soffit"), Trough.Lowest, SoffitZ, 0.05);
-	TestNearlyEqual(TEXT("The trough is open to the slab above it"), Trough.Highest, BoardTopZ, 0.05);
+	TestNearlyEqual(TEXT("The strip lies on the trough floor"), Trough.Highest, StripTopZ, 0.05);
+
+	// Beside the strip the trough is empty right up to the slab; the setback from the lip is real
+	// clearance rather than a figure nothing was built to.
+	const FColumn BareTrough = ColumnAt(Cove.Mesh, ProbeX, EmptyTroughY);
+	TestNearlyEqual(TEXT("The trough beside the strip is open to the slab"),
+		BareTrough.Highest, BoardTopZ, 0.05);
+
+	// THE SIGHT LINE, AS AN INEQUALITY, measured off the built mesh rather than off the parameters.
+	// A strip throwing upward sends every ray that clears the lip away from any eye below it, so the
+	// lowest thing such a ray can reach over the trough is the lip top - which makes concealment a
+	// single comparison with no distance term in it, true from every position in the room at once.
+	TestTrue(*FString::Printf(TEXT("The strip's top (%.2f) stays below the lip's top (%.2f)"),
+		StripTopZ, LipTopZ), StripTopZ <= LipTopZ);
 
 	// THE LIP STANDS IN FRONT OF IT, and stops short of the slab so the light gets past.
 	const FColumn Lip = ColumnAt(Cove.Mesh, ProbeX, LipY);
@@ -607,20 +626,56 @@ bool FHFCoveTroughTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The lip stops below the slab, so the light leaves the trough"),
 		LipTopZ < StructuralZ - 1.0);
 
-	// AND THE STRIP CANNOT BE SEEN. Sight lines to the trough floor from where people are: the
-	// middle of the room at eye height, sitting height, and up against the opposite band.
-	const TArray<FVector3d> Eyes = {
-		FVector3d(200.0, 150.0, 160.0),
-		FVector3d(200.0, 150.0, 110.0),
-		FVector3d(200.0, 250.0, 160.0),
-		FVector3d(ProbeX, 120.0, 160.0)
-	};
-
-	for (const FVector3d& Eye : Eyes)
+	// AND THE STRIP CANNOT BE SEEN, FROM ANYWHERE IN THE ROOM. Swept rather than sampled at a few
+	// convenient spots: the inequality above says concealment cannot depend on where the eye is, and
+	// the way to hold that claim to the geometry is to try every position and let a ray decide.
+	//
+	// Cast at the TOP EDGE of the strip - the highest point of the thing being hidden and therefore
+	// the first part of it to come into view - from a standing eye at 1600 over a grid covering the
+	// whole floor, plus a sitting eye and a child's, which are lower and so strictly easier.
 	{
-		TestFalse(*FString::Printf(TEXT("The strip is out of sight from (%.0f, %.0f, %.0f)"),
-			Eye.X, Eye.Y, Eye.Z),
-			Cove.CanSee(Eye, FVector3d(ProbeX, TroughY, BoardTopZ + 0.5)));
+		int32 Seen = 0;
+		int32 Cast = 0;
+		FVector3d FirstSeenFrom = FVector3d::Zero();
+
+		// The strip runs all the way round the trough, so it is probed on all four runs: a lip that
+		// hid the strip along one wall and not along the next would pass a single-probe test.
+		const TArray<FVector3d> StripTargets = {
+			FVector3d(ProbeX, TroughY, StripTopZ - 0.05),
+			FVector3d(ProbeX, 300.0 - TroughY, StripTopZ - 0.05),
+			FVector3d(TroughY, 137.0, StripTopZ - 0.05),
+			FVector3d(400.0 - TroughY, 137.0, StripTopZ - 0.05)
+		};
+
+		for (const double EyeZ : { 160.0, 120.0, 100.0 })
+		{
+			// Off-grid on purpose: a probe landing exactly on a triangle edge in plan is a coin toss.
+			for (double X = 7.0; X < 400.0; X += 21.0)
+			{
+				for (double Y = 5.0; Y < 300.0; Y += 17.0)
+				{
+					const FVector3d Eye(X, Y, EyeZ);
+					for (const FVector3d& Target : StripTargets)
+					{
+						++Cast;
+						if (Cove.CanSee(Eye, Target))
+						{
+							if (Seen == 0)
+							{
+								FirstSeenFrom = Eye;
+							}
+							++Seen;
+						}
+					}
+				}
+			}
+		}
+
+		AddInfo(FString::Printf(TEXT("Cast %d sight lines at the LED strip from across the room."), Cast));
+		TestTrue(TEXT("The sweep actually cast sight lines"), Cast > 1000);
+		TestEqual(*FString::Printf(
+			TEXT("The strip is out of sight from every eye position (first seen from %.0f, %.0f, %.0f)"),
+			FirstSeenFrom.X, FirstSeenFrom.Y, FirstSeenFrom.Z), Seen, 0);
 	}
 
 	// The fan mirror has to agree with the profile: the soffit under the trough is the band's

@@ -5,6 +5,7 @@
 #include "HouseForge.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
+#include "Model/HFCeilingTemplates.h"
 #include "Model/HFSpecSerializer.h"
 
 namespace
@@ -168,20 +169,56 @@ namespace
 			}, SkirtingHeight);
 		}
 
+		/**
+		 * The downlight fitting, in the millimetres this spec is dimensioned in.
+		 *
+		 * FHFDownlightProfile's own defaults are in CENTIMETRES, like every other project default,
+		 * and are scaled into a drawing's units by FHFCeilingTemplates. A ceiling written by hand
+		 * gets no such service, so a Custom ceiling in a millimetre spec that leaves the profile
+		 * alone would build 75 mm fittings as 7.5 mm ones - a run of pinholes in the plaster.
+		 */
+		static FHFDownlightProfile MillimetreDownlight()
+		{
+			FHFDownlightProfile Fitting;
+			Fitting.CutoutDiameter = 75.0;
+			Fitting.FlangeDiameter = 90.0;
+			Fitting.FlangeProjection = 3.0;
+			Fitting.BodyDepth = 60.0;
+			return Fitting;
+		}
+
+		/** A ceiling whose every figure is written out here. Templates do not touch it. */
 		void AddCeiling(const FName& Id, const FName& RoomId, EHFCeilingStyle Style,
 			double Drop, double BandWidth, const TArray<FVector2D>& Lights = {})
 		{
 			FHFFalseCeiling Ceiling;
 			Ceiling.Id = Id;
 			Ceiling.RoomId = RoomId;
+			Ceiling.Template = EHFCeilingTemplate::Custom;
 			Ceiling.Style = Style;
 			Ceiling.Drop = Drop;
 			Ceiling.BandWidth = BandWidth;
-			Ceiling.Cove.ChannelWidth = 80.0;
-			Ceiling.Cove.LipHeight = 50.0;
-			Ceiling.Cove.Setback = 20.0;
 			Ceiling.Cove.bHasLedStrip = (Style == EHFCeilingStyle::Cove);
+			Ceiling.Downlight = MillimetreDownlight();
 			Ceiling.LightPositions = Lights;
+			Spec.FalseCeilings.Add(Ceiling);
+		}
+
+		/**
+		 * A ceiling that names a DESIGN and lets the project fill in the figures.
+		 *
+		 * What a drawing should say, and what the reference flat now says for every habitable room:
+		 * the style, the band, the drop, the cove section, the downlight run and the ring that
+		 * buries the beams are all consequences of the name and of the frame the room sits in.
+		 * FHFCeilingTemplates::Apply resolves them at the end of Make2BHK, so what is committed and
+		 * what a validator reads are still plain numbers.
+		 */
+		void AddTemplatedCeiling(const FName& Id, const FName& RoomId, EHFCeilingTemplate Template)
+		{
+			FHFFalseCeiling Ceiling;
+			Ceiling.Id = Id;
+			Ceiling.RoomId = RoomId;
+			Ceiling.Template = Template;
 			Spec.FalseCeilings.Add(Ceiling);
 		}
 
@@ -456,54 +493,71 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// Living gets the full cove treatment; bedrooms a peripheral band; wet areas a full drop to
 	// conceal plumbing; the corridor a bulkhead over its length.
 	//
-	// EVERY DROP HERE IS 500, AND NOT ONE OF THEM IS A DESIGN CHOICE. The beams are 450 deep hung
-	// from a 3000 slab, so their soffits are at 2550, and six of the eight are 230 wide over 115
-	// partitions - they stand 57.5 proud of the plaster on both faces and read as a ledge round the
-	// top of every room they border. A false ceiling exists to bury that. These were 200, 300 and
-	// 400: every one of them sat ABOVE the beam soffit, so the beam pierced the finished ceiling and
-	// hung below it, which is what "a ragged dark line along the top of every wall" was.
+	// NOT ONE DROP HERE IS 500 ANY MORE, AND THAT IS THE POINT.
 	//
-	// 500 puts the soffit at 2500, 50 clear below the beams, and a full drop's 20 panel top at 2520
-	// still 30 clear - short of touching, because a face landing exactly on the beam soffit is two
-	// coplanar faces and the flashing starts again. Clear height 2500 is a normal finished ceiling
-	// in a flat of these proportions, and the deep perimeter box a 450 beam forces is exactly how
-	// this is detailed on site.
-	B.AddCeiling(TEXT("FC_Living"), TEXT("R_Living"), EHFCeilingStyle::Cove, 500.0, 600.0,
-		{ FVector2D(1200.0, 1200.0), FVector2D(1200.0, 2400.0), FVector2D(5400.0, 1200.0), FVector2D(5400.0, 2400.0) });
+	// Every ceiling in this flat used to drop a uniform 500 across its whole room, and every one of
+	// them had a correct reason. The beams are 450 deep hung from a 3000 slab, six of the eight are
+	// 230 wide over 115 partitions so they stand 57.5 proud of the plaster on both faces, and a
+	// false ceiling exists to bury that ledge. When the validator learned to see those perimeter
+	// beams for the first time, the drops were deepened until every one of them cleared 450.
+	//
+	// It was the wrong answer to the right problem. Dropping a twenty-four square metre living room
+	// by half a metre to hide one beam is not what anybody builds, and it is not what a false
+	// ceiling looks like: a real one is SHALLOW - a 150 band round the perimeter with the centre of
+	// the room left at slab height - and where a beam has to be boxed in it gets a LOCAL bulkhead.
+	// The deep drop also destroyed the one feature it was supposed to show off. FC_Living's cove
+	// became a trough 480 deep and 80 wide, a six-to-one well that absorbs most of what its strip
+	// emits, throws a 40 degree cone and lands the near edge of its wash the better part of a metre
+	// inboard - a dark band on the slab exactly where the glow is meant to start. "The false ceiling
+	// types are not properly visible" was that, in two numbers.
+	//
+	// So the habitable rooms name a DESIGN and let the project's figures fill it in, and the beams
+	// are handled by a ring 300 wide dropping 480 round the edge of each room rather than by the
+	// whole ceiling. Clear height is 2850 over almost all of every room and 2520 in the 300 band at
+	// its edge, where the beam is - which is the stepped ceiling the reference photographs show,
+	// arrived at from the structure rather than imposed on it.
+	B.AddTemplatedCeiling(TEXT("FC_Living"), TEXT("R_Living"), EHFCeilingTemplate::Cove);
+	B.AddTemplatedCeiling(TEXT("FC_MBed"),   TEXT("R_MBed"),   EHFCeilingTemplate::FramedPanel);
+	B.AddTemplatedCeiling(TEXT("FC_Bed2"),   TEXT("R_Bed2"),   EHFCeilingTemplate::SteppedTray);
+	B.AddTemplatedCeiling(TEXT("FC_Foyer"),  TEXT("R_Foyer"),  EHFCeilingTemplate::PlainBand);
 
-	B.AddCeiling(TEXT("FC_MBed"), TEXT("R_MBed"), EHFCeilingStyle::Peripheral, 500.0, 600.0,
-		{ FVector2D(5100.0, 6300.0), FVector2D(8100.0, 6300.0) });
-
-	B.AddCeiling(TEXT("FC_Bed2"), TEXT("R_Bed2"), EHFCeilingStyle::Peripheral, 500.0, 500.0,
-		{ FVector2D(7500.0, 1200.0), FVector2D(9600.0, 1200.0) });
-
-	B.AddCeiling(TEXT("FC_Kitchen"), TEXT("R_Kitchen"), EHFCeilingStyle::FullDrop, 500.0, 0.0,
+	// THE WET AREAS AND THE CORRIDOR KEEP THEIR FULL DROP, and that is not an oversight left over
+	// from the old figures - it is what these rooms get built. A kitchen hides a chimney duct and a
+	// bathroom hides its plumbing and its extract, so both are ceiled flat across the whole room;
+	// a corridor is where the services run between them. None of the reference photographs is of a
+	// bathroom. What did change is the depth: 480 rather than 500, which is the beam's 450 plus the
+	// board and a service gap and no more, and it is the same figure the perimeter rings use.
+	//
+	// 480 is short of touching on purpose. A soffit landing exactly on the beam soffit at 2550 is
+	// two coplanar faces and the flashing starts again.
+	B.AddCeiling(TEXT("FC_Kitchen"), TEXT("R_Kitchen"), EHFCeilingStyle::FullDrop, 480.0, 0.0,
 		{ FVector2D(900.0, 6300.0), FVector2D(2700.0, 6300.0), FVector2D(900.0, 7800.0), FVector2D(2700.0, 7800.0) });
 
-	B.AddCeiling(TEXT("FC_CBath"), TEXT("R_CBath"), EHFCeilingStyle::FullDrop, 500.0, 0.0,
+	B.AddCeiling(TEXT("FC_CBath"), TEXT("R_CBath"), EHFCeilingStyle::FullDrop, 480.0, 0.0,
 		{ FVector2D(3000.0, 4500.0) });
 
-	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 500.0, 0.0,
+	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 480.0, 0.0,
 		{ FVector2D(9450.0, 4500.0) });
 
 	// FC_Living_Beam went with BM_Living_Cross. It existed only to box that beam in, and a 450 deep
 	// bulkhead crossing the middle of the living room for no reason is worse than the beam was - the
 	// beam at least stopped at 2600, and the bulkhead reached 2550 over the whole width of the room.
-	// Nothing else in R_Living needs a localised drop: its cove is a perimeter band and its four
-	// downlights sit in that band.
+	// Nothing else in R_Living needs a localised drop: its cove is a perimeter band, its downlights
+	// sit in that band, and the beams round its edge are buried by its perimeter ring.
 
 	{
 		// A bulkhead follows its own polygon rather than the room, so it needs one explicitly.
 		FHFFalseCeiling Bulkhead;
 		Bulkhead.Id = TEXT("FC_Corridor");
 		Bulkhead.RoomId = TEXT("R_Corridor");
+		Bulkhead.Template = EHFCeilingTemplate::Custom;
 		Bulkhead.Style = EHFCeilingStyle::Bulkhead;
 
-		// 500 for the same reason every other ceiling in this flat is: BM_Mid_Lower and
-		// BM_Mid_Upper are the corridor's two long walls, and at 300 this bulkhead stopped 250
-		// short of burying either of them.
-		Bulkhead.Drop = 500.0;
+		// BM_Mid_Lower and BM_Mid_Upper are the corridor's two long walls, so this has to bury 450
+		// over its whole width - which for a 1500 wide corridor is a full drop and nothing else.
+		Bulkhead.Drop = 480.0;
 		Bulkhead.BandWidth = 0.0;
+		Bulkhead.Downlight = FSampleBuilder::MillimetreDownlight();
 		Bulkhead.ExplicitPolygon = {
 			FVector2D(X2, Y1), FVector2D(X4, Y1), FVector2D(X4, Y2), FVector2D(X2, Y2)
 		};
@@ -1033,6 +1087,20 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		AddPelmet(TEXT("F_Pelmet_MBed"),   TEXT("R_MBed"),   FVector2D(7500.0, 8220.0), FVector2D(2200.0, 180.0), 0.0, TEXT("W_North"));
 		AddPelmet(TEXT("F_Pelmet_Bed2"),   TEXT("R_Bed2"),   FVector2D(8700.0, 180.0), FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
 	}
+
+	// ------------------------------------------------------------------- resolve the templates
+	//
+	// LAST, AND ONCE. A templated ceiling carries a NAME and nothing else until this runs; after it
+	// the spec holds plain numbers, so the committed JSON is readable, the validator has something
+	// to judge, and the generator has something to build. It also needs the beams, which is why it
+	// cannot happen where the ceilings are declared - the perimeter ring over each room is derived
+	// from the deepest beam showing in it, and the beams are added earlier in this same function.
+	//
+	// The plugin's compiled-in figures, deliberately, not the project's. The reference flat is
+	// reference data: it must measure the same in every project that opens it, and a spec that came
+	// out different because somebody had dragged a slider would be no reference at all. A house
+	// built into a level does take the project's figures - AHFHouseActor::SetSpec re-applies them.
+	FHFCeilingTemplates::Apply(B.Spec, FHFCeilingDefaults());
 
 	return B.Spec;
 }

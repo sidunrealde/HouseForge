@@ -446,9 +446,25 @@ void FHFUnits::ConvertToCentimeters(FHFHouseSpec& Spec)
 	{
 		Ceiling.Drop *= Scale;
 		Ceiling.BandWidth *= Scale;
+		Ceiling.InnerDrop *= Scale;
+		Ceiling.CentrePanelDrop *= Scale;
+		Ceiling.PerimeterBulkheadWidth *= Scale;
+		Ceiling.PerimeterBulkheadDrop *= Scale;
+
 		Ceiling.Cove.ChannelWidth *= Scale;
 		Ceiling.Cove.LipHeight *= Scale;
 		Ceiling.Cove.Setback *= Scale;
+		Ceiling.Cove.StripWidth *= Scale;
+		Ceiling.Cove.StripHeight *= Scale;
+		Ceiling.Cove.StripSetback *= Scale;
+
+		// The fitting is bought in millimetres and does not resize with the drawing, but every
+		// other length here is in the spec's units and these have to match them or a downlight in
+		// a millimetre spec is a 75 metre hole.
+		Ceiling.Downlight.CutoutDiameter *= Scale;
+		Ceiling.Downlight.FlangeDiameter *= Scale;
+		Ceiling.Downlight.FlangeProjection *= Scale;
+		Ceiling.Downlight.BodyDepth *= Scale;
 
 		for (FVector2D& Point : Ceiling.ExplicitPolygon)
 		{
