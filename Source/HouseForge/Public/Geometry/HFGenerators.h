@@ -53,6 +53,15 @@ class HOUSEFORGE_API FHFGenerators
 {
 public:
 	/**
+	 * Soffit board thickness in centimetres: a 12.5 plasterboard with its skim, or a POP soffit.
+	 *
+	 * Public because it is not only the generator's business. How deep a ceiling has to be before a
+	 * recessed downlight fits behind it is board plus can, and the validator has to be able to say
+	 * so - a second copy of the figure sitting in the validator is how the two come to disagree.
+	 */
+	static constexpr double CeilingPanelThicknessCm = 2.0;
+
+	/**
 	 * A wall, with its openings cut out and the structure it is built around taken out of it.
 	 *
 	 * Built from the centreline outward, so changing thickness grows the wall symmetrically and

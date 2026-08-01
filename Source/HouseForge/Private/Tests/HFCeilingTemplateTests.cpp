@@ -707,6 +707,123 @@ bool FHFCeilingTemplatesTouchNothingElseTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * THE COVE'S OWN SIZING RULES, ASSERTED INSTEAD OF DESCRIBED.
+ *
+ * FHFCoveProfile states three of them in its comment - trough at most 1.5:1, dark gap under 150,
+ * lip at least 40 clear of the trough floor - and the shipped profile broke the third one. It had
+ * a 50 lip on a 20 board, leaving 30, and it shipped that way because the rule lived in prose and
+ * nothing ever compared a number to it. That is how the uniform 500 drops survived too.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCoveProfileRulesTest,
+	"HouseForge.Model.CoveProfileObeysItsOwnSizingRules", HF_TEST_FLAGS)
+
+bool FHFCoveProfileRulesTest::RunTest(const FString& Parameters)
+{
+	const FHFCoveProfile Profile = FHFCeilingDefaults().Cove;
+	const double Board = FHFGenerators::CeilingPanelThicknessCm;
+
+	AddInfo(FString::Printf(
+		TEXT("Cove: channel %.1f, lip %.1f (%.1f clear of the trough floor), upstand %.1f, strip %.1f x %.1f set back %.1f."),
+		Profile.ChannelWidth, Profile.LipHeight, Profile.LipHeight - Board, Profile.Setback,
+		Profile.StripWidth, Profile.StripHeight, Profile.StripSetback));
+
+	// The one the shipped profile failed. A 40 mm upstand is what keeps a thicker diffuser, a bare
+	// strip on a bracket or a 10 mm setting-out error behind the lip rather than in plain sight.
+	TestTrue(TEXT("The lip stands at least 4 cm clear of the trough floor"),
+		Profile.LipHeight - Board >= 4.0 - UE_KINDA_SMALL_NUMBER);
+
+	// A POP upstand thinner than this chips off the corner while it is being finished.
+	TestTrue(TEXT("The upstand is at least 2.5 cm thick"),
+		Profile.Setback >= 2.5 - UE_KINDA_SMALL_NUMBER);
+
+	// And the sight line the whole detail turns on, from the figures alone.
+	TestTrue(TEXT("The strip's top stays below the lip's top"),
+		Board + Profile.StripHeight <= Profile.LipHeight);
+
+	// The strip has to fit in the trough it lies in, with its setback.
+	TestTrue(TEXT("The strip and its setback fit inside the channel"),
+		Profile.StripWidth + Profile.StripSetback <= Profile.ChannelWidth);
+
+	return true;
+}
+
+/**
+ * A CEILING TOO SHALLOW FOR ITS OWN DOWNLIGHTS IS REFUSED, RATHER THAN BUILT INTO THE SLAB.
+ *
+ * The aperture is set out at the soffit plus the can's body depth and nothing bounded it against
+ * the slab. At a 5 cm drop the emitting face ended up inside the concrete - 326 cm3 of the living
+ * room's ceiling, 310 in the master bedroom, 233 in bedroom 2 - and the build reported no errors.
+ * Two guards, because they catch different things: the validator refuses a spec that states the
+ * drop directly, and the generator clamps so a direct call cannot produce it either.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCeilingShallowDownlightTest,
+	"HouseForge.Model.CeilingTooShallowForItsDownlights", HF_TEST_FLAGS)
+
+bool FHFCeilingShallowDownlightTest::RunTest(const FString& Parameters)
+{
+	const FHFRoom Room = MakeTemplateRoom();
+	const double StructuralZ = Room.FloorZ + Room.CeilingHeight;
+
+	FHFHouseSpec Spec;
+	Spec.Units = EHFUnits::Centimeters;
+	Spec.Rooms.Add(Room);
+
+	FHFFalseCeiling& Ceiling = Spec.FalseCeilings.AddDefaulted_GetRef();
+	Ceiling.Id = TEXT("FC_Shallow");
+	Ceiling.RoomId = Room.Id;
+	Ceiling.Template = EHFCeilingTemplate::Custom;
+	Ceiling.Style = EHFCeilingStyle::FullDrop;
+	Ceiling.Drop = 5.0;
+	Ceiling.LightPositions = { FVector2D(250.0, 200.0) };
+
+	const FHFValidationResult Shallow = FHFSpecValidator::Validate(Spec);
+	TestTrue(TEXT("A 5 cm drop with recessed downlights in it is an error"),
+		Shallow.Issues.ContainsByPredicate([](const FHFValidationIssue& Issue)
+		{
+			return Issue.Code == TEXT("CeilingTooShallowForDownlight");
+		}));
+
+	// And the geometry cannot make one either. The lens must stay under the slab whatever it is
+	// asked for, because every test in this file calls the generator directly.
+	const FDynamicMesh3 Mesh = FHFGenerators::GenerateCeiling(Ceiling, Room, {}, 0.0);
+
+	double Highest = -TNumericLimits<double>::Max();
+	for (const int32 Vid : Mesh.VertexIndicesItr())
+	{
+		Highest = FMath::Max(Highest, Mesh.GetVertex(Vid).Z);
+	}
+
+	AddInfo(FString::Printf(TEXT("A 5 cm ceiling reaches %.2f against a slab at %.2f."),
+		Highest, StructuralZ));
+
+	TestTrue(TEXT("Nothing the ceiling builds reaches through the slab"),
+		Highest <= StructuralZ + 0.001);
+
+	// The deep case is left alone: the clamp must not shorten a can that fits.
+	FHFFalseCeiling Deep = Ceiling;
+	Deep.Drop = 15.0;
+
+	const FHFValidationResult Fine = FHFSpecValidator::Validate(Spec);
+	Spec.FalseCeilings[0] = Deep;
+
+	TestFalse(TEXT("A 15 cm drop is not complained about"),
+		FHFSpecValidator::Validate(Spec).Issues.ContainsByPredicate(
+			[](const FHFValidationIssue& Issue)
+			{
+				return Issue.Code == TEXT("CeilingTooShallowForDownlight");
+			}));
+
+	const TArray<FVector> Apertures = FHFGenerators::CeilingDownlights(Deep, Room);
+	if (TestEqual(TEXT("The deep ceiling places its one downlight"), Apertures.Num(), 1))
+	{
+		TestEqual(TEXT("...with its aperture at the full body depth up the can"),
+			Apertures[0].Z, StructuralZ - Deep.Drop + Deep.Downlight.BodyDepth, 0.01);
+	}
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

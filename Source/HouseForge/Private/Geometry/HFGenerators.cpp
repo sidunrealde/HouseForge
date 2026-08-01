@@ -642,8 +642,8 @@ namespace
 		return Out;
 	}
 
-	/** Soffit board thickness. A 12.5 plasterboard with its skim, or a POP soffit. */
-	constexpr double HFCeilingPanel = 2.0;
+	/** Soffit board thickness. Published on FHFGenerators, because the validator needs it too. */
+	constexpr double HFCeilingPanel = FHFGenerators::CeilingPanelThicknessCm;
 
 	/**
 	 * How far a piece laps into the one beside it, rather than stopping in its face.
@@ -945,7 +945,7 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 	 * which is the part that catches light and reads as a fitting rather than as a hole, and the
 	 * aperture disc up inside the recess that the lighting milestone will make emissive.
 	 */
-	auto AppendDownlight = [&Mesh, &Ceiling](const FVector2D& Position, double SoffitPlaneZ) -> bool
+	auto AppendDownlight = [&Mesh, &Ceiling, StructuralZ](const FVector2D& Position, double SoffitPlaneZ) -> bool
 	{
 		const FHFDownlightProfile& Fitting = Ceiling.Downlight;
 		const double CutRadius = Fitting.CutoutRadius();
@@ -965,12 +965,22 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 		// The lens, set back up the can. LightSource rather than Glass: it is the emitting face, and
 		// as glass it was a pale disc up a hole - which is why a run of downlights read as a row of
 		// faint pencil circles in every render of the flat.
-		if (Fitting.BodyDepth > 0.0)
+		constexpr double LensThickness = 0.4;
+
+		// CLAMPED INTO THE PLENUM. The can is set out at the soffit plus its body depth and nothing
+		// bounded that against the slab, so a band shallower than board-plus-can put the emitting
+		// face through the concrete - measured at a 50 mm drop, 326 cm3 of the living room's ceiling
+		// ended up inside the slab and the build reported no errors. The validator refuses such a
+		// spec outright (CeilingTooShallowForDownlight); this is what keeps the geometry honest for
+		// a generator called directly, which is how every test calls it.
+		const double Headroom = StructuralZ - LensThickness - SoffitPlaneZ;
+
+		if (Fitting.BodyDepth > 0.0 && Headroom > 0.0)
 		{
-			const double LensZ = SoffitPlaneZ + Fitting.BodyDepth;
+			const double LensZ = SoffitPlaneZ + FMath::Min(Fitting.BodyDepth, Headroom);
 			bBuilt &= FHFMeshOps::AppendPrism(Mesh,
 				CirclePolygon(Position, FMath::Max(CutRadius - 0.2, 0.1), 20),
-				LensZ, LensZ + 0.4, EHFSurfaceRole::LightSource);
+				LensZ, LensZ + LensThickness, EHFSurfaceRole::LightSource);
 		}
 
 		return bBuilt;
@@ -1210,7 +1220,13 @@ TArray<FVector> FHFGenerators::CeilingDownlights(const FHFFalseCeiling& Ceiling,
 			// The APERTURE, not the plan dot: a real light belongs up inside the can at the lens,
 			// so that the trim shades it exactly as the fitting does and the scallop on the wall
 			// starts where the reflector says it does rather than at the plasterboard.
-			Out.Add(FVector(Position.X, Position.Y, Layout.SoffitZ + Ceiling.Downlight.BodyDepth));
+			//
+			// Clamped into the plenum by the same rule the geometry is, or a light would be left
+			// hanging inside the slab above a lens that had been pulled back out of it.
+			const double Depth = FMath::Min(Ceiling.Downlight.BodyDepth,
+				FMath::Max(Layout.StructuralZ - 0.4 - Layout.SoffitZ, 0.0));
+
+			Out.Add(FVector(Position.X, Position.Y, Layout.SoffitZ + Depth));
 		}
 	}
 

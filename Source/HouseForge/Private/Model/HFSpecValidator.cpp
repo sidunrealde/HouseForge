@@ -2,6 +2,7 @@
 
 #include "Model/HFSpecValidator.h"
 
+#include "Geometry/HFGenerators.h"
 #include "Model/HFCeilingFit.h"
 
 namespace
@@ -1734,6 +1735,34 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 			Result.Add(EHFValidationSeverity::Warning, TEXT("CentrePanelNotRecessed"), Ceiling.Id,
 				FString::Printf(TEXT("False ceiling '%s' has a centre panel dropping %.1f inside a band dropping %.1f; a centre panel sits higher than its frame, so nothing is built."),
 					*Describe(Ceiling.Id), Ceiling.CentrePanelDrop, Ceiling.Drop));
+		}
+
+		// THE PLENUM HAS TO HOLD THE FITTING.
+		//
+		// A recessed downlight is a 20 board with a 60 can behind it and its wiring above that, and
+		// the aperture is set out at the soffit plus the body depth. Nothing bounded that against
+		// the drop, so a band shallower than board-plus-can put the emitting face THROUGH the
+		// structural slab: measured at a 50 drop, 326 cm3 of the living room's ceiling ended up
+		// inside the concrete, 310 in the master bedroom and 233 in bedroom 2, and the build
+		// reported no errors at all. 50 is not an absurd entry either - the research behind these
+		// templates puts a real plain band at 100 to 200, so it is one notch below the documented
+		// range.
+		//
+		// The generator clamps as well, because a clamp alone cannot help here: a spec states its
+		// drop directly and never passes through the settings page.
+		if (Ceiling.Downlight.bRecessed && Ceiling.Style != EHFCeilingStyle::None
+			&& !Ceiling.LightPositions.IsEmpty())
+		{
+			const double ToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+			const double NeededCm = FHFGenerators::CeilingPanelThicknessCm + Ceiling.Downlight.BodyDepth * ToCm;
+
+			if (Ceiling.Drop * ToCm + UE_KINDA_SMALL_NUMBER < NeededCm)
+			{
+				Result.Add(EHFValidationSeverity::Error, TEXT("CeilingTooShallowForDownlight"), Ceiling.Id,
+					FString::Printf(TEXT("False ceiling '%s' drops %.1f cm but its recessed downlights need %.1f cm of plenum (a %.1f cm board plus a %.1f cm can); the aperture would sit inside the slab."),
+						*Describe(Ceiling.Id), Ceiling.Drop * ToCm, NeededCm,
+						FHFGenerators::CeilingPanelThicknessCm, Ceiling.Downlight.BodyDepth * ToCm));
+			}
 		}
 
 		const bool bNeedsBand =

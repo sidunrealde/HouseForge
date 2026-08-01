@@ -41,8 +41,14 @@ struct HOUSEFORGE_API FHFCeilingDefaults
 	 *
 	 * Not a free choice: a 20 board plus a 60 downlight can plus its wiring is what has to fit in
 	 * the plenum, which is the real reason 150 is the usual minimum rather than any rule of taste.
+	 *
+	 * CLAMPED AT 80, WHICH IS THAT SENTENCE AS AN ENFORCED FIGURE. Nothing bounded these drops, so
+	 * dragging one to 50 - one notch under the documented range - pushed the downlight aperture
+	 * through the structural slab, and the build reported no errors. The clamp is a floor on the
+	 * page; the validator refuses a spec that states a shallow drop directly, since a spec never
+	 * passes through here at all.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "8.0"))
 	double BandDrop = 15.0;
 
 	// ------------------------------------------------------------------------------------ cove
@@ -52,7 +58,7 @@ struct HOUSEFORGE_API FHFCeilingDefaults
 	double CoveBandWidth = 60.0;
 
 	/** Drop of a band carrying a cove, in centimetres. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "8.0"))
 	double CoveDrop = 15.0;
 
 	/**
@@ -72,7 +78,7 @@ struct HOUSEFORGE_API FHFCeilingDefaults
 	double TrayBandWidth = 45.0;
 
 	/** Drop of the outer band, in centimetres. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "8.0"))
 	double TrayDrop = 20.0;
 
 	/** Drop of the step inside it, in centimetres. Two levels plus the slab; three reads fussy. */
@@ -86,7 +92,7 @@ struct HOUSEFORGE_API FHFCeilingDefaults
 	double PanelFrameWidth = 45.0;
 
 	/** Drop of the frame band, in centimetres. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "8.0"))
 	double PanelFrameDrop = 15.0;
 
 	/**
@@ -175,7 +181,7 @@ struct HOUSEFORGE_API FHFCeilingDefaults
 	 * way to bury one was to drop everything. With the ring taking the edges, the flat part answers
 	 * to what actually runs above it, which is 250 of plenum and not 480.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "8.0"))
 	double FlatSoffitDrop = 25.0;
 
 	// ------------------------------------------------------ what else in the room has to clear it

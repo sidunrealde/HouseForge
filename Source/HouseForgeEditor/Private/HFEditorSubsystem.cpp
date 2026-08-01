@@ -352,10 +352,46 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 	// or building the same spec twice - does not accumulate suns.
 	EnsureViewingLight();
 
+	// WHAT WAS BUILT, NOT WHAT WAS READ.
+	//
+	// This line counted rows in the spec, so it said "69 fixtures" over a level holding eight - and
+	// that overstatement is exactly what hid 710 cm of deleted skirting, because the skirting was cut
+	// for base cabinets, a shoe rack and a study table that the report was reporting as built. On
+	// this project a report that overstates is how a defect gets past a green gate.
+	int32 BuiltFixtures = 0;
+	TSet<EHFFixtureType> BuiltTypes;
+
+	for (const FHFFixture& Fixture : Spec.Fixtures)
+	{
+		if (AHFHouseActor::BuildsGeometryFor(Fixture.Type))
+		{
+			++BuiltFixtures;
+			BuiltTypes.Add(Fixture.Type);
+		}
+	}
+
 	FString Message = FString::Printf(
 		TEXT("Built '%s': %d walls, %d openings, %d rooms, %d beams, %d columns, %d false ceilings, %d fixtures."),
 		*Spec.Name, Spec.Walls.Num(), Spec.Openings.Num(), Spec.Rooms.Num(),
-		Spec.Beams.Num(), Spec.Columns.Num(), Spec.FalseCeilings.Num(), Spec.Fixtures.Num());
+		Spec.Beams.Num(), Spec.Columns.Num(), Spec.FalseCeilings.Num(), BuiltFixtures);
+
+	// And say plainly what is missing, rather than leaving the difference to be discovered by
+	// looking at the level. The fixture catalogue is milestone 9 and most of it does not exist.
+	if (BuiltFixtures < Spec.Fixtures.Num())
+	{
+		TArray<FString> TypeNames;
+		for (const EHFFixtureType Type : BuiltTypes)
+		{
+			TypeNames.Add(StaticEnum<EHFFixtureType>()->GetNameStringByValue(static_cast<int64>(Type)));
+		}
+		TypeNames.Sort();
+
+		Message += FString::Printf(
+			TEXT("\n%d fixtures declared, %d built (%s); %d fixture types are not modelled yet."),
+			Spec.Fixtures.Num(), BuiltFixtures,
+			TypeNames.IsEmpty() ? TEXT("none") : *FString::Join(TypeNames, TEXT(", ")),
+			Spec.Fixtures.Num() - BuiltFixtures);
+	}
 
 	if (Validation.HasWarnings())
 	{
