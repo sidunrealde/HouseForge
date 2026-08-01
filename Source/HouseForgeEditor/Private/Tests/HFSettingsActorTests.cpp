@@ -6,6 +6,7 @@
 
 #include "Actors/HFHouseActor.h"
 #include "Actors/HFOpeningActor.h"
+#include "Actors/HFFanActor.h"
 #include "Actors/HFWardrobeActor.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Actors/HFElementActors.h"
@@ -152,6 +153,95 @@ namespace
 		House->SetSpec(Spec);
 		House->BuildGeometry();
 		return House;
+	}
+
+	/**
+	 * A room with a templated ceiling over it, a beam round its edge, and a fan hanging in it.
+	 *
+	 * All three, because the thing under test is that they move TOGETHER. A ceiling on its own
+	 * would prove that the drop changed and say nothing about the rotor left inside it; a fan on
+	 * its own has nothing over it to be swallowed by.
+	 */
+	AHFHouseActor* SpawnOneCeilingHouse(UWorld* World, EHFCeilingTemplate Template)
+	{
+		ClearHouseForgeActors(World);
+
+		FHFHouseSpec Spec;
+		Spec.Name = TEXT("Ceiling Settings Test");
+		Spec.Units = EHFUnits::Centimeters;
+		Spec.UnitsSource = TEXT("test");
+
+		FHFRoom& Room = Spec.Rooms.AddDefaulted_GetRef();
+		Room.Id = TEXT("R1");
+		Room.Type = EHFRoomType::Bedroom;
+		Room.CeilingHeight = 300.0;
+		Room.Boundary = { FVector2D(0, 0), FVector2D(500, 0), FVector2D(500, 400), FVector2D(0, 400) };
+
+		FHFWall& Wall = Spec.Walls.AddDefaulted_GetRef();
+		Wall.Id = TEXT("W1");
+		Wall.Start = FVector2D(0.0, 0.0);
+		Wall.End = FVector2D(500.0, 0.0);
+		Wall.Thickness = 11.5;
+		Wall.Height = 300.0;
+
+		// The reference flat's own section: a 23 beam over an 11.5 partition stands proud of it and
+		// therefore shows in the room, which is what puts a ring on the ceiling.
+		FHFBeam& Beam = Spec.Beams.AddDefaulted_GetRef();
+		Beam.Id = TEXT("BM1");
+		Beam.Start = FVector2D(0.0, 0.0);
+		Beam.End = FVector2D(500.0, 0.0);
+		Beam.Width = 23.0;
+		Beam.Depth = 45.0;
+		Beam.SoffitZ = 300.0;
+
+		FHFFalseCeiling& Ceiling = Spec.FalseCeilings.AddDefaulted_GetRef();
+		Ceiling.Id = TEXT("FC1");
+		Ceiling.RoomId = TEXT("R1");
+		Ceiling.Template = Template;
+
+		// Dead centre, where a band style leaves the room open to the slab and a full drop does not.
+		FHFFixture& Fan = Spec.Fixtures.AddDefaulted_GetRef();
+		Fan.Id = TEXT("FAN1");
+		Fan.RoomId = TEXT("R1");
+		Fan.Type = EHFFixtureType::CeilingFan;
+		Fan.Label = TEXT("Ceiling fan");
+		Fan.Position = FVector2D(250.0, 200.0);
+		Fan.Footprint = FVector2D(120.0, 120.0);
+		Fan.Height = 30.0;
+
+		AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+		if (House == nullptr)
+		{
+			return nullptr;
+		}
+
+		House->SetSpec(Spec);
+		House->BuildGeometry();
+		return House;
+	}
+
+	AHFCeilingActor* FindCeiling(AHFHouseActor* House)
+	{
+		for (AActor* Element : House->ElementActors)
+		{
+			if (AHFCeilingActor* Ceiling = Cast<AHFCeilingActor>(Element))
+			{
+				return Ceiling;
+			}
+		}
+		return nullptr;
+	}
+
+	AHFFanActor* FindFan(AHFHouseActor* House)
+	{
+		for (AActor* Element : House->ElementActors)
+		{
+			if (AHFFanActor* Fan = Cast<AHFFanActor>(Element))
+			{
+				return Fan;
+			}
+		}
+		return nullptr;
 	}
 
 	AHFWardrobeActor* FindWardrobe(AHFHouseActor* House)
@@ -522,6 +612,175 @@ bool FHFJoineryFigureRebuildsAWardrobeTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Widening the module re-divides a wardrobe already in the level"),
 		Wardrobe->NumParts(), 3);
+
+	return true;
+}
+
+/**
+ * The False Ceilings page reaches a ceiling already standing in a level - and takes the fans with it.
+ *
+ * TWO FAILURES IN ONE, and the second is the one that would not have been noticed. Every other
+ * section on this page changes one element in place, so a branch that re-seeds that element is the
+ * whole fix. A ceiling figure is different: a ceiling fan hangs from the structural SLAB and its rod
+ * is lengthened to reach past whatever the false ceiling puts between it and the room, so deepening
+ * a ceiling and rebuilding only the ceiling leaves the fan with the rod it had. That is the rotor
+ * built inside the plasterboard - the defect the rod resolution exists to prevent - reached by
+ * dragging a slider instead of by writing a spec.
+ *
+ * Measured on the built mesh wherever a mesh can show it. A figure faithfully copied onto a
+ * parameter struct and then ignored is what this whole family of tests exists to catch.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCeilingFigureRebuildsCeilingAndFanTest,
+	"HouseForge.Settings.ChangingACeilingFigureMovesTheFanWithIt", HF_TEST_FLAGS)
+
+bool FHFCeilingFigureRebuildsCeilingAndFanTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	UHFEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UHFEditorSubsystem>();
+	UHFSettings* Settings = GetMutableDefault<UHFSettings>();
+	if (!TestNotNull(TEXT("The HouseForge editor subsystem exists"), Subsystem)
+		|| !TestNotNull(TEXT("The settings CDO exists"), Settings))
+	{
+		return false;
+	}
+
+	const FHFCeilingDefaults SavedCeiling = Settings->Ceiling;
+
+	AHFHouseActor* House = SpawnOneCeilingHouse(World, EHFCeilingTemplate::PlainBand);
+	if (!TestNotNull(TEXT("A house with a ceiling builds"), House))
+	{
+		return false;
+	}
+
+	ON_SCOPE_EXIT
+	{
+		Settings->Ceiling = SavedCeiling;
+		if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); }
+	};
+
+	AHFCeilingActor* Ceiling = FindCeiling(House);
+	AHFFanActor* Fan = FindFan(House);
+	if (!TestNotNull(TEXT("The house built a ceiling"), Ceiling)
+		|| !TestNotNull(TEXT("The house built a fan"), Fan))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("The ceiling was resolved from the project's template figures"),
+		Ceiling->Ceiling.Drop, Settings->Ceiling.BandDrop);
+	TestEqual(TEXT("...and its band too"),
+		Ceiling->Ceiling.BandWidth, Settings->Ceiling.BandWidth);
+	TestTrue(TEXT("...and it got a ring, because a beam shows in the room"),
+		Ceiling->Ceiling.HasPerimeterBulkhead());
+
+	// THE LOWEST POINT OF THIS MESH IS THE RING, NOT THE BAND, and that caught the first version of
+	// this test out. The perimeter bulkhead is sized from the beam it buries, so dragging the band
+	// figures leaves the mesh's minimum Z exactly where it was - which is correct, and says nothing
+	// at all about whether the band moved. Volume is what the band shows in: a deeper, wider band is
+	// more plasterboard, and a figure copied onto the struct without regenerating changes none of it.
+	const double VolumeBefore = ShellVolume(Ceiling);
+	const double RingSoffitBefore = Ceiling->GetMeshComponent()->GetDynamicMesh()->GetMeshRef().GetBounds().Min.Z;
+
+	TestTrue(TEXT("The ceiling has volume"), VolumeBefore > 0.0);
+	TestTrue(TEXT("The ceiling has a run of downlights"), Ceiling->Ceiling.LightPositions.Num() > 0);
+
+	// ------------------------------------------------------------------ the user drags the band
+	//
+	// Deeper and wider. The drop is measured on the MESH: a band re-seeded onto the parameter struct
+	// and never regenerated would satisfy the field comparison and leave the soffit where it was.
+	Settings->Ceiling.BandDrop = SavedCeiling.BandDrop * 2.0;
+	Settings->Ceiling.BandWidth = SavedCeiling.BandWidth * 1.5;
+
+	TestTrue(TEXT("Changing a ceiling figure rebuilds something"),
+		Subsystem->ApplyProjectSettingsToLevel() > 0);
+
+	Ceiling = FindCeiling(House);
+	if (!TestNotNull(TEXT("The ceiling survives the rebuild"), Ceiling))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("The ceiling took the new drop"),
+		Ceiling->Ceiling.Drop, Settings->Ceiling.BandDrop);
+	TestTrue(*FString::Printf(TEXT("The band was actually rebuilt: volume %.0f then %.0f"),
+		VolumeBefore, ShellVolume(Ceiling)),
+		ShellVolume(Ceiling) > VolumeBefore * 1.2);
+
+	// And the ring did NOT move, which is the other half of the depth model being right: the ring is
+	// sized by the beam it buries, so a band figure has no business changing it.
+	TestNearlyEqual(TEXT("The ring stays where the beam put it"),
+		Ceiling->GetMeshComponent()->GetDynamicMesh()->GetMeshRef().GetBounds().Min.Z,
+		RingSoffitBefore, 0.01);
+
+	// -------------------------------------------- and the fan under a ceiling that covers it
+	//
+	// Switched to a full drop, which is the only arrangement where the ceiling is between the fan
+	// and the room at all - every named template is a band style and leaves the middle open, which
+	// is the whole point of them. Done through the spec, because that is how a drawing would say it.
+	{
+		FHFHouseSpec Deep = House->Spec;
+		for (FHFFalseCeiling& Panel : Deep.FalseCeilings)
+		{
+			Panel.Template = EHFCeilingTemplate::Custom;
+			Panel.Style = EHFCeilingStyle::FullDrop;
+			Panel.Drop = 20.0;
+			Panel.BandWidth = 0.0;
+			Panel.PerimeterBulkheadWidth = 0.0;
+			Panel.PerimeterBulkheadDrop = 0.0;
+		}
+
+		House->SetSpec(Deep);
+		House->BuildGeometry();
+
+		Fan = FindFan(House);
+		if (!TestNotNull(TEXT("The fan survives a rebuild under a full drop"), Fan))
+		{
+			return false;
+		}
+
+		const double RodUnderShallow = Fan->Fan.DropLength;
+		TestTrue(*FString::Printf(TEXT("The rod reaches past a 20 drop: %.2f"), RodUnderShallow),
+			RodUnderShallow >= Settings->CeilingFanDropLength + 20.0 - 0.01);
+
+		// The ceiling is deepened and the level asked to catch up. The ceiling moves; the question
+		// this test exists for is whether the fan does.
+		for (FHFFalseCeiling& Panel : House->Spec.FalseCeilings)
+		{
+			Panel.Drop = 45.0;
+		}
+
+		TestTrue(TEXT("Re-applying settings rebuilds the ceiling and the fan"),
+			House->ApplyProjectSettingsToCeilings() >= 2);
+
+		Fan = FindFan(House);
+		if (!TestNotNull(TEXT("The fan survives that too"), Fan))
+		{
+			return false;
+		}
+
+		TestTrue(*FString::Printf(
+			TEXT("The rod grew with the ceiling rather than leaving the rotor in it: %.2f then %.2f"),
+			RodUnderShallow, Fan->Fan.DropLength),
+			Fan->Fan.DropLength > RodUnderShallow + 20.0);
+
+		// AND IT IS NOT CUMULATIVE. Re-seeded from the project figure plus the ceiling rather than
+		// added to whatever was there, so asking twice gives the same answer instead of hanging the
+		// fan a ceiling lower every time somebody opens the settings page.
+		const double RodOnce = Fan->Fan.DropLength;
+		House->ApplyProjectSettingsToCeilings();
+
+		Fan = FindFan(House);
+		if (TestNotNull(TEXT("The fan survives a second re-apply"), Fan))
+		{
+			TestEqual(TEXT("Re-applying twice does not lengthen the rod again"),
+				Fan->Fan.DropLength, RodOnce);
+		}
+	}
 
 	return true;
 }

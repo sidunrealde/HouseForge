@@ -12,11 +12,14 @@
  * What sits inside an opening: a door leaf, or a window frame with its sashes and glazing.
  *
  * Articulated, because a real door opens and so does a real window. The leaf is a moving part hung
- * on the jamb the drawing's swing arc puts it on. A sliding door is two panels instead - one fixed,
- * one running in its own track - because a single leaf the width of the opening has nowhere to
- * slide to but into the wall. A sliding window is the same arrangement one size down: two sashes on
- * two tracks, each glazed in its own rebate, with the operable one running. A ventilator is a
- * top-hung sash pivoting on its head.
+ * on the jamb the drawing's swing arc puts it on. A sliding door is two panels instead, each in its
+ * own track, because a single leaf the width of the opening has nowhere to slide to but into the
+ * wall. A sliding window is the same arrangement one size down: two sashes on two tracks, each
+ * glazed in its own rebate. A ventilator is a top-hung sash pivoting on its head.
+ *
+ * BOTH PANELS OF A SLIDER RUN, and either is the one you push - which is what decides whether the
+ * daylight appears at the near jamb or the far one. The drawing's swing arc picks the default and
+ * AHFArticulatedActor::OpenRunFrom opens it the other way; neither panel is furniture.
  *
  * A fixed window and an archway have nothing that moves, and that is the answer rather than an
  * omission - see .claude/rules/04-conventions.md.
@@ -52,17 +55,26 @@ public:
 	/** Seeds BuildParams from the project's settings. Called by the composing layer, not by generation. */
 	void ApplyProjectDefaults();
 
-	/** Part id of a door's leaf, and of the running panel of a sliding door. */
+	/** Part id of a hinged door's leaf. */
 	static const FName LeafPartId;
 
-	/** Part id of the fixed panel of a sliding door. Present only on a sliding door. */
-	static const FName FixedPanelPartId;
-
-	/** Part id of the sash that moves: the running one of a sliding window, or a pivot ventilator's. */
+	/** Part id of a ventilator's top-hung sash. */
 	static const FName SashPartId;
 
-	/** Part id of the fixed sash of a sliding window. */
-	static const FName FixedSashPartId;
+	/**
+	 * The two panels of a sliding door, named for the JAMB each is set out from rather than for what
+	 * it does - because what it does now depends on which way the unit is being opened.
+	 *
+	 * They were PanelFixed and Leaf, which said one of them was furniture. Both slide: see
+	 * FHFGenerators' BuildSlidingPair and FHFPartMotion::bMasterOpens. A name that describes a
+	 * position survives that; a name that describes a role did not.
+	 */
+	static const FName NearLeafPartId;
+	static const FName FarLeafPartId;
+
+	/** The two sashes of a sliding window. Same rule, same reason. */
+	static const FName NearSashPartId;
+	static const FName FarSashPartId;
 
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;

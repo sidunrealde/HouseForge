@@ -250,6 +250,11 @@ FHFWardrobeBuild FHFWardrobeKit::Build(const FHFWardrobeParams& Params)
 		const int32 Count = LeafCountFor(Template.MotionKind, Bays);
 		const double LeafModule = P.Width / static_cast<double>(Count);
 
+		// The pair, remembered so each can name the other. A slider is always two leaves, so this is
+		// the whole run; a hinged run leaves it empty and pairs nothing, which is right - a hinged
+		// leaf swings clear of its neighbour rather than sharing an aperture with it.
+		TArray<FName> SlidingPair;
+
 		for (int32 Index = 0; Index < Count; ++Index)
 		{
 			FHFShutterParams Leaf = Template;
@@ -264,16 +269,18 @@ FHFWardrobeBuild FHFWardrobeKit::Build(const FHFWardrobeParams& Params)
 			{
 				Leaf.Track = Index % 2;
 
-				// ONE OF THE PAIR STANDS. The leaf on the back track is it, and the front one runs
-				// across it - which is the way round a real two-track wardrobe works, because the
-				// front leaf is the one you can reach and the one whose handle is on show.
+				// BOTH LEAVES RUN, AND ONE OF THEM LEADS. A two-track run has gear on both leaves
+				// and a person slides whichever one they want; the leaf that moves is the leaf that
+				// stops covering its own bay, so which one you push is which end the aperture
+				// appears at. The wardrobe declares which of the two a single "open it" runs, and
+				// the other stays posable by hand and through OpenRunFrom.
 				//
-				// Without this both leaves ran, in opposite directions, off the same open amount:
-				// they swapped bays and the run was fully covered at 0.0, at 1.0 and everywhere
-				// between. The four top-hung loft flaps above lifted perfectly, which is why it was
-				// reported as the BOTTOM SECTION not opening rather than as a wardrobe that does
-				// not open at all.
-				Leaf.bStandingLeaf = (Leaf.Track == 0);
+				// What must NOT happen is one amount driving both. They swap bays and the run is
+				// fully covered at 0.0, at 1.0 and everywhere between - the master bedroom's 2400
+				// wardrobe, whose four top-hung loft flaps above lifted perfectly, which is why it
+				// was reported as the BOTTOM SECTION not opening rather than as a wardrobe that
+				// does nothing. FHFPartMotion::bMasterOpens is what keeps that out.
+				Leaf.bLeadsTheRun = (Leaf.Hinge == P.SlideOpensFrom);
 			}
 
 			const FName PartId = bLoft ? LoftPartId(Index) : ShutterPartId(Index);
@@ -281,6 +288,11 @@ FHFWardrobeBuild FHFWardrobeKit::Build(const FHFWardrobeParams& Params)
 			if (Part.Mesh.TriangleCount() == 0)
 			{
 				continue;
+			}
+
+			if (Leaf.IsSliding())
+			{
+				SlidingPair.Add(PartId);
 			}
 
 			// Into the LEAF's own mesh, in the leaf's own space. Anywhere else and the handle stays
@@ -293,6 +305,29 @@ FHFWardrobeBuild FHFWardrobeKit::Build(const FHFWardrobeParams& Params)
 
 			Out.ShutterFaceY = FMath::Min(Out.ShutterFaceY, -Leaf.FaceOffset());
 			Out.Parts.Add(MoveTemp(Part));
+		}
+
+		// Each leaf of the pair names the other, symmetrically, so "open the run from this end"
+		// knows which leaf to shut. Only the composer can do this - a leaf on its own has no idea
+		// there is a second one, which is the same reason bLeadsTheRun is set here rather than in
+		// FHFShutterParams' own defaults.
+		//
+		// Deliberately only for a run of exactly two. A leaf that failed to build - a bay eaten by
+		// its reveal - would leave one leaf holding a link to a part that does not exist, and a
+		// dangling alternate is a shut command sent nowhere.
+		if (SlidingPair.Num() == 2)
+		{
+			for (FHFMeshPart& Part : Out.Parts)
+			{
+				if (Part.PartId == SlidingPair[0])
+				{
+					Part.Motion.AlternateToPartId = SlidingPair[1];
+				}
+				else if (Part.PartId == SlidingPair[1])
+				{
+					Part.Motion.AlternateToPartId = SlidingPair[0];
+				}
+			}
 		}
 	};
 

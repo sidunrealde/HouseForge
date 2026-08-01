@@ -120,7 +120,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFEveryRoleResolvesTest,
 
 bool FHFEveryRoleResolvesTest::RunTest(const FString& Parameters)
 {
-	TestEqual(TEXT("There are sixteen surface roles"), FHFMeshOps::NumSurfaceRoles(), 16);
+	// Seventeen: the sixteen finishes, plus LightSource - the one role that is not a finish, added
+	// so a cove's strip and a downlight's lens have something to be made of.
+	TestEqual(TEXT("There are seventeen surface roles"), FHFMeshOps::NumSurfaceRoles(), 17);
+
+	// AND THE LAST ONE ROUND-TRIPS. Both mapping tables used to bound themselves on Structure by
+	// name, so everything past it fell back to WallPaint - a slot quietly rendering the wrong
+	// material, which nothing else here would have caught.
+	for (const EHFSurfaceRole Role : AllRoles())
+	{
+		TestTrue(*FString::Printf(TEXT("Role '%s' survives its material id"), *RoleName(Role)),
+			FHFMeshOps::RoleForMaterialId(FHFMeshOps::MaterialIdForRole(Role)) == Role);
+	}
 
 	for (const EHFSurfaceRole Role : AllRoles())
 	{
@@ -237,7 +248,7 @@ bool FHFMaterialIdsFollowRolesTest::RunTest(const FString& Parameters)
 
 	// Two roles from the generator, plus a third appended through AppendPreservingRoles - the same
 	// composition AHFRoomActor performs, so this covers the case a raw append would have broken.
-	FDynamicMesh3 Mesh = FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0);
+	FDynamicMesh3 Mesh = FHFGenerators::GenerateFloor(Room, 15.0, FHFSkirting::For(Room, {}, {}, {}, {}));
 	FHFMeshOps::AppendPreservingRoles(Mesh, FHFGenerators::GenerateCeilingSlab(Room, 15.0));
 
 	const TSet<EHFSurfaceRole> Expected = {
@@ -319,7 +330,9 @@ bool FHFMaterialPassKeepsRolesTest::RunTest(const FString& Parameters)
 
 	// A boolean, then an append: both of the operations that have renumbered groups before.
 	FDynamicMesh3 Mesh = FHFGenerators::GenerateWall(Wall, { Door });
-	FHFMeshOps::AppendPreservingRoles(Mesh, FHFGenerators::GenerateFloor(MakeRoom(), 15.0, {}, 100.0));
+	const FHFRoom FloorRoom = MakeRoom();
+	FHFMeshOps::AppendPreservingRoles(Mesh,
+		FHFGenerators::GenerateFloor(FloorRoom, 15.0, FHFSkirting::For(FloorRoom, {}, {}, {}, {})));
 
 	const TArray<int32> Before = SnapshotGroups(Mesh);
 	const TSet<EHFSurfaceRole> RolesBefore = FHFMeshOps::RolesPresent(Mesh);

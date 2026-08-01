@@ -6,7 +6,33 @@
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Geometry/HFOpeningParams.h"
 #include "Model/HFArticulation.h"
+#include "Model/HFSkirtingPlan.h"
 #include "Model/HFTypes.h"
+
+/**
+ * One straight run of LED strip lying in a cove trough, described so a light can be built on it.
+ *
+ * Geometry, not a light: the generators may not touch a world and a light is a component. What is
+ * returned is where the strip is, which way it runs and how big the aperture above it is, and the
+ * composing layer turns that into whatever the renderer wants.
+ */
+struct HOUSEFORGE_API FHFCoveLightRun
+{
+	/** Middle of the run, in world centimetres, at the top of the strip. */
+	FVector Centre = FVector::ZeroVector;
+
+	/** Which way the run travels in plan, as a yaw in degrees. */
+	double YawDegrees = 0.0;
+
+	/** How long the run is. */
+	double Length = 0.0;
+
+	/** The trough's channel width - the aperture the wash leaves through. */
+	double Width = 0.0;
+
+	/** How far it is from the strip up to the surface being washed. Sizes the light's reach. */
+	double ThrowHeight = 0.0;
+};
 
 /**
  * Element generators.
@@ -26,6 +52,15 @@
 class HOUSEFORGE_API FHFGenerators
 {
 public:
+	/**
+	 * Soffit board thickness in centimetres: a 12.5 plasterboard with its skim, or a POP soffit.
+	 *
+	 * Public because it is not only the generator's business. How deep a ceiling has to be before a
+	 * recessed downlight fits behind it is board plus can, and the validator has to be able to say
+	 * so - a second copy of the figure sitting in the validator is how the two come to disagree.
+	 */
+	static constexpr double CeilingPanelThicknessCm = 2.0;
+
 	/**
 	 * A wall, with its openings cut out and the structure it is built around taken out of it.
 	 *
@@ -63,20 +98,19 @@ public:
 	static FHFStructuralCut StructuralCutFor(const FHFWall& Wall);
 
 	/**
-	 * A room's floor slab, plus skirting swept around its boundary.
+	 * A room's floor slab, plus the skirting the plan says runs round it.
 	 *
-	 * Doorways are omitted from the skirting: a continuous skirting across a door opening is one
-	 * of the most obvious tells that geometry was generated rather than modelled.
+	 * WHERE THE SKIRTING RUNS IS NOT DECIDED HERE. Which walls are on a room's edges, which openings
+	 * are in them and which joinery stands against them are all questions about the spec, and a
+	 * generator may not go looking - see .claude/rules/04-conventions.md. FHFSkirting::For answers
+	 * them once in the composing layer and this builds the answer.
 	 *
-	 * @param WallFaceInsets How far the finished wall face stands in from each boundary EDGE - edge
-	 *        i running Boundary[i] to Boundary[i+1] - normally half the thickness of the wall set
-	 *        out on that line. A room boundary is a centreline, so without this the skirting is
-	 *        laid along the middle of the masonry and buried in it. Empty, or short, means zero for
-	 *        the edges it does not cover, which is what a caller with no walls to consult wants.
+	 * @param Skirting Runs, plaster offsets and section, per boundary edge. A default-constructed
+	 *        plan has no edges and emits no skirting, which is what a caller with no walls to consult
+	 *        wants; its Height, not FHFRoom::SkirtingHeight, is what gets built.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateFloor(const FHFRoom& Room, double SlabThickness,
-		const TArray<FVector2D>& SkirtingGaps, double GapWidth,
-		const TArray<double>& WallFaceInsets = TArray<double>());
+		const FHFSkirtingPlan& Skirting = FHFSkirtingPlan());
 
 	/**
 	 * A false ceiling.
@@ -86,11 +120,51 @@ public:
 	 * structure above, a full drop covers everything, a tray steps between two levels, a cove adds
 	 * a shielded channel for an LED strip, and a bulkhead follows its own polygon.
 	 *
+	 * On top of the style, three things any of them can carry:
+	 *
+	 *   - a PERIMETER BULKHEAD ring, deeper than the ceiling inside it, boxing in the beams that
+	 *     run round the room so the rest of the ceiling does not have to be as deep as they are;
+	 *   - a CENTRE PANEL filling the middle higher than the band, which is what turns a band into a
+	 *     frame and gives a cove something to wash;
+	 *   - RECESSED DOWNLIGHTS at FHFFalseCeiling::LightPositions - a bore through the soffit, a trim
+	 *     ring proud of it and an aperture up the can, rather than a dot on a plan.
+	 *
 	 * @param FanDrops Plan positions of ceiling fans, whose drop rods must pass through the
 	 *        ceiling. A fan hanging from a soffit it does not penetrate is an obvious tell.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateCeiling(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,
 		const TArray<FVector2D>& FanDrops, double FanDropRadius);
+
+	/**
+	 * Where this ceiling's recessed downlights actually are, in three dimensions.
+	 *
+	 * WHAT THE LIGHTING MILESTONE ATTACHES TO. LightPositions is a list of plan coordinates and says
+	 * nothing about height, about which of them fitted, or about how far up the can the emitter
+	 * sits - and a spotlight parented at the soffit plane instead of at the lens is shaded by its
+	 * own trim. This answers all three from the same layout the geometry was built from, so a
+	 * fitting that was skipped for not fitting the band does not come back as a light hanging in
+	 * open air.
+	 *
+	 * Pure, like everything else here. The composing layer asks; nothing is spawned.
+	 */
+	static TArray<FVector> CeilingDownlights(const FHFFalseCeiling& Ceiling, const FHFRoom& Room);
+
+	/**
+	 * The straight runs of LED strip lying in a cove's trough, as things a light can be made from.
+	 *
+	 * THE COVE IS THE POINT OF THE WHOLE REFERENCE SET and it had nothing in it that emits. The
+	 * concealment argument is exactly what makes that fatal rather than cosmetic: the strip is
+	 * hidden from every camera in the flat by construction, so with no light and no emissive
+	 * material there is, correctly, nothing to see. What a person is supposed to see is the WASH -
+	 * a band of light thrown up the trough onto the slab or the centre panel above it - and that
+	 * only exists if something puts it there.
+	 *
+	 * A run per straight segment rather than one light for the room, because the wash follows the
+	 * trough round the corners and a point light in the middle would light the middle.
+	 *
+	 * Pure. The composing layer asks and spawns; nothing here touches a world.
+	 */
+	static TArray<FHFCoveLightRun> CeilingCoveLights(const FHFFalseCeiling& Ceiling, const FHFRoom& Room);
 
 	/**
 	 * How far below the structural slab this ceiling's panel hangs over a plan point. 0 if none does.

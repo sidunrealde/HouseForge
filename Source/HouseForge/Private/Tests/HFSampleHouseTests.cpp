@@ -164,9 +164,10 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 	// 22, not 21. The service band lost W_CBath_MBath when the utility left it, and the utility
 	// gained W_Kitchen_Util and W_Kitchen_Util_S where it now sits in the kitchen's corner.
 	TestEqual(TEXT("Sample has 22 walls"), Spec.Walls.Num(), 22);
-	// 7 and 8, not 8 and 9. BM_Living_Cross crossed the middle of the living room on no wall line
-	// and between no columns, and FC_Living_Beam was the bulkhead that existed only to box it in.
-	TestEqual(TEXT("Sample has 7 false ceilings"), Spec.FalseCeilings.Num(), 7);
+	// 8: the seven the flat always had, plus FC_Foyer. The foyer had no ceiling at all, which was an
+	// omission rather than a decision - it is the room you walk into - and it is where the fourth
+	// named template is demonstrated.
+	TestEqual(TEXT("Sample has 8 false ceilings"), Spec.FalseCeilings.Num(), 8);
 	TestEqual(TEXT("Sample has 8 beams"), Spec.Beams.Num(), 8);
 	TestEqual(TEXT("Sample has 11 columns"), Spec.Columns.Num(), 11);
 
@@ -208,11 +209,40 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
+		// DeepestDrop, not Drop. Burying the beam by dropping the whole room is exactly the answer
+		// this flat used to give and the reason its ceilings read as boxes; what buries it now is a
+		// 300 wide ring round the edge of the room, which is deeper than the ceiling inside it. The
+		// assertion that matters is that SOMETHING reaches the beam, and that it is positioned over
+		// it - which HouseForge.Validation.BulkheadMustCoverTheBeam holds against the validator.
 		TestTrue(*FString::Printf(
-			TEXT("Ceiling '%s' drops %.0f, enough to bury beam '%s' which hangs %.0f into room '%s'"),
-			*Ceiling.Id.ToString(), Ceiling.Drop, *Showing->Id.ToString(), Showing->Depth,
+			TEXT("Ceiling '%s' reaches %.0f at its deepest, enough to bury beam '%s' which hangs %.0f into room '%s'"),
+			*Ceiling.Id.ToString(), Ceiling.DeepestDrop(), *Showing->Id.ToString(), Showing->Depth,
 			*Ceiling.RoomId.ToString()),
-			Ceiling.Drop >= Showing->Depth);
+			Ceiling.DeepestDrop() >= Showing->Depth);
+
+		// AND THE OTHER HALF OF IT, which is the half that was reported as a defect. A ring is only
+		// an improvement if the ceiling INSIDE it is shallow; a 480 ring round a 480 ceiling is the
+		// uniform half-metre drop again with extra fields. Every habitable room in this flat is
+		// ceiled at 150 or 200 - the reference designs' range - and the wet areas and the corridor
+		// are flat-ceiled on purpose, so they are named rather than exempted by a rule.
+		const bool bServiceRoom =
+			Ceiling.RoomId == FName(TEXT("R_Kitchen")) ||
+			Ceiling.RoomId == FName(TEXT("R_CBath")) ||
+			Ceiling.RoomId == FName(TEXT("R_MBath")) ||
+			Ceiling.RoomId == FName(TEXT("R_Corridor"));
+
+		if (!bServiceRoom)
+		{
+			TestTrue(*FString::Printf(
+				TEXT("Ceiling '%s' over habitable room '%s' is shallow: it drops %.0f, not the 500 it used to"),
+				*Ceiling.Id.ToString(), *Ceiling.RoomId.ToString(), Ceiling.Drop),
+				Ceiling.Drop <= 200.0);
+
+			TestTrue(*FString::Printf(
+				TEXT("Ceiling '%s' buries its beam with a ring rather than with the whole room"),
+				*Ceiling.Id.ToString()),
+				Ceiling.HasPerimeterBulkhead());
+		}
 	}
 
 	// Every room must be reachable by the builder, and every opening must host on a real wall.

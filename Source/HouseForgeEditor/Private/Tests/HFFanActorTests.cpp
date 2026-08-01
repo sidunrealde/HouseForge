@@ -16,6 +16,7 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "Model/HFBuildDefaults.h"
+#include "Model/HFCeilingFit.h"
 #include "Model/HFSampleHouse.h"
 #include "Model/HFTypes.h"
 
@@ -345,7 +346,18 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 
 	const TMap<FName, AHFFanActor*> Built = FansIn(House);
 
-	for (const FHFFixture& Fixture : House->Spec.Fixtures)
+	// THE FIXTURES AS BUILT, not as drawn, and the difference between the two is a deliberate one.
+	//
+	// A drawing puts an extract at a height on a wall and says nothing about the false ceiling that
+	// will be hung over it, so where the fan ENDS UP is the drawn height resolved against the soffit
+	// that actually lands above it - see FHFCeilingFit. Both bathroom extracts in this flat are drawn
+	// at 230..255 under a soffit at 252, and are built 40 mm lower for that reason.
+	//
+	// Measuring against Spec.Fixtures would therefore be measuring the actor against a figure nothing
+	// builds from. The assertion loses no teeth: the fitted list differs from the drawing only where
+	// a ceiling forced it to, everything else in it is the drawing verbatim, and the clause below
+	// asserts that the fitted extract really does clear the ceiling it was moved for.
+	for (const FHFFixture& Fixture : House->FittedFixtures())
 	{
 		AHFFanActor* Fan = Built.FindRef(Fixture.Id);
 		if (Fan == nullptr)
@@ -468,9 +480,25 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 			// three-blade extract.
 			const double Centre = FloorZ + Fixture.BaseZ + Fixture.Height * 0.5;
 			const double AxisZ = Rotor->GetComponentLocation().Z;
-			TestTrue(*FString::Printf(TEXT("'%s' sits at the height it was drawn (%.1f against %.1f)"),
+			TestTrue(*FString::Printf(TEXT("'%s' sits at the height it is built at (%.1f against %.1f)"),
 				*Where, AxisZ, Centre),
 				FMath::IsNearlyEqual(AxisZ, Centre, 0.1));
+
+			// AND THE CEILING IS WHY IT IS THERE. An extract high in a wall is precisely the thing a
+			// dropped ceiling comes down onto, and both of this flat's bathroom extracts stood 30 mm
+			// inside their own finished soffits the day the ceilings became shallow bands with deep
+			// rings. Asserted on the whole case rather than the axis, because it is the top of the box
+			// that disappears into the plasterboard.
+			if (Room != nullptr)
+			{
+				const double SoffitZ =
+					FHFCeilingFit::LowestSoffitZOver(Fixture, *Room, House->Spec.FalseCeilings);
+
+				TestTrue(*FString::Printf(
+					TEXT("'%s' clears the ceiling over it (case head %.1f, soffit %.1f)"),
+					*Where, FloorZ + Fixture.BaseZ + Fixture.Height, SoffitZ),
+					FloorZ + Fixture.BaseZ + Fixture.Height <= SoffitZ + 0.01);
+			}
 
 			// And it faces INTO the room it serves rather than into the wall it is screwed to. The
 			// case would look identical either way in plan, which is the only view a drawing has.
@@ -570,10 +598,30 @@ bool FHFFanUnderACeilingTest::RunTest(const FString& Parameters)
 	// Both are 500 now, for a reason that has nothing to do with fans: every drop in that flat is
 	// set by the 450 beams it has to bury. The difference went to zero and this test failed while
 	// nothing about a fan had changed. What it wants is a controlled pair, so it makes its own.
+	//
+	// AND IT HAS TO SAY SO IN THE SPEC'S OWN LANGUAGE. Setting a figure is not enough: SetSpec
+	// re-resolves every templated ceiling, so a hand-set drop on a ceiling that still names a
+	// template is stamped straight back over. Custom is exactly the word for "these figures stand
+	// as written", and both of these rooms carry a named design now - a PlainBand in the kitchen
+	// and a FlatSoffit in the bathroom - so without it the pair silently became 0 and 25 again.
 	for (FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
 	{
-		if (Ceiling.RoomId == TEXT("R_Kitchen")) { Ceiling.Drop = 300.0; }
-		if (Ceiling.RoomId == TEXT("R_MBath"))   { Ceiling.Drop = 400.0; }
+		if (Ceiling.RoomId != TEXT("R_Kitchen") && Ceiling.RoomId != TEXT("R_MBath"))
+		{
+			continue;
+		}
+
+		Ceiling.Template = EHFCeilingTemplate::Custom;
+
+		// Flat across the whole room, so the drop under the fan IS the drop. A band leaves the
+		// centre of the room open and the fan under it would answer zero however deep the band is.
+		Ceiling.Style = EHFCeilingStyle::FullDrop;
+		Ceiling.BandWidth = 0.0;
+		Ceiling.PerimeterBulkheadWidth = 0.0;
+		Ceiling.PerimeterBulkheadDrop = 0.0;
+		Ceiling.PerimeterBulkheadEdges.Reset();
+
+		Ceiling.Drop = (Ceiling.RoomId == TEXT("R_Kitchen")) ? 300.0 : 400.0;
 	}
 
 	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
@@ -728,7 +776,12 @@ bool FHFExtractDuctTest::RunTest(const FString& Parameters)
 
 	int32 Extracts = 0;
 
-	for (const FHFFixture& Fixture : House->Spec.Fixtures)
+	// The fitted fixtures, because the hole has to follow the FAN. An extract that a false ceiling
+	// forced down takes its duct with it - the case covers exactly the spot where the hole is, so a
+	// duct cored at the drawn height with the fan built 40 mm below it is a bare square opening in a
+	// finished wall. That is the same invisible-from-the-room failure this test was written for, only
+	// the other way up, and asking the drawing for the expected hole would have hidden it.
+	for (const FHFFixture& Fixture : House->FittedFixtures())
 	{
 		if (Fixture.Type != EHFFixtureType::ExhaustFan)
 		{

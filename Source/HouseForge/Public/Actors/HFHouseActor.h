@@ -64,6 +64,69 @@ public:
 	void ClearGeometry();
 
 	/**
+	 * Re-resolves the ceilings against the project's current figures, AND EVERYTHING THAT DEPENDS ON
+	 * THEM.
+	 *
+	 * THE PIECES CANNOT BE DONE SEPARATELY, which is why this is one call and why it is on the house
+	 * rather than on any of the actors involved. A ceiling fan hangs from the structural SLAB and its
+	 * rod is lengthened to reach past whatever the false ceiling puts between it and the room - so
+	 * deepening a ceiling from the settings page and rebuilding only the ceiling leaves every fan in
+	 * that room with the rod it had, which is the rotor built inside the plasterboard all over again.
+	 * It is exactly the failure the rod resolution was added to fix, arrived at by dragging a slider
+	 * instead of by writing a spec.
+	 *
+	 * The fan was never the only one. Everything fixed high in a room answers to the soffit over it -
+	 * an extract, a split AC head, a geyser, a curtain pelmet, the top of a wardrobe - and the chain
+	 * does not stop at the fitting: an extract that has to drop takes the duct cored through its wall
+	 * with it, so the WALL rebuilds too. FHFCeilingFit works out what gives; this puts the answer on
+	 * every element that carries part of it, in one pass, so no two of them can be resolved against
+	 * different ideas of where the ceiling is.
+	 *
+	 * Re-seeded from scratch rather than adjusted, because ApplyCeilingAbove ADDS to the project's rod
+	 * length and calling it twice would hang the fan a ceiling lower each time.
+	 *
+	 * Hand-edited elements are left alone completely, parameters included.
+	 *
+	 * @return How many elements were rebuilt.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
+	int32 ApplyProjectSettingsToCeilings();
+
+	/**
+	 * The spec's fixtures as they are actually BUILT: each one resolved against the ceiling over it.
+	 *
+	 * The spec says what the drawing says - a pelmet over this window at 2350. What gets built has to
+	 * answer to a false ceiling that the drawing never mentioned and that the project's settings can
+	 * move at any moment, so the resolution is recomputed here rather than stored anywhere. See
+	 * FHFCeilingFit for why that is the only version of this that cannot go stale.
+	 *
+	 * Same order and same length as Spec.Fixtures. Everything downstream - the wall that cores an
+	 * extract's duct, the actors, the preview - reads this rather than the raw list, which is what
+	 * keeps them from disagreeing about where a fitting is.
+	 *
+	 * Not a UFUNCTION: UnrealHeaderTool in 5.8 refuses a Blueprint-exposed function returning an
+	 * array of a project USTRUCT by value, and there is no Blueprint asking for this yet.
+	 */
+	TArray<FHFFixture> FittedFixtures() const;
+
+	/**
+	 * Whether a fixture of this type becomes an element actor when the house is built.
+	 *
+	 * THE ONE PLACE THAT ANSWERS IT. The fixture catalogue is milestone 9 and most of it does not
+	 * exist yet: 69 fixtures are declared in the reference flat and eight are built. Every part of
+	 * the composing layer that has to know which is which asks here - the spawn loops below, the
+	 * skirting resolver that must not cut a gap for a cabinet nobody modelled, and the build report
+	 * that used to count spec rows and say "69 fixtures" over a level holding eight.
+	 *
+	 * The day a base cabinet starts building, this list gains a line and the skirting break, the
+	 * report and the geometry all move together.
+	 */
+	static bool BuildsGeometryFor(EHFFixtureType Type);
+
+	/** Ids of the fixtures in a list that BuildsGeometryFor accepts. */
+	static TSet<FName> BuiltFixtureIds(const TArray<FHFFixture>& Fixtures);
+
+	/**
 	 * Takes the house's elements with it.
 	 *
 	 * UWorld::DestroyActor explicitly DETACHES attached children rather than destroying them, and
@@ -118,6 +181,13 @@ public:
 private:
 	UPROPERTY()
 	TObjectPtr<ULineBatchComponent> Lines;
+
+	/**
+	 * FittedFixtures, with the list of what had to give.
+	 *
+	 * @param OutMoved Optional. One line per fixture the ceiling forced to move, for the build log.
+	 */
+	TArray<FHFFixture> ResolveFixtures(TArray<FString>* OutMoved) const;
 
 	void DrawWalls();
 	void DrawOpenings();

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "Geometry/HFRenderFinish.h"
 #include "Model/HFTypes.h"
 
 /**
@@ -35,7 +36,7 @@ public:
 	static EHFSurfaceRole RoleForMaterialId(int32 MaterialId);
 
 	/** Number of material slots a fully-dressed HouseForge component carries: one per role. */
-	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::Structure) + 1; }
+	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::LightSource) + 1; }
 
 	/**
 	 * Writes each triangle's material id from the surface role its polygroup already carries.
@@ -219,6 +220,94 @@ public:
 		double HardEdgeAngleDegrees = 40.0);
 
 	/**
+	 * Chamfers every convex arris the parameters ask for, with the surface roles intact.
+	 *
+	 * The ONLY way a bevel is applied here, exactly as AppendPreservingRoles is the only way meshes
+	 * are joined, and against the same failure: FMeshBevel calls Mesh.AllocateTriangleGroup() for
+	 * every strip and junction polygon it emits, so the chamfer facets come out in groups no role
+	 * maps to, RoleForGroup falls to WallPaint, and the material panel can never reach the chamfers.
+	 * Invisible in a screenshot and fatal to the material system. This puts them back by flooding the
+	 * role in from the original faces each new triangle touches.
+	 *
+	 * ## What is selected, and what deliberately is not
+	 *
+	 * FMeshBevel's own InitializeFromGroupTopology is useless here. It bevels group-boundary edges,
+	 * and in HouseForge the polygroup IS the surface role - a box's six faces are one group with no
+	 * interior group edges, so it would bevel nothing at all. The edge set is chosen here instead:
+	 *
+	 *   - CONVEX only. Face normals alone cannot tell a convex arris from a concave internal corner
+	 *     (the dot product is the same either way), so convexity is computed as the side of the first
+	 *     triangle's plane the second triangle's far vertex falls on. Chamfering concave edges eats
+	 *     material out of every junction, and a real internal corner is filled, not chamfered.
+	 *   - Above the hard-edge angle. See FHFBevelParams::MinAngleDegrees.
+	 *   - Only where the faces either side are wide enough to lose the chamfer without vanishing.
+	 *     See FHFBevelParams::MinFeatureFactor - this kit's 3 mm shadow gaps depend on it.
+	 *
+	 * Runs one pass per distinct chamfer width present, widest first, and never re-bevels a facet an
+	 * earlier pass created: a fresh chamfer meets its parent faces at 45 degrees, which is above the
+	 * threshold, so without that guard the second pass would chamfer the first pass's chamfers.
+	 *
+	 * NOT IDEMPOTENT, which is what makes it a composing-layer operation rather than a generator one.
+	 * See FHFRenderFinish.
+	 *
+	 * ## AND NOT EVERY CONVEX ARRIS IS AN ARRIS
+	 *
+	 * Each element is its own closed solid, so where one element's material STOPS because another
+	 * element's material starts, the boundary between them is convex within the first solid's own
+	 * mesh and is not an edge of the building at all. A partition butting into a wall ends in that
+	 * wall's face; the plaster runs straight through. Chamfered anyway, both sides retreat and the
+	 * two 45-degree strips meet as a 3 mm V-notch scored down what should be one flat plane - two
+	 * full-height hairlines down the corridor's far wall, and the same at every wall butt, at all
+	 * eighteen column-in-wall faces, and along the floor line wherever no skirting covers it. It was
+	 * the first thing anybody would have seen, and it was new with the chamfer.
+	 *
+	 * So the composing layer says where the material continues. FlushVolumes are the volumes this
+	 * element's geometry was built AROUND - which for a wall is exactly the FHFStructuralCut list it
+	 * already carries, plus what it stands on - and a candidate edge lying inside one of them is
+	 * dropped. Bounded volumes rather than infinite planes: a column flush in a wall shares the
+	 * wall's face plane, and suppressing that plane would take every door reveal on the wall with it.
+	 *
+	 * In the same space as the mesh, which for a HouseForge element is world centimetres.
+	 *
+	 * @return true if any edge was chamfered. On failure the mesh is left exactly as it arrived - a
+	 *         partially beveled mesh is worse than a sharp one, because it looks plausible.
+	 */
+	static bool BevelConvexEdges(UE::Geometry::FDynamicMesh3& Mesh, const FHFBevelParams& Params,
+		const TArray<FHFStructuralCut>& FlushVolumes = TArray<FHFStructuralCut>());
+
+	/**
+	 * Builds a non-overlapping second UV channel for baked lighting, leaving UV0 untouched.
+	 *
+	 * UV0 cannot be used for a lightmap and that is not a defect in it: it is world position over
+	 * texel size, so it is deliberately shared between every surface at the same coordinates, and
+	 * two rooms' walls land on top of each other. A lightmap needs the opposite property.
+	 *
+	 * Islands are the mesh's own planar-projection regions - the same dominant-axis grouping UV0
+	 * uses - packed into the unit square by the engine's own UV packer, the one static mesh lightmap
+	 * generation uses. World-scale projection first means the islands arrive at a consistent
+	 * texel-to-world ratio before packing, so a big wall gets proportionally more lightmap than a
+	 * door handle instead of every island being scaled to fit its own slot.
+	 *
+	 * @return false if the mesh has no triangles or the packer could not lay the islands out, in
+	 *         which case no second layer is left half-built.
+	 */
+	static bool BuildLightmapUVs(UE::Geometry::FDynamicMesh3& Mesh, const FHFLightmapParams& Params);
+
+	/**
+	 * Everything between a generator finishing and a component receiving the mesh: bevel, UVs, normals.
+	 *
+	 * Ordered, and the order is the whole point. The bevel runs FIRST so the chamfer facets are
+	 * present when UV0 is projected and the normals are computed - a chamfer with no UVs and no
+	 * normal elements renders as an untextured band shading off the constant normal, which is
+	 * precisely the invisible-in-a-screenshot failure this file keeps guarding against. The lightmap
+	 * unwrap runs LAST, because it packs the islands the projection produced.
+	 *
+	 * @param FlushVolumes What this element's material dies into. See BevelConvexEdges.
+	 */
+	static void FinishForRender(UE::Geometry::FDynamicMesh3& Mesh, const FHFRenderFinish& Finish,
+		const TArray<FHFStructuralCut>& FlushVolumes = TArray<FHFStructuralCut>());
+
+	/**
 	 * Insets a closed polygon inward by Amount, returning the resulting loops.
 	 *
 	 * Uses a proper polygon offset rather than shifting each edge along its normal: on a concave
@@ -230,6 +319,26 @@ public:
 	 *         failure - it means the band is wider than the room.
 	 */
 	static TArray<TArray<FVector2D>> InsetPolygon(const TArray<FVector2D>& Polygon, double Amount);
+
+	/**
+	 * Subject minus the union of Cutters, as closed loops.
+	 *
+	 * WHAT MAKES A PERIMETER TREATMENT ANSWER TO THE ROOM RATHER THAN GO ROUND IT. A beam bulkhead
+	 * belongs on the edges a beam actually shows along - two of the living room's four - and an inset
+	 * cannot express that, because an inset is the same on every side by construction. Cutting the
+	 * ceiling's outline with a strip per boundary edge can.
+	 *
+	 * Holes in the result are dropped: nothing in this domain subtracts an island out of the middle
+	 * of a ceiling, and a loop with a hole in it is not something AppendPrism could build anyway.
+	 *
+	 * @return Empty when the cutters consume the subject entirely, which is a real answer.
+	 */
+	static TArray<TArray<FVector2D>> SubtractPolygons(const TArray<FVector2D>& Subject,
+		const TArray<TArray<FVector2D>>& Cutters);
+
+	/** Subject clipped to the union of Clips, as closed loops. The other half of SubtractPolygons. */
+	static TArray<TArray<FVector2D>> IntersectPolygons(const TArray<FVector2D>& Subject,
+		const TArray<TArray<FVector2D>>& Clips);
 
 	/** True if the mesh is closed - every edge shared by exactly two triangles. */
 	static bool IsClosed(const UE::Geometry::FDynamicMesh3& Mesh);

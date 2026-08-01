@@ -444,7 +444,14 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 	Room.CeilingHeight = 300.0;
 	Room.SkirtingHeight = 0.0;
 
-	const FDynamicMesh3 Bare = FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0);
+	// The plan is what says where the skirting runs; with no walls to consult every edge insets
+	// zero, which is what a caller with none wants and is what the bare cases below get.
+	auto PlainPlan = [](const FHFRoom& R)
+	{
+		return FHFSkirting::For(R, {}, {}, {}, {});
+	};
+
+	const FDynamicMesh3 Bare = FHFGenerators::GenerateFloor(Room, 15.0, PlainPlan(Room));
 	TestTrue(TEXT("A bare floor slab generates"), Bare.TriangleCount() > 0);
 	TestTrue(TEXT("A bare floor slab is watertight"), FHFMeshOps::IsClosed(Bare));
 
@@ -454,21 +461,42 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 
 	// Skirting adds geometry.
 	Room.SkirtingHeight = 10.0;
-	const FDynamicMesh3 Skirted = FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0);
+	const FDynamicMesh3 Skirted = FHFGenerators::GenerateFloor(Room, 15.0, PlainPlan(Room));
 	TestTrue(TEXT("Skirting adds geometry"), Skirted.TriangleCount() > Bare.TriangleCount());
 
 	// A doorway must interrupt it: running skirting across an opening is the most obvious tell
 	// that geometry was generated rather than modelled. Splitting one run into two adds triangles,
 	// so the property to check is that less material was emitted, not fewer triangles.
-	const FDynamicMesh3 WithGap = FHFGenerators::GenerateFloor(Room, 15.0, { FVector2D(200.0, 0.0) }, 100.0);
-	const double SkirtedVolume = TMeshQueries<FDynamicMesh3>::GetVolumeArea(Skirted).X;
+	FHFWall South;
+	South.Id = TEXT("W_South");
+	South.Start = FVector2D(0.0, 0.0);
+	South.End = FVector2D(400.0, 0.0);
+	South.Thickness = 23.0;
+	South.Height = 300.0;
+
+	FHFOpening Door;
+	Door.Id = TEXT("D1");
+	Door.WallId = South.Id;
+	Door.Kind = EHFOpeningKind::Door;
+	Door.OffsetAlongWall = 200.0;
+	Door.Width = 100.0;
+	Door.Height = 210.0;
+
+	const FDynamicMesh3 WithGap = FHFGenerators::GenerateFloor(Room, 15.0,
+		FHFSkirting::For(Room, { South }, { Door }, {}, {}));
+
+	// Against the same wall, so the doorway is the only difference between the two.
+	const FDynamicMesh3 Unbroken = FHFGenerators::GenerateFloor(Room, 15.0,
+		FHFSkirting::For(Room, { South }, {}, {}, {}));
+
+	const double SkirtedVolume = TMeshQueries<FDynamicMesh3>::GetVolumeArea(Unbroken).X;
 	const double GappedVolume = TMeshQueries<FDynamicMesh3>::GetVolumeArea(WithGap).X;
 	TestTrue(TEXT("A doorway removes a length of skirting"), GappedVolume < SkirtedVolume);
 
 	// Zero skirting height must emit none at all.
 	Room.SkirtingHeight = 0.0;
 	TestEqual(TEXT("Zero skirting height emits no skirting"),
-		FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0).TriangleCount(), Bare.TriangleCount());
+		FHFGenerators::GenerateFloor(Room, 15.0, PlainPlan(Room)).TriangleCount(), Bare.TriangleCount());
 
 	// ------------------------------------------------------- and it has to be IN the room
 	//
@@ -505,7 +533,7 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 
 	// A 23 wall on that edge puts its face 11.5 into the room.
 	const FDynamicMesh3 AgainstAWall = FHFGenerators::GenerateFloor(
-		Room, 15.0, {}, 100.0, { 11.5, 0.0, 0.0, 0.0 });
+		Room, 15.0, FHFSkirting::For(Room, { South }, {}, {}, {}));
 
 	const double Reach = DeepestIntoTheRoomOffSouth(AgainstAWall);
 
@@ -517,9 +545,9 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 	TestTrue(*FString::Printf(TEXT("...and is only just proud of it (%.2f)"), Reach),
 		Reach < 11.5 + 2.0);
 
-	// The old behaviour, for contrast: with no inset declared it lies down the middle of the wall.
+	// The old behaviour, for contrast: with no wall found on the edge it lies down the centreline.
 	TestTrue(TEXT("With no inset the skirting sits on the boundary, which is what the walls bury"),
-		DeepestIntoTheRoomOffSouth(FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0)) < 11.5);
+		DeepestIntoTheRoomOffSouth(FHFGenerators::GenerateFloor(Room, 15.0, PlainPlan(Room))) < 11.5);
 
 	return true;
 }

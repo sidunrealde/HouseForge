@@ -5,10 +5,13 @@
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "GameFramework/Actor.h"
+#include "Geometry/HFRenderFinish.h"
+#include "Model/HFSkirtingPlan.h"
 #include "Model/HFTypes.h"
 #include "HFElementActors.generated.h"
 
 class UDynamicMeshComponent;
+class ULightComponent;
 
 /**
  * Base for every generated element.
@@ -64,6 +67,32 @@ public:
 	/** Spec element this actor was generated from, so a rebuild can match it back up. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
 	FName ElementId;
+
+	/**
+	 * What is done to this element's geometry on the way to the component: chamfers, UVs, lightmap.
+	 *
+	 * Lives on the actor rather than in the generators because a generator is a pure function of its
+	 * parameters and the bevel is not idempotent - see FHFRenderFinish. It is editable per element
+	 * because the cost is real: chamfering an arris is triangles, and the answer for a wall the
+	 * camera walks past is not the answer for a service duct nobody ever sees.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Render")
+	FHFRenderFinish RenderFinish;
+
+	/**
+	 * Volumes this element's geometry was built around, so the chamfer knows where the plaster runs on.
+	 *
+	 * NOT A RENDER SETTING, which is why it is here and not on FHFRenderFinish: it is a fact about
+	 * where this element sits in the building, and the settings page re-seeds RenderFinish wholesale.
+	 * A wall butting into another wall ends in that wall's face and the surface continues straight
+	 * through; chamfered anyway, the junction is scored with a 3 mm V-notch. See
+	 * FHFMeshOps::BevelConvexEdges.
+	 *
+	 * Empty is the honest answer for an element standing on its own, and then every convex arris is
+	 * a real one.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Render")
+	TArray<FHFStructuralCut> FlushVolumes;
 
 	UDynamicMeshComponent* GetMeshComponent() const { return Mesh; }
 
@@ -151,22 +180,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "1.0"))
 	double SlabThickness = 15.0;
 
-	/** Plan positions where skirting stops, so it does not run across a doorway. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
-	TArray<FVector2D> DoorwayCentres;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "1.0"))
-	double DoorwayWidth = 100.0;
-
 	/**
-	 * How far the finished wall face stands in from each boundary edge, one entry per edge.
+	 * Where the skirting runs, where it stops and why - the whole answer for this room.
 	 *
-	 * A room boundary is a wall CENTRELINE, so the plaster is half a wall's thickness inside it.
-	 * The skirting is laid against that face, and only the composing layer can see which wall is on
-	 * which edge - so it works this out and puts the answer here, and the generator is handed it.
+	 * Resolved by FHFSkirting::For in the composing layer, because every question behind it is a
+	 * question about the SPEC: which walls are set out on this room's edges, which openings are in
+	 * those walls, and which joinery is scribed to them. A generator may not go looking - see
+	 * .claude/rules/04-conventions.md - and the three fields this replaced were the composing layer
+	 * trying to answer all three with a bag of points and one number, which is how a 750 bathroom
+	 * door came to remove 1800 of skirting and how the common bathroom collected four gaps for doors
+	 * in other people's rooms.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
-	TArray<double> WallFaceInsets;
+	FHFSkirtingPlan Skirting;
 
 	/**
 	 * Also emit the structural slab soffit over this room.
@@ -201,6 +227,55 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double FanDropRadius = 8.0;
+
+	/**
+	 * Where this ceiling's downlights are in the world, for whatever will light them.
+	 *
+	 * DELIBERATELY NO ApplyProjectDefaults HERE, unlike every other actor the settings page reaches.
+	 * A ceiling figure does not change one element in place: it changes what hangs between a ceiling
+	 * fan and the room, so the ceiling and the fans under it have to be re-seeded together or a
+	 * deeper ceiling swallows the rotor. Only the house holds both, so re-seeding is
+	 * AHFHouseActor::ApplyProjectSettingsToCeilings and there is no second way in.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge")
+	TArray<FVector> DownlightPositions() const;
+
+	/**
+	 * Puts real lights in the cove trough and up each downlight can.
+	 *
+	 * WITHOUT THIS A COVE IS A PAINTED LINE. The strip is concealed from every camera in the flat by
+	 * construction - that is the whole point of the detail - so what a person is meant to see is the
+	 * WASH it throws on the slab above, and nothing was throwing one. DownlightPositions has
+	 * returned the aperture rather than the plan dot since it was written, precisely so a light
+	 * could be parented there, and until now it had no caller at all.
+	 *
+	 * Idempotent: the lights are destroyed and rebuilt, so regenerating a ceiling or re-seeding it
+	 * from the settings page does not accumulate them.
+	 *
+	 * Rebuilt by Regenerate, so a ceiling whose design changes takes its lighting with it.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
+	int32 RebuildLights();
+
+	/** Off leaves the fittings modelled but dark, which is what the flat did before this existed. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting")
+	bool bBuildLights = true;
+
+	/** Lumens per recessed downlight. A 3-inch COB is 600 to 900. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "0.0"))
+	double DownlightLumens = 700.0;
+
+	/** Lumens per metre of cove strip. A domestic warm-white COB tape is 700 to 1200. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "0.0"))
+	double CoveLumensPerMetre = 900.0;
+
+	/** Colour temperature of both, in kelvin. 3000 is the warm white these flats are lit with. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "1700.0", ClampMax = "12000.0"))
+	double LightTemperatureKelvin = 3000.0;
+
+	/** The lights this ceiling owns, so a rebuild can take them away again. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Lighting")
+	TArray<TObjectPtr<ULightComponent>> Lights;
 
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;

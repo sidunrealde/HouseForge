@@ -7,11 +7,14 @@
 #include "CompGeom/PolygonTriangulation.h"
 #include "ConstrainedDelaunay2.h"
 #include "Curve/GeneralPolygon2.h"
+#include "Curve/PolygonIntersectionUtils.h"
 #include "Curve/PolygonOffsetUtils.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "DynamicMesh/MeshNormals.h"
+#include "Operations/MeshBevel.h"
 #include "Operations/MeshBoolean.h"
 #include "Parameterization/DynamicMeshUVEditor.h"
+#include "Parameterization/MeshUVPacking.h"
 
 using namespace UE::Geometry;
 
@@ -72,18 +75,294 @@ namespace
 			Swap(Tri.B, Tri.C);
 		}
 	}
+
+	/**
+	 * Which of the six axis directions a triangle is projected along.
+	 *
+	 * SIGNED, and that is what makes the projection safe to weld along. The plane a triangle
+	 * projects onto follows only the axis - +Z and -Z both give (X, Y) - so an unsigned answer
+	 * would let the two faces of a thin fin share UV elements, which is fine for the UV VALUES
+	 * (identical either way, since they are a function of position) and wrong for everything
+	 * downstream that reads the resulting connectivity as an island. A fin welded into one island
+	 * is an island folded back on top of itself, and a lightmap packed from it overlaps.
+	 *
+	 * The comparison order matches what the per-triangle projection has always used, so nothing
+	 * lands on a different plane than it did before.
+	 */
+	int32 SignedProjectionAxis(const FVector3d& Normal)
+	{
+		const double AbsX = FMath::Abs(Normal.X);
+		const double AbsY = FMath::Abs(Normal.Y);
+		const double AbsZ = FMath::Abs(Normal.Z);
+
+		if (AbsZ >= AbsX && AbsZ >= AbsY)	{ return Normal.Z >= 0.0 ? 2 : 5; }
+		if (AbsX >= AbsY)					{ return Normal.X >= 0.0 ? 0 : 3; }
+		return Normal.Y >= 0.0 ? 1 : 4;
+	}
+
+	/** World position over texel size, on the plane that axis projects onto. */
+	FVector2f ProjectOntoAxisPlane(const FVector3d& P, int32 SignedAxis, double InvTexel)
+	{
+		switch (SignedAxis % 3)
+		{
+		case 2:		return FVector2f(static_cast<float>(P.X * InvTexel), static_cast<float>(P.Y * InvTexel));
+		case 0:		return FVector2f(static_cast<float>(P.Y * InvTexel), static_cast<float>(P.Z * InvTexel));
+		default:	return FVector2f(static_cast<float>(P.X * InvTexel), static_cast<float>(P.Z * InvTexel));
+		}
+	}
+
+	/**
+	 * Fills a UV overlay with the world-scale planar projection, welded per vertex and axis.
+	 *
+	 * WELDED, where this used to append three fresh elements for every triangle corner. The values
+	 * are identical either way - a projection is a pure function of position and axis - so nothing
+	 * about the world-scale relationship the material panel depends on changes. What changes is the
+	 * connectivity, and two things read it:
+	 *
+	 *   - TANGENTS. UDynamicMeshComponent computes them with EDynamicMeshComponentTangentsMode::
+	 *     AutoCalculated, from the normal overlay AND the primary UV overlay. A UV overlay with no
+	 *     shared elements anywhere splits the tangent frame at every single triangle edge, so a
+	 *     surface that was carefully welded smooth by ComputeShadingNormals still gets a
+	 *     discontinuous tangent basis - invisible against today's flat colours and a faceted seam on
+	 *     every triangle of every curved surface the moment a normal map goes on. That is exactly
+	 *     the failure AHFElementActor's constructor comment predicted for tangents mode, one layer
+	 *     further down.
+	 *   - ISLANDS. The lightmap unwrap packs UV islands, and islands are connected components of
+	 *     this overlay. Fully split elements mean one island per triangle, which packs every
+	 *     triangle of the flat as its own chart with its own gutter.
+	 */
+	void FillWorldScaleProjection(FDynamicMesh3& Mesh, FDynamicMeshUVOverlay& UVs, double TexelSizeCm)
+	{
+		UVs.ClearElements();
+
+		const double InvTexel = 1.0 / TexelSizeCm;
+
+		// Keyed by vertex and signed axis, so a face's interior edges weld and its arrises do not.
+		TMap<TPair<int32, int32>, int32> ElementForVertexAndAxis;
+		ElementForVertexAndAxis.Reserve(Mesh.TriangleCount() * 2);
+
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		{
+			const FIndex3i Tri = Mesh.GetTriangle(Tid);
+			const int32 Axis = SignedProjectionAxis(Mesh.GetTriNormal(Tid));
+
+			int32 Elements[3];
+			for (int32 Corner = 0; Corner < 3; ++Corner)
+			{
+				const TPair<int32, int32> Key(Tri[Corner], Axis);
+				if (const int32* Existing = ElementForVertexAndAxis.Find(Key))
+				{
+					Elements[Corner] = *Existing;
+					continue;
+				}
+
+				const int32 New = UVs.AppendElement(
+					ProjectOntoAxisPlane(Mesh.GetVertex(Tri[Corner]), Axis, InvTexel));
+				ElementForVertexAndAxis.Add(Key, New);
+				Elements[Corner] = New;
+			}
+
+			UVs.SetTriangle(Tid, FIndex3i(Elements[0], Elements[1], Elements[2]));
+		}
+	}
+
+	/**
+	 * True if the two triangles either side of an edge fold AWAY from the solid.
+	 *
+	 * Face normals cannot answer this on their own: an arris and an internal corner of the same
+	 * angle give the same dot product, and FMeshNormals' own opening-angle predicate only dots the
+	 * normals - which is right for deciding whether to weld a normal and wrong for deciding whether
+	 * to cut material away. So the far vertex of the second triangle is tested against the first
+	 * triangle's plane. Behind it means the pair closes over the solid, which is a convex arris; in
+	 * front of it means they open into a corner, and a real internal corner is FILLED, not chamfered.
+	 */
+	bool IsConvexEdge(const FDynamicMesh3& Mesh, int32 Eid)
+	{
+		const FIndex2i EdgeTris = Mesh.GetEdgeT(Eid);
+		if (EdgeTris.B == FDynamicMesh3::InvalidID)
+		{
+			return false;
+		}
+
+		const FIndex2i EdgeVerts = Mesh.GetEdgeV(Eid);
+		const FIndex3i Far = Mesh.GetTriangle(EdgeTris.B);
+
+		int32 FarVertex = FDynamicMesh3::InvalidID;
+		for (int32 i = 0; i < 3; ++i)
+		{
+			if (Far[i] != EdgeVerts.A && Far[i] != EdgeVerts.B)
+			{
+				FarVertex = Far[i];
+				break;
+			}
+		}
+		if (FarVertex == FDynamicMesh3::InvalidID)
+		{
+			return false;
+		}
+
+		const FVector3d Normal = Mesh.GetTriNormal(EdgeTris.A);
+		return Normal.Dot(Mesh.GetVertex(FarVertex) - Mesh.GetVertex(EdgeVerts.A)) < -UE_KINDA_SMALL_NUMBER;
+	}
+
+	/**
+	 * How wide the faces either side of an edge are, measured across it.
+	 *
+	 * The triangle's altitude over the candidate edge. For the two-triangle faces AppendBox and
+	 * AppendPrism emit that is exactly the face's other dimension, which is the number that decides
+	 * whether a chamfer fits on it - a 3 mm shadow gap between two shutters answers 0.3, and
+	 * chamfering both its arrises at 1.5 mm would consume it and weld the shutters into one slab.
+	 */
+	double NarrowestFaceAcross(const FDynamicMesh3& Mesh, int32 Eid)
+	{
+		const FIndex2i EdgeVerts = Mesh.GetEdgeV(Eid);
+		const FVector3d A = Mesh.GetVertex(EdgeVerts.A);
+		const FVector3d B = Mesh.GetVertex(EdgeVerts.B);
+
+		FVector3d Along = B - A;
+		if (!Along.Normalize())
+		{
+			return 0.0;
+		}
+
+		double Narrowest = TNumericLimits<double>::Max();
+
+		const FIndex2i EdgeTris = Mesh.GetEdgeT(Eid);
+		for (int32 Side = 0; Side < 2; ++Side)
+		{
+			const int32 Tid = EdgeTris[Side];
+			if (Tid == FDynamicMesh3::InvalidID)
+			{
+				continue;
+			}
+
+			const FIndex3i Tri = Mesh.GetTriangle(Tid);
+			for (int32 i = 0; i < 3; ++i)
+			{
+				if (Tri[i] == EdgeVerts.A || Tri[i] == EdgeVerts.B)
+				{
+					continue;
+				}
+
+				const FVector3d ToFar = Mesh.GetVertex(Tri[i]) - A;
+				Narrowest = FMath::Min(Narrowest, (ToFar - Along * ToFar.Dot(Along)).Length());
+			}
+		}
+
+		return Narrowest == TNumericLimits<double>::Max() ? 0.0 : Narrowest;
+	}
+
+	/**
+	 * Puts a surface role back on every triangle the bevel invented.
+	 *
+	 * FMeshBevel allocates a fresh polygroup for each strip and each junction polygon, so on a mesh
+	 * where the group IS the role - which is every mesh here - the chamfers come out tagged with
+	 * nothing the material panel can reach. The role floods in from the original faces each new
+	 * triangle touches, largest neighbouring area winning, and ties broken by the lower role index
+	 * so the answer does not depend on triangle iteration order.
+	 *
+	 * WHICH TRIANGLES ARE NEW IS TAKEN FROM THE BEVEL, never inferred from the group ids, and the
+	 * difference is not academic. AllocateTriangleGroup hands back MaxGroupID and steps it, and on a
+	 * mesh built entirely from one role - a wall, a slab, a beam - MaxGroupID is 2. So the groups the
+	 * bevel invents are 2, 3, 4: perfectly valid role ids meaning FloorFinish, CeilingSoffit,
+	 * CoveInterior. A wall's chamfers would come back tagged as floor and ceiling, every check for
+	 * "is this a role" would pass, and the material panel would paint the arrises of every wall in
+	 * the flat with a different finish from the wall.
+	 *
+	 * @return false if any new triangle was left untagged, which means the flood could not reach it.
+	 */
+	bool RetagNewTrianglesWithRoles(FDynamicMesh3& Mesh, const TArray<int32>& NewTriangles)
+	{
+		TSet<int32> Untagged;
+		Untagged.Reserve(NewTriangles.Num());
+		for (const int32 Tid : NewTriangles)
+		{
+			if (Mesh.IsTriangle(Tid))
+			{
+				Untagged.Add(Tid);
+			}
+		}
+
+		while (!Untagged.IsEmpty())
+		{
+			TSet<int32> StillUntagged;
+			TArray<TPair<int32, int32>> Assignments;
+
+			for (const int32 Tid : Untagged)
+			{
+				// Area per neighbouring role, so a chamfer belongs to the face it mostly came off.
+				TMap<int32, double> AreaByGroup;
+				const FIndex3i Neighbours = Mesh.GetTriNeighbourTris(Tid);
+				for (int32 i = 0; i < 3; ++i)
+				{
+					const int32 Neighbour = Neighbours[i];
+					if (Neighbour == FDynamicMesh3::InvalidID || Untagged.Contains(Neighbour))
+					{
+						continue;
+					}
+
+					AreaByGroup.FindOrAdd(Mesh.GetTriangleGroup(Neighbour)) += Mesh.GetTriArea(Neighbour);
+				}
+
+				if (AreaByGroup.IsEmpty())
+				{
+					StillUntagged.Add(Tid);
+					continue;
+				}
+
+				int32 Best = INT32_MAX;
+				double BestArea = -1.0;
+				for (const TPair<int32, double>& Candidate : AreaByGroup)
+				{
+					if (Candidate.Value > BestArea + UE_KINDA_SMALL_NUMBER
+						|| (Candidate.Value > BestArea - UE_KINDA_SMALL_NUMBER && Candidate.Key < Best))
+					{
+						Best = Candidate.Key;
+						BestArea = Candidate.Value;
+					}
+				}
+
+				Assignments.Emplace(Tid, Best);
+			}
+
+			if (Assignments.IsEmpty())
+			{
+				// Nothing reachable this round and nothing will be reachable next round either.
+				return false;
+			}
+
+			// Applied after the whole round rather than during it, so one new triangle can never
+			// take its role from another new triangle that was assigned earlier in the same sweep.
+			for (const TPair<int32, int32>& Assignment : Assignments)
+			{
+				Mesh.SetTriangleGroup(Assignment.Key, Assignment.Value);
+			}
+
+			Untagged = MoveTemp(StillUntagged);
+		}
+
+		return true;
+	}
 }
 
 EHFSurfaceRole FHFMeshOps::RoleForGroup(int32 GroupId)
 {
 	const int32 Index = GroupId - 1;
-	const int32 Max = static_cast<int32>(EHFSurfaceRole::Structure);
+	// THE LAST ENUMERATOR, whichever that is, and not a role named by hand. Naming one is how the
+	// bound came to be Structure, and the moment a role was added after it every triangle and every
+	// slot beyond Structure fell back to WallPaint - a surface silently rendering the wrong material,
+	// which is the one failure this table exists to prevent.
+	const int32 Max = NumSurfaceRoles() - 1;
 	return (Index >= 0 && Index <= Max) ? static_cast<EHFSurfaceRole>(Index) : EHFSurfaceRole::WallPaint;
 }
 
 EHFSurfaceRole FHFMeshOps::RoleForMaterialId(int32 MaterialId)
 {
-	const int32 Max = static_cast<int32>(EHFSurfaceRole::Structure);
+	// THE LAST ENUMERATOR, whichever that is, and not a role named by hand. Naming one is how the
+	// bound came to be Structure, and the moment a role was added after it every triangle and every
+	// slot beyond Structure fell back to WallPaint - a surface silently rendering the wrong material,
+	// which is the one failure this table exists to prevent.
+	const int32 Max = NumSurfaceRoles() - 1;
 	return (MaterialId >= 0 && MaterialId <= Max) ? static_cast<EHFSurfaceRole>(MaterialId) : EHFSurfaceRole::WallPaint;
 }
 
@@ -823,41 +1102,334 @@ void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 	{
 		return;
 	}
-	UVs->ClearElements();
-
 	// Project each triangle along its dominant axis rather than using the UV editor's box
 	// projection: that one atlases the six faces into a cube-cross layout, so UVs no longer
 	// correspond to world distance. Here UV is simply world position over texel size, which means
 	// one tile really is TexelSizeCm across - the property the material panel needs in order to
 	// express tiling in millimetres.
-	const double InvTexel = 1.0 / TexelSizeCm;
-
-	for (const int32 Tid : Mesh.TriangleIndicesItr())
-	{
-		const FIndex3i Tri = Mesh.GetTriangle(Tid);
-		const FVector3d Normal = Mesh.GetTriNormal(Tid);
-
-		const double AbsX = FMath::Abs(Normal.X);
-		const double AbsY = FMath::Abs(Normal.Y);
-		const double AbsZ = FMath::Abs(Normal.Z);
-
-		int32 Elements[3];
-		for (int32 Corner = 0; Corner < 3; ++Corner)
-		{
-			const FVector3d P = Mesh.GetVertex(Tri[Corner]);
-
-			FVector2f UV;
-			if (AbsZ >= AbsX && AbsZ >= AbsY)		{ UV = FVector2f(P.X * InvTexel, P.Y * InvTexel); }
-			else if (AbsX >= AbsY)					{ UV = FVector2f(P.Y * InvTexel, P.Z * InvTexel); }
-			else									{ UV = FVector2f(P.X * InvTexel, P.Z * InvTexel); }
-
-			Elements[Corner] = UVs->AppendElement(UV);
-		}
-
-		UVs->SetTriangle(Tid, FIndex3i(Elements[0], Elements[1], Elements[2]));
-	}
+	FillWorldScaleProjection(Mesh, *UVs, TexelSizeCm);
 
 	ComputeShadingNormals(Mesh);
+}
+
+bool FHFMeshOps::BevelConvexEdges(FDynamicMesh3& Mesh, const FHFBevelParams& Params,
+	const TArray<FHFStructuralCut>& FlushVolumes)
+{
+	if (!Params.bEnabled || Mesh.TriangleCount() == 0 || !Mesh.HasTriangleGroups())
+	{
+		return false;
+	}
+
+	AdoptAttributes(Mesh);
+
+	// WHERE THIS ELEMENT'S MATERIAL DIES INTO SOMETHING ELSE'S, there is no arris to chamfer. See
+	// the header. A tolerance rather than an exact surface test: the boundary is a lap of a
+	// millimetre or two by construction, and an edge that close to a neighbour's masonry is one no
+	// camera can see round.
+	constexpr double FlushToleranceCm = 0.2;
+
+	auto InsideAnyFlushVolume = [&FlushVolumes](const FVector3d& Point)
+	{
+		for (const FHFStructuralCut& Volume : FlushVolumes)
+		{
+			if (!Volume.IsValid())
+			{
+				continue;
+			}
+
+			// Into the volume's own frame, so a cut turned in plan is tested as the box it is
+			// rather than as its axis-aligned bounds - which for a 450 x 230 column at 90 degrees
+			// would reach 110 mm further into the wall than the concrete does.
+			const FVector Local = FRotator(0.0, -Volume.YawDegrees, 0.0)
+				.RotateVector(FVector(Point) - Volume.Centre);
+
+			if (FMath::Abs(Local.X) <= Volume.Extents.X + FlushToleranceCm
+				&& FMath::Abs(Local.Y) <= Volume.Extents.Y + FlushToleranceCm
+				&& FMath::Abs(Local.Z) <= Volume.Extents.Z + FlushToleranceCm)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// One pass per distinct chamfer width the roles present actually ask for, widest first. An edge
+	// between two roles takes the SMALLER of the two widths, so a chamfer never eats past what the
+	// tighter of the two materials would accept, and an edge touching a role that must stay sharp -
+	// fabric, or anything the user has zeroed - is not a candidate at all.
+	TArray<double> Widths;
+	for (const EHFSurfaceRole Role : RolesPresent(Mesh))
+	{
+		const double Width = Params.WidthFor(Role);
+		if (Width > UE_KINDA_SMALL_NUMBER && !Widths.ContainsByPredicate(
+			[Width](double Existing) { return FMath::IsNearlyEqual(Existing, Width, 1e-6); }))
+		{
+			Widths.Add(Width);
+		}
+	}
+	if (Widths.IsEmpty())
+	{
+		return false;
+	}
+	Widths.Sort([](double A, double B) { return A > B; });
+
+	const double CosThreshold = FMath::Cos(FMath::DegreesToRadians(
+		FMath::Clamp(Params.MinAngleDegrees, 1.0, 179.0)));
+
+	// Triangles earlier passes created, so a later pass cannot chamfer a chamfer. A fresh facet
+	// meets its parent faces at half the original angle - 45 degrees off a box arris - which is
+	// above any sensible threshold, so without this the second pass would bevel the first pass's
+	// work and the third would bevel the second's.
+	TSet<int32> BevelCreated;
+	bool bAnyApplied = false;
+
+	for (const double Width : Widths)
+	{
+		const double MinFace = Width * FMath::Max(Params.MinFeatureFactor, 1.0);
+
+		TArray<int32> Candidates;
+		for (const int32 Eid : Mesh.EdgeIndicesItr())
+		{
+			const FIndex2i EdgeTris = Mesh.GetEdgeT(Eid);
+			if (EdgeTris.B == FDynamicMesh3::InvalidID)
+			{
+				continue;
+			}
+			if (BevelCreated.Contains(EdgeTris.A) || BevelCreated.Contains(EdgeTris.B))
+			{
+				continue;
+			}
+
+			const double WidthA = Params.WidthFor(RoleForGroup(Mesh.GetTriangleGroup(EdgeTris.A)));
+			const double WidthB = Params.WidthFor(RoleForGroup(Mesh.GetTriangleGroup(EdgeTris.B)));
+			if (!FMath::IsNearlyEqual(FMath::Min(WidthA, WidthB), Width, 1e-6))
+			{
+				continue;
+			}
+
+			if (Mesh.GetTriNormal(EdgeTris.A).Dot(Mesh.GetTriNormal(EdgeTris.B)) > CosThreshold)
+			{
+				continue;
+			}
+			if (!IsConvexEdge(Mesh, Eid))
+			{
+				continue;
+			}
+
+			const FIndex2i EdgeVerts = Mesh.GetEdgeV(Eid);
+			const FVector3d VertexA = Mesh.GetVertex(EdgeVerts.A);
+			const FVector3d VertexB = Mesh.GetVertex(EdgeVerts.B);
+
+			if (FVector3d::Distance(VertexA, VertexB) < MinFace)
+			{
+				continue;
+			}
+
+			// Both ends, so a long arris that merely passes through a neighbour's footprint - a
+			// wall's own corner running past a column further along it - keeps its chamfer.
+			if (!FlushVolumes.IsEmpty()
+				&& InsideAnyFlushVolume(VertexA) && InsideAnyFlushVolume(VertexB))
+			{
+				continue;
+			}
+			if (NarrowestFaceAcross(Mesh, Eid) < MinFace)
+			{
+				continue;
+			}
+
+			Candidates.Add(Eid);
+		}
+
+		if (Candidates.IsEmpty())
+		{
+			continue;
+		}
+
+		// A vertex where exactly two chamfered edges meet is a corner only if they turn there.
+		// Straight through - a long arris that happens to be split by a vertex, which every boolean
+		// leaves behind - has to stay one span, or the bevel terminates and restarts mid-edge and
+		// leaves a notch in the middle of a chamfer.
+		TMap<int32, TArray<FVector3d>> DirectionsAtVertex;
+		for (const int32 Eid : Candidates)
+		{
+			const FIndex2i EdgeVerts = Mesh.GetEdgeV(Eid);
+			for (int32 Side = 0; Side < 2; ++Side)
+			{
+				const FVector3d From = Mesh.GetVertex(EdgeVerts[Side]);
+				FVector3d Direction = Mesh.GetVertex(EdgeVerts[1 - Side]) - From;
+				if (Direction.Normalize())
+				{
+					DirectionsAtVertex.FindOrAdd(EdgeVerts[Side]).Add(Direction);
+				}
+			}
+		}
+
+		auto IsCornerVertex = [&DirectionsAtVertex](int32 Vid)
+		{
+			const TArray<FVector3d>* Directions = DirectionsAtVertex.Find(Vid);
+			if (Directions == nullptr || Directions->Num() != 2)
+			{
+				return false;
+			}
+			// Opposite directions mean the span runs straight through. Anything else is a turn.
+			return (*Directions)[0].Dot((*Directions)[1]) > -0.94;
+		};
+
+		// Worked on a copy. FMeshBevel unlinks the mesh before it re-stitches it, so a failure
+		// part-way leaves geometry that is neither the input nor a bevel of it, and a half-beveled
+		// wall is worse than a sharp one because it looks plausible in every screenshot.
+		FDynamicMesh3 Beveled(Mesh);
+		AdoptAttributes(Beveled);
+
+		FMeshBevel Bevel;
+		Bevel.InsetDistance = Width;
+		Bevel.NumSubdivisions = 0;
+		Bevel.InitializeFromTriangleEdges(Beveled, Candidates, IsCornerVertex);
+
+		const bool bWasClosed = IsClosed(Mesh);
+		const TSet<EHFSurfaceRole> RolesBefore = RolesPresent(Mesh);
+
+		if (!Bevel.Apply(Beveled, nullptr))
+		{
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("Bevel of %d edge(s) at %.3f cm failed; those arrises are left sharp."),
+				Candidates.Num(), Width);
+			continue;
+		}
+
+		if (!RetagNewTrianglesWithRoles(Beveled, Bevel.NewTriangles)
+			|| !RolesPresent(Beveled).Includes(RolesBefore)
+			|| RolesPresent(Beveled).Num() != RolesBefore.Num()
+			|| (bWasClosed && !IsClosed(Beveled)))
+		{
+			// Roles lost or the solid opened up. Both are invisible in a capture and fatal later -
+			// an untagged chamfer can never be re-materialled and an open solid defeats every
+			// boolean and every collision cook it meets - so the sharp mesh stands.
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("Bevel of %d edge(s) at %.3f cm produced geometry that lost a surface role or opened the solid; those arrises are left sharp."),
+				Candidates.Num(), Width);
+			continue;
+		}
+
+		for (const int32 Tid : Bevel.NewTriangles)
+		{
+			BevelCreated.Add(Tid);
+		}
+
+		Mesh = MoveTemp(Beveled);
+		AdoptAttributes(Mesh);
+		bAnyApplied = true;
+	}
+
+	return bAnyApplied;
+}
+
+bool FHFMeshOps::BuildLightmapUVs(FDynamicMesh3& Mesh, const FHFLightmapParams& Params)
+{
+	if (!Params.bEnabled || Mesh.TriangleCount() == 0)
+	{
+		return false;
+	}
+
+	if (!Mesh.HasAttributes())
+	{
+		Mesh.EnableAttributes();
+	}
+	AdoptAttributes(Mesh);
+
+	FDynamicMeshAttributeSet* Attributes = Mesh.Attributes();
+	if (Attributes == nullptr)
+	{
+		return false;
+	}
+
+	if (Attributes->NumUVLayers() < 2)
+	{
+		Attributes->SetNumUVLayers(2);
+	}
+
+	FDynamicMeshUVOverlay* Lightmap = Attributes->GetUVLayer(1);
+	if (Lightmap == nullptr)
+	{
+		return false;
+	}
+
+	// Seeded with the same world-scale projection UV0 uses, at a texel size of 1 cm. The absolute
+	// scale is irrelevant - the packer normalises it - but the RELATIVE scale between islands is
+	// not, and starting from a world-scale unwrap is what makes a 3 m wall arrive at the packer
+	// with proportionally more area than a door handle rather than each being fitted to its own
+	// slot. Islands fall out of the welding: one per connected same-facing planar region.
+	FillWorldScaleProjection(Mesh, *Lightmap, 1.0);
+
+	FDynamicMeshUVPacker Packer(Lightmap);
+	Packer.TextureResolution = FMath::Max(Params.TextureResolution, 16);
+	Packer.GutterSize = static_cast<float>(FMath::Max(Params.GutterPixels, 1));
+	Packer.bAllowFlips = false;
+
+	if (!Packer.StandardPack())
+	{
+		// Leaving a projected-but-unpacked second layer behind would be the worst outcome: it looks
+		// like a lightmap unwrap, and every island sits on top of every other one.
+		Lightmap->ClearElements();
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("Lightmap UV packing failed for a %d-triangle mesh; no second UV channel was written."),
+			Mesh.TriangleCount());
+		return false;
+	}
+
+	// THE PACKER DOES NOT GUARANTEE THE UNIT SQUARE, and on the reference flat it overruns it by up
+	// to 4.6 on a fifth of the meshes - the ones carrying many small islands. A lightmap UV outside
+	// 0..1 is not a cosmetic problem: the bake allocates one texture per mesh and addresses it with
+	// these coordinates, so anything past the edge wraps back onto another island and lights it with
+	// somebody else's bounce.
+	//
+	// Fixed by one UNIFORM scale and translate over the whole sheet, never per island. That preserves
+	// every relative island size and every gap between them exactly as the packer laid them out; the
+	// only cost is that the gutter ends up the same fraction smaller, which is why GutterPixels is
+	// asked for at the target resolution rather than assumed to survive. Refitting islands
+	// individually would be the wrong fix - it would destroy the consistent texel density that
+	// starting from a world-scale projection exists to produce.
+	FAxisAlignedBox2f Packed = FAxisAlignedBox2f::Empty();
+	for (const int32 Eid : Lightmap->ElementIndicesItr())
+	{
+		Packed.Contain(Lightmap->GetElement(Eid));
+	}
+
+	const float Border = 0.5f / static_cast<float>(Packer.TextureResolution);
+	const float Span = FMath::Max(Packed.Width(), Packed.Height());
+	if (Span > UE_KINDA_SMALL_NUMBER
+		&& (Packed.Min.X < 0.0f || Packed.Min.Y < 0.0f || Packed.Max.X > 1.0f || Packed.Max.Y > 1.0f))
+	{
+		const float Scale = (1.0f - 2.0f * Border) / Span;
+		for (const int32 Eid : Lightmap->ElementIndicesItr())
+		{
+			const FVector2f UV = Lightmap->GetElement(Eid);
+			Lightmap->SetElement(Eid, FVector2f(
+				Border + (UV.X - Packed.Min.X) * Scale,
+				Border + (UV.Y - Packed.Min.Y) * Scale));
+		}
+	}
+
+	return true;
+}
+
+void FHFMeshOps::FinishForRender(FDynamicMesh3& Mesh, const FHFRenderFinish& Finish,
+	const TArray<FHFStructuralCut>& FlushVolumes)
+{
+	if (Mesh.TriangleCount() == 0)
+	{
+		return;
+	}
+
+	BevelConvexEdges(Mesh, Finish.Bevel, FlushVolumes);
+
+	// Re-projected after the bevel rather than trusted from the generator. The chamfer facets are
+	// new triangles with no UV elements and no normal elements of their own, and a triangle with no
+	// normal elements shades off FDynamicMesh3's constant (0, 1, 0) - so an unfinished chamfer is a
+	// band of geometry lit as though it faced +Y, on every arris in the flat.
+	ApplyWorldScaleUVs(Mesh, Finish.TexelSizeCm);
+
+	BuildLightmapUVs(Mesh, Finish.Lightmap);
 }
 
 void FHFMeshOps::ComputeShadingNormals(FDynamicMesh3& Mesh, double HardEdgeAngleDegrees)
@@ -962,6 +1534,114 @@ TArray<TArray<FVector2D>> FHFMeshOps::InsetPolygon(const TArray<FVector2D>& Poly
 	}
 
 	return Out;
+}
+
+namespace
+{
+	/** A closed loop as Clipper wants it: counter-clockwise, so "inside" is unambiguous. */
+	bool ToGeneralPolygon(const TArray<FVector2D>& Loop, FGeneralPolygon2d& Out)
+	{
+		if (Loop.Num() < 3)
+		{
+			return false;
+		}
+
+		TArray<FVector2d> Points;
+		Points.Reserve(Loop.Num());
+		for (const FVector2D& Point : Loop)
+		{
+			Points.Add(FVector2d(Point.X, Point.Y));
+		}
+
+		FPolygon2d Outer(Points);
+		if (Outer.SignedArea() < 0.0)
+		{
+			Outer.Reverse();
+		}
+
+		Out = FGeneralPolygon2d(Outer);
+		return true;
+	}
+
+	TArray<TArray<FVector2D>> FromGeneralPolygons(const TArray<FGeneralPolygon2d>& In)
+	{
+		TArray<TArray<FVector2D>> Out;
+		for (const FGeneralPolygon2d& Polygon : In)
+		{
+			const TArray<FVector2d>& Vertices = Polygon.GetOuter().GetVertices();
+			if (Vertices.Num() < 3)
+			{
+				continue;
+			}
+
+			TArray<FVector2D>& Loop = Out.AddDefaulted_GetRef();
+			Loop.Reserve(Vertices.Num());
+			for (const FVector2d& Vertex : Vertices)
+			{
+				Loop.Add(FVector2D(Vertex.X, Vertex.Y));
+			}
+		}
+		return Out;
+	}
+
+	/** Both booleans differ only in which one they call, so they share everything else. */
+	TArray<TArray<FVector2D>> PolygonBoolean(const TArray<FVector2D>& Subject,
+		const TArray<TArray<FVector2D>>& Others, bool bSubtract)
+	{
+		FGeneralPolygon2d SubjectPolygon;
+		if (!ToGeneralPolygon(Subject, SubjectPolygon))
+		{
+			return {};
+		}
+
+		TArray<FGeneralPolygon2d> OtherPolygons;
+		for (const TArray<FVector2D>& Loop : Others)
+		{
+			FGeneralPolygon2d Polygon;
+			if (ToGeneralPolygon(Loop, Polygon))
+			{
+				OtherPolygons.Add(MoveTemp(Polygon));
+			}
+		}
+
+		if (OtherPolygons.IsEmpty())
+		{
+			// Nothing to cut with. Subtracting nothing leaves the subject; intersecting with
+			// nothing leaves nothing, and both are the honest answers rather than failures.
+			TArray<TArray<FVector2D>> Untouched;
+			if (bSubtract)
+			{
+				Untouched.Add(Subject);
+			}
+			return Untouched;
+		}
+
+		const TArray<FGeneralPolygon2d> SubjectArray = { SubjectPolygon };
+
+		TArray<FGeneralPolygon2d> Result;
+		const bool bOk = bSubtract
+			? PolygonsDifference(SubjectArray, OtherPolygons, Result)
+			: PolygonsIntersection(SubjectArray, OtherPolygons, Result);
+
+		if (!bOk)
+		{
+			return {};
+		}
+
+		return FromGeneralPolygons(Result);
+	}
+}
+
+TArray<TArray<FVector2D>> FHFMeshOps::SubtractPolygons(const TArray<FVector2D>& Subject,
+	const TArray<TArray<FVector2D>>& Cutters)
+{
+	return PolygonBoolean(Subject, Cutters, /*bSubtract*/ true);
+}
+
+TArray<TArray<FVector2D>> FHFMeshOps::IntersectPolygons(const TArray<FVector2D>& Subject,
+	const TArray<TArray<FVector2D>>& Clips)
+{
+	return PolygonBoolean(Subject, Clips, /*bSubtract*/ false);
 }
 
 bool FHFMeshOps::IsClosed(const FDynamicMesh3& Mesh)

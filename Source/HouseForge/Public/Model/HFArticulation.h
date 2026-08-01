@@ -196,6 +196,53 @@ struct HOUSEFORGE_API FHFPartMotion
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	double SequenceThreshold = 0.5;
 
+	/**
+	 * The part that closes the SAME aperture as this one, from the other end. Empty for a part with
+	 * its opening to itself.
+	 *
+	 * The third relationship, and it is not either of the two above. A geared part copies its
+	 * driver's amount and a sequenced part is held back by its blocker; an ALTERNATE is neither
+	 * subordinate nor ordered. It is an equal, and the two of them are choices: a two-panel slider
+	 * opens by running the near leaf OR the far leaf, and which one you run decides which end of the
+	 * run the daylight appears at.
+	 *
+	 * Both leaves therefore carry a real Slide motion and a real travel - see bMasterOpens for the
+	 * one thing that keeps that from collapsing back into the defect it was born from - and each
+	 * names the other here. Symmetric by construction: a generator that emits a pair emits both
+	 * halves of the link, and HouseForge.Articulation.SliderPairsAreSymmetric says so.
+	 *
+	 * What it buys, concretely, is AHFArticulatedActor::OpenRunFrom: "open this run from THAT end"
+	 * is one call rather than a caller having to know that opening one leaf means shutting another.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	FName AlternateToPartId;
+
+	/**
+	 * Whether ONE control opening the whole fixture opens this part.
+	 *
+	 * True for everything except the leaf of a slider that is not the declared default runner, and
+	 * that exception is the whole reason this exists.
+	 *
+	 * TWO LEAVES OF ONE SLIDER DRIVEN BY ONE AMOUNT CANCEL. Each is set out from its own jamb and
+	 * each runs towards the other's bay, so at full travel they have simply exchanged tracks and the
+	 * run is exactly as covered as it was shut. That is what the master bedroom's 2400 wardrobe did:
+	 * both leaves travelled their full 118.45 cm, every part-motion assertion passed, and the
+	 * wardrobe never opened by a millimetre of visible aperture.
+	 *
+	 * The earlier fix was to take the motion away from one leaf - FHFShutterParams::bStandingLeaf -
+	 * which cured the cancellation by making the slider open one way and only one way. The user
+	 * asked for both. So the motion stays on both leaves, and what is withheld from one of them is
+	 * not the ability to move but the master's ATTENTION: it is posable by hand, by Sequencer, and
+	 * by OpenRunFrom, and it is simply not what "open everything" reaches for.
+	 *
+	 * A part this is false on is driven to SHUT by the master rather than left where it was. "Open
+	 * everything" has to be a definite pose - the canonical open pose of this fixture - and a partner
+	 * leaf left half open from an earlier hand pose would quietly halve the aperture the master was
+	 * asked to produce.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	bool bMasterOpens = true;
+
 	/** True for anything that is not fixed, spinning parts included. */
 	bool Moves() const { return Type != EHFMotionType::None; }
 

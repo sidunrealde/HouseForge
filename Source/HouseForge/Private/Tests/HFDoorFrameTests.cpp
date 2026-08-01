@@ -448,13 +448,15 @@ bool FHFSlidingDoorIsGlazedTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
+		// Both panels of a two-track unit run; they are told apart by which one a single control
+		// drives, not by which one has a motion. See FHFPartMotion::bMasterOpens.
 		const FHFMeshPart* Running = Parts.FindByPredicate(
-			[](const FHFMeshPart& P) { return P.Motion.Type == EHFMotionType::Slide; });
+			[](const FHFMeshPart& P) { return P.Motion.Type == EHFMotionType::Slide && P.Motion.bMasterOpens; });
 		const FHFMeshPart* Standing = Parts.FindByPredicate(
-			[](const FHFMeshPart& P) { return !P.Motion.Moves(); });
+			[](const FHFMeshPart& P) { return P.Motion.Type == EHFMotionType::Slide && !P.Motion.bMasterOpens; });
 
-		if (!TestNotNull(*FString::Printf(TEXT("'%s' has a running panel"), *Which), Running)
-			|| !TestNotNull(*FString::Printf(TEXT("'%s' has a fixed panel"), *Which), Standing))
+		if (!TestNotNull(*FString::Printf(TEXT("'%s' has a leading panel"), *Which), Running)
+			|| !TestNotNull(*FString::Printf(TEXT("'%s' has a second panel that also runs"), *Which), Standing))
 		{
 			continue;
 		}
@@ -511,6 +513,12 @@ bool FHFSlidingDoorIsGlazedTest::RunTest(const FString& Parameters)
 
 		TestNearlyEqual(*FString::Printf(TEXT("And it moves that far in the world for '%s'"), *Which),
 			(OpenAt - ClosedAt).Size(), Expected, 0.01);
+
+		// And the OTHER panel travels exactly as far the other way, which is what makes the unit
+		// openable from either end rather than from one. Same distance, opposite sign: the pair is
+		// one set-out mirrored, not two.
+		TestNearlyEqual(*FString::Printf(TEXT("The second panel of '%s' runs as far the other way"), *Which),
+			Standing->Motion.MaxTravelCm, -Expected, 0.01);
 
 		// The outer frame: four sides including the threshold, which is the member a hinged frame
 		// does not have, with the tracks the panels run on standing on it.

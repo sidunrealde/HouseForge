@@ -22,6 +22,7 @@
 #include "Misc/ScopeExit.h"
 #include "Model/HFSpecSerializer.h"
 #include "Model/HFBuildDefaults.h"
+#include "Model/HFCeilingTemplates.h"
 #include "Model/HFSpecValidator.h"
 #include "Model/HFSettings.h"
 #include "Actors/HFElementActors.h"
@@ -52,6 +53,18 @@ namespace
 	FHFValidationLimits ProjectValidationLimits()
 	{
 		return FHFBuildDefaults::FromProjectSettings().Validation;
+	}
+
+	/**
+	 * The project's ceiling designs, for the same reason and with the same discipline.
+	 *
+	 * Every entry point that reads a spec has to resolve its templates before doing anything with
+	 * it, or the two tools disagree about what the same JSON means: a ceiling naming a template has
+	 * a drop of zero until this runs, so validate would refuse a spec that apply would build.
+	 */
+	FHFCeilingDefaults ProjectCeilingDefaults()
+	{
+		return FHFBuildDefaults::FromProjectSettings().Ceiling;
 	}
 }
 
@@ -277,6 +290,11 @@ FHFOperationResult UHFEditorSubsystem::ValidateSpecJson(const FString& SpecJson)
 		return FHFOperationResult::Fail(Error);
 	}
 
+	// RESOLVED BEFORE IT IS JUDGED. A ceiling that names a template carries no drop, no band and no
+	// cove section until the project's figures are stamped onto it, so validating first would judge
+	// a ceiling with a drop of zero and report a spec that is perfectly good as broken.
+	FHFCeilingTemplates::Apply(Spec, ProjectCeilingDefaults());
+
 	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec, ProjectValidationLimits());
 	if (Validation.HasErrors())
 	{
@@ -294,6 +312,8 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 	{
 		return FHFOperationResult::Fail(Error);
 	}
+
+	FHFCeilingTemplates::Apply(Spec, ProjectCeilingDefaults());
 
 	const FHFValidationResult Validation = FHFSpecValidator::Validate(Spec, ProjectValidationLimits());
 	if (Validation.HasErrors())
@@ -332,10 +352,46 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 	// or building the same spec twice - does not accumulate suns.
 	EnsureViewingLight();
 
+	// WHAT WAS BUILT, NOT WHAT WAS READ.
+	//
+	// This line counted rows in the spec, so it said "69 fixtures" over a level holding eight - and
+	// that overstatement is exactly what hid 710 cm of deleted skirting, because the skirting was cut
+	// for base cabinets, a shoe rack and a study table that the report was reporting as built. On
+	// this project a report that overstates is how a defect gets past a green gate.
+	int32 BuiltFixtures = 0;
+	TSet<EHFFixtureType> BuiltTypes;
+
+	for (const FHFFixture& Fixture : Spec.Fixtures)
+	{
+		if (AHFHouseActor::BuildsGeometryFor(Fixture.Type))
+		{
+			++BuiltFixtures;
+			BuiltTypes.Add(Fixture.Type);
+		}
+	}
+
 	FString Message = FString::Printf(
 		TEXT("Built '%s': %d walls, %d openings, %d rooms, %d beams, %d columns, %d false ceilings, %d fixtures."),
 		*Spec.Name, Spec.Walls.Num(), Spec.Openings.Num(), Spec.Rooms.Num(),
-		Spec.Beams.Num(), Spec.Columns.Num(), Spec.FalseCeilings.Num(), Spec.Fixtures.Num());
+		Spec.Beams.Num(), Spec.Columns.Num(), Spec.FalseCeilings.Num(), BuiltFixtures);
+
+	// And say plainly what is missing, rather than leaving the difference to be discovered by
+	// looking at the level. The fixture catalogue is milestone 9 and most of it does not exist.
+	if (BuiltFixtures < Spec.Fixtures.Num())
+	{
+		TArray<FString> TypeNames;
+		for (const EHFFixtureType Type : BuiltTypes)
+		{
+			TypeNames.Add(StaticEnum<EHFFixtureType>()->GetNameStringByValue(static_cast<int64>(Type)));
+		}
+		TypeNames.Sort();
+
+		Message += FString::Printf(
+			TEXT("\n%d fixtures declared, %d built (%s); %d fixture types are not modelled yet."),
+			Spec.Fixtures.Num(), BuiltFixtures,
+			TypeNames.IsEmpty() ? TEXT("none") : *FString::Join(TypeNames, TEXT(", ")),
+			Spec.Fixtures.Num() - BuiltFixtures);
+	}
 
 	if (Validation.HasWarnings())
 	{
@@ -920,6 +976,14 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 	int32 Rebuilt = 0;
 	int32 Preserved = 0;
 
+	// The render finish is the one section on the page that reaches EVERY element rather than a
+	// class of them - a chamfer is put on a wall, a slab, a beam and a shutter alike - so it is
+	// resolved once here and compared per element below. Without the comparison the choice would be
+	// between rebuilding the whole flat whenever any unrelated figure moved, and leaving a changed
+	// chamfer width sitting on elements that never picked it up. The second is the failure this page
+	// has already had once, when the joinery section was inert on wardrobes already in the level.
+	const FHFRenderFinish RenderDefaults = FHFBuildDefaults::FromProjectSettings().Render;
+
 	// Every house in the level, not just the first. FindHouseActor answers "the house" for the tools,
 	// which is the right answer there; a project-wide setting change is different - a level holding
 	// two houses would otherwise leave the second one built to the old figures with nothing saying so.
@@ -927,6 +991,14 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 	for (TActorIterator<AHFHouseActor> It(World); It; ++It)
 	{
 		Elements.Append(It->ElementActors);
+
+		// CEILINGS ARE ASKED OF THE HOUSE, NOT OF THE ELEMENT, and they are the only section on the
+		// page that has to be. Every other control changes one element in place; a ceiling figure
+		// changes what hangs between a fan and the room, so the ceiling and the fans under it have
+		// to move together or a deeper ceiling swallows the rotor - the exact defect the rod
+		// resolution was added for, reached by dragging a slider rather than by writing a spec. Only
+		// the house holds both the ceiling and the fixture the fan was seeded from.
+		Rebuilt += It->ApplyProjectSettingsToCeilings();
 	}
 
 	for (AActor* Element : Elements)
@@ -946,13 +1018,24 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 			continue;
 		}
 
+		// The render finish reaches every element rather than a class of them - a chamfer goes on a
+		// wall, a slab, a beam and a shutter alike - so it is re-seeded here on anything whose finish
+		// the page has moved. Flagged rather than rebuilt on the spot, because an element can need
+		// BOTH this and its own section's figures, and rebuilding it twice for one settings change
+		// would be waste that grows with the size of the flat.
+		bool bNeedsRebuild = false;
+		if (Typed->RenderFinish != RenderDefaults)
+		{
+			Typed->RenderFinish = RenderDefaults;
+			bNeedsRebuild = true;
+		}
+
 		// Only elements whose construction the settings actually feed. Re-seeding is the composing
 		// layer's job and is done HERE, not inside any generator.
 		if (AHFOpeningActor* Opening = Cast<AHFOpeningActor>(Typed))
 		{
 			Opening->ApplyProjectDefaults();
-			Opening->Regenerate();
-			++Rebuilt;
+			bNeedsRebuild = true;
 		}
 		else if (AHFWardrobeActor* Wardrobe = Cast<AHFWardrobeActor>(Typed))
 		{
@@ -966,7 +1049,12 @@ int32 UHFEditorSubsystem::ApplyProjectSettingsToLevel()
 			// inside the kit rather than derived here - re-seeding Joinery re-derives the bay count
 			// with it, so ShutterModuleWidth moves geometry on an existing wardrobe too.
 			Wardrobe->ApplyProjectDefaults();
-			Wardrobe->Regenerate();
+			bNeedsRebuild = true;
+		}
+
+		if (bNeedsRebuild)
+		{
+			Typed->Regenerate();
 			++Rebuilt;
 		}
 	}

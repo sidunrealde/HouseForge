@@ -79,6 +79,38 @@ bool AHFArticulatedActor::SetPartOpenAmount(FName PartId, double OpenAmount)
 	return false;
 }
 
+bool AHFArticulatedActor::OpenRunFrom(FName PartId, double OpenAmount)
+{
+	const FHFPartState* Leaf = FindPart(PartId);
+	if (Leaf == nullptr)
+	{
+		return false;
+	}
+
+	// Read the link before anything is written, because the loop below writes through Parts and the
+	// pointer above does not survive being reasoned about afterwards.
+	const FName Partner = Leaf->Motion.AlternateToPartId;
+	const double Clamped = FMath::Clamp(OpenAmount, 0.0, 1.0);
+
+	for (FHFPartState& Part : Parts)
+	{
+		if (Part.PartId == PartId)
+		{
+			Part.OpenAmount = Clamped;
+		}
+		else if (!Partner.IsNone() && Part.PartId == Partner)
+		{
+			// THE OTHER LEAF IS SHUT, not left where it was. Two leaves of one run driven out
+			// together exchange tracks and uncover nothing, which is the exact shape of the defect
+			// this whole mechanism exists to keep out - see FHFPartMotion::bMasterOpens.
+			Part.OpenAmount = 0.0;
+		}
+	}
+
+	ApplyOpenAmounts();
+	return true;
+}
+
 double AHFArticulatedActor::GetPartOpenAmount(FName PartId) const
 {
 	const FHFPartState* Part = FindPart(PartId);
@@ -157,7 +189,14 @@ void AHFArticulatedActor::SetAllPartsOpenAmount(double OpenAmount)
 			continue;
 		}
 
-		Part.OpenAmount = Clamped;
+		// ONE OF A PAIR OF SLIDING LEAVES IS NOT WHAT "OPEN EVERYTHING" REACHES FOR, and it is driven
+		// SHUT rather than left alone. Both leaves of a slider can run, and both driven to the same
+		// amount exchange tracks and uncover nothing - see FHFPartMotion::bMasterOpens, which is the
+		// whole of why the master bedroom wardrobe passed every motion assertion while never opening.
+		//
+		// Shut rather than untouched, because a master amount has to be a definite pose: a partner
+		// leaf left half open from an earlier hand pose would halve the aperture asked for.
+		Part.OpenAmount = Part.Motion.bMasterOpens ? Clamped : 0.0;
 	}
 
 	// Every part ASKED for the same amount; what they are left holding is whatever the orderings
@@ -395,6 +434,11 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 			// Our own write must not read as an artist edit.
 			TGuardValue<bool> Guard(bGenerating, true);
 
+			// The same render finish the fixed shell gets. A part that missed it would be the one
+			// piece of the flat with sharp arrises and no lightmap channel, which is every shutter,
+			// every drawer front and every door leaf in the room - the things closest to camera.
+			FHFMeshOps::FinishForRender(Part.Mesh, RenderFinish);
+
 			FHFMeshOps::AssignMaterialIdsFromRoles(Part.Mesh);
 
 			Component->SetMesh(MoveTemp(Part.Mesh));
@@ -591,15 +635,36 @@ void AHFArticulatedActor::PostEditChangeProperty(FPropertyChangedEvent& Property
 
 	// Posing is not a parameter change: it must move parts without rebuilding any geometry, or
 	// dragging the slider would rebuild the whole fixture on every mouse move.
+	//
+	// BUT IT STILL HAS TO PUT THE COMPONENTS BACK, and skipping the whole chain did not.
+	//
+	// The engine's contract is a pair: AActor::PreEditChange calls UnregisterAllComponents whenever
+	// ReregisterComponentsWhenModified is true - which is every actor in a level - and
+	// AActor::PostEditChangeProperty is what registers them again. Returning here without reaching
+	// AActor left every component of the fixture unregistered: no render state, no physics state,
+	// and actor bounds of exactly zero.
+	//
+	// So dragging MasterOpenAmount in the details panel - which is the single most obvious thing
+	// anybody does to check that a fixture opens - made the whole wardrobe VANISH from the viewport.
+	// Not the leaves: the carcass, the shelves, the plinth and the cornice with them. Every part
+	// reported the pose it had been asked for, every automation test passed, and the wardrobe was
+	// gone. It was found by rendering the master bedroom, not by any assertion.
+	//
+	// AActor:: rather than Super:: on purpose. AHFElementActor::PostEditChangeProperty regenerates
+	// for any property declared on an element actor, and both of these are, so going through it
+	// would rebuild the fixture on every frame of a slider drag - the thing this branch exists to
+	// avoid. What is wanted is the engine's half of the contract and nothing else.
 	if (Member == GET_MEMBER_NAME_CHECKED(AHFArticulatedActor, MasterOpenAmount))
 	{
 		SetAllPartsOpenAmount(MasterOpenAmount);
+		AActor::PostEditChangeProperty(PropertyChangedEvent);
 		return;
 	}
 
 	if (Member == GET_MEMBER_NAME_CHECKED(AHFArticulatedActor, Parts))
 	{
 		ApplyOpenAmounts();
+		AActor::PostEditChangeProperty(PropertyChangedEvent);
 		return;
 	}
 

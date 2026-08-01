@@ -886,9 +886,14 @@ bool FHFWardrobeApertureTest::RunTest(const FString& Parameters)
 		// stops articulating in a run where its neighbours already uncover the elevation would not
 		// move the coverage figure at all.
 		//
-		// A part declared FIXED is allowed not to move, and exactly one leaf of a sliding pair is:
-		// see FHFShutterParams::bStandingLeaf. It is proved to be at most one below, because a pair
-		// with both leaves standing is a wardrobe that does not open and would otherwise be silent.
+		// EXACTLY ONE LEAF OF A SLIDING PAIR IS ALLOWED TO SIT OUT A MASTER OPEN, and it is not
+		// because it cannot move - both leaves of a run slide, and either can be the one you push.
+		// It is because two leaves driven by ONE amount exchange tracks and uncover nothing; see
+		// FHFPartMotion::bMasterOpens. HouseForge.Editor.WardrobeOpensBothWays is where the other
+		// leaf is proved to move when it is asked directly.
+		//
+		// At most one, because a pair with both leaves sitting out is a wardrobe that does not open
+		// and would otherwise be silent.
 		int32 Standing = 0;
 		TArray<UDynamicMeshComponent*> AllLeaves = Body;
 		AllLeaves.Append(Loft);
@@ -925,6 +930,171 @@ bool FHFWardrobeApertureTest::RunTest(const FString& Parameters)
 	}
 
 	TestTrue(TEXT("The reference flat has wardrobes to open"), Measured >= 2);
+
+	return true;
+}
+
+/**
+ * A sliding wardrobe opens from EITHER end, and the aperture is measured in centimetres.
+ *
+ * The user's report put the wardrobes and the balcony doors in one sentence, and they had the same
+ * fault for the same reason: one leaf of the pair had been made furniture so that the pair could not
+ * cancel, which cured a wardrobe that never opened by giving it a wardrobe that opened one way.
+ *
+ * Both leaves run now, and what separates them is only which one a single control drives. So the
+ * assertions here are the ones that can tell those two situations apart, and there are four,
+ * because each of them passes on a different broken wardrobe:
+ *
+ *   - EITHER LEAF MOVES WHEN ASKED. Fails on a leaf built as furniture; passes on the canceller.
+ *   - THE APERTURE IS AT THE END THE MOVED LEAF CAME FROM. Fails on a run that always opens the
+ *     same end; passes on anything that opens at all.
+ *   - OPENING ONE LEAF DOES NOT MOVE THE OTHER. Fails on the canceller; passes on furniture.
+ *   - THE APERTURE IS AT LEAST HALF THE RUN LESS THE LAP, IN CENTIMETRES. Fails on a leaf that
+ *     travels a token distance; passes on anything that moves at all, which is precisely what the
+ *     original "does this part move" assertion did while the run stayed 100% covered.
+ *
+ * Measured on the reference flat's own wardrobes rather than on a fixture built for the test.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFWardrobeOpensBothWaysTest,
+	"HouseForge.Editor.WardrobeOpensBothWays", HF_TEST_FLAGS)
+
+bool FHFWardrobeOpensBothWaysTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+	if (!TestNotNull(TEXT("A house actor spawns"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); } };
+
+	House->SetSpec(FHFSampleHouse::Make2BHK());
+	House->BuildGeometry();
+
+	int32 Measured = 0;
+
+	for (AActor* Element : House->ElementActors)
+	{
+		AHFWardrobeActor* Wardrobe = Cast<AHFWardrobeActor>(Element);
+		if (Wardrobe == nullptr || Wardrobe->Wardrobe.MotionKind != EHFShutterMotion::Sliding)
+		{
+			continue;
+		}
+
+		const FString Where = Wardrobe->ElementId.ToString();
+
+		// A sliding run is two leaves whatever the carcass behind it is divided into: a leaf can only
+		// run to where another leaf is NOT, so leaves and tracks are the same count.
+		const FName LeftId = AHFWardrobeActor::ShutterPartId(0);
+		const FName RightId = AHFWardrobeActor::ShutterPartId(1);
+
+		UDynamicMeshComponent* LeftLeaf = Wardrobe->GetPartComponent(LeftId);
+		UDynamicMeshComponent* RightLeaf = Wardrobe->GetPartComponent(RightId);
+		const FHFPartState* LeftState = Wardrobe->FindPart(LeftId);
+		const FHFPartState* RightState = Wardrobe->FindPart(RightId);
+
+		if (!TestNotNull(*FString::Printf(TEXT("'%s' has a left leaf"), *Where), LeftLeaf)
+			|| !TestNotNull(*FString::Printf(TEXT("'%s' has a right leaf"), *Where), RightLeaf)
+			|| LeftState == nullptr || RightState == nullptr)
+		{
+			continue;
+		}
+
+		TestTrue(*FString::Printf(TEXT("'%s': both leaves are gear, not one leaf and one panel"), *Where),
+			LeftState->Motion.Type == EHFMotionType::Slide
+				&& RightState->Motion.Type == EHFMotionType::Slide);
+		TestTrue(*FString::Printf(TEXT("'%s': the pair names itself, so a run can be shut from either end"), *Where),
+			LeftState->Motion.AlternateToPartId == RightId
+				&& RightState->Motion.AlternateToPartId == LeftId);
+
+		// Where each leaf stands along the run, right now, in the wardrobe's own space.
+		auto SpanOf = [Wardrobe](UDynamicMeshComponent& Part, double& OutMin, double& OutMax)
+		{
+			FElevationRect Rect;
+			if (!ElevationOf(*Wardrobe, Part, Rect))
+			{
+				return false;
+			}
+			OutMin = Rect.MinX;
+			OutMax = Rect.MaxX;
+			return true;
+		};
+
+		Wardrobe->CloseAllParts();
+
+		double LeftShutMin = 0.0, LeftShutMax = 0.0, RightShutMin = 0.0, RightShutMax = 0.0;
+		if (!SpanOf(*LeftLeaf, LeftShutMin, LeftShutMax) || !SpanOf(*RightLeaf, RightShutMin, RightShutMax))
+		{
+			AddError(FString::Printf(TEXT("'%s' has leaves with no mesh to measure."), *Where));
+			continue;
+		}
+
+		const double RunMin = FMath::Min(LeftShutMin, RightShutMin);
+		const double RunMax = FMath::Max(LeftShutMax, RightShutMax);
+		const double RunWidth = RunMax - RunMin;
+
+		// The lap: sliding leaves overlap on separate tracks rather than being separated by a reveal,
+		// because a reveal between two sliding leaves is a hole straight into the wardrobe. It is
+		// also exactly what the aperture is allowed to fall short of half the run by.
+		const double Lap = LeftShutMax - RightShutMin;
+		const double Required = RunWidth * 0.5 - Lap;
+
+		TestTrue(*FString::Printf(TEXT("'%s' laps at the meeting line when shut (%.1f cm)"), *Where, Lap),
+			Lap > 0.0);
+
+		// ---------------------------------------------------------------- run the left-hand leaf
+		Wardrobe->OpenRunFrom(LeftId, 1.0);
+
+		double LeftOpenMin = 0.0, LeftOpenMax = 0.0, RightHeldMin = 0.0, RightHeldMax = 0.0;
+		SpanOf(*LeftLeaf, LeftOpenMin, LeftOpenMax);
+		SpanOf(*RightLeaf, RightHeldMin, RightHeldMax);
+
+		TestTrue(*FString::Printf(TEXT("'%s': running the left leaf leaves the right one where it was"), *Where),
+			FMath::IsNearlyEqual(RightHeldMin, RightShutMin, 0.01)
+				&& FMath::IsNearlyEqual(RightHeldMax, RightShutMax, 0.01));
+
+		const double LeftAperture = FMath::Min(LeftOpenMin, RightHeldMin) - RunMin;
+		TestTrue(*FString::Printf(
+				TEXT("'%s' opens %.1f cm at the LEFT end, and half the run less the lap is %.1f cm"),
+				*Where, LeftAperture, Required),
+			LeftAperture >= Required - 0.01);
+
+		// --------------------------------------------------------------- run the right-hand leaf
+		Wardrobe->OpenRunFrom(RightId, 1.0);
+
+		double RightOpenMin = 0.0, RightOpenMax = 0.0, LeftHeldMin = 0.0, LeftHeldMax = 0.0;
+		SpanOf(*RightLeaf, RightOpenMin, RightOpenMax);
+		SpanOf(*LeftLeaf, LeftHeldMin, LeftHeldMax);
+
+		TestTrue(*FString::Printf(TEXT("'%s': running the right leaf leaves the left one where it was"), *Where),
+			FMath::IsNearlyEqual(LeftHeldMin, LeftShutMin, 0.01)
+				&& FMath::IsNearlyEqual(LeftHeldMax, LeftShutMax, 0.01));
+
+		const double RightAperture = RunMax - FMath::Max(RightOpenMax, LeftHeldMax);
+		TestTrue(*FString::Printf(
+				TEXT("'%s' opens %.1f cm at the RIGHT end, and half the run less the lap is %.1f cm"),
+				*Where, RightAperture, Required),
+			RightAperture >= Required - 0.01);
+
+		// Neither leaf ever leaves the carcass. A leaf running past the end of the run is a leaf
+		// hanging in the room off nothing, which is what a leaf slid its own width does.
+		for (const double Edge : { LeftOpenMin, LeftOpenMax, RightOpenMin, RightOpenMax })
+		{
+			TestTrue(*FString::Printf(TEXT("'%s' keeps every leaf inside the run (%.1f in %.1f..%.1f)"),
+					*Where, Edge, RunMin, RunMax),
+				Edge >= RunMin - 0.01 && Edge <= RunMax + 0.01);
+		}
+
+		Wardrobe->CloseAllParts();
+		++Measured;
+	}
+
+	TestTrue(TEXT("The reference flat has a sliding wardrobe to open"), Measured >= 1);
 
 	return true;
 }

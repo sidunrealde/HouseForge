@@ -2,6 +2,9 @@
 
 #include "Model/HFSpecValidator.h"
 
+#include "Geometry/HFGenerators.h"
+#include "Model/HFCeilingFit.h"
+
 namespace
 {
 	// The two thresholds that used to live here are now FHFValidationLimits, because they are
@@ -438,6 +441,100 @@ namespace
 		}
 
 		return bSawBeamInsideRoom;
+	}
+
+	/**
+	 * Shortest distance from a point to a polygon's boundary, whichever side of it the point is on.
+	 *
+	 * How far a spot is from the nearest wall, which is what a perimeter ring is measured in. Done
+	 * this way rather than by offsetting the room and testing containment: an offset can legitimately
+	 * split an L-shaped room into two loops or consume it entirely, and neither of those is an
+	 * answer to "how far in is this point".
+	 */
+	double DistanceToBoundary(const TArray<FVector2D>& Polygon, const FVector2D& Point)
+	{
+		double Nearest = TNumericLimits<double>::Max();
+
+		for (int32 Index = 0; Index < Polygon.Num(); ++Index)
+		{
+			const FVector2D& A = Polygon[Index];
+			const FVector2D& B = Polygon[(Index + 1) % Polygon.Num()];
+
+			const FVector2D Edge = B - A;
+			const double LengthSquared = Edge.SizeSquared();
+			const double T = (LengthSquared > UE_KINDA_SMALL_NUMBER)
+				? FMath::Clamp(FVector2D::DotProduct(Point - A, Edge) / LengthSquared, 0.0, 1.0)
+				: 0.0;
+
+			Nearest = FMath::Min(Nearest, FVector2D::Distance(Point, A + Edge * T));
+		}
+
+		return Nearest;
+	}
+
+	/**
+	 * Whether a ceiling's own perimeter bulkhead ring buries a beam where it crosses a room.
+	 *
+	 * The same question BulkheadCoversBeamOverRoom asks of a sibling bulkhead, put to a ring: over
+	 * every part of the beam that is inside this room, is the beam within the ring's width of the
+	 * wall.
+	 *
+	 * ON THE BEAM'S FOOTPRINT, not on its centreline, and that is the one place this is stricter
+	 * than the sibling test. A sibling bulkhead is drawn by hand a little wider than the beam it
+	 * boxes in, so a few centimetres either way there is drafting rounding. A ring is DERIVED from
+	 * the beam - its width is chosen as half the beam plus a shoulder - so if the arithmetic that
+	 * chose it is wrong the error is systematic and shows on every room in the flat at once.
+	 * Checking the edge of the beam rather than its middle is what would catch that.
+	 */
+	bool PerimeterRingCoversBeamOverRoom(const FHFFalseCeiling& Ceiling, const FHFBeam& Beam,
+		const FHFRoom& Room)
+	{
+
+		const TArray<FVector2D>& Outline = (Ceiling.ExplicitPolygon.Num() >= 3)
+			? Ceiling.ExplicitPolygon
+			: Room.Boundary;
+
+		if (Outline.Num() < 3 || Beam.Length() <= UE_KINDA_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		// Sampled at the same rate as everything else that walks a beam, so the rule that finds a
+		// beam over a room and the rule that asks whether it is covered agree about where it is.
+		constexpr int32 SampleCount = 24;
+
+		bool bSawBeam = false;
+		for (int32 Sample = 0; Sample <= SampleCount; ++Sample)
+		{
+			const FVector2D Point = FMath::Lerp(Beam.Start, Beam.End,
+				static_cast<double>(Sample) / SampleCount);
+
+			// HOW FAR THE BEAM REACHES IN, on the same footing DeepestBeamOverRoom measures it. A
+			// containment test alone is the wrong question here and would have made this clause
+			// never fire: every beam in this flat is set out ON a wall line, so its centreline lies
+			// exactly on the room boundary, where an even-odd test is a coin toss. What reaches the
+			// room is the beam's own half width past that line.
+			const double Distance = DistanceToBoundary(Outline, Point);
+			const double Inside = HFPolygonContainsPoint(Outline, Point) ? Distance : -Distance;
+			const double Reach = Inside + Beam.Width * 0.5;
+
+			// Nothing of the beam is over the ceiling here; further along it may be.
+			if (Reach <= 0.0)
+			{
+				continue;
+			}
+
+			bSawBeam = true;
+
+			// The far edge of the beam, not its middle. The ring has to reach at least as far in as
+			// the beam does, or the beam's inner face hangs out of the box that was sized for it.
+			if (Reach > Ceiling.PerimeterBulkheadWidth + UE_KINDA_SMALL_NUMBER)
+			{
+				return false;
+			}
+		}
+
+		return bSawBeam;
 	}
 
 	/** Reports any id used more than once, since later lookups would silently take the first. */
@@ -1597,22 +1694,75 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 				FString::Printf(TEXT("False ceiling '%s' has drop %.2f; a false ceiling must hang below the slab."),
 					*Describe(Ceiling.Id), Ceiling.Drop));
 		}
-		else if (Ceiling.Drop >= Room->CeilingHeight)
+		// THE DEEPEST PART OF THE CEILING, not its nominal drop. A ceiling is no longer one plane:
+		// a shallow band can carry a perimeter bulkhead ring hanging a great deal lower, and that
+		// ring is what somebody walks under at the edge of the room. Measuring headroom against
+		// Drop would report 285 cm of clearance under a ceiling whose ring hangs at 252.
+		else if (Ceiling.DeepestDrop() >= Room->CeilingHeight)
 		{
 			Result.Add(EHFValidationSeverity::Error, TEXT("CeilingDropExceedsRoom"), Ceiling.Id,
 				FString::Printf(TEXT("False ceiling '%s' drops %.1f but room '%s' is only %.1f tall; it would land at or below the floor."),
-					*Describe(Ceiling.Id), Ceiling.Drop, *Describe(Room->Id), Room->CeilingHeight));
+					*Describe(Ceiling.Id), Ceiling.DeepestDrop(), *Describe(Room->Id), Room->CeilingHeight));
 		}
 		// Scaled to centimetres, for the same reason BeamLowHeadroom above is: the limit is a
 		// centimetre figure and the spec is in whatever it declares.
-		else if ((Room->CeilingHeight - Ceiling.Drop) * FHFUnits::ToCentimeterScale(Spec.Units)
+		else if ((Room->CeilingHeight - Ceiling.DeepestDrop()) * FHFUnits::ToCentimeterScale(Spec.Units)
 			< Limits.MinHeadroomCm)
 		{
 			Result.Add(EHFValidationSeverity::Warning, TEXT("LowHeadroom"), Ceiling.Id,
 				FString::Printf(TEXT("False ceiling '%s' leaves %.1f cm clear in room '%s', below the %.0f cm usually treated as minimum headroom."),
 					*Describe(Ceiling.Id),
-					(Room->CeilingHeight - Ceiling.Drop) * FHFUnits::ToCentimeterScale(Spec.Units),
+					(Room->CeilingHeight - Ceiling.DeepestDrop()) * FHFUnits::ToCentimeterScale(Spec.Units),
 					*Describe(Room->Id), Limits.MinHeadroomCm));
+		}
+
+		// A ring no deeper than the ceiling inside it builds nothing at all - HasPerimeterBulkhead
+		// answers false and the geometry is a plain band - so a spec asking for one and getting
+		// none would be a beam left showing with nothing said about it.
+		if (Ceiling.PerimeterBulkheadWidth > 0.0 && Ceiling.PerimeterBulkheadDrop <= Ceiling.Drop)
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("PerimeterBulkheadNotDeeper"), Ceiling.Id,
+				FString::Printf(TEXT("False ceiling '%s' asks for a %.1f wide perimeter bulkhead dropping %.1f, which is not deeper than the ceiling's own %.1f; no ring is built."),
+					*Describe(Ceiling.Id), Ceiling.PerimeterBulkheadWidth,
+					Ceiling.PerimeterBulkheadDrop, Ceiling.Drop));
+		}
+
+		// A centre panel is a RECESS: it sits higher than the band that frames it. Hung lower it is
+		// not a framed panel, it is a full drop with a rebate round the edge, and the cove under it
+		// would be throwing its light at the top of a box.
+		if (Ceiling.CentrePanelDrop > 0.0 && Ceiling.CentrePanelDrop >= Ceiling.Drop)
+		{
+			Result.Add(EHFValidationSeverity::Warning, TEXT("CentrePanelNotRecessed"), Ceiling.Id,
+				FString::Printf(TEXT("False ceiling '%s' has a centre panel dropping %.1f inside a band dropping %.1f; a centre panel sits higher than its frame, so nothing is built."),
+					*Describe(Ceiling.Id), Ceiling.CentrePanelDrop, Ceiling.Drop));
+		}
+
+		// THE PLENUM HAS TO HOLD THE FITTING.
+		//
+		// A recessed downlight is a 20 board with a 60 can behind it and its wiring above that, and
+		// the aperture is set out at the soffit plus the body depth. Nothing bounded that against
+		// the drop, so a band shallower than board-plus-can put the emitting face THROUGH the
+		// structural slab: measured at a 50 drop, 326 cm3 of the living room's ceiling ended up
+		// inside the concrete, 310 in the master bedroom and 233 in bedroom 2, and the build
+		// reported no errors at all. 50 is not an absurd entry either - the research behind these
+		// templates puts a real plain band at 100 to 200, so it is one notch below the documented
+		// range.
+		//
+		// The generator clamps as well, because a clamp alone cannot help here: a spec states its
+		// drop directly and never passes through the settings page.
+		if (Ceiling.Downlight.bRecessed && Ceiling.Style != EHFCeilingStyle::None
+			&& !Ceiling.LightPositions.IsEmpty())
+		{
+			const double ToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+			const double NeededCm = FHFGenerators::CeilingPanelThicknessCm + Ceiling.Downlight.BodyDepth * ToCm;
+
+			if (Ceiling.Drop * ToCm + UE_KINDA_SMALL_NUMBER < NeededCm)
+			{
+				Result.Add(EHFValidationSeverity::Error, TEXT("CeilingTooShallowForDownlight"), Ceiling.Id,
+					FString::Printf(TEXT("False ceiling '%s' drops %.1f cm but its recessed downlights need %.1f cm of plenum (a %.1f cm board plus a %.1f cm can); the aperture would sit inside the slab."),
+						*Describe(Ceiling.Id), Ceiling.Drop * ToCm, NeededCm,
+						FHFGenerators::CeilingPanelThicknessCm, Ceiling.Downlight.BodyDepth * ToCm));
+			}
 		}
 
 		const bool bNeedsBand =
@@ -1634,6 +1784,30 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 		{
 			if (Ceiling.Drop + UE_KINDA_SMALL_NUMBER < Beam->Depth)
 			{
+				// THE CEILING'S OWN PERIMETER RING, and this is the clause that had to be added for
+				// the depth model to change at all.
+				//
+				// The rule and its bulkhead exemption were right about the principle - a beam must
+				// be boxed in where it runs, not excused by a drop somewhere else - and the
+				// exemption was made positional for exactly that reason. What it could not see was
+				// a bulkhead that is not a separate element. Every beam in this flat runs along a
+				// wall line, so what has to be boxed in is a strip round the EDGE of each room, and
+				// expressing that as sibling FHFFalseCeilings would mean one Bulkhead element per
+				// room edge per room - a spec four times the size carrying no information the beam
+				// list does not already carry, and every one of those polygons a chance to drift
+				// out of step with the beam it was drawn against.
+				//
+				// So the ring is a property of the ceiling, derived from the beams rather than
+				// authored, and this asks the same positional question of it that
+				// BulkheadCoversBeamOverRoom asks of a sibling: is the beam INSIDE the ring, along
+				// its whole run over this room. Measured on the beam's own footprint rather than on
+				// its centreline - a ring is sized to bury a beam's full width, and a ring that
+				// covers the centreline while the beam's edge hangs out of it has boxed in nothing.
+				const bool bRingCoversIt =
+					Ceiling.HasPerimeterBulkhead()
+					&& Ceiling.PerimeterBulkheadDrop + UE_KINDA_SMALL_NUMBER >= Beam->Depth
+					&& PerimeterRingCoversBeamOverRoom(Ceiling, *Beam, *Room);
+
 				// A peripheral band leaves the centre of the room at slab height, so it conceals
 				// nothing mid-span. It is only excusable when a bulkhead boxes the beam in - which
 				// is exactly how this is detailed in practice.
@@ -1662,10 +1836,10 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 							&& BulkheadCoversBeamOverRoom(Other, *Beam, *Room);
 					});
 
-				if (!(bIsPerimeterOnly && bBulkheadCoversIt))
+				if (!bRingCoversIt && !(bIsPerimeterOnly && bBulkheadCoversIt))
 				{
 					Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingDoesNotClearBeam"), Ceiling.Id,
-						FString::Printf(TEXT("False ceiling '%s' drops %.1f but beam '%s' over room '%s' hangs %.1f; the beam would show through the soffit. Deepen the ceiling or add a bulkhead over the beam."),
+						FString::Printf(TEXT("False ceiling '%s' drops %.1f but beam '%s' over room '%s' hangs %.1f; the beam would show through the soffit. Give it a perimeter bulkhead deep and wide enough to bury the beam where it runs round the room, add a bulkhead over it, or deepen the ceiling."),
 							*Describe(Ceiling.Id), Ceiling.Drop, *Describe(Beam->Id), *Describe(Room->Id), Beam->Depth));
 				}
 			}
@@ -1678,31 +1852,73 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 					*Describe(Ceiling.Id), Ceiling.ExplicitPolygon.Num()));
 		}
 
-		// A door that opens into the room must clear the false ceiling above it.
-		for (const FHFOpening& Opening : Spec.Openings)
+	}
+
+	// ------------------------------------------------------ what a ceiling comes down onto: openings
+	//
+	// A DOOR OR WINDOW HEAD IS AT THE EDGE OF A ROOM, WHICH IS WHERE THE CEILING IS DEEPEST. That is
+	// the whole reason this rule had to be rewritten rather than left alone. It used to fire only for
+	// FullDrop and Tray - "a peripheral band may well sit clear of the door" - and to measure against
+	// Ceiling.Drop. Both were true of a ceiling that was one plane, and both are false now: a shallow
+	// band carries a perimeter bulkhead ring hanging a great deal lower, and that ring runs round the
+	// room exactly along the walls every opening is cut into. A Cove at 15 with a ring at 48 would
+	// have been judged against 15 and passed while its ring cut through a 2.4 m door head.
+	//
+	// So it asks positionally, of whatever actually covers the opening, using the same function the
+	// geometry is built from and the fan's rod is resolved against. Style is no longer consulted at
+	// all - the answer for a peripheral band away from the wall really is "nothing covers it", and it
+	// comes out of the same call rather than out of a second list of which styles count.
+	//
+	// Windows and ventilators too. A ventilator sits high in a wall by definition - the common bath's
+	// reaches 2450 - so it is the opening most likely to be buried, and it was the one kind the old
+	// rule never looked at.
+	for (const FHFOpening& Opening : Spec.Openings)
+	{
+		const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+		if (Wall == nullptr)
 		{
-			const bool bIsDoor = Opening.Kind == EHFOpeningKind::Door || Opening.Kind == EHFOpeningKind::SlidingDoor;
-			if (!bIsDoor)
+			continue;
+		}
+
+		const double WallLength = Wall->Length();
+		if (WallLength <= UE_KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector2D Along = (Wall->End - Wall->Start) / WallLength;
+		const double HeadZ = Wall->BaseZ + Opening.HeadHeight();
+
+		// The opening as something a soffit can be asked about: its width along the wall, and enough
+		// depth to reach into the room on either side of the centreline it is set out on. A room
+		// boundary IS that centreline, so a probe with no depth would sit exactly on the polygon edge
+		// and be inside or outside it by rounding.
+		FHFFixture Probe;
+		Probe.Position = Wall->Start + Along * Opening.OffsetAlongWall;
+		Probe.Footprint = FVector2D(Opening.Width, Wall->Thickness * 2.0);
+		Probe.RotationDegrees = FMath::RadiansToDegrees(FMath::Atan2(Along.Y, Along.X));
+
+		for (const FHFRoom& Room : Spec.Rooms)
+		{
+			const double SlabZ = Room.FloorZ + Room.CeilingHeight;
+			const double SoffitZ = FHFCeilingFit::LowestSoffitZOver(Probe, Room, Spec.FalseCeilings);
+
+			// Nothing of this room's is over the opening - either the room is elsewhere in the plan or
+			// its ceiling leaves this spot open to the slab.
+			if (SoffitZ >= SlabZ - UE_KINDA_SMALL_NUMBER)
 			{
 				continue;
 			}
 
-			const FHFWall* Wall = Spec.FindWall(Opening.WallId);
-			if (Wall == nullptr)
+			if (HeadZ > SoffitZ + UE_KINDA_SMALL_NUMBER)
 			{
-				continue;
-			}
+				Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingBelowDoorHead"), Opening.Id,
+					FString::Printf(TEXT("Opening '%s' reaches %.1f but the finished ceiling over it in room '%s' sits at %.1f; the soffit would cut through its head. Raise the ceiling over it, narrow the perimeter bulkhead, or lower the opening."),
+						*Describe(Opening.Id), HeadZ, *Describe(Room.Id), SoffitZ));
 
-			// Only meaningful for a full drop; a peripheral band may well sit clear of the door.
-			const bool bCoversWholeRoom =
-				Ceiling.Style == EHFCeilingStyle::FullDrop ||
-				Ceiling.Style == EHFCeilingStyle::Tray;
-
-			if (bCoversWholeRoom && Opening.HeadHeight() > Room->CeilingHeight - Ceiling.Drop + UE_KINDA_SMALL_NUMBER)
-			{
-				Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingBelowDoorHead"), Ceiling.Id,
-					FString::Printf(TEXT("False ceiling '%s' sits at %.1f but door '%s' reaches %.1f; the ceiling would cut through the door head."),
-						*Describe(Ceiling.Id), Room->CeilingHeight - Ceiling.Drop, *Describe(Opening.Id), Opening.HeadHeight()));
+				// One complaint per opening. An opening in a party wall is under two rooms' ceilings
+				// and the fix is the same either way.
+				break;
 			}
 		}
 	}
@@ -1768,6 +1984,33 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 			Result.Add(EHFValidationSeverity::Error, TEXT("UnknownWallReference"), Fixture.Id,
 				FString::Printf(TEXT("Fixture '%s' anchors to wall '%s', which does not exist."),
 					*Describe(Fixture.Id), *Describe(Fixture.AnchorWallId)));
+		}
+
+		// ----------------------------------------- and whether the ceiling leaves room for it at all
+		//
+		// A CHECK ON THE RESOLVER RATHER THAN A SECOND AUTHORITY. FHFCeilingFit is what decides where a
+		// fitting ends up, and it is recomputed at build time precisely so it cannot go stale - see the
+		// note on that class for why declaring it in the spec would be the wrong answer. This asks the
+		// same question of the spec's own numbers, so a spec can be judged before anything is built.
+		//
+		// Only the case NOTHING CAN BE DONE ABOUT. An extract sliding 40 mm down the wall to clear a
+		// soffit is the mechanism working, not a fault, and warning on it would put seven lines of
+		// noise in front of a user for a flat that is correct. What is worth saying is that a fitting
+		// has been left where it was drawn because there was no honest place to put it.
+		//
+		// Asked at zero clearance, deliberately. The gap a project leaves under its plaster is a build
+		// figure on the settings page; "does not fit even touching the soffit" is a fact about the
+		// drawing, and it is the only version of the question a validator should be answering.
+		{
+			const FHFCeilingFitResult Fit = FHFCeilingFit::Fit(Fixture, *Room, Spec.FalseCeilings, 0.0);
+
+			if (Fit.Action == EHFCeilingFitAction::Refused)
+			{
+				Result.Add(EHFValidationSeverity::Warning, TEXT("CeilingLeavesNoRoomForFixture"), Fixture.Id,
+					FString::Printf(TEXT("Fixture '%s' stands %.1f tall from %.1f but the finished ceiling over it in room '%s' sits at %.1f, and it can neither be lowered nor cut down by %.1f. It is built exactly as drawn and will pass through the soffit."),
+						*Describe(Fixture.Id), Fixture.Height, Room->FloorZ + Fixture.BaseZ,
+						*Describe(Room->Id), Fit.SoffitZ, Fit.Shortfall));
+			}
 		}
 	}
 

@@ -588,7 +588,39 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// not exist while every door in the flat was a bare leaf in a bare hole; and the two sliding
 	// panel figures that used to live under Doors moved into the eighteen of the glazed sliding
 	// DOOR section, which is a sliding window with a threshold rather than a pair of boards.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 100);
+	// 127 rather than 100: the False Ceilings section. Twenty-five numeric figures - the band and
+	// the drop for each of the four named designs, the six of the cove section, the four of the
+	// downlight fitting with its pitch and setback, and the three that size the ring which buries a
+	// beam - plus two switches, bHasLedStrip and bRecessed, which are the two places a design says
+	// "not this one" rather than giving a number.
+	//
+	// This section is why the flat's ceilings stopped being a uniform 500 drop. Every one of those
+	// figures used to be a literal: some in FHFSampleHouse, some compiled into HFGenerators, and the
+	// cove's three in a struct nothing built anything from.
+	//
+	// 128 rather than 127: FixtureSoffitClearance, which is the figure that makes a ceiling something
+	// the rest of the room answers to rather than a plane drawn over the top of it. It is the gap
+	// FHFCeilingFit leaves between a fitting's head and the soffit above it, and it is on the page
+	// because how tight a project fixes to its plaster is a decision - see FHFCeilingDefaults.
+	//
+	// 130 rather than 128: the skirting section's two, Depth and JambClearance. Only two, because
+	// WHERE a skirting runs is not a setting - it follows from the walls a room has, the doors in
+	// them and the joinery scribed to them, and is resolved per room by FHFSkirting::For. What is
+	// left for a page to hold is what a joiner sets out before cutting: the board's thickness, and
+	// how far clear of each jamb it stops.
+	//
+	// 142 rather than 130: the render finish's twelve. That section is the only one on the page that
+	// costs triangles rather than moving them - chamfering every arris in the reference flat takes it
+	// from 39,074 to 86,626 - and it is the only one that reaches EVERY element rather than a class of
+	// them, since a wall, a slab, a beam and a shutter all get an arris. Both are reasons it has to be
+	// a setting rather than a constant compiled into the composing layer.
+	//
+	// 145 rather than 142: the three figures that make a ceiling answer to the room it is in rather
+	// than be stamped over it - MinBandWidth, MinOpenCentreFactor and FlatSoffitDrop. The first two
+	// are what stop a 450 band and a 300 ring consuming a 1800 foyer and leaving a 310 mm shaft
+	// punched through its plaster; the third is what a room that wants no design at all gets, so
+	// "flat on purpose" stops being indistinguishable from "not done yet".
+	TestEqual(TEXT("The page ships every control it did"), Controls, 145);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 31);
 
 	return true;
@@ -852,7 +884,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 100);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 141);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;
