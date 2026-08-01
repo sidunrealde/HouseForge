@@ -510,7 +510,8 @@ void AHFHouseActor::BuildGeometry()
 
 		RoomActor->Room = Room;
 		RoomActor->SlabThickness = SlabThickness;
-		RoomActor->Skirting = FHFSkirting::For(Room, Spec.Walls, Spec.Openings, Fixtures, SkirtingParams);
+		RoomActor->Skirting = FHFSkirting::For(Room, Spec.Walls, Spec.Openings, Spec.Columns, Fixtures,
+			SkirtingParams);
 		RoomActor->Regenerate();
 	}
 

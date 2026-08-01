@@ -209,7 +209,7 @@ FDynamicMesh3 AHFRoomActor::BuildMesh() const
 
 	const FHFSkirtingPlan Resolved = (Skirting.Edges.Num() == Room.Boundary.Num())
 		? Skirting
-		: FHFSkirting::For(Room, {}, {}, {}, Section);
+		: FHFSkirting::For(Room, {}, {}, {}, {}, Section);
 
 	FDynamicMesh3 Result = FHFGenerators::GenerateFloor(Room, SlabThickness, Resolved);
 

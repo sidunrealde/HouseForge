@@ -237,7 +237,7 @@ bool FHFMaterialIdsFollowRolesTest::RunTest(const FString& Parameters)
 
 	// Two roles from the generator, plus a third appended through AppendPreservingRoles - the same
 	// composition AHFRoomActor performs, so this covers the case a raw append would have broken.
-	FDynamicMesh3 Mesh = FHFGenerators::GenerateFloor(Room, 15.0, FHFSkirting::For(Room, {}, {}, {}));
+	FDynamicMesh3 Mesh = FHFGenerators::GenerateFloor(Room, 15.0, FHFSkirting::For(Room, {}, {}, {}, {}));
 	FHFMeshOps::AppendPreservingRoles(Mesh, FHFGenerators::GenerateCeilingSlab(Room, 15.0));
 
 	const TSet<EHFSurfaceRole> Expected = {
@@ -321,7 +321,7 @@ bool FHFMaterialPassKeepsRolesTest::RunTest(const FString& Parameters)
 	FDynamicMesh3 Mesh = FHFGenerators::GenerateWall(Wall, { Door });
 	const FHFRoom FloorRoom = MakeRoom();
 	FHFMeshOps::AppendPreservingRoles(Mesh,
-		FHFGenerators::GenerateFloor(FloorRoom, 15.0, FHFSkirting::For(FloorRoom, {}, {}, {})));
+		FHFGenerators::GenerateFloor(FloorRoom, 15.0, FHFSkirting::For(FloorRoom, {}, {}, {}, {})));
 
 	const TArray<int32> Before = SnapshotGroups(Mesh);
 	const TSet<EHFSurfaceRole> RolesBefore = FHFMeshOps::RolesPresent(Mesh);

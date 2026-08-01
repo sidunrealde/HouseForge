@@ -500,6 +500,28 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 					Frame.YawDegrees, EHFSurfaceRole::Skirting);
 			}
 		}
+
+		// ------------------------------------------------------------------ round the columns
+		//
+		// A return is a length of skirting that has left the boundary, so it carries its own two
+		// points rather than a distance along an edge. The room is on the LEFT of Start -> End - the
+		// same winding the boundary uses - which is what lets one offset serve both.
+		for (const FHFSkirtingReturn& Run : Skirting.Returns)
+		{
+			const FWallFrame Frame = MakeWallFrame(Run.Start, Run.End);
+			if (!Frame.bValid || Frame.Length <= MinMemberSize)
+			{
+				continue;
+			}
+
+			const FVector2D Centre = (Run.Start + Run.End) * 0.5
+				+ Frame.Normal * (Skirting.Depth * 0.5 - Embed);
+
+			FHFMeshOps::AppendBox(Mesh,
+				FVector3d(Centre.X, Centre.Y, Room.FloorZ + Room.SkirtingHeight * 0.5),
+				FVector3d(Frame.Length * 0.5, Skirting.Depth * 0.5, Room.SkirtingHeight * 0.5),
+				Frame.YawDegrees, EHFSurfaceRole::Skirting);
+		}
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);

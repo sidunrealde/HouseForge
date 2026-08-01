@@ -35,18 +35,17 @@ namespace
 		return Centre + FVector2D(D.X * C - D.Y * S, D.X * S + D.Y * C);
 	}
 
-	/** The four plan corners of a fixture's footprint. */
-	TArray<FVector2D> FootprintCorners(const FHFFixture& Fixture)
+	/** The four plan corners of a rectangular footprint about a centre. */
+	TArray<FVector2D> PlanCorners(const FVector2D& Centre, const FVector2D& Size, double RotationDegrees)
 	{
-		const FVector2D Half = Fixture.Footprint * 0.5;
-		const FVector2D P = Fixture.Position;
+		const FVector2D Half = Size * 0.5;
 
 		TArray<FVector2D> Out;
 		Out.Reserve(4);
-		Out.Add(RotateAbout(P + FVector2D(-Half.X, -Half.Y), P, Fixture.RotationDegrees));
-		Out.Add(RotateAbout(P + FVector2D(Half.X, -Half.Y), P, Fixture.RotationDegrees));
-		Out.Add(RotateAbout(P + FVector2D(Half.X, Half.Y), P, Fixture.RotationDegrees));
-		Out.Add(RotateAbout(P + FVector2D(-Half.X, Half.Y), P, Fixture.RotationDegrees));
+		Out.Add(RotateAbout(Centre + FVector2D(-Half.X, -Half.Y), Centre, RotationDegrees));
+		Out.Add(RotateAbout(Centre + FVector2D(Half.X, -Half.Y), Centre, RotationDegrees));
+		Out.Add(RotateAbout(Centre + FVector2D(Half.X, Half.Y), Centre, RotationDegrees));
+		Out.Add(RotateAbout(Centre + FVector2D(-Half.X, Half.Y), Centre, RotationDegrees));
 		return Out;
 	}
 }
@@ -70,6 +69,16 @@ double FHFSkirtingPlan::CoveredLength() const
 		{
 			Total += Run.Length();
 		}
+	}
+	return Total;
+}
+
+double FHFSkirtingPlan::ReturnLength() const
+{
+	double Total = 0.0;
+	for (const FHFSkirtingReturn& Run : Returns)
+	{
+		Total += Run.Length();
 	}
 	return Total;
 }
@@ -154,9 +163,61 @@ TArray<const FHFWall*> FHFSkirting::WallsOnEdge(const FVector2D& From, const FVe
 	return Out;
 }
 
+bool FHFSkirting::ColumnProjectsInto(const FHFColumn& Column, const FVector2D& From, const FVector2D& To,
+	double FaceInset, double& OutProjection, double& OutFrom, double& OutTo)
+{
+	OutProjection = 0.0;
+	OutFrom = 0.0;
+	OutTo = 0.0;
+
+	const double EdgeLength = FVector2D::Distance(From, To);
+	if (EdgeLength <= UE_KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FVector2D Direction = (To - From) / EdgeLength;
+	const FVector2D Normal(-Direction.Y, Direction.X);
+
+	double Deepest = -TNumericLimits<double>::Max();
+	double Shallowest = TNumericLimits<double>::Max();
+	double MinAlong = TNumericLimits<double>::Max();
+	double MaxAlong = -TNumericLimits<double>::Max();
+
+	for (const FVector2D& Corner : PlanCorners(Column.Position, Column.Size, Column.RotationDegrees))
+	{
+		const FVector2D Local = Corner - From;
+
+		const double Across = FVector2D::DotProduct(Local, Normal) - FaceInset;
+		Deepest = FMath::Max(Deepest, Across);
+		Shallowest = FMath::Min(Shallowest, Across);
+
+		const double Along = FVector2D::DotProduct(Local, Direction);
+		MinAlong = FMath::Min(MinAlong, Along);
+		MaxAlong = FMath::Max(MaxAlong, Along);
+	}
+
+	OutProjection = Deepest;
+	OutFrom = FMath::Max(0.0, MinAlong);
+	OutTo = FMath::Min(EdgeLength, MaxAlong);
+
+	// IT HAS TO BE IN THIS WALL, which is a separate question from being in front of it. Without the
+	// near-side test a column standing anywhere in the room answers for every edge of it - a column
+	// 2 m off the far wall reads as one projecting 2 m out of it - and the returns then strike out
+	// across the room and through the next one. That is not a hypothetical: it built 79 square metres
+	// of skirting standing in mid-air the first time this ran.
+	//
+	// A column that touches no wall at all therefore produces nothing, and the run passes it. Going
+	// round a free-standing column is a closed loop rather than a return, and there is not one in
+	// this domain to justify writing it.
+	const bool bSetInTheWall = Shallowest <= Negligible;
+
+	return bSetInTheWall && Deepest > 0.0 && OutTo - OutFrom > Negligible;
+}
+
 FHFSkirtingPlan FHFSkirting::For(const FHFRoom& Room, const TArray<FHFWall>& Walls,
-	const TArray<FHFOpening>& Openings, const TArray<FHFFixture>& Fixtures,
-	const FHFSkirtingParams& Params)
+	const TArray<FHFOpening>& Openings, const TArray<FHFColumn>& Columns,
+	const TArray<FHFFixture>& Fixtures, const FHFSkirtingParams& Params)
 {
 	FHFSkirtingPlan Plan;
 	Plan.Depth = Params.Depth;
@@ -261,6 +322,85 @@ FHFSkirtingPlan FHFSkirting::For(const FHFRoom& Room, const TArray<FHFWall>& Wal
 			}
 		}
 
+		// ------------------------------------------------------------------ columns standing proud
+		//
+		// NOT AN END. A column in a wall face is the one obstruction a skirting goes ROUND: out along
+		// its near flank, across its face and back along the far one. The straight run does stop, so
+		// it is a break - but a break that costs no skirting, because the three returns replace it
+		// and then some.
+		//
+		// Ignored when the column stands less proud than the skirting is deep. Then there is nothing
+		// to turn round: the board is scribed to the concrete and runs straight past, which is what a
+		// mason does with a 10 mm nib.
+		if (Height > 0.0)
+		{
+			for (const FHFColumn& Column : Columns)
+			{
+				// It has to reach the floor of THIS room. A column starting above the skirting -
+				// stub columns over a beam - passes over it and leaves it whole.
+				if (Column.BaseZ - Room.FloorZ >= Height)
+				{
+					continue;
+				}
+
+				double Projection = 0.0;
+				double FromAlong = 0.0;
+				double ToAlong = 0.0;
+
+				if (!ColumnProjectsInto(Column, A, B, Edge.FaceInset, Projection, FromAlong, ToAlong)
+					|| Projection <= Plan.Depth)
+				{
+					continue;
+				}
+
+				FHFSkirtingBreak Break;
+				Break.EdgeIndex = i;
+				Break.Start = FromAlong;
+				Break.End = ToAlong;
+				Break.Cause = EHFSkirtingBreakCause::Structure;
+				Break.SourceId = Column.Id;
+				EdgeBreaks.Add(Break);
+
+				// The three lengths that go round it, each with the room on its left.
+				//
+				// Every one overlaps its neighbour by the section depth, so the two external corners
+				// of the return are filled by the union rather than left as a notch - the same way
+				// two runs meeting at a room corner fill it. The flanks are extended outward and the
+				// face is extended sideways, so the overlap is at the corner and nowhere else.
+				const FVector2D Face = A + Normal * Edge.FaceInset;
+				const double Out = Projection + Plan.Depth;
+
+				auto AddReturn = [&Plan, &Column](const FVector2D& Start, const FVector2D& End)
+				{
+					FHFSkirtingReturn Run;
+					Run.Start = Start;
+					Run.End = End;
+					Run.SourceId = Column.Id;
+					Plan.Returns.Add(Run);
+				};
+
+				// Near flank, running out of the wall. Absent where the column reaches the end of
+				// the edge, because there is no exposed flank there - the return carries on round
+				// the corner and the next edge picks the column up itself.
+				if (FromAlong > Negligible)
+				{
+					AddReturn(Face + Direction * FromAlong,
+						Face + Direction * FromAlong + Normal * Out);
+				}
+
+				// The face itself.
+				AddReturn(Face + Direction * (FromAlong - Plan.Depth) + Normal * Projection,
+					Face + Direction * (ToAlong + Plan.Depth) + Normal * Projection);
+
+				// Far flank, running back into the wall.
+				if (ToAlong < Edge.Length - Negligible)
+				{
+					AddReturn(Face + Direction * ToAlong + Normal * Out,
+						Face + Direction * ToAlong);
+				}
+			}
+		}
+
 		// ------------------------------------------------------------------ scribed joinery
 		//
 		// Only where there is a skirting for it to displace, and only where it would actually foul
@@ -282,7 +422,8 @@ FHFSkirtingPlan FHFSkirting::For(const FHFRoom& Room, const TArray<FHFWall>& Wal
 					continue;
 				}
 
-				const TArray<FVector2D> Corners = FootprintCorners(Fixture);
+				const TArray<FVector2D> Corners =
+					PlanCorners(Fixture.Position, Fixture.Footprint, Fixture.RotationDegrees);
 
 				double NearestAcross = TNumericLimits<double>::Max();
 				double MinAlong = TNumericLimits<double>::Max();

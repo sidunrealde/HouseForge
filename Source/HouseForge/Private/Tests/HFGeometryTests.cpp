@@ -448,7 +448,7 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 	// zero, which is what a caller with none wants and is what the bare cases below get.
 	auto PlainPlan = [](const FHFRoom& R)
 	{
-		return FHFSkirting::For(R, {}, {}, {});
+		return FHFSkirting::For(R, {}, {}, {}, {});
 	};
 
 	const FDynamicMesh3 Bare = FHFGenerators::GenerateFloor(Room, 15.0, PlainPlan(Room));
@@ -483,11 +483,11 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 	Door.Height = 210.0;
 
 	const FDynamicMesh3 WithGap = FHFGenerators::GenerateFloor(Room, 15.0,
-		FHFSkirting::For(Room, { South }, { Door }, {}));
+		FHFSkirting::For(Room, { South }, { Door }, {}, {}));
 
 	// Against the same wall, so the doorway is the only difference between the two.
 	const FDynamicMesh3 Unbroken = FHFGenerators::GenerateFloor(Room, 15.0,
-		FHFSkirting::For(Room, { South }, {}, {}));
+		FHFSkirting::For(Room, { South }, {}, {}, {}));
 
 	const double SkirtedVolume = TMeshQueries<FDynamicMesh3>::GetVolumeArea(Unbroken).X;
 	const double GappedVolume = TMeshQueries<FDynamicMesh3>::GetVolumeArea(WithGap).X;
@@ -533,7 +533,7 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 
 	// A 23 wall on that edge puts its face 11.5 into the room.
 	const FDynamicMesh3 AgainstAWall = FHFGenerators::GenerateFloor(
-		Room, 15.0, FHFSkirting::For(Room, { South }, {}, {}));
+		Room, 15.0, FHFSkirting::For(Room, { South }, {}, {}, {}));
 
 	const double Reach = DeepestIntoTheRoomOffSouth(AgainstAWall);
 

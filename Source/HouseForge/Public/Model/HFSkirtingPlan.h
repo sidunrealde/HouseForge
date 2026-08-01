@@ -26,7 +26,17 @@ enum class EHFSkirtingBreakCause : uint8
 	 * the carcass lands and scribes the plinth to the plaster; leaving it in puts a 18 mm board
 	 * through the back of every one of them.
 	 */
-	Joinery
+	Joinery,
+
+	/**
+	 * A column standing proud of the wall behind it. NOT AN END - the skirting returns round it.
+	 *
+	 * The one cause that adds skirting rather than removing it, and the reason it is a break at all
+	 * is that the straight run along the wall genuinely does stop: it turns out along the column's
+	 * flank, crosses its face and comes back. See FHFSkirtingPlan::Returns, which carries the three
+	 * lengths that do the turning. A break of this cause without them is a column with a bare face.
+	 */
+	Structure
 };
 
 /** One stretch of one boundary edge where the skirting stops, and what stopped it. */
@@ -104,6 +114,37 @@ struct HOUSEFORGE_API FHFSkirtingEdge
 };
 
 /**
+ * One length of skirting that is not on the room boundary - a return round something standing
+ * proud of a wall.
+ *
+ * Held as a plan segment rather than a distance along an edge, because that is exactly what it is
+ * not: the near flank of a column runs at right angles to the wall the run came in along.
+ *
+ * ROOM ON THE LEFT, which is the same convention the boundary already uses - a room polygon winds
+ * anticlockwise, so the left normal of each edge points into the room. The skirting is fixed to the
+ * face this segment lies on and stands off it to the left, and that one rule is what lets the
+ * generator build a return exactly as it builds a run.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFSkirtingReturn
+{
+	GENERATED_BODY()
+
+	/** On the face the skirting is fixed to, with the room to the left of Start -> End. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	FVector2D Start = FVector2D::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	FVector2D End = FVector2D::ZeroVector;
+
+	/** The column this goes round. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	FName SourceId;
+
+	double Length() const { return FVector2D::Distance(Start, End); }
+};
+
+/**
  * Where a room's skirting runs and where it stops.
  *
  * The whole answer for one room, worked out once and then merely built. Holding the runs rather than
@@ -121,6 +162,10 @@ struct HOUSEFORGE_API FHFSkirtingPlan
 	/** Every break, over every edge, with its cause. Ordered by edge and then along the edge. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
 	TArray<FHFSkirtingBreak> Breaks;
+
+	/** The lengths that leave the boundary to go round a column. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	TArray<FHFSkirtingReturn> Returns;
 
 	/**
 	 * Section depth off the plaster, in centimetres.
@@ -150,6 +195,9 @@ struct HOUSEFORGE_API FHFSkirtingPlan
 	 * therefore an identity, and the thing a coverage test can lean on.
 	 */
 	double BreakLength() const { return BoundaryLength() - CoveredLength(); }
+
+	/** Total length of the returns. Extra skirting, off the boundary, so it is counted separately. */
+	double ReturnLength() const;
 };
 
 /** Section figures for a skirting, resolved by the composing layer and handed down. */
@@ -205,6 +253,13 @@ struct HOUSEFORGE_API FHFSkirtingParams
  *   4. NOTHING KNEW ABOUT JOINERY. A wardrobe scribed to the wall had a skirting running through the
  *      back of it, which is the opposite error and equally wrong.
  *
+ * A fifth was only ever going to be found by rendering it, and was: eighteen places in the
+ * reference flat where a 450 x 230 column stands between 58 and 168 mm proud of the plaster it
+ * sits in. The run went straight into the concrete and came out the far side, so from the room it
+ * stopped dead at the column and the column's three exposed faces were bare - which is the same
+ * picture as a missing length and reads exactly like one. A skirting RETURNS round a column: out
+ * along the near flank, across the face, back along the far one. See FHFSkirtingPlan::Returns.
+ *
  * ## Why it is a resolver and not a generator
  *
  * Which walls are on a room's edges, which openings are in those walls, and which fixtures stand
@@ -243,12 +298,27 @@ public:
 		const TArray<FHFWall>& Walls);
 
 	/**
+	 * How far a column stands proud of a wall face, and over what stretch of it.
+	 *
+	 * Measured in the edge's own frame, which is exact for a rectangular column set out square to
+	 * the wall it sits in - every column in this domain - and conservative for one turned at an
+	 * angle, where it answers for the footprint's extent rather than its true section.
+	 *
+	 * @return False when the column does not reach past the plaster into this edge at all.
+	 */
+	static bool ColumnProjectsInto(const FHFColumn& Column, const FVector2D& From, const FVector2D& To,
+		double FaceInset, double& OutProjection, double& OutFrom, double& OutTo);
+
+	/**
 	 * The whole answer for one room.
 	 *
+	 * @param Columns Structure standing in the wall faces. A column proud of the plaster does not
+	 *        end a skirting - it makes it turn - so these produce breaks AND returns.
 	 * @param Fixtures May be the whole spec's list; anything in another room is ignored.
 	 */
 	static FHFSkirtingPlan For(const FHFRoom& Room, const TArray<FHFWall>& Walls,
-		const TArray<FHFOpening>& Openings, const TArray<FHFFixture>& Fixtures,
+		const TArray<FHFOpening>& Openings, const TArray<FHFColumn>& Columns,
+		const TArray<FHFFixture>& Fixtures,
 		const FHFSkirtingParams& Params = FHFSkirtingParams());
 
 	/** One line per break, for a build report. */

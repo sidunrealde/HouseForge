@@ -89,7 +89,7 @@ bool FHFSkirtingWholePerimeterTest::RunTest(const FString& Parameters)
 	const FHFRoom Room = MakeSkirtingRoom();
 	const TArray<FHFWall> Walls = MakeSkirtingWalls();
 
-	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, {}, {});
+	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, {}, {}, {});
 
 	TestEqual(TEXT("One entry per boundary edge"), Plan.Edges.Num(), 4);
 	TestEqual(TEXT("Nothing interrupts it"), Plan.Breaks.Num(), 0);
@@ -130,7 +130,7 @@ bool FHFSkirtingDoorwayWidthTest::RunTest(const FString& Parameters)
 	FHFSkirtingParams Params;
 	Params.JambClearance = 1.0;
 
-	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, Openings, {}, Params);
+	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, Openings, {}, {}, Params);
 
 	TestEqual(TEXT("Two doorways, two breaks"), Plan.Breaks.Num(), 2);
 
@@ -172,7 +172,7 @@ bool FHFSkirtingWindowTest::RunTest(const FString& Parameters)
 		MakeSkirtingOpening(TEXT("V_Vent"), TEXT("W_E"), EHFOpeningKind::Ventilator, 150.0, 60.0, 210.0)
 	};
 
-	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, Openings, {});
+	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, Openings, {}, {});
 
 	TestEqual(TEXT("No window interrupts a skirting"), Plan.Breaks.Num(), 0);
 	TestNearlyEqual(TEXT("The whole boundary is still skirted"),
@@ -208,7 +208,7 @@ bool FHFSkirtingForeignDoorwayTest::RunTest(const FString& Parameters)
 		MakeSkirtingOpening(TEXT("D_NextRoom"), TEXT("W_S_Next"), EHFOpeningKind::Door, 40.0, 90.0, 0.0)
 	};
 
-	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, Openings, {});
+	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, Openings, {}, {});
 
 	TestEqual(TEXT("A door in a wall this room does not have is ignored"), Plan.Breaks.Num(), 0);
 	TestNearlyEqual(TEXT("The south run is whole"), Plan.Edges[0].Runs.Num() == 1
@@ -257,7 +257,7 @@ bool FHFSkirtingJoineryTest::RunTest(const FString& Parameters)
 	WallUnit.Footprint = FVector2D(35.0, 120.0);
 	WallUnit.BaseZ = 140.0;
 
-	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, {}, { Wardrobe, Bed, WallUnit });
+	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, {}, {}, { Wardrobe, Bed, WallUnit });
 
 	TestEqual(TEXT("Only the wardrobe interrupts it"), Plan.Breaks.Num(), 1);
 	if (Plan.Breaks.Num() == 1)
@@ -273,13 +273,96 @@ bool FHFSkirtingJoineryTest::RunTest(const FString& Parameters)
 	FHFFixture Floating = Wardrobe;
 	Floating.BaseZ = Room.SkirtingHeight + 1.0;
 	TestEqual(TEXT("Joinery that clears the skirting leaves it whole"),
-		FHFSkirting::For(Room, Walls, {}, { Floating }).Breaks.Num(), 0);
+		FHFSkirting::For(Room, Walls, {}, {}, { Floating }).Breaks.Num(), 0);
 
 	// SAME TYPE, STANDING OFF THE WALL. Nothing to scribe to, so the skirting runs on behind it.
 	FHFFixture Islanded = Wardrobe;
 	Islanded.Position = FVector2D(150.0, 150.0);
 	TestEqual(TEXT("Joinery clear of the plaster leaves it whole"),
-		FHFSkirting::For(Room, Walls, {}, { Islanded }).Breaks.Num(), 0);
+		FHFSkirting::For(Room, Walls, {}, {}, { Islanded }).Breaks.Num(), 0);
+
+	return true;
+}
+
+/**
+ * A SKIRTING GOES ROUND A COLUMN. IT DOES NOT STOP AT ONE.
+ *
+ * Found by rendering the flat, and by nothing else: the run went straight into the concrete and came
+ * out the far side, so the board was there, watertight, correctly tagged - and invisible for the 450
+ * it spent inside the column, with the column's three exposed faces bare. From the room that is
+ * indistinguishable from a missing length, and it is what the reference flat looked like in eighteen
+ * places once the doorway gaps were right.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSkirtingColumnTest,
+	"HouseForge.Model.SkirtingReturnsRoundAColumn", HF_TEST_FLAGS)
+
+bool FHFSkirtingColumnTest::RunTest(const FString& Parameters)
+{
+	const FHFRoom Room = MakeSkirtingRoom();
+	const TArray<FHFWall> Walls = MakeSkirtingWalls();
+
+	// A 45 x 23 column in the 115 south wall, whose face stands 5.75 inside the boundary. Centred on
+	// the boundary line, so it projects 11.5 - 5.75 = 5.75 past the plaster, over its 45 width.
+	FHFColumn Column;
+	Column.Id = TEXT("COL_1");
+	Column.Position = FVector2D(200.0, 0.0);
+	Column.Size = FVector2D(45.0, 23.0);
+	Column.Height = 300.0;
+	Column.BaseZ = 0.0;
+
+	FHFSkirtingParams Params;
+	Params.Depth = 1.8;
+
+	const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Walls, {}, { Column }, {}, Params);
+
+	if (!TestEqual(TEXT("The column breaks the straight run"), Plan.Breaks.Num(), 1))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("And is named as structure"),
+		Plan.Breaks[0].Cause == EHFSkirtingBreakCause::Structure);
+	TestEqual(TEXT("By its own id"), Plan.Breaks[0].SourceId, FName(TEXT("COL_1")));
+	TestNearlyEqual(TEXT("Over exactly its own width"), Plan.Breaks[0].Length(), 45.0, 0.01);
+	TestNearlyEqual(TEXT("Starting at its near face"), Plan.Breaks[0].Start, 177.5, 0.01);
+
+	// Three returns: out along the near flank, across the face, back along the far one.
+	TestEqual(TEXT("Three lengths go round it"), Plan.Returns.Num(), 3);
+
+	// THE SKIRTING GETS LONGER, NOT SHORTER. A break that removed 450 and gave nothing back is the
+	// defect; this is the assertion that separates the fix from it.
+	TestTrue(*FString::Printf(
+		TEXT("Going round a column adds skirting rather than removing it (%.1f back for %.1f lost)"),
+		Plan.ReturnLength(), Plan.BreakLength()),
+		Plan.ReturnLength() > Plan.BreakLength());
+
+	// Every return stands off the wall face, which is what makes it a return rather than a
+	// duplicate of the run it replaced. The south wall's plaster is at y = 5.75.
+	double DeepestOff = 0.0;
+	for (const FHFSkirtingReturn& Run : Plan.Returns)
+	{
+		DeepestOff = FMath::Max3(DeepestOff, Run.Start.Y - 5.75, Run.End.Y - 5.75);
+	}
+	TestNearlyEqual(TEXT("They reach the column's face and the section in front of it"),
+		DeepestOff, 5.75 + Params.Depth, 0.01);
+
+	// ---------------------------------------------------------------- and only when there is
+	// something to go round
+	//
+	// A column standing less proud than the board is thick is scribed to, not returned round - the
+	// skirting runs straight past a nib it can be planed against.
+	FHFColumn Flush = Column;
+	Flush.Size = FVector2D(45.0, 12.0);
+	const FHFSkirtingPlan Scribed = FHFSkirting::For(Room, Walls, {}, { Flush }, {}, Params);
+	TestEqual(TEXT("A column barely proud of the plaster is scribed to, not returned round"),
+		Scribed.Breaks.Num(), 0);
+	TestEqual(TEXT("...and needs no returns"), Scribed.Returns.Num(), 0);
+
+	// A column that starts above the top of the skirting passes over it.
+	FHFColumn Stub = Column;
+	Stub.BaseZ = Room.SkirtingHeight + 1.0;
+	TestEqual(TEXT("A column that does not reach the floor leaves the run whole"),
+		FHFSkirting::For(Room, Walls, {}, { Stub }, {}, Params).Breaks.Num(), 0);
 
 	return true;
 }
@@ -303,7 +386,8 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
 
 	for (const FHFRoom& Room : Spec.Rooms)
 	{
-		const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Spec.Walls, Spec.Openings, Spec.Fixtures);
+		const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Spec.Walls, Spec.Openings,
+			Spec.Columns, Spec.Fixtures);
 
 		// The identity. Runs are cut from the boundary and overlapping breaks merge, so this holds
 		// whatever the breaks are - and it fails the moment a run is emitted outside its edge.
@@ -351,6 +435,33 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
 				TestTrue(*FString::Printf(TEXT("%s is no wider than the door plus its jambs"), *Where),
 					Break.Length() <= Opening->Width + 2.1);
 			}
+			else if (Break.Cause == EHFSkirtingBreakCause::Structure)
+			{
+				const FHFColumn* Column = Spec.Columns.FindByPredicate(
+					[&Break](const FHFColumn& C) { return C.Id == Break.SourceId; });
+
+				if (Column == nullptr)
+				{
+					AddError(FString::Printf(TEXT("%s names no column in the spec"), *Where));
+					continue;
+				}
+
+				const FHFSkirtingEdge& Edge = Plan.Edges[Break.EdgeIndex];
+
+				double Projection = 0.0;
+				double From = 0.0;
+				double To = 0.0;
+				TestTrue(*FString::Printf(TEXT("%s stands proud of that wall face"), *Where),
+					FHFSkirting::ColumnProjectsInto(*Column, Edge.Start, Edge.End, Edge.FaceInset,
+						Projection, From, To) && Projection > Plan.Depth);
+
+				// A STRUCTURE BREAK IS A TURN, NOT AN END. It must be answered by lengths that go
+				// round, or it is exactly the defect it was written to fix.
+				const bool bReturned = Plan.Returns.ContainsByPredicate(
+					[&Break](const FHFSkirtingReturn& R) { return R.SourceId == Break.SourceId; });
+				TestTrue(*FString::Printf(TEXT("%s is returned round rather than stopped at"), *Where),
+					bReturned);
+			}
 			else
 			{
 				const FHFFixture* Fixture = Spec.Fixtures.FindByPredicate(
@@ -370,6 +481,19 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
 					Fixture->BaseZ < Room.SkirtingHeight);
 			}
 		}
+
+		// Every return belongs to a break, so a length of skirting cannot appear round a column the
+		// run was never interrupted for.
+		for (const FHFSkirtingReturn& Run : Plan.Returns)
+		{
+			const bool bHasBreak = Plan.Breaks.ContainsByPredicate([&Run](const FHFSkirtingBreak& B)
+			{
+				return B.Cause == EHFSkirtingBreakCause::Structure && B.SourceId == Run.SourceId;
+			});
+
+			TestTrue(*FString::Printf(TEXT("%s: the return round '%s' answers a break"),
+				*Room.Id.ToString(), *Run.SourceId.ToString()), bHasBreak);
+		}
 	}
 
 	TestTrue(TEXT("The flat has skirting breaks to check at all"), TotalBreaks > 10);
@@ -383,7 +507,7 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
 
 	if (CBath != nullptr)
 	{
-		const FHFSkirtingPlan Plan = FHFSkirting::For(*CBath, Spec.Walls, Spec.Openings, Spec.Fixtures);
+		const FHFSkirtingPlan Plan = FHFSkirting::For(*CBath, Spec.Walls, Spec.Openings, Spec.Columns, Spec.Fixtures);
 		TestEqual(TEXT("The common bathroom has one gap"), Plan.Breaks.Num(), 1);
 		if (Plan.Breaks.Num() == 1)
 		{
