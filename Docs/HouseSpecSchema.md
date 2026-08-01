@@ -226,6 +226,36 @@ Two remedies the rule accepts, both positional:
 - **A separate `Bulkhead` ceiling** with its own polygon, for a beam crossing the open interior of a
   room. It has to be over the beam along the beam's whole run inside that room.
 
+### Everything in the room answers to the ceiling, and it is resolved at build time
+
+**State the height the drawing states. Do not adjust anything for the ceiling.** A pelmet goes in at
+the 2350 the drawing marks it at, even if the finished soffit over it is going to be at 2520.
+
+A false ceiling here is *derived*: a drawing names a template, the project's settings say what that
+template's figures are, and the beams over the room decide the perimeter ring. None of the three is
+something a drawing states, and all three change when somebody drags a slider. So a fixture height
+worked out against a ceiling would be a copy of a number that goes stale the moment they do.
+
+`FHFCeilingFit` therefore resolves it at build time, from the soffit that actually ends up over each
+fixture's **whole footprint** — not over its centre, because a 2.2 m run crosses a 300 ring and a 450
+band without its middle leaving one of them. What gives depends on what the thing is:
+
+| Fixture | What happens |
+|---|---|
+| `CeilingFan` | Its rod lengthens and its canopy drops onto the soffit; it hangs from the slab |
+| `LightFixture` | `baseZ` is a drop below the *finished soffit* rather than below the slab |
+| `ExhaustFan`, `ACIndoorUnit`, `Geyser`, `Chimney`, `Pelmet`, `Curtain` | Keeps its size, slides **down** only as far as it must, never up |
+| `Wardrobe`, `LoftUnit`, `KitchenWallCabinet`, `KitchenTallUnit`, `Bookshelf` | Keeps its base, is **cut shorter** — what a carpenter does |
+| everything else | Left exactly as drawn |
+
+Nothing is written back into the spec, so the file keeps saying what the drawing says. When nothing
+can be made to fit, the fitting is built as drawn and `CeilingLeavesNoRoomForFixture` says so — a
+silent fudge would hide a design fault.
+
+An extract that has to drop takes the duct cored through its wall with it, and the size the fit works
+against is what actually gets **built**: an extract's bezel laps the corners of that chase, so a fan
+drawn 250 stands 316 tall.
+
 ## `fixtures[]`
 
 Joinery, furniture, sanitary ware and electrical fittings.
@@ -304,7 +334,13 @@ Openings sharing a wall and a height range raise `OpeningsOverlap`.
 `ImplausibleWallThickness`, `ImplausibleDoorSize`, `MissingSwing`, `SwingBlocked`,
 `DoorWithSill` (probably a mislabelled window),
 `LowHeadroom` (under 2100 clear), `CeilingBelowDoorHead`, `CeilingDoesNotClearBeam`,
-`BeamLowHeadroom`, `UnknownFixtureType`, `OverlappingFixtures`, `FixtureFootprintCrossesWall`.
+`CeilingLeavesNoRoomForFixture`, `BeamLowHeadroom`, `UnknownFixtureType`, `OverlappingFixtures`,
+`FixtureFootprintCrossesWall`.
+
+`CeilingBelowDoorHead` covers windows and ventilators as well as doors, and asks positionally: an
+opening is cut into a wall, and the wall line is exactly where a perimeter bulkhead ring hangs
+lowest. A shallow band away from the wall really does sit clear of a door head, and the same
+question answers that too.
 
 `CeilingDoesNotClearBeam` is the one worth understanding. A peripheral or cove ceiling leaves the
 centre of the room at slab height and so conceals nothing mid-span; it only escapes the warning
