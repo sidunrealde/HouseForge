@@ -1325,6 +1325,39 @@ bool FHFMeshOps::BuildLightmapUVs(FDynamicMesh3& Mesh, const FHFLightmapParams& 
 		return false;
 	}
 
+	// THE PACKER DOES NOT GUARANTEE THE UNIT SQUARE, and on the reference flat it overruns it by up
+	// to 4.6 on a fifth of the meshes - the ones carrying many small islands. A lightmap UV outside
+	// 0..1 is not a cosmetic problem: the bake allocates one texture per mesh and addresses it with
+	// these coordinates, so anything past the edge wraps back onto another island and lights it with
+	// somebody else's bounce.
+	//
+	// Fixed by one UNIFORM scale and translate over the whole sheet, never per island. That preserves
+	// every relative island size and every gap between them exactly as the packer laid them out; the
+	// only cost is that the gutter ends up the same fraction smaller, which is why GutterPixels is
+	// asked for at the target resolution rather than assumed to survive. Refitting islands
+	// individually would be the wrong fix - it would destroy the consistent texel density that
+	// starting from a world-scale projection exists to produce.
+	FAxisAlignedBox2f Packed = FAxisAlignedBox2f::Empty();
+	for (const int32 Eid : Lightmap->ElementIndicesItr())
+	{
+		Packed.Contain(Lightmap->GetElement(Eid));
+	}
+
+	const float Border = 0.5f / static_cast<float>(Packer.TextureResolution);
+	const float Span = FMath::Max(Packed.Width(), Packed.Height());
+	if (Span > UE_KINDA_SMALL_NUMBER
+		&& (Packed.Min.X < 0.0f || Packed.Min.Y < 0.0f || Packed.Max.X > 1.0f || Packed.Max.Y > 1.0f))
+	{
+		const float Scale = (1.0f - 2.0f * Border) / Span;
+		for (const int32 Eid : Lightmap->ElementIndicesItr())
+		{
+			const FVector2f UV = Lightmap->GetElement(Eid);
+			Lightmap->SetElement(Eid, FVector2f(
+				Border + (UV.X - Packed.Min.X) * Scale,
+				Border + (UV.Y - Packed.Min.Y) * Scale));
+		}
+	}
+
 	return true;
 }
 
