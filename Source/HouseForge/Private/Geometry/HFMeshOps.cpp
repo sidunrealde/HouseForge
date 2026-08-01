@@ -15,6 +15,65 @@
 
 using namespace UE::Geometry;
 
+namespace
+{
+	/**
+	 * Turns a triangulated cap the right way up, as a whole.
+	 *
+	 * THE TWO TRIANGULATORS THIS FILE USES DO NOT AGREE, and both prism builders cap their solids
+	 * with the same formula on the assumption that they do. PolygonTriangulation::TriangulateSimplePolygon
+	 * returns triangles wound like its input; FConstrainedDelaunay2d returns them wound the other
+	 * way. So every prism with a hole in it came out with BOTH caps inverted - the top facing down
+	 * into the solid, the bottom facing up out of it.
+	 *
+	 * Nothing in the suite could see it, and AppendPrism's own comment records why: GetVolumeArea
+	 * integrates along X alone, so a Z-extruded prism's caps contribute exactly zero to the volume
+	 * it reports. Bounds, watertightness, role tagging and triangle count all come out exactly
+	 * right. In a room it is not subtle at all - a peripheral ceiling band showed its soffit only
+	 * from ABOVE, so looking up from underneath you saw straight through the band into the plenum,
+	 * and the band's top face fought the slab soffit it was pressed against.
+	 *
+	 * ## Why the whole set, and never triangle by triangle
+	 *
+	 * Rewinding each triangle to counter-clockwise looks equivalent and is not. Given a CONCAVE
+	 * boundary, TriangulateSimplePolygon returns a set that DELIBERATELY CONTAINS BOTH ORIENTATIONS:
+	 * the reversed triangles cover the concave bite and cancel the forward ones that overran it, so
+	 * the set sums to the true area. Forcing them all one way fills the bite in - an L-shaped room's
+	 * floor grows to its bounding rectangle, which HouseForge.Geometry.ConcavePrism measures.
+	 *
+	 * Judging the set by its TOTAL signed area and flipping all of it or none preserves those
+	 * relative windings exactly, and needs no promise from either library about which way round it
+	 * likes to work. A triangulator swapped in later cannot turn the ceilings inside out again.
+	 */
+	void OrientCapCounterClockwise(TArray<FIndex3i>& Triangles, const TArray<FVector2d>& Positions)
+	{
+		double Signed = 0.0;
+
+		for (const FIndex3i& Tri : Triangles)
+		{
+			if (!Positions.IsValidIndex(Tri.A) || !Positions.IsValidIndex(Tri.B) || !Positions.IsValidIndex(Tri.C))
+			{
+				return;
+			}
+
+			const FVector2d& A = Positions[Tri.A];
+			const FVector2d& B = Positions[Tri.B];
+			const FVector2d& C = Positions[Tri.C];
+			Signed += (B.X - A.X) * (C.Y - A.Y) - (C.X - A.X) * (B.Y - A.Y);
+		}
+
+		if (Signed >= 0.0)
+		{
+			return;
+		}
+
+		for (FIndex3i& Tri : Triangles)
+		{
+			Swap(Tri.B, Tri.C);
+		}
+	}
+}
+
 EHFSurfaceRole FHFMeshOps::RoleForGroup(int32 GroupId)
 {
 	const int32 Index = GroupId - 1;
@@ -227,6 +286,12 @@ bool FHFMeshOps::AppendPrism(FDynamicMesh3& Mesh, const TArray<FVector2D>& Polyg
 
 	// Same outward-facing convention as AppendBox: caps face away from the solid, sides wound to
 	// match. An inverted prism has negative volume and silently defeats mesh booleans.
+	//
+	// The cap is turned the right way up rather than trusted, for the reason set out on
+	// OrientCapCounterClockwise. It changes nothing here - this triangulator already agrees - and it
+	// is what makes the identical formula in AppendPrismWithHoles correct rather than lucky.
+	OrientCapCounterClockwise(Triangles, Flat);
+
 	for (const FIndex3i& Tri : Triangles)
 	{
 		Mesh.AppendTriangle(BottomVerts[Tri.A], BottomVerts[Tri.B], BottomVerts[Tri.C], Group);
@@ -335,6 +400,11 @@ bool FHFMeshOps::AppendPrismWithHoles(FDynamicMesh3& Mesh, const TArray<FVector2
 		BottomVerts.Add(Mesh.AppendVertex(FVector3d(Vertex.X, Vertex.Y, BottomZ)));
 		TopVerts.Add(Mesh.AppendVertex(FVector3d(Vertex.X, Vertex.Y, TopZ)));
 	}
+
+	// Turned the right way up, not trusted. FConstrainedDelaunay2d hands back triangles wound
+	// OPPOSITE to the ones AppendPrism's triangulator returns, and this identical formula therefore
+	// built every holed prism in the plugin inside out. See OrientCapCounterClockwise.
+	OrientCapCounterClockwise(Triangulator.Triangles, Triangulator.Vertices);
 
 	for (const FIndex3i& Tri : Triangulator.Triangles)
 	{
