@@ -77,6 +77,7 @@ FHFBuildDefaults UHFSettings::Resolve() const
 	F.CeilingFanDropLength = CeilingFanDropLength;
 
 	Out.Ceiling = Ceiling;
+	Out.Skirting = Skirting;
 	Out.Validation = Validation;
 
 	return Out;

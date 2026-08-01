@@ -459,6 +459,23 @@ public:
 		meta = (ShowOnlyInnerProperties))
 	FHFCeilingDefaults Ceiling;
 
+	// ==================================================================================== skirting
+
+	/**
+	 * The section a skirting is run in, and the slack it leaves round a doorway.
+	 *
+	 * WHERE it runs is not here and cannot be: that follows from the walls a room has, the doors in
+	 * them and the joinery scribed to them, and is resolved per room by FHFSkirting::For. These are
+	 * the two figures a joiner would set out before cutting - how thick the board is, and how much
+	 * clear of each jamb it stops - and both are in centimetres.
+	 *
+	 * The height is not here either. A room states its own skirting height, because a drawing does:
+	 * a 100 skirting in the bedrooms and none at all in the bathrooms is a fact about the flat.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Skirting",
+		meta = (ShowOnlyInnerProperties))
+	FHFSkirtingParams Skirting;
+
 	// ======================================================================= validation limits
 
 	/** What the spec validator judges a house against, before anything is built from it. */

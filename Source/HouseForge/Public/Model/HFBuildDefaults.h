@@ -7,6 +7,7 @@
 #include "Geometry/HFJoineryKit.h"
 #include "Geometry/HFOpeningParams.h"
 #include "Model/HFCeilingTemplates.h"
+#include "Model/HFSkirtingPlan.h"
 #include "Model/HFSpecValidator.h"
 #include "HFBuildDefaults.generated.h"
 
@@ -338,6 +339,10 @@ struct HOUSEFORGE_API FHFBuildDefaults
 	/** The figures behind the named false-ceiling designs. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFCeilingDefaults Ceiling;
+
+	/** The section a skirting is run in, and what it leaves round a doorway. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFSkirtingParams Skirting;
 
 	/** What the validator judges a spec against. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")

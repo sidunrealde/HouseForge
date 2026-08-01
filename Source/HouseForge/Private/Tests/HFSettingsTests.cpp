@@ -602,7 +602,13 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// the rest of the room answers to rather than a plane drawn over the top of it. It is the gap
 	// FHFCeilingFit leaves between a fitting's head and the soffit above it, and it is on the page
 	// because how tight a project fixes to its plaster is a decision - see FHFCeilingDefaults.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 128);
+	//
+	// 130 rather than 128: the skirting section's two, Depth and JambClearance. Only two, because
+	// WHERE a skirting runs is not a setting - it follows from the walls a room has, the doors in
+	// them and the joinery scribed to them, and is resolved per room by FHFSkirting::For. What is
+	// left for a page to hold is what a joiner sets out before cutting: the board's thickness, and
+	// how far clear of each jamb it stops.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 130);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 31);
 
 	return true;
@@ -866,7 +872,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 126);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 128);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;
