@@ -654,4 +654,127 @@ bool FHFChamferIsShadedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * The 40 degree split is still the right threshold, and the chamfer is why it can stay.
+ *
+ * .claude/rules/04-conventions.md asks for hard and soft edges "chosen deliberately rather than left
+ * to a blanket recompute", so the figure is asserted against the geometry the kit actually emits
+ * rather than left as a comment:
+ *
+ *   - a box arris is 90 and stays HARD. It is also now chamfered, which leaves two 45 degree edges -
+ *     still above the threshold, so the chamfer reads as its own plane catching its own highlight
+ *     rather than as a smudge. That is the answer to "is 40 enough after bevelling": a chamfer is
+ *     meant to be a facet, and at 40 it is one.
+ *   - a revolved knob at 16 sides is 22.5 per facet and welds SMOOTH, which is the whole reason
+ *     for revolving it.
+ *
+ * The real defect in this area was never the angle. It was that UV0 appended three fresh elements
+ * per triangle corner and welded nothing, so the tangent basis UDynamicMeshComponent derives from
+ * it broke at every triangle edge of every smooth surface - carefully welded normals over a
+ * shattered tangent frame, invisible until a normal map goes on. That is what this measures.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFNormalThresholdTest,
+	"HouseForge.Photoreal.HardAndSoftEdgesAreDeliberate", HF_TEST_FLAGS)
+
+bool FHFNormalThresholdTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeRenderFinish;
+
+	auto CountWelds = [](const FDynamicMesh3& Mesh, int32& OutNormalWelds, int32& OutUVWelds, int32& OutInterior)
+	{
+		OutNormalWelds = OutUVWelds = OutInterior = 0;
+
+		const FDynamicMeshNormalOverlay* Normals = Mesh.Attributes()->PrimaryNormals();
+		const FDynamicMeshUVOverlay* UVs = Mesh.Attributes()->PrimaryUV();
+		if (Normals == nullptr || UVs == nullptr)
+		{
+			return;
+		}
+
+		for (const int32 Eid : Mesh.EdgeIndicesItr())
+		{
+			const FIndex2i Tris = Mesh.GetEdgeT(Eid);
+			if (Tris.B == FDynamicMesh3::InvalidID)
+			{
+				continue;
+			}
+			++OutInterior;
+			OutNormalWelds += Normals->AreTrianglesConnected(Tris.A, Tris.B) ? 1 : 0;
+			OutUVWelds += UVs->AreTrianglesConnected(Tris.A, Tris.B) ? 1 : 0;
+		}
+	};
+
+	// A box: every arris is 90 and must stay hard, and its two coplanar half-quads must weld.
+	{
+		FDynamicMesh3 Box = MakeBox();
+		FHFMeshOps::ApplyWorldScaleUVs(Box, 100.0);
+
+		int32 NormalWelds = 0, UVWelds = 0, Interior = 0;
+		CountWelds(Box, NormalWelds, UVWelds, Interior);
+
+		// Six faces, each split by one diagonal: exactly six interior edges may weld.
+		TestEqual(TEXT("A box welds only its face diagonals, never an arris"), NormalWelds, 6);
+		TestEqual(TEXT("And UV0 welds across exactly those same six"), UVWelds, 6);
+		TestTrue(TEXT("A box has arrises to keep hard"), Interior > 6);
+	}
+
+	// A revolved solid: its facets are meant to disappear, and its tangent frame with them.
+	{
+		FDynamicMesh3 Knob;
+		FHFMeshOps::InitialiseMesh(Knob);
+		// A 16-sided barrel: 22.5 degrees per facet, comfortably under the threshold.
+		FHFMeshOps::AppendRevolvedProfile(Knob, { FVector2D(0.0, 1.5), FVector2D(4.0, 1.5) },
+			FVector3d::Zero(), FVector3d::UnitZ(), 16, EHFSurfaceRole::MetalHardware);
+		FHFMeshOps::ApplyWorldScaleUVs(Knob, 100.0);
+
+		int32 NormalWelds = 0, UVWelds = 0, Interior = 0;
+		CountWelds(Knob, NormalWelds, UVWelds, Interior);
+
+		if (TestTrue(TEXT("The barrel has interior edges"), Interior > 0))
+		{
+			TestTrue(TEXT("Most of a revolved barrel welds smooth"),
+				NormalWelds > Interior / 2);
+
+			// The load-bearing one. Before UV0 was welded this was ZERO on every mesh in the plugin,
+			// so the tangent basis broke at every edge of every curved surface while the normals were
+			// perfect. A planar projection cannot weld across the axis changes - those are real UV
+			// seams, and there are four of them round a barrel - but everything between them must.
+			TestTrue(TEXT("UV0 welds across a barrel's facet seams too, so its tangents are continuous"),
+				UVWelds > Interior / 4);
+		}
+	}
+
+	// And after chamfering, the chamfer facets are hard on both sides: a 90 degree arris becomes two
+	// 45 degree ones, which is the deliberate choice, not an accident of the default.
+	{
+		FDynamicMesh3 Chamfered = MakeBox();
+		FHFRenderFinish Finish;
+		FHFMeshOps::FinishForRender(Chamfered, Finish);
+
+		const FDynamicMeshNormalOverlay* Normals = Chamfered.Attributes()->PrimaryNormals();
+		if (TestNotNull(TEXT("The chamfered box has normals"), Normals))
+		{
+			int32 Hard = 0;
+			for (const int32 Eid : Chamfered.EdgeIndicesItr())
+			{
+				const FIndex2i Tris = Chamfered.GetEdgeT(Eid);
+				if (Tris.B == FDynamicMesh3::InvalidID)
+				{
+					continue;
+				}
+
+				const double Angle = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+					Chamfered.GetTriNormal(Tris.A).Dot(Chamfered.GetTriNormal(Tris.B)), -1.0, 1.0)));
+				if (Angle > 40.0 && Normals->AreTrianglesConnected(Tris.A, Tris.B))
+				{
+					++Hard;
+				}
+			}
+			TestEqual(TEXT("Nothing over 40 degrees was welded smooth by mistake"), Hard, 0);
+		}
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
