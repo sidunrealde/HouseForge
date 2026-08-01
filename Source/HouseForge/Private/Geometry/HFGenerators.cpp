@@ -1426,11 +1426,23 @@ namespace
 		// leaf it had designated the runner. That reads as correct in a still of a shut door and is
 		// a missing handle the moment anybody opens the unit from the other end.
 		{
-			// On the meeting stile, projecting away from the other sash's track - which is the face
-			// a hand can reach and the side the catch is fitted on. Which END the meeting stile is on
-			// is the caller's to say: the leaf set out from the near jamb meets its partner at its
-			// far edge, and the leaf set out from the far jamb meets it at its near edge. Reading it
-			// off the geometry here would put both pulls on the same side of the unit.
+			// On the meeting stile, projecting AWAY from the other sash's track.
+			//
+			// Which END the meeting stile is on is the caller's to say: the leaf set out from the
+			// near jamb meets its partner at its far edge, and the leaf set out from the far jamb
+			// meets it at its near edge. Reading it off the geometry here would put both pulls on
+			// the same side of the unit.
+			//
+			// Which FACE is not a style choice, it is a clearance. Two tracks are one leaf thickness
+			// and a running clearance apart, and a pull stands 15-30 mm proud of the leaf it is
+			// screwed to; put the outer leaf's pull on the room side and the inner leaf drives
+			// through it every time either one moves. That reads perfectly well in a still of a shut
+			// unit, which is the same trap the wardrobe's applied handles fell into.
+			//
+			// So each pull faces out of its own track. On a balcony door that is exactly right - a
+			// pull inside and a pull on the balcony is what one has. On a window it means the outer
+			// sash's catch faces outward, where a real domal unit would use a slim flush pull inside
+			// the 10 mm gap; that is a simplification, and it is the one that cannot clash.
 			const double Side = TrackY >= 0.0 ? 1.0 : -1.0;
 			const double Half = Section.HandleHeight * 0.5;
 			const double Lowest = ZMin + Rail + Half;
