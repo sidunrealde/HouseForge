@@ -27,14 +27,30 @@ class HOUSEFORGE_API FHFGenerators
 {
 public:
 	/**
-	 * A wall, with its openings cut out.
+	 * A wall, with its openings cut out and the structure it is built around taken out of it.
 	 *
 	 * Built from the centreline outward, so changing thickness grows the wall symmetrically and
 	 * leaves its neighbours' junctions alone. Openings are subtracted as boxes that overshoot the
 	 * wall faces, because a cutter flush with the surface leaves coplanar faces the boolean has to
 	 * resolve and often does badly.
+	 *
+	 * @param Structure Beams and columns passing through this wall. THE RCC FRAME GOES UP FIRST AND
+	 *        THE BLOCKWORK INFILLS AROUND IT: masonry is built up to a beam's soffit and butted to a
+	 *        column's face, so the wall does not exist where the structure is. Leaving it there gave
+	 *        both members the same faces to draw, and the whole flat flashed - see FHFStructuralCut.
+	 *        The composing layer works out which members reach this wall; a generator cannot know.
 	 */
-	static UE::Geometry::FDynamicMesh3 GenerateWall(const FHFWall& Wall, const TArray<FHFOpening>& OpeningsInWall);
+	static UE::Geometry::FDynamicMesh3 GenerateWall(const FHFWall& Wall, const TArray<FHFOpening>& OpeningsInWall,
+		const TArray<FHFStructuralCut>& Structure = TArray<FHFStructuralCut>());
+
+	/**
+	 * The volume a beam or a column displaces, ready to be handed to another member as structure.
+	 *
+	 * Pure conversions, and here rather than on the structs because a beam's orientation comes from
+	 * its centreline and only this file knows how that is resolved.
+	 */
+	static FHFStructuralCut StructuralCutFor(const FHFBeam& Beam);
+	static FHFStructuralCut StructuralCutFor(const FHFColumn& Column);
 
 	/**
 	 * A room's floor slab, plus skirting swept around its boundary.
@@ -86,8 +102,16 @@ public:
 	/** The structural slab soffit over a room - what you see looking up where nothing conceals it. */
 	static UE::Geometry::FDynamicMesh3 GenerateCeilingSlab(const FHFRoom& Room, double SlabThickness);
 
-	/** A downstand beam, hanging below the slab soffit. */
-	static UE::Geometry::FDynamicMesh3 GenerateBeam(const FHFBeam& Beam);
+	/**
+	 * A downstand beam, hanging below the slab soffit.
+	 *
+	 * @param Structure Columns this beam lands on, and any beam that runs through it. A column is
+	 *        cast before the beams that frame into it, and where two beams cross one is continuous
+	 *        and the other stops at its face. Two beam soffits sharing a patch of the same plane is
+	 *        a flash directly overhead, in the one surface a room's ceiling is made of.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateBeam(const FHFBeam& Beam,
+		const TArray<FHFStructuralCut>& Structure = TArray<FHFStructuralCut>());
 
 	/** A column. */
 	static UE::Geometry::FDynamicMesh3 GenerateColumn(const FHFColumn& Column);

@@ -119,6 +119,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ShowOnlyInnerProperties))
 	FHFWall Wall;
 
+	/**
+	 * Beams and columns passing through this wall.
+	 *
+	 * The RCC frame goes up first and the blockwork infills around it, so the wall is not built
+	 * where these are. Held on the actor rather than looked up, for the same reason the openings
+	 * are: a wall owns everything it needs to rebuild itself when its thickness is edited, and a
+	 * generator may not go looking for the rest of the house. See FHFStructuralCut.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FHFStructuralCut> Structure;
+
 	/** The openings cut into this wall. Held here so the wall owns everything it needs to rebuild. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	TArray<FHFOpening> Openings;
@@ -194,6 +205,10 @@ class HOUSEFORGE_API AHFBeamActor : public AHFElementActor
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ShowOnlyInnerProperties))
 	FHFBeam Beam;
+
+	/** Columns this beam lands on, and any beam that runs through it. See FHFStructuralCut. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FHFStructuralCut> Structure;
 
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;

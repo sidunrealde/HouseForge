@@ -380,6 +380,56 @@ struct HOUSEFORGE_API FHFColumn
 	EHFSurfaceRole SurfaceRole = EHFSurfaceRole::Structure;
 };
 
+/**
+ * A volume that displaces whatever is built around it.
+ *
+ * RCC GOES UP FIRST AND THE BLOCKWORK INFILLS AROUND IT. A wall under a downstand beam is built to
+ * the beam soffit; a wall meeting a column butts against its face; a beam frames into the column it
+ * lands on. In none of those does the same volume belong to both members, and the plaster that
+ * spans the junction afterwards is a finish, not a second wall.
+ *
+ * Modelled as if it did. A beam co-linear with the wall below it occupied the top 450 of that
+ * wall's own solid, so the beam and the wall each drew the same two side faces and the same top
+ * face - and two faces in one plane pointing the same way is a coin toss the depth test re-tosses
+ * every frame. That is the flashing the flat was reported for: a stippled band the whole 10.8 m
+ * length of the south elevation, a torn sawtooth along every wall-to-ceiling junction, a striped
+ * strip up the wall beside the master bedroom door. Every one of those meshes was watertight,
+ * correctly wound, correctly sized and correctly tagged.
+ *
+ * A beam and a column reduce to the same thing as far as the member they displace is concerned, so
+ * the generators see ONE concept rather than two, and a structural member added later needs no new
+ * case anywhere.
+ *
+ * A plain oriented box, because that is what every structural member in this domain is. Anything
+ * that is not - a shear wall on a curve - would arrive as several of these.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFStructuralCut
+{
+	GENERATED_BODY()
+
+	/** What displaced the masonry, for the build log. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	FName SourceId;
+
+	/** Centre of the volume, in world centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FVector Centre = FVector::ZeroVector;
+
+	/** Half-size on each axis, before rotation. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FVector Extents = FVector::ZeroVector;
+
+	/** Rotation about Z, about the centre. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double YawDegrees = 0.0;
+
+	double BottomZ() const { return Centre.Z - Extents.Z; }
+	double TopZ() const { return Centre.Z + Extents.Z; }
+
+	bool IsValid() const { return Extents.X > 0.0 && Extents.Y > 0.0 && Extents.Z > 0.0; }
+};
+
 /** An enclosed space. Its boundary drives the floor slab, skirting and false ceiling. */
 USTRUCT(BlueprintType)
 struct HOUSEFORGE_API FHFRoom

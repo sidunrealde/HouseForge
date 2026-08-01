@@ -732,6 +732,7 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 		&Result, FMeshBoolean::EBooleanOp::Difference);
 	Boolean.bPutResultInInputSpace = true;
 
+
 	// The one thing standing between a cut face and the material panel. The tool's triangles are
 	// appended into the result with freshly allocated group ids, so ask for the map back and undo
 	// the renumbering below - the group IS the surface role here, not an arbitrary partition.
@@ -750,9 +751,13 @@ bool FHFMeshOps::SubtractInPlace(FDynamicMesh3& Target, const FDynamicMesh3& Too
 		// Leaving the target uncut is the safer failure: a half-subtracted wall still looks
 		// plausible in a screenshot, which is exactly how a bad cut would go unnoticed. Log it,
 		// because a silent no-op is indistinguishable from a cut that was never requested.
+		// Unwelded edges are reported alongside, because they say WHICH failure this is: a result
+		// with triangles and open seams is a cut that worked and did not close, which is a
+		// tolerance problem, not a geometry one.
 		UE_LOG(LogHouseForge, Warning,
-			TEXT("Mesh subtraction produced unusable geometry (computed=%d, result tris=%d, closed=%d); target left uncut."),
-			bComputed ? 1 : 0, Result.TriangleCount(), IsClosed(Result) ? 1 : 0);
+			TEXT("Mesh subtraction produced unusable geometry (computed=%d, result tris=%d, closed=%d, unwelded edges=%d); target left uncut."),
+			bComputed ? 1 : 0, Result.TriangleCount(), IsClosed(Result) ? 1 : 0,
+			Boolean.CreatedBoundaryEdges.Num());
 		return false;
 	}
 

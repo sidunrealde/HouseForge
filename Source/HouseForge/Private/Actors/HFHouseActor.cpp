@@ -67,6 +67,79 @@ namespace
 		Out.Add(RotateAbout(Centre + FVector2D(-Half.X,  Half.Y), Centre, RotationDegrees));
 		return Out;
 	}
+
+	// ------------------------------------------------------------------- the build order of a frame
+	//
+	// A house is not a bag of solids. Concrete is cast before masonry is laid, columns before the
+	// beams that frame into them, and where two members want the same volume exactly one of them
+	// gets it. Modelling every member as if it were alone gave two of them the same faces to draw,
+	// and the whole flat flashed - see FHFStructuralCut.
+	//
+	// So the composing layer, which is the only thing that can see more than one element, works out
+	// what displaces what and hands each member the list. The precedence is the build sequence:
+	//
+	//   1. Columns - cast first, full height, displaced by nothing.
+	//   2. Beams   - frame into every column they land on. Where two cross, the LONGER one runs
+	//                through and the shorter stops at its face, which is what primary and secondary
+	//                beams are. Equal lengths break on id so a rebuild is deterministic.
+	//   3. Walls   - blockwork infills around all of it.
+
+	/** World-space bounds of an oriented structural volume. */
+	FBox BoundsOf(const FHFStructuralCut& Cut)
+	{
+		if (!Cut.IsValid())
+		{
+			return FBox(ForceInit);
+		}
+
+		FBox Bounds(ForceInit);
+		const FVector2D Centre(Cut.Centre.X, Cut.Centre.Y);
+
+		for (const FVector2D& Corner : RectFootprint(Centre,
+			FVector2D(Cut.Extents.X * 2.0, Cut.Extents.Y * 2.0), Cut.YawDegrees))
+		{
+			Bounds += FVector(Corner.X, Corner.Y, Cut.BottomZ());
+			Bounds += FVector(Corner.X, Corner.Y, Cut.TopZ());
+		}
+
+		return Bounds;
+	}
+
+	FBox BoundsOf(const FHFWall& Wall)
+	{
+		FBox Bounds(ForceInit);
+		for (const FVector2D& Corner : WallFootprint(Wall))
+		{
+			Bounds += FVector(Corner.X, Corner.Y, Wall.BaseZ);
+			Bounds += FVector(Corner.X, Corner.Y, Wall.BaseZ + Wall.Height);
+		}
+		return Bounds;
+	}
+
+	/**
+	 * True when two members want the same material, rather than merely meeting.
+	 *
+	 * Shrunk before the test on purpose. Two members that touch face to face are a butt joint - the
+	 * everyday case, every wall against every other wall - and cutting one with the other there
+	 * would run a mesh boolean per junction to remove exactly nothing.
+	 */
+	bool VolumesOverlap(const FBox& A, const FBox& B)
+	{
+		constexpr double Touching = 0.01;
+		return A.IsValid && B.IsValid && A.ExpandBy(-Touching).Intersect(B.ExpandBy(-Touching));
+	}
+
+	/** True when the first beam is the one that runs through at a crossing. */
+	bool BeamRunsThrough(const FHFBeam& Candidate, const FHFBeam& Other)
+	{
+		const double A = Candidate.Length();
+		const double B = Other.Length();
+		if (!FMath::IsNearlyEqual(A, B, 0.1))
+		{
+			return A > B;
+		}
+		return Candidate.Id.LexicalLess(Other.Id);
+	}
 }
 
 AHFHouseActor::AHFHouseActor()
@@ -192,6 +265,92 @@ void AHFHouseActor::BuildGeometry()
 		return Actor;
 	};
 
+	// ------------------------------------------------------------------ resolve the frame, once
+	//
+	// Worked out here, before anything is generated, because only the composing layer can see more
+	// than one element and a generator may not go looking for the rest of the house. See the note
+	// on build order above, and .claude/rules/04-conventions.md.
+	TArray<FHFStructuralCut> ColumnCuts;
+	TArray<FBox> ColumnBounds;
+	ColumnCuts.Reserve(Spec.Columns.Num());
+	ColumnBounds.Reserve(Spec.Columns.Num());
+
+	for (const FHFColumn& Column : Spec.Columns)
+	{
+		const FHFStructuralCut Cut = FHFGenerators::StructuralCutFor(Column);
+		if (Cut.IsValid())
+		{
+			ColumnCuts.Add(Cut);
+			ColumnBounds.Add(BoundsOf(Cut));
+		}
+	}
+
+	TArray<FHFStructuralCut> BeamCuts;
+	TArray<FBox> BeamBounds;
+	BeamCuts.Reserve(Spec.Beams.Num());
+	BeamBounds.Reserve(Spec.Beams.Num());
+
+	for (const FHFBeam& Beam : Spec.Beams)
+	{
+		BeamCuts.Add(FHFGenerators::StructuralCutFor(Beam));
+		BeamBounds.Add(BoundsOf(BeamCuts.Last()));
+	}
+
+	// What each beam is cut by: every column it lands on, and every beam that runs through it.
+	TArray<TArray<FHFStructuralCut>> BeamStructure;
+	BeamStructure.SetNum(Spec.Beams.Num());
+
+	for (int32 Index = 0; Index < Spec.Beams.Num(); ++Index)
+	{
+		if (!BeamCuts[Index].IsValid())
+		{
+			continue;
+		}
+
+		for (int32 Column = 0; Column < ColumnCuts.Num(); ++Column)
+		{
+			if (VolumesOverlap(BeamBounds[Index], ColumnBounds[Column]))
+			{
+				BeamStructure[Index].Add(ColumnCuts[Column]);
+			}
+		}
+
+		for (int32 Other = 0; Other < Spec.Beams.Num(); ++Other)
+		{
+			if (Other != Index && BeamCuts[Other].IsValid()
+				&& VolumesOverlap(BeamBounds[Index], BeamBounds[Other])
+				&& BeamRunsThrough(Spec.Beams[Other], Spec.Beams[Index]))
+			{
+				BeamStructure[Index].Add(BeamCuts[Other]);
+			}
+		}
+	}
+
+	// Masonry is displaced by all of it.
+	auto StructureInWall = [&ColumnCuts, &ColumnBounds, &BeamCuts, &BeamBounds](const FHFWall& Wall)
+	{
+		const FBox Bounds = BoundsOf(Wall);
+		TArray<FHFStructuralCut> Cuts;
+
+		for (int32 Index = 0; Index < ColumnCuts.Num(); ++Index)
+		{
+			if (VolumesOverlap(Bounds, ColumnBounds[Index]))
+			{
+				Cuts.Add(ColumnCuts[Index]);
+			}
+		}
+
+		for (int32 Index = 0; Index < BeamCuts.Num(); ++Index)
+		{
+			if (BeamCuts[Index].IsValid() && VolumesOverlap(Bounds, BeamBounds[Index]))
+			{
+				Cuts.Add(BeamCuts[Index]);
+			}
+		}
+
+		return Cuts;
+	};
+
 	// Walls carry their own openings, so each wall owns everything it needs to rebuild itself
 	// when its thickness or height is edited.
 	for (const FHFWall& Wall : Spec.Walls)
@@ -204,6 +363,8 @@ void AHFHouseActor::BuildGeometry()
 		}
 
 		WallActor->Wall = Wall;
+		WallActor->Structure = StructureInWall(Wall);
+
 		for (const FHFOpening& Opening : Spec.Openings)
 		{
 			if (Opening.WallId == Wall.Id)
@@ -317,12 +478,14 @@ void AHFHouseActor::BuildGeometry()
 		CeilingActor->Regenerate();
 	}
 
-	for (const FHFBeam& Beam : Spec.Beams)
+	for (int32 Index = 0; Index < Spec.Beams.Num(); ++Index)
 	{
+		const FHFBeam& Beam = Spec.Beams[Index];
 		if (AHFBeamActor* BeamActor = Cast<AHFBeamActor>(Spawn(AHFBeamActor::StaticClass(), Beam.Id,
 			FString::Printf(TEXT("Beam_%s"), *Beam.Id.ToString()))))
 		{
 			BeamActor->Beam = Beam;
+			BeamActor->Structure = BeamStructure[Index];
 			BeamActor->Regenerate();
 		}
 	}

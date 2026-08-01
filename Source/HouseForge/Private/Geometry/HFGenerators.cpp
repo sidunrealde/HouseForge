@@ -45,6 +45,273 @@ namespace
 		Frame.bValid = true;
 		return Frame;
 	}
+
+	/**
+	 * One surviving stretch of a linear member: where it runs, and how tall it is there.
+	 *
+	 * A wall interrupted by two columns is three panels of masonry; a wall under a beam over part of
+	 * its length is a tall stretch and a short one. Both are the same list.
+	 */
+	struct FMemberRun
+	{
+		double Start = 0.0;
+		double End = 0.0;
+		double TopZ = 0.0;
+	};
+
+	/**
+	 * Builds a linear member around the structure that displaces it.
+	 *
+	 * ONE FUNCTION FOR MASONRY AND FOR CONCRETE, because the question is the same either way: a wall
+	 * under a beam and a beam landing on a column are both "this member stops where that one starts".
+	 * Told the member as a centreline, a width and a height range, so a wall and a beam are the same
+	 * shape of problem and neither generator has to know about the other.
+	 *
+	 * ## Why this is arithmetic and not a mesh boolean
+	 *
+	 * The obvious implementation is to build the member whole and subtract each structural volume
+	 * from it. That was the first implementation, and on the reference flat EIGHT of those
+	 * subtractions came back with cracked seams - FMeshBoolean cuts correctly and then fails to weld
+	 * the new edges, so IsClosed rejects the result and the cut is abandoned. The member keeps
+	 * material the structure also occupies, both draw the shared faces, and that patch of the flat
+	 * flashes. Moving the cuts ahead of the openings, onto a pristine box, fixed two of the eight;
+	 * nothing fixed the rest, because a boolean's output is a far poorer boolean input than a box and
+	 * each cut ran on the wreckage of the last.
+	 *
+	 * None of that computation was ever needed. Structure meets a linear member in exactly two
+	 * shapes, and both of them are ONE-DIMENSIONAL:
+	 *
+	 *   A COLUMN INTERRUPTS IT.  Full height, so the masonry stops at one face of it and starts
+	 *                            again at the other. The wall becomes two panels.
+	 *   A BEAM CAPS IT.          Hung from the slab, so the masonry below is built up to the beam
+	 *                            soffit. The wall keeps its length and loses its top.
+	 *
+	 * So the member is worked out as a set of runs along its own length, each with its own top, and
+	 * emitted as one box per run. Exact, no tolerance in the geometry at all, cannot fail, and it
+	 * takes some seventy mesh booleans out of every house build. Where two runs meet, the faces are
+	 * opposed and buried in solid material, which is what a masonry joint is.
+	 *
+	 * A cut that is neither of those two shapes - one floating in the middle of the member's height,
+	 * or a column too short to reach its top - leaves material above it that a run cannot express.
+	 * Those fall back to the boolean, which is the right tool for a shape this is not: rare, honest,
+	 * and reported when it fails.
+	 *
+	 * Skewed structure falls back too. Reducing a cut to an interval needs its axes to line up with
+	 * this member's, and a projected bounding interval would take out more than the thing meant to
+	 * fill it. Nothing in this domain produces one - beams follow wall lines and columns sit on them.
+	 */
+	void AppendMemberAroundStructure(FDynamicMesh3& Mesh, const TArray<FHFStructuralCut>& Structure,
+		const FWallFrame& Frame, const FVector2D& Start, double Width, double BaseZ, double TopZ,
+		EHFSurfaceRole Role, const FName& MemberId)
+	{
+		if (!Frame.bValid || Width <= 0.0 || TopZ <= BaseZ)
+		{
+			return;
+		}
+
+		const FVector2D Midpoint = Start + Frame.Direction * (Frame.Length * 0.5);
+
+		/** At the surface, or through it. A beam the same width as its wall is flush to the last decimal. */
+		constexpr double Reached = 0.01;
+
+		TArray<FMemberRun> Runs;
+		Runs.Add({ 0.0, Frame.Length, TopZ });
+
+		// Structure this member cannot be built around by arithmetic alone.
+		TArray<FHFStructuralCut> Awkward;
+
+		/** Caps every run over [From, To] at NewTopZ; at or below the base that removes the stretch. */
+		auto CapRuns = [&Runs, BaseZ](double From, double To, double NewTopZ)
+		{
+			TArray<FMemberRun> Out;
+			Out.Reserve(Runs.Num() + 2);
+
+			for (const FMemberRun& Run : Runs)
+			{
+				if (To <= Run.Start || From >= Run.End)
+				{
+					Out.Add(Run);
+					continue;
+				}
+
+				if (From > Run.Start)
+				{
+					Out.Add({ Run.Start, From, Run.TopZ });
+				}
+
+				const double Capped = FMath::Min(Run.TopZ, NewTopZ);
+				if (Capped > BaseZ + UE_KINDA_SMALL_NUMBER)
+				{
+					Out.Add({ FMath::Max(From, Run.Start), FMath::Min(To, Run.End), Capped });
+				}
+
+				if (To < Run.End)
+				{
+					Out.Add({ To, Run.End, Run.TopZ });
+				}
+			}
+
+			Runs = MoveTemp(Out);
+		};
+
+		for (const FHFStructuralCut& Cut : Structure)
+		{
+			if (!Cut.IsValid())
+			{
+				continue;
+			}
+
+			// Where the cutter's own axes sit relative to this member's. A quarter turn swaps its
+			// two plan half-extents and nothing else, which is why both cases are exact.
+			const double Relative = FMath::UnwindDegrees(Cut.YawDegrees - Frame.YawDegrees);
+			const bool bAligned = FMath::IsNearlyZero(FMath::Abs(Relative), 0.01)
+				|| FMath::IsNearlyEqual(FMath::Abs(Relative), 180.0, 0.01);
+			const bool bCrossed = FMath::IsNearlyEqual(FMath::Abs(Relative), 90.0, 0.01);
+
+			if (!bAligned && !bCrossed)
+			{
+				Awkward.Add(Cut);
+				continue;
+			}
+
+			const FVector2D Offset = FVector2D(Cut.Centre.X, Cut.Centre.Y) - Midpoint;
+			const double HalfAlong = bAligned ? Cut.Extents.X : Cut.Extents.Y;
+			const double HalfAcross = bAligned ? Cut.Extents.Y : Cut.Extents.X;
+			const double Across = FVector2D::DotProduct(Offset, Frame.Normal);
+
+			// Measured from the member's start, which is how a run is measured.
+			const double AlongCentre = FVector2D::DotProduct(Offset, Frame.Direction) + Frame.Length * 0.5;
+			const double From = FMath::Max(AlongCentre - HalfAlong, 0.0);
+			const double To = FMath::Min(AlongCentre + HalfAlong, Frame.Length);
+
+			// Misses this member entirely, along it or across it.
+			if (To <= From
+				|| Across - HalfAcross >= Width * 0.5 - Reached
+				|| Across + HalfAcross <= -Width * 0.5 + Reached)
+			{
+				continue;
+			}
+
+			const bool bReachesBottom = Cut.BottomZ() <= BaseZ + Reached;
+			const bool bReachesTop = Cut.TopZ() >= TopZ - Reached;
+
+			if (bReachesBottom && bReachesTop)
+			{
+				CapRuns(From, To, BaseZ);
+			}
+			else if (bReachesTop)
+			{
+				CapRuns(From, To, FMath::Max(Cut.BottomZ(), BaseZ));
+			}
+			else
+			{
+				// Material would survive above it. Not a run; hand it to the boolean.
+				Awkward.Add(Cut);
+			}
+		}
+
+		for (const FMemberRun& Run : Runs)
+		{
+			const double RunLength = Run.End - Run.Start;
+			if (RunLength <= UE_KINDA_SMALL_NUMBER || Run.TopZ <= BaseZ + UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const FVector2D Plan = Start + Frame.Direction * (Run.Start + RunLength * 0.5);
+			FHFMeshOps::AppendBox(Mesh,
+				FVector3d(Plan.X, Plan.Y, (BaseZ + Run.TopZ) * 0.5),
+				FVector3d(RunLength * 0.5, Width * 0.5, (Run.TopZ - BaseZ) * 0.5),
+				Frame.YawDegrees, Role);
+		}
+
+		for (const FHFStructuralCut& Cut : Awkward)
+		{
+			// Overshot on every face that already lies at or beyond this member's surface, and left
+			// exact on every face that cuts into it. Pushing a face further out through a surface it
+			// has already reached removes nothing extra, so it is free; leaving the rest exact is what
+			// stops the tool eating material the structure does not fill.
+			const FVector2D Offset = FVector2D(Cut.Centre.X, Cut.Centre.Y) - Midpoint;
+			const double AlongCentre = FVector2D::DotProduct(Offset, Frame.Direction);
+			const double AcrossCentre = FVector2D::DotProduct(Offset, Frame.Normal);
+			const double HalfLength = Frame.Length * 0.5;
+			const double HalfWidth = Width * 0.5;
+
+			double AlongMin = AlongCentre - Cut.Extents.X;
+			double AlongMax = AlongCentre + Cut.Extents.X;
+			double AcrossMin = AcrossCentre - Cut.Extents.Y;
+			double AcrossMax = AcrossCentre + Cut.Extents.Y;
+			double Bottom = Cut.BottomZ();
+			double Top = Cut.TopZ();
+
+			AlongMin -= (AlongMin <= -HalfLength + Reached) ? CutterOvershoot : 0.0;
+			AlongMax += (AlongMax >= HalfLength - Reached) ? CutterOvershoot : 0.0;
+			AcrossMin -= (AcrossMin <= -HalfWidth + Reached) ? CutterOvershoot : 0.0;
+			AcrossMax += (AcrossMax >= HalfWidth - Reached) ? CutterOvershoot : 0.0;
+			Bottom -= (Bottom <= BaseZ + Reached) ? CutterOvershoot : 0.0;
+			Top += (Top >= TopZ - Reached) ? CutterOvershoot : 0.0;
+
+			if (Top <= Bottom || AlongMax <= AlongMin || AcrossMax <= AcrossMin)
+			{
+				continue;
+			}
+
+			FDynamicMesh3 Cutter;
+			FHFMeshOps::InitialiseMesh(Cutter);
+
+			// Tagged with the member's own role, not the structure's. The faces a subtraction exposes
+			// come from the TOOL - see FHFMeshOps::SubtractInPlace - and the face this one exposes is
+			// the end of the masonry, which is masonry.
+			FHFMeshOps::AppendBox(Cutter,
+				FVector3d(Cut.Centre.X, Cut.Centre.Y, (Bottom + Top) * 0.5),
+				FVector3d((AlongMax - AlongMin) * 0.5, (AcrossMax - AcrossMin) * 0.5, (Top - Bottom) * 0.5),
+				Cut.YawDegrees, Role);
+
+			if (!FHFMeshOps::SubtractInPlace(Mesh, Cutter))
+			{
+				// Named, because the consequence is invisible in every other measurement: the member
+				// keeps material the structure also occupies, both draw the shared faces, and that
+				// patch of the flat flashes. Nothing else about either mesh is wrong.
+				UE_LOG(LogHouseForge, Warning,
+					TEXT("'%s' could not be built around '%s'; they overlap and will z-fight."),
+					*MemberId.ToString(), *Cut.SourceId.ToString());
+			}
+		}
+	}
+}
+
+FHFStructuralCut FHFGenerators::StructuralCutFor(const FHFBeam& Beam)
+{
+	FHFStructuralCut Cut;
+	Cut.SourceId = Beam.Id;
+
+	const FWallFrame Frame = MakeWallFrame(Beam.Start, Beam.End);
+	if (!Frame.bValid || Beam.Width <= 0.0 || Beam.Depth <= 0.0)
+	{
+		return Cut;
+	}
+
+	const FVector2D Midpoint = (Beam.Start + Beam.End) * 0.5;
+	Cut.Centre = FVector(Midpoint.X, Midpoint.Y, Beam.SoffitZ - Beam.Depth * 0.5);
+	Cut.Extents = FVector(Frame.Length * 0.5, Beam.Width * 0.5, Beam.Depth * 0.5);
+	Cut.YawDegrees = Frame.YawDegrees;
+	return Cut;
+}
+
+FHFStructuralCut FHFGenerators::StructuralCutFor(const FHFColumn& Column)
+{
+	FHFStructuralCut Cut;
+	Cut.SourceId = Column.Id;
+
+	if (Column.Size.X <= 0.0 || Column.Size.Y <= 0.0 || Column.Height <= 0.0)
+	{
+		return Cut;
+	}
+
+	Cut.Centre = FVector(Column.Position.X, Column.Position.Y, Column.BaseZ + Column.Height * 0.5);
+	Cut.Extents = FVector(Column.Size.X * 0.5, Column.Size.Y * 0.5, Column.Height * 0.5);
+	Cut.YawDegrees = Column.RotationDegrees;
+	return Cut;
 }
 
 FVector2D FHFGenerators::OpeningCentre(const FHFOpening& Opening, const FHFWall& Wall)
@@ -57,7 +324,8 @@ FVector2D FHFGenerators::OpeningCentre(const FHFOpening& Opening, const FHFWall&
 	return Wall.Start + Frame.Direction * Opening.OffsetAlongWall;
 }
 
-FDynamicMesh3 FHFGenerators::GenerateWall(const FHFWall& Wall, const TArray<FHFOpening>& OpeningsInWall)
+FDynamicMesh3 FHFGenerators::GenerateWall(const FHFWall& Wall, const TArray<FHFOpening>& OpeningsInWall,
+	const TArray<FHFStructuralCut>& Structure)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -68,11 +336,10 @@ FDynamicMesh3 FHFGenerators::GenerateWall(const FHFWall& Wall, const TArray<FHFO
 		return Mesh;
 	}
 
-	const FVector2D Midpoint = (Wall.Start + Wall.End) * 0.5;
-	const FVector3d Centre(Midpoint.X, Midpoint.Y, Wall.BaseZ + Wall.Height * 0.5);
-	const FVector3d Extents(Frame.Length * 0.5, Wall.Thickness * 0.5, Wall.Height * 0.5);
-
-	FHFMeshOps::AppendBox(Mesh, Centre, Extents, Frame.YawDegrees, Wall.SurfaceRole);
+	// THE FRAME FIRST, THEN THE OPENINGS IN WHAT IS LEFT - the order a wall is actually built in.
+	// With no structure this emits exactly the one box it always did.
+	AppendMemberAroundStructure(Mesh, Structure, Frame, Wall.Start, Wall.Thickness,
+		Wall.BaseZ, Wall.BaseZ + Wall.Height, Wall.SurfaceRole, Wall.Id);
 
 	for (const FHFOpening& Opening : OpeningsInWall)
 	{
@@ -562,7 +829,7 @@ double FHFGenerators::CeilingSoffitDropAt(const FHFFalseCeiling& Ceiling, const 
 	}
 }
 
-FDynamicMesh3 FHFGenerators::GenerateBeam(const FHFBeam& Beam)
+FDynamicMesh3 FHFGenerators::GenerateBeam(const FHFBeam& Beam, const TArray<FHFStructuralCut>& Structure)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -573,13 +840,11 @@ FDynamicMesh3 FHFGenerators::GenerateBeam(const FHFBeam& Beam)
 		return Mesh;
 	}
 
-	const FVector2D Midpoint = (Beam.Start + Beam.End) * 0.5;
-
-	// Beams hang down from the slab soffit, so they occupy ClearHeight..SoffitZ.
-	FHFMeshOps::AppendBox(Mesh,
-		FVector3d(Midpoint.X, Midpoint.Y, Beam.SoffitZ - Beam.Depth * 0.5),
-		FVector3d(Frame.Length * 0.5, Beam.Width * 0.5, Beam.Depth * 0.5),
-		Frame.YawDegrees, Beam.SurfaceRole);
+	// Beams hang down from the slab soffit, so they occupy ClearHeight..SoffitZ - and they frame into
+	// the columns they land on and into any beam that runs through them. Left overlapping, two beam
+	// soffits share a patch of plane in the very surface a room's ceiling is made of.
+	AppendMemberAroundStructure(Mesh, Structure, Frame, Beam.Start, Beam.Width,
+		Beam.ClearHeight(), Beam.SoffitZ, Beam.SurfaceRole, Beam.Id);
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
 	return Mesh;
