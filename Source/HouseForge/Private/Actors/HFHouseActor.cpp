@@ -506,6 +506,10 @@ void AHFHouseActor::BuildGeometry()
 	// same list everything else takes is what stops the two drifting.
 	const FHFSkirtingParams SkirtingParams = FHFBuildDefaults::FromProjectSettings().Skirting;
 
+	// AND WHICH OF THEM WILL ACTUALLY STAND THERE. A skirting break is a hole in the board, so it
+	// has to be paid for by a carcass in front of it - see FHFSkirting::IsScribedJoinery.
+	const TSet<FName> BuiltIds = BuiltFixtureIds(Fixtures);
+
 	for (const FHFRoom& Room : Spec.Rooms)
 	{
 		AHFRoomActor* RoomActor = Cast<AHFRoomActor>(Spawn(AHFRoomActor::StaticClass(), Room.Id,
@@ -518,7 +522,7 @@ void AHFHouseActor::BuildGeometry()
 		RoomActor->Room = Room;
 		RoomActor->SlabThickness = SlabThickness;
 		RoomActor->Skirting = FHFSkirting::For(Room, Spec.Walls, Spec.Openings, Spec.Columns, Fixtures,
-			SkirtingParams);
+			SkirtingParams, &BuiltIds);
 		RoomActor->Regenerate();
 	}
 
@@ -619,9 +623,12 @@ void AHFHouseActor::BuildGeometry()
 	// Joinery. One fixture type so far - a wardrobe - and it is the first thing in the flat built out
 	// of FHFJoineryKit rather than out of a bespoke generator. The rest of the catalogue composes from
 	// the same kit and lands with milestone 9.
+	//
+	// The type test goes through BuildsGeometryFor as well as being written out here, so the skirting
+	// resolver, the build report and this loop cannot disagree about what exists.
 	for (const FHFFixture& Fixture : Fixtures)
 	{
-		if (Fixture.Type != EHFFixtureType::Wardrobe)
+		if (Fixture.Type != EHFFixtureType::Wardrobe || !BuildsGeometryFor(Fixture.Type))
 		{
 			continue;
 		}
@@ -658,7 +665,8 @@ void AHFHouseActor::BuildGeometry()
 	// above a fan that did not exist, and ExhaustFan was not read anywhere.
 	for (const FHFFixture& Fixture : Fixtures)
 	{
-		if (Fixture.Type != EHFFixtureType::CeilingFan && Fixture.Type != EHFFixtureType::ExhaustFan)
+		if ((Fixture.Type != EHFFixtureType::CeilingFan && Fixture.Type != EHFFixtureType::ExhaustFan)
+			|| !BuildsGeometryFor(Fixture.Type))
 		{
 			continue;
 		}
@@ -917,6 +925,34 @@ int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
 TArray<FHFFixture> AHFHouseActor::FittedFixtures() const
 {
 	return ResolveFixtures(nullptr);
+}
+
+bool AHFHouseActor::BuildsGeometryFor(EHFFixtureType Type)
+{
+	switch (Type)
+	{
+	case EHFFixtureType::Wardrobe:
+	case EHFFixtureType::CeilingFan:
+	case EHFFixtureType::ExhaustFan:
+		return true;
+
+	default:
+		// Everything else is a row in the spec and nothing in the level: milestone 9's catalogue.
+		return false;
+	}
+}
+
+TSet<FName> AHFHouseActor::BuiltFixtureIds(const TArray<FHFFixture>& Fixtures)
+{
+	TSet<FName> Ids;
+	for (const FHFFixture& Fixture : Fixtures)
+	{
+		if (BuildsGeometryFor(Fixture.Type))
+		{
+			Ids.Add(Fixture.Id);
+		}
+	}
+	return Ids;
 }
 
 TArray<FHFFixture> AHFHouseActor::ResolveFixtures(TArray<FString>* OutMoved) const

@@ -290,6 +290,15 @@ public:
 	 * that a wardrobe is scribed and a sofa is pushed up against the skirting. Loose furniture is
 	 * absent on purpose - a bed, a sofa or a nightstand stands IN FRONT of a skirting that carries on
 	 * behind it, and cutting one out for a bed would be a fault nobody could see until they moved it.
+	 *
+	 * BEING SCRIBED IS NOT ENOUGH TO CUT A SKIRTING. It says what a carpenter would do if the unit
+	 * were there; whether it IS there is a separate question, and it was the difference between a
+	 * correct rule and 710 cm of the reference flat's perimeter with the board deleted and bare
+	 * plaster behind it. Eight types answer true here and one of them - Wardrobe - is the only one
+	 * the composing layer builds today, so a shoe rack, a study table and two runs of kitchen base
+	 * units each took their length of skirting away and put nothing in front of it. That is the
+	 * user's "skirting stops abruptly in the middle", and it is why For takes BuiltFixtureIds: a
+	 * break has to be justified by geometry that will exist, not by a row in a spec.
 	 */
 	static bool IsScribedJoinery(EHFFixtureType Type);
 
@@ -315,11 +324,15 @@ public:
 	 * @param Columns Structure standing in the wall faces. A column proud of the plaster does not
 	 *        end a skirting - it makes it turn - so these produce breaks AND returns.
 	 * @param Fixtures May be the whole spec's list; anything in another room is ignored.
+	 * @param BuiltFixtureIds Which of those fixtures the composing layer will actually put geometry
+	 *        in the level for. See the note below. Null means "no information", and then every
+	 *        scribed type cuts, which is the right answer for a caller that is not building a house.
 	 */
 	static FHFSkirtingPlan For(const FHFRoom& Room, const TArray<FHFWall>& Walls,
 		const TArray<FHFOpening>& Openings, const TArray<FHFColumn>& Columns,
 		const TArray<FHFFixture>& Fixtures,
-		const FHFSkirtingParams& Params = FHFSkirtingParams());
+		const FHFSkirtingParams& Params = FHFSkirtingParams(),
+		const TSet<FName>* BuiltFixtureIds = nullptr);
 
 	/** One line per break, for a build report. */
 	static TArray<FString> Describe(const FHFRoom& Room, const FHFSkirtingPlan& Plan);

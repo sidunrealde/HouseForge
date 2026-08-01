@@ -217,7 +217,8 @@ bool FHFSkirting::ColumnProjectsInto(const FHFColumn& Column, const FVector2D& F
 
 FHFSkirtingPlan FHFSkirting::For(const FHFRoom& Room, const TArray<FHFWall>& Walls,
 	const TArray<FHFOpening>& Openings, const TArray<FHFColumn>& Columns,
-	const TArray<FHFFixture>& Fixtures, const FHFSkirtingParams& Params)
+	const TArray<FHFFixture>& Fixtures, const FHFSkirtingParams& Params,
+	const TSet<FName>* BuiltFixtureIds)
 {
 	FHFSkirtingPlan Plan;
 	Plan.Depth = Params.Depth;
@@ -410,6 +411,16 @@ FHFSkirtingPlan FHFSkirting::For(const FHFRoom& Room, const TArray<FHFWall>& Wal
 			for (const FHFFixture& Fixture : Fixtures)
 			{
 				if (Fixture.RoomId != Room.Id || !IsScribedJoinery(Fixture.Type))
+				{
+					continue;
+				}
+
+				// AND IT HAS TO BE BUILT. A break with nothing standing in it is a length of missing
+				// skirting and reads as exactly that: bare plaster meeting bare floor for the width
+				// of a unit nobody modelled. Where the caller has told us what it is building, a
+				// fixture it is not building leaves the run whole; where it has not, every scribed
+				// type still cuts, so a room resolved on its own behaves as it always did.
+				if (BuiltFixtureIds != nullptr && !BuiltFixtureIds->Contains(Fixture.Id))
 				{
 					continue;
 				}

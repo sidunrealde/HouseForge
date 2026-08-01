@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Actors/HFHouseActor.h"
 #include "Misc/AutomationTest.h"
 #include "Model/HFSampleHouse.h"
 #include "Model/HFSkirtingPlan.h"
@@ -382,12 +383,16 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
 	FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 	FHFUnits::ConvertToCentimeters(Spec);
 
+	// EXACTLY WHAT THE COMPOSING LAYER PASSES. Resolving here without it would test a plan the flat
+	// is never built from, and that is how 710 cm of deleted skirting stayed green.
+	const TSet<FName> BuiltIds = AHFHouseActor::BuiltFixtureIds(Spec.Fixtures);
+
 	int32 TotalBreaks = 0;
 
 	for (const FHFRoom& Room : Spec.Rooms)
 	{
 		const FHFSkirtingPlan Plan = FHFSkirting::For(Room, Spec.Walls, Spec.Openings,
-			Spec.Columns, Spec.Fixtures);
+			Spec.Columns, Spec.Fixtures, FHFSkirtingParams(), &BuiltIds);
 
 		// The identity. Runs are cut from the boundary and overlapping breaks merge, so this holds
 		// whatever the breaks are - and it fails the moment a run is emitted outside its edge.
@@ -479,6 +484,13 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
 					FHFSkirting::IsScribedJoinery(Fixture->Type));
 				TestTrue(*FString::Printf(TEXT("%s reaches the floor"), *Where),
 					Fixture->BaseZ < Room.SkirtingHeight);
+
+				// AND SOMETHING WILL ACTUALLY STAND IN IT. This is the assertion the user's first
+				// complaint needed: a gap the eye can see into is a defect however correct the rule
+				// that made it. The day a base cabinet starts building, its break comes back on its
+				// own and this keeps passing.
+				TestTrue(*FString::Printf(TEXT("%s is a fixture the house builds"), *Where),
+					AHFHouseActor::BuildsGeometryFor(Fixture->Type));
 			}
 		}
 
@@ -507,7 +519,8 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
 
 	if (CBath != nullptr)
 	{
-		const FHFSkirtingPlan Plan = FHFSkirting::For(*CBath, Spec.Walls, Spec.Openings, Spec.Columns, Spec.Fixtures);
+		const FHFSkirtingPlan Plan = FHFSkirting::For(*CBath, Spec.Walls, Spec.Openings, Spec.Columns,
+			Spec.Fixtures, FHFSkirtingParams(), &BuiltIds);
 		TestEqual(TEXT("The common bathroom has one gap"), Plan.Breaks.Num(), 1);
 		if (Plan.Breaks.Num() == 1)
 		{
@@ -517,6 +530,99 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
 	else
 	{
 		AddError(TEXT("The sample flat has no R_CBath to check."));
+	}
+
+	return true;
+}
+
+/**
+ * THE GAPS THE USER SAW, IN CENTIMETRES, AND THE FACT THAT THEY ARE GONE.
+ *
+ * "Skirting doesnt cover entirely. They stop abruptly in the middle." Measured off the built
+ * triangles at the time: the foyer lost 120 cm to a shoe rack, bedroom 2 lost 120 cm to a study
+ * table, and the kitchen lost 230 + 240 cm to two runs of base units - 710 cm of the flat's
+ * perimeter with the board deleted and nothing in front of it, because eight fixture types answer
+ * true to IsScribedJoinery and only Wardrobe is built.
+ *
+ * So this measures the two resolutions against each other. Told nothing, the resolver still cuts for
+ * every scribed type, which is the right answer for a room being resolved on its own. Told what the
+ * house builds, the unbuilt units leave the run whole - and the wardrobes, which ARE built, still
+ * cut, because a carcass really does stand there.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSkirtingUnbuiltJoineryTest,
+	"HouseForge.Model.SkirtingIsNotCutForJoineryNobodyBuilds", HF_TEST_FLAGS)
+
+bool FHFSkirtingUnbuiltJoineryTest::RunTest(const FString& Parameters)
+{
+	FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
+	FHFUnits::ConvertToCentimeters(Spec);
+
+	const TSet<FName> BuiltIds = AHFHouseActor::BuiltFixtureIds(Spec.Fixtures);
+
+	double RecoveredTotal = 0.0;
+	int32 WardrobeBreaks = 0;
+
+	for (const FHFRoom& Room : Spec.Rooms)
+	{
+		const FHFSkirtingPlan Uninformed = FHFSkirting::For(Room, Spec.Walls, Spec.Openings,
+			Spec.Columns, Spec.Fixtures);
+		const FHFSkirtingPlan Built = FHFSkirting::For(Room, Spec.Walls, Spec.Openings,
+			Spec.Columns, Spec.Fixtures, FHFSkirtingParams(), &BuiltIds);
+
+		// The identity still holds on the informed plan; recovering skirting must not invent any.
+		TestNearlyEqual(*FString::Printf(TEXT("%s: boundary is still skirting plus gaps"), *Room.Id.ToString()),
+			Built.CoveredLength() + Built.BreakLength(), Built.BoundaryLength(), 0.01);
+
+		TestTrue(*FString::Printf(TEXT("%s: knowing what is built never removes skirting"), *Room.Id.ToString()),
+			Built.CoveredLength() >= Uninformed.CoveredLength() - 0.01);
+
+		RecoveredTotal += Built.CoveredLength() - Uninformed.CoveredLength();
+
+		for (const FHFSkirtingBreak& Break : Built.Breaks)
+		{
+			if (Break.Cause == EHFSkirtingBreakCause::Joinery)
+			{
+				++WardrobeBreaks;
+			}
+		}
+	}
+
+	AddInfo(FString::Printf(TEXT("Skirting recovered across the flat: %.0f cm."), RecoveredTotal));
+
+	// The four unbuilt runs, to the centimetre: 120 + 120 + 230 + 240.
+	TestTrue(TEXT("The flat gets its missing skirting back"), RecoveredTotal > 700.0);
+
+	// And the wardrobes keep theirs, because a wardrobe really is built.
+	TestEqual(TEXT("Only the two wardrobes still cut the run"), WardrobeBreaks, 2);
+
+	// The rooms the user would have looked at first.
+	auto RoomNamed = [&Spec](const TCHAR* Id) -> const FHFRoom*
+	{
+		return Spec.Rooms.FindByPredicate([Id](const FHFRoom& R) { return R.Id == FName(Id); });
+	};
+
+	for (const TCHAR* Id : { TEXT("R_Kitchen"), TEXT("R_Foyer"), TEXT("R_Bed2") })
+	{
+		const FHFRoom* Room = RoomNamed(Id);
+		if (Room == nullptr)
+		{
+			AddError(FString::Printf(TEXT("The sample flat has no %s."), Id));
+			continue;
+		}
+
+		const FHFSkirtingPlan Built = FHFSkirting::For(*Room, Spec.Walls, Spec.Openings,
+			Spec.Columns, Spec.Fixtures, FHFSkirtingParams(), &BuiltIds);
+
+		for (const FHFSkirtingBreak& Break : Built.Breaks)
+		{
+			if (Break.Cause != EHFSkirtingBreakCause::Joinery)
+			{
+				continue;
+			}
+
+			TestTrue(*FString::Printf(TEXT("%s: gap for '%s' is backed by a built fixture"),
+				Id, *Break.SourceId.ToString()), BuiltIds.Contains(Break.SourceId));
+		}
 	}
 
 	return true;
