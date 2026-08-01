@@ -4,6 +4,7 @@
 
 #include "Actors/HFArticulatedActor.h"
 #include "Actors/HFCasedGoodsActor.h"
+#include "Actors/HFCounterActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFOpeningActor.h"
 #include "Actors/HFFanActor.h"
@@ -264,12 +265,39 @@ namespace
 	 * that depends on more than one element is resolved by the composing layer and handed over as a
 	 * plain value - the same rule the wall's structural cuts and the ceiling's fan holes follow.
 	 */
+	/**
+	 * Which set-in fixtures land on which host, resolved once for the whole house.
+	 *
+	 * THE ONE CROSS-FIXTURE DEPENDENCY IN THE CATALOGUE. A sink and a hob are set INTO a counter:
+	 * the counter has to be cut for them, and they have to sit at the counter's built top rather than
+	 * at the height the drawing gave them. Neither of those can be worked out by either fixture -
+	 * a generator may not go looking for the rest of the house, and nor may an actor - so it is
+	 * resolved here, in the composing layer, and handed to both sides as plain values.
+	 *
+	 * Exactly the shape of the answer AHFFanActor::DuctOpeningFor already gives for an extract's hole
+	 * through its host wall, and for the same reason.
+	 */
+	struct FHFSetInResolution
+	{
+		/** Holes to cut, by host fixture id, already in that host's own local frame. */
+		TMap<FName, TArray<FHFCounterAperture>> AperturesByHost;
+
+		/** World Z of the host's finished top, by SET-IN fixture id. */
+		TMap<FName, double> SurfaceZ;
+
+		/** The host's resolved yaw, by set-in fixture id. A hob set into a run turns WITH the run. */
+		TMap<FName, double> SurfaceYaw;
+	};
+
 	struct FHFFixtureContext
 	{
 		const FHFHouseSpec* Spec = nullptr;
 		const FHFFixture* Fixture = nullptr;
 		const FHFRoom* Room = nullptr;
 		const FHFWall* AnchorWall = nullptr;
+
+		/** Where the sinks and hobs are, for the counters they are cut into and for themselves. */
+		const FHFSetInResolution* SetIn = nullptr;
 
 		/** How far the false ceiling over this fixture hangs below the slab, at its own position. */
 		double SoffitDrop = 0.0;
@@ -332,6 +360,26 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	void SeedCounter(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFCounterActor& Actor = static_cast<AHFCounterActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// THE HOLES, WORKED OUT BY THE ONLY LAYER THAT CAN SEE TWO FIXTURES AT ONCE. Empty for a
+		// counter with nothing set into it, which is an uncut slab and not an error.
+		if (C.SetIn != nullptr)
+		{
+			if (const TArray<FHFCounterAperture>* Apertures = C.SetIn->AperturesByHost.Find(C.Fixture->Id))
+			{
+				Actor.Counter.Apertures = *Apertures;
+			}
+		}
+
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
 	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFFanActor& Actor = static_cast<AHFFanActor&>(Element);
@@ -383,6 +431,9 @@ namespace
 			{ EHFFixtureType::KitchenWallCabinet, AHFCasedGoodsActor::StaticClass(),
 				TEXT("Case"), &SeedCasedGoods },
 
+			{ EHFFixtureType::CounterTop, AHFCounterActor::StaticClass(),
+				TEXT("Counter"), &SeedCounter },
+
 			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
 				TEXT("Fan"), &SeedCeilingFan },
 			{ EHFFixtureType::ExhaustFan, AHFFanActor::StaticClass(),
@@ -402,6 +453,86 @@ namespace
 			}
 		}
 		return nullptr;
+	}
+
+	/** True for a fixture that is set INTO a worktop rather than standing on the floor. */
+	bool IsSetIntoASurface(EHFFixtureType Type)
+	{
+		return Type == EHFFixtureType::Sink || Type == EHFFixtureType::Hob;
+	}
+
+	/**
+	 * Which set-in fixtures land on which host, and where the host's finished top actually is.
+	 *
+	 * A set-in fixture is matched to a host by FOOTPRINT rather than by an id on the spec, because
+	 * the drawing does not carry one: a sink is drawn where it is, and the counter it is drawn on top
+	 * of is the counter it is set into. Matching on geometry also means a sink that has been dragged
+	 * off its counter stops being cut into it, which is the honest answer rather than a hole in the
+	 * wrong slab.
+	 *
+	 * @param Fixtures The FITTED fixtures, so a host that a ceiling moved is the host that is built.
+	 */
+	FHFSetInResolution ResolveSetInFixtures(const FHFHouseSpec& Spec, const TArray<FHFFixture>& Fixtures)
+	{
+		FHFSetInResolution Out;
+
+		for (const FHFFixture& SetIn : Fixtures)
+		{
+			if (!IsSetIntoASurface(SetIn.Type))
+			{
+				continue;
+			}
+
+			for (const FHFFixture& Host : Fixtures)
+			{
+				if (!AHFCounterActor::Builds(Host.Type) || Host.RoomId != SetIn.RoomId
+					|| !FHFFixturePlacement::FootprintContains(Host, SetIn.Position))
+				{
+					continue;
+				}
+
+				const FHFWall* HostWall = Spec.FindWall(Host.AnchorWallId);
+				const double HostYaw = FHFFixturePlacement::FacingYaw(Host, HostWall);
+
+				// Into the HOST's own frame: undo the host's yaw about its footprint centre, then
+				// measure from the front-left corner the host is set out from. Done here rather than
+				// inside the counter because only this layer knows both transforms.
+				const double Radians = FMath::DegreesToRadians(HostYaw);
+				const double C = FMath::Cos(Radians);
+				const double S = FMath::Sin(Radians);
+
+				const FVector2D Delta = SetIn.Position - Host.Position;
+				const FVector2D InHost(Delta.X * C + Delta.Y * S, -Delta.X * S + Delta.Y * C);
+
+				FHFCounterAperture Aperture;
+				Aperture.FixtureId = SetIn.Id;
+				Aperture.Centre = InHost + Host.Footprint * 0.5;
+
+				// THE HOLE IS SMALLER THAN THE APPLIANCE. Both of these sit on a rim that laps the cut
+				// edge, and cutting the footprint itself would leave the appliance resting on nothing
+				// with a slot of daylight all round it.
+				const double Lap = AHFCounterActor::RimLapFor(SetIn.Type);
+				Aperture.Size = FVector2D(
+					FMath::Max(SetIn.Footprint.X - 2.0 * Lap, 0.0),
+					FMath::Max(SetIn.Footprint.Y - 2.0 * Lap, 0.0));
+
+				Out.AperturesByHost.FindOrAdd(Host.Id).Add(Aperture);
+
+				// Where the appliance's own rim goes, resolved from what is BUILT rather than from
+				// the BaseZ the drawing gave it: that figure was arrived at by adding up a carcass, a
+				// plinth and a slab, and it goes stale the moment any of the three changes.
+				const FHFRoom* Room = Spec.FindRoom(Host.RoomId);
+				Out.SurfaceZ.Add(SetIn.Id,
+					(Room != nullptr ? Room->FloorZ : 0.0) + AHFCounterActor::BuiltTopZ(Host));
+
+				// And turned WITH the host. A hob set square to the drawing, in a run turned through a
+				// right angle, is a hob across the run.
+				Out.SurfaceYaw.Add(SetIn.Id, HostYaw);
+				break;
+			}
+		}
+
+		return Out;
 	}
 
 	/**
@@ -851,6 +982,12 @@ void AHFHouseActor::BuildGeometry()
 	// each is seeded are all one answer, given once - so this loop, the rebuild in
 	// ApplyProjectSettingsToCeilings, the skirting resolver and the build report cannot come to
 	// different conclusions about what is in the level.
+
+	// Resolved before the loop, because a counter has to be cut for a sink that has not been built
+	// yet and the sink has to be levelled to a counter that has not been built yet either. Neither
+	// can ask the other; only this layer can see both.
+	const FHFSetInResolution SetIn = ResolveSetInFixtures(Spec, Fixtures);
+
 	for (const FHFFixture& Fixture : Fixtures)
 	{
 		const FHFFixtureRecipe* Recipe = RecipeFor(Fixture.Type);
@@ -876,6 +1013,7 @@ void AHFHouseActor::BuildGeometry()
 		Context.Fixture = &Fixture;
 		Context.Room = Spec.FindRoom(Fixture.RoomId);
 		Context.AnchorWall = Spec.FindWall(Fixture.AnchorWallId);
+		Context.SetIn = &SetIn;
 
 		// WHAT IS BETWEEN A CEILING-HUNG FITTING AND THE ROOM. A ceiling fan hangs from the structural
 		// slab, so a false ceiling over it is something its rod has to get through - and a rod that was
@@ -974,6 +1112,12 @@ int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
 	// with the build about how a fixture is put together - a difference that would only ever show on
 	// the SECOND build, after somebody dragged a settings slider. Whatever a fresh build does to a
 	// fixture is now by construction what this does to it.
+	//
+	// Re-resolved rather than remembered, for the same reason: the slab's thickness is a project
+	// figure, so the height a sink is levelled to and the hole it drops through both move when
+	// somebody changes it.
+	const FHFSetInResolution SetIn = ResolveSetInFixtures(Spec, Fixtures);
+
 	for (const FHFFixture& Fixture : Fixtures)
 	{
 		const FHFRoom* FixtureRoom = Spec.FindRoom(Fixture.RoomId);
@@ -1002,6 +1146,7 @@ int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
 		Context.Fixture = &Fixture;
 		Context.Room = FixtureRoom;
 		Context.AnchorWall = Spec.FindWall(Fixture.AnchorWallId);
+		Context.SetIn = &SetIn;
 		Context.SoffitDrop = SoffitDropAt(Spec, Fixture, FixtureRoom);
 
 		// The difference from a fresh build, and the only one: the walls already exist and were cored
