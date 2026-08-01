@@ -263,6 +263,17 @@ FHFWardrobeBuild FHFWardrobeKit::Build(const FHFWardrobeParams& Params)
 			if (Leaf.IsSliding())
 			{
 				Leaf.Track = Index % 2;
+
+				// ONE OF THE PAIR STANDS. The leaf on the back track is it, and the front one runs
+				// across it - which is the way round a real two-track wardrobe works, because the
+				// front leaf is the one you can reach and the one whose handle is on show.
+				//
+				// Without this both leaves ran, in opposite directions, off the same open amount:
+				// they swapped bays and the run was fully covered at 0.0, at 1.0 and everywhere
+				// between. The four top-hung loft flaps above lifted perfectly, which is why it was
+				// reported as the BOTTOM SECTION not opening rather than as a wardrobe that does
+				// not open at all.
+				Leaf.bStandingLeaf = (Leaf.Track == 0);
 			}
 
 			const FName PartId = bLoft ? LoftPartId(Index) : ShutterPartId(Index);

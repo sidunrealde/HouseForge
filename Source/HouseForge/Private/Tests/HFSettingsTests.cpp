@@ -568,22 +568,28 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// The whole page ships, not a subset of it. A control quietly dropped between milestones is
 	// exactly what this number is here to catch.
 	//
-	// 101 leaves: 8 door + 18 sliding door + 15 sliding window + 12 ventilator + 4 fixed window
-	// under Openings, 32 under Joinery, 7 under Fans, and 5 validation limits. The struct properties
+	// 100 leaves: 8 door + 18 sliding door + 15 sliding window + 12 ventilator + 4 fixed window
+	// under Openings, 31 under Joinery, 7 under Fans, and 5 validation limits. The struct properties
 	// themselves are headings in the details panel rather than things anybody drags, so they are
 	// recursed through, not counted.
+	//
+	// 31 under Joinery, not 32: PlinthEndRecess is gone. It set a plinth back at every end on show,
+	// which put a 5 x 10 cm notch at each end of every wardrobe run in the flat with floor visible
+	// under the gable above it. A toe kick is set back at the FRONT and its ends stand on the floor,
+	// so the control was removed rather than defaulted to zero - a default is a value somebody can
+	// put back, and the geometry is wrong at every value of it but zero.
 	//
 	// 5, not 3: DoorApproachDepthCm and MinClearPassageCm are what the DoorwayNotClear rule is
 	// judged against, and a doorway blockage is a project's own call - how far in front of a door
 	// counts as being in the way, and how narrow a gap that project will let somebody squeeze
 	// through - so they belong on the page beside MinHeadroomCm rather than compiled in.
 	//
-	// 101 rather than 79: doors gained the six figures of the chowkhat they are hung in, which did
+	// 100 rather than 79: doors gained the six figures of the chowkhat they are hung in, which did
 	// not exist while every door in the flat was a bare leaf in a bare hole; and the two sliding
 	// panel figures that used to live under Doors moved into the eighteen of the glazed sliding
 	// DOOR section, which is a sliding window with a threshold rather than a pair of boards.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 101);
-	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
+	TestEqual(TEXT("The page ships every control it did"), Controls, 100);
+	TestEqual(TEXT("Every joinery control is still there"), Joinery, 31);
 
 	return true;
 }
@@ -846,7 +852,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 101);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 100);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

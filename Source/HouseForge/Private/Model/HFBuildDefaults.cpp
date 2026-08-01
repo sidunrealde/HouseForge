@@ -12,7 +12,6 @@ void FHFJoineryDefaults::ApplyTo(FHFPlinthParams& Params) const
 {
 	Params.Height = PlinthHeight;
 	Params.FrontRecess = PlinthFrontRecess;
-	Params.EndRecess = PlinthEndRecess;
 	Params.PanelThickness = PlinthPanelThickness;
 
 	// ShutterOverlay is deliberately not set here. It is the figure the shutter was generated with,

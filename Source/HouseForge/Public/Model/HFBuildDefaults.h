@@ -96,10 +96,6 @@ struct HOUSEFORGE_API FHFJoineryDefaults
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	double PlinthFrontRecess = 5.0;
 
-	/** The same setback at an end on show. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
-	double PlinthEndRecess = 5.0;
-
 	/** Plinth board. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	double PlinthPanelThickness = 1.8;

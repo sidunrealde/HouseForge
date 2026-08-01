@@ -44,7 +44,6 @@ FHFBuildDefaults UHFSettings::Resolve() const
 
 	J.PlinthHeight = PlinthHeight;
 	J.PlinthFrontRecess = PlinthFrontRecess;
-	J.PlinthEndRecess = PlinthEndRecess;
 
 	J.CorniceDepth = CorniceDepth;
 	J.CorniceHeight = CorniceHeight;

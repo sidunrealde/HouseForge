@@ -226,11 +226,6 @@ public:
 		meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "0.0", UIMax = "15.0"))
 	double PlinthFrontRecess = 5.0;
 
-	/** The same setback at an end on show, in centimetres. An end dying into a wall keeps its width. */
-	UPROPERTY(config, EditAnywhere, Category = "Joinery|Plinth",
-		meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "0.0", UIMax = "15.0"))
-	double PlinthEndRecess = 5.0;
-
 	// ========================================================================= joinery: cornice
 
 	/** Front-to-back depth of the moulding, in centimetres. */

@@ -70,9 +70,16 @@ struct HOUSEFORGE_API FHFPlinthParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double FrontRecess = 5.0;
 
-	/** The same setback at an end on show. An end dying into a wall keeps the full width instead. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
-	double EndRecess = 5.0;
+	// THERE IS NO END RECESS, and there was: 5 cm of setback at every end on show, which is what put
+	// a 5 x 10 cm notch at each end of every wardrobe run in the flat with daylight under the gable
+	// above it. A toe kick is set back at the FRONT. Its ENDS are flush, because the end of the
+	// plinth is what the exposed gable stands on and carries down to the floor - set it back and the
+	// carcass overhangs air at exactly the corner a person standing in the room looks at.
+	//
+	// Removed rather than defaulted to zero. A default is a value somebody can put back, and the
+	// geometry is wrong at every value but zero. FrontRecess is where a kick belongs;
+	// bLeftEndExposed and bRightEndExposed keep their real job, which is the surface role of the end
+	// board, not where it lands.
 
 	/** Board thickness: 1.8 for faced ply, 0.6 for ply clad in aluminium in a wet kitchen. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
@@ -390,6 +397,26 @@ struct HOUSEFORGE_API FHFShutterParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
 		meta = (EditCondition = "MotionKind == EHFShutterMotion::Sliding", ClampMin = "0", ClampMax = "3"))
 	int32 Track = 0;
+
+	/**
+	 * Sliding only: this is the STANDING leaf of the pair, so it does not run.
+	 *
+	 * A SLIDER OPENS BY MOVING ONE LEAF. Two leaves on two tracks, each set out from its own jamb
+	 * and each running towards the other's bay, is a pair that cancels: driven together by one open
+	 * amount they simply exchange tracks and the run stays covered at every value from 0 to 1. That
+	 * is exactly what the master bedroom's 2400 wardrobe did. Both leaves travelled their full
+	 * 118.45 cm, every "does this part move" assertion passed, and the bottom section never opened
+	 * by a millimetre of visible aperture.
+	 *
+	 * So the asymmetry is stated rather than left to emerge. It belongs on the leaf because
+	 * ShutterMotion is a function of one leaf, and it is set by whoever composes the PAIR - which is
+	 * the only place that knows there is another leaf to stand still. The sliding door has had this
+	 * shape all along: BuildSlidingPair builds a PanelFixed and a running Leaf, and the wardrobe was
+	 * the one slider in the plugin that built two runners.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge",
+		meta = (EditCondition = "MotionKind == EHFShutterMotion::Sliding"))
+	bool bStandingLeaf = false;
 
 	/** The gap a hinge leaves between the closed leaf's back and the carcass front edges. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))

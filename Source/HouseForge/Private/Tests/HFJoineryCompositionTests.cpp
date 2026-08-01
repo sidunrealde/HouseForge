@@ -350,7 +350,6 @@ namespace
 		W.PlinthParams.FrontRecess = 5.0;
 		W.PlinthParams.PanelThickness = Board;
 		W.PlinthParams.bRightEndExposed = true;
-		W.PlinthParams.EndRecess = 5.0;
 		W.Plinth = FHFJoineryKit::GeneratePlinth(W.PlinthParams);
 
 		// ------------------------------------------------------------------------------ shelves

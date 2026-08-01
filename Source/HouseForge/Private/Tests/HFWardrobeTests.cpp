@@ -323,11 +323,30 @@ bool FHFWardrobeSlidingRunTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("An applied handle on a sliding run is routed instead"),
 		FHFWardrobeKit::Sanitise(P).HandleStyle, EHFHandleStyle::HandlelessGroove);
 
+	// ---------------------------------------------------------- ONE RUNS AND ONE STANDS
+	//
+	// This used to require BOTH leaves to slide, and both did: each travelled its full 118.45 cm off
+	// one open amount, in opposite directions, out from the meeting line. They exchanged tracks and
+	// the run stayed covered at every value from shut to open - the master bedroom wardrobe that was
+	// reported as "the bottom section is not opening". A pair of leaves that both move is not a pose
+	// a slider can be in, and "does this part move" is exactly the assertion that could not see it.
+	int32 Running = 0;
+	int32 Standing = 0;
+
 	for (const FHFMeshPart& Part : W.Parts)
 	{
-		TestTrue(TEXT("A sliding leaf slides"), Part.Motion.Type == EHFMotionType::Slide);
-		TestTrue(TEXT("A sliding leaf has somewhere to go"), FMath::Abs(Part.Motion.MaxTravelCm) > 0.0);
+		if (Part.Motion.Type == EHFMotionType::Slide && FMath::Abs(Part.Motion.MaxTravelCm) > 0.0)
+		{
+			++Running;
+		}
+		else if (Part.Motion.Type == EHFMotionType::None)
+		{
+			++Standing;
+		}
 	}
+
+	TestEqual(TEXT("Exactly one leaf of the pair runs"), Running, 1);
+	TestEqual(TEXT("...and exactly one stands, as its partner slides across it"), Standing, 1);
 
 	const FAxisAlignedBox3d Left = Posed(W.Parts[0], 0.0).GetBounds();
 	const FAxisAlignedBox3d Right = Posed(W.Parts[1], 0.0).GetBounds();
@@ -348,10 +367,38 @@ bool FHFWardrobeSlidingRunTest::RunTest(const FString& Parameters)
 		FMath::Min(Left.Min.X, Right.Min.X) <= 1.0
 		&& FMath::Max(Left.Max.X, Right.Max.X) >= P.Width - 1.0);
 
-	// Opened, the leading leaf has actually moved somewhere.
-	const FAxisAlignedBox3d Open = Posed(W.Parts[0], 1.0).GetBounds();
-	TestTrue(*FString::Printf(TEXT("A leaf at its stop has travelled (%.1f cm)"), Open.Min.X - Left.Min.X),
-		FMath::Abs(Open.Min.X - Left.Min.X) > 1.0);
+	// ---------------------------------------------------------------- AND IT REALLY OPENS
+	//
+	// Measured as APERTURE - a stretch of the run with no leaf in front of it - and not as travel.
+	// Travel was never the problem: both leaves had 118 cm of it and the wardrobe was shut at every
+	// value of it. What follows is the same question a person standing in front of the wardrobe asks.
+	const FAxisAlignedBox3d LeftOpen = Posed(W.Parts[0], 1.0).GetBounds();
+	const FAxisAlignedBox3d RightOpen = Posed(W.Parts[1], 1.0).GetBounds();
+
+	// The widest stretch of the run that no leaf covers, at full open. Sampled rather than reasoned
+	// about, because the two leaves lap and their uncovered stretches are not simply the complement
+	// of their widths.
+	constexpr int32 Samples = 240;
+	int32 Uncovered = 0;
+
+	for (int32 i = 0; i < Samples; ++i)
+	{
+		const double X = P.Width * (i + 0.5) / Samples;
+		const bool bCovered =
+			(X >= LeftOpen.Min.X && X <= LeftOpen.Max.X) || (X >= RightOpen.Min.X && X <= RightOpen.Max.X);
+
+		if (!bCovered)
+		{
+			++Uncovered;
+		}
+	}
+
+	const double OpenFraction = double(Uncovered) / double(Samples);
+
+	// A two-leaf slider gives up about half its width: one leaf parks over the other and the bay it
+	// left is open. A third is the floor, and the defect scored exactly zero.
+	TestTrue(*FString::Printf(TEXT("Opening the run uncovers a bay to reach into (%.0f%% of the width)"),
+		OpenFraction * 100.0), OpenFraction > 0.33);
 
 	return true;
 }
