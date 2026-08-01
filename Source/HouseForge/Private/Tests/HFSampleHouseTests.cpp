@@ -453,6 +453,111 @@ bool FHFSampleSpecFileInSyncTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * No two rooms stand on the same piece of floor.
+ *
+ * Every room slab's top face is at its own FloorZ and faces up, so two rooms whose boundaries
+ * overlap put two identical, identically-oriented surfaces in the same plane with zero separation
+ * between them. That is a depth fight, and a floor patch that strobes as the camera moves is
+ * reported - accurately - as there being no floor there at all.
+ *
+ * Rooms are MEANT to share edges: the kitchen and the master bedroom meet on X2, and every boundary
+ * is drawn to the wall centreline. So the measurement is AREA, sampled at cell centres, which a
+ * shared edge contributes nothing to and a real overlap contributes its whole footprint to.
+ *
+ * This exists because the utility was read off the built flat as overlapping the kitchen by
+ * 120 x 180 cm - which is, to the millimetre, the utility's own footprint and therefore exactly the
+ * notch the kitchen's L-shaped boundary cuts out for it. A bounding box says those two rooms
+ * overlap; their polygons do not. The difference between the two readings is this test, and the
+ * number it prints is what settles the question next time rather than another visual guess.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSampleHouseRoomsDoNotOverlapTest,
+	"HouseForge.SampleHouse.NoTwoRoomsShareFloorPlan", HF_TEST_FLAGS)
+
+bool FHFSampleHouseRoomsDoNotOverlapTest::RunTest(const FString& Parameters)
+{
+	const FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
+
+	// Millimetres here - the spec has not been converted - so the cell is 5 cm square and the
+	// tolerance below is a tenth of a square metre.
+	constexpr double Cell = 50.0;
+	constexpr double CellArea = Cell * Cell;
+	constexpr double ToleranceMm2 = 0.1 * 1'000'000.0;  // 0.1 m2, four sample cells
+
+	auto BoundsOf = [](const FHFRoom& Room, FVector2D& Min, FVector2D& Max)
+	{
+		Min = Room.Boundary[0];
+		Max = Room.Boundary[0];
+		for (const FVector2D& V : Room.Boundary)
+		{
+			Min = FVector2D(FMath::Min(Min.X, V.X), FMath::Min(Min.Y, V.Y));
+			Max = FVector2D(FMath::Max(Max.X, V.X), FMath::Max(Max.Y, V.Y));
+		}
+	};
+
+	int32 Compared = 0;
+
+	for (int32 i = 0; i < Spec.Rooms.Num(); ++i)
+	{
+		for (int32 j = i + 1; j < Spec.Rooms.Num(); ++j)
+		{
+			const FHFRoom& A = Spec.Rooms[i];
+			const FHFRoom& B = Spec.Rooms[j];
+
+			if (A.Boundary.Num() < 3 || B.Boundary.Num() < 3)
+			{
+				continue;
+			}
+
+			// Slabs in different planes cannot fight. A sunk bathroom floor is a real and correct
+			// overlap-free case only because its FloorZ differs, so the plane is part of the test.
+			if (!FMath::IsNearlyEqual(A.FloorZ, B.FloorZ, 1.0))
+			{
+				continue;
+			}
+
+			FVector2D AMin, AMax, BMin, BMax;
+			BoundsOf(A, AMin, AMax);
+			BoundsOf(B, BMin, BMax);
+
+			const FVector2D Min(FMath::Max(AMin.X, BMin.X), FMath::Max(AMin.Y, BMin.Y));
+			const FVector2D Max(FMath::Min(AMax.X, BMax.X), FMath::Min(AMax.Y, BMax.Y));
+			if (Max.X <= Min.X || Max.Y <= Min.Y)
+			{
+				continue;
+			}
+
+			++Compared;
+
+			double OverlapMm2 = 0.0;
+			for (double X = Min.X + Cell * 0.5; X < Max.X; X += Cell)
+			{
+				for (double Y = Min.Y + Cell * 0.5; Y < Max.Y; Y += Cell)
+				{
+					const FVector2D P(X, Y);
+					if (A.ContainsPoint(P) && B.ContainsPoint(P))
+					{
+						OverlapMm2 += CellArea;
+					}
+				}
+			}
+
+			if (OverlapMm2 > ToleranceMm2)
+			{
+				AddError(FString::Printf(
+					TEXT("Rooms '%s' and '%s' stand on %.2f m2 of the same floor, both at Z=%.1f. Two up-facing slabs in one plane with no separation is a depth fight, and it reads as the floor being missing."),
+					*A.Id.ToString(), *B.Id.ToString(), OverlapMm2 / 1'000'000.0, A.FloorZ));
+			}
+		}
+	}
+
+	// The pairs whose bounding boxes DO cross are the whole point: an L-shaped room overlaps its
+	// neighbour's box by construction, and if none of these were reached the test proved nothing.
+	TestTrue(TEXT("Some room pairs share a bounding box and were measured properly"), Compared > 0);
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS
