@@ -605,33 +605,49 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Kitchen: an L-shaped modular run along the west and north walls.
 	{
+		// THE CORNER, SET OUT SO THE TWO RUNS DO NOT STAND IN EACH OTHER.
+		//
+		// An L-shaped kitchen has one run going hard into the corner and the other butting against
+		// its side. Drawn as two rectangles that each ran the full length of their wall, these two
+		// overlapped by 115 x 415 in the north-west corner - 477 cm2 of one carcass inside the other,
+		// with the west run ALSO stopping 185 short of the north wall, so the corner was simultaneously
+		// double-occupied and open. Neither was visible until the cabinets were first built, because
+		// nothing in the spec looks at two fixtures at once; the coplanar scan found it the moment
+		// there was geometry to scan.
+		//
+		// West runs into the corner: back on the west wall's inner face at X 115, front at X 715,
+		// north end hard against the north wall's inner face at Y 8285.
+		// North starts clear of it at X 750, which leaves the west counter's overhang somewhere to be.
+		//
 		// footprint.x is always the run length and .y the depth; rotation orients it. A 90 degree
 		// yaw therefore puts a 2400 long, 600 deep run against the west wall.
 		FHFFixture& BaseWest = B.AddFixture(TEXT("F_Kitchen_BaseW"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, west run"), FVector2D(415.0, 6900.0), FVector2D(2400.0, 600.0), 850.0, 90.0);
+			TEXT("Base units, west run"), FVector2D(415.0, 7085.0), FVector2D(2400.0, 600.0), 850.0, 90.0);
 		BaseWest.AnchorWallId = TEXT("W_West");
 		BaseWest.Params.ShutterCount = 2;
 		BaseWest.Params.DrawerCount = 3;
 		BaseWest.Params.PlinthHeight = 100.0;
 		BaseWest.Params.HandleStyle = EHFHandleStyle::JProfile;
 
-		// 2300, not 3000: the north run now dies into W_Kitchen_Util, whose west face is at 2942.5.
+		// X 750..2900: clear of the west run's corner at one end, and dying into W_Kitchen_Util,
+		// whose west face is at 2942.5, at the other.
 		FHFFixture& BaseNorth = B.AddFixture(TEXT("F_Kitchen_BaseN"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, north run"), FVector2D(1750.0, 7985.0), FVector2D(2300.0, 600.0), 850.0);
+			TEXT("Base units, north run"), FVector2D(1825.0, 7985.0), FVector2D(2150.0, 600.0), 850.0);
 		BaseNorth.AnchorWallId = TEXT("W_North");
 		BaseNorth.Params.ShutterCount = 3;
 		BaseNorth.Params.DrawerCount = 2;
 		BaseNorth.Params.PlinthHeight = 100.0;
 		BaseNorth.Params.HandleStyle = EHFHandleStyle::JProfile;
 
-		// Counters run along their walls, so they anchor to them like the cabinets beneath.
+		// Counters run along their walls, so they anchor to them like the cabinets beneath, and they
+		// take the same corner set-out: two slabs meeting in an L, not two slabs sharing a corner.
 		FHFFixture& CounterW = B.AddFixture(TEXT("F_Kitchen_CounterW"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, west"), FVector2D(415.0, 6900.0), FVector2D(2400.0, 600.0), 40.0, 90.0, 850.0);
+			TEXT("Granite counter, west"), FVector2D(415.0, 7085.0), FVector2D(2400.0, 600.0), 40.0, 90.0, 850.0);
 		CounterW.AnchorWallId = TEXT("W_West");
 		CounterW.Params.UpstandHeight = 100.0;
 
 		FHFFixture& CounterN = B.AddFixture(TEXT("F_Kitchen_CounterN"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, north"), FVector2D(1750.0, 7985.0), FVector2D(2300.0, 600.0), 40.0, 0.0, 850.0);
+			TEXT("Granite counter, north"), FVector2D(1825.0, 7985.0), FVector2D(2150.0, 600.0), 40.0, 0.0, 850.0);
 		CounterN.AnchorWallId = TEXT("W_North");
 		CounterN.Params.UpstandHeight = 100.0;
 

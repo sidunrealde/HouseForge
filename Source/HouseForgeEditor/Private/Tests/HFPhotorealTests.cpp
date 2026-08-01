@@ -455,12 +455,28 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 
 	const FCollisionQueryParams TraceParams(TEXT("HFSlidingCollision"), /*bTraceComplex*/ true);
 
-	// A probe through the middle of a part, along whichever way it is thinnest - which for a leaf,
-	// a sash or a shutter is its thickness, so the line crosses the solid rather than running down
-	// a shadow gap.
+	// A probe along whichever way the part is thinnest - which for a leaf, a sash or a shutter is its
+	// thickness, so the line crosses the solid rather than running down a shadow gap.
+	//
+	// AIMED AT THE PART'S OWN TRIANGLES RATHER THAN AT THE MIDDLE OF ITS BOUNDING BOX, because not
+	// every part has anything at the middle of its bounding box. A drawer's runner is a PAIR of
+	// members, one down each side of the module - see FHFJoineryKit::GenerateDrawerRunnerIntermediate,
+	// where two of them is what lets the drawer's rail overlap this member and this member overlap the
+	// cabinet's channel. Its box therefore spans the whole module and its centre is the air BETWEEN
+	// the two rails, so a central probe went cleanly through the gap and reported no collision on five
+	// parts that have perfectly good collision.
+	//
+	// Sampling a grid across the box does not fix it either - the rails are 12 mm members at the ends
+	// of a 780 mm span, so any grid coarse enough to write down misses them too, and picking offsets
+	// until the current geometry passes is fitting the test to the answer.
+	//
+	// So the probe is aimed at a point that is on the surface BY CONSTRUCTION: the centroid of one of
+	// the part's own triangles, taken from the mesh the component is rendering and pushed through the
+	// component's own transform. That cannot be defeated by any shape, and it still fails exactly as
+	// before for the case this test exists to catch - a part whose collision did not travel with its
+	// render has nothing at any of its triangles either.
 	auto ProbeHits = [&TraceParams](UDynamicMeshComponent* Component, const FBox& WorldBounds)
 	{
-		const FVector Centre = WorldBounds.GetCenter();
 		const FVector Extent = WorldBounds.GetExtent();
 
 		int32 Thinnest = 0;
@@ -472,8 +488,36 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 		FVector Along = FVector::ZeroVector;
 		Along[Thinnest] = FMath::Max(Extent[Thinnest] * 4.0, 10.0);
 
-		FHitResult Hit;
-		return Component->LineTraceComponent(Hit, Centre - Along, Centre + Along, TraceParams);
+		const UE::Geometry::FDynamicMesh3* Mesh = Component->GetMesh();
+		if (Mesh == nullptr || Mesh->TriangleCount() == 0)
+		{
+			return false;
+		}
+
+		const FTransform ToWorld = Component->GetComponentTransform();
+
+		// A handful of triangles spread through the part rather than all of them: one is enough to
+		// prove the body is there, and several guard against a single degenerate face.
+		const int32 Triangles = Mesh->MaxTriangleID();
+		const int32 Stride = FMath::Max(Triangles / 8, 1);
+
+		for (int32 Tri = 0; Tri < Triangles; Tri += Stride)
+		{
+			if (!Mesh->IsTriangle(Tri))
+			{
+				continue;
+			}
+
+			const FVector From = ToWorld.TransformPosition(FVector(Mesh->GetTriCentroid(Tri)));
+
+			FHitResult Hit;
+			if (Component->LineTraceComponent(Hit, From - Along, From + Along, TraceParams))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	};
 
 	int32 SlidingParts = 0;

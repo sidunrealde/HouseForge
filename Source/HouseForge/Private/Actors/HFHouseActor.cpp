@@ -3,6 +3,7 @@
 #include "Actors/HFHouseActor.h"
 
 #include "Actors/HFArticulatedActor.h"
+#include "Actors/HFCasedGoodsActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFOpeningActor.h"
 #include "Actors/HFFanActor.h"
@@ -14,6 +15,7 @@
 #include "Model/HFBuildDefaults.h"
 #include "Model/HFCeilingFit.h"
 #include "Model/HFCeilingTemplates.h"
+#include "Model/HFFixturePlacement.h"
 #include "Model/HFSkirtingPlan.h"
 
 namespace
@@ -233,6 +235,198 @@ namespace
 		}
 
 		return Out;
+	}
+
+	// ---------------------------------------------------------------------- the fixture spawn table
+	//
+	// THIRTY MORE TYPES MUST NOT MEAN THIRTY MORE LOOPS IN TWO PLACES THAT CAN DISAGREE.
+	//
+	// Until this table existed the composing layer had one hand-written loop per fixture family in
+	// BuildGeometry and a parallel switch in ApplyProjectSettingsToCeilings, and the two carried the
+	// same seeding sequence written out twice. They were already one edit apart from drifting: a
+	// wardrobe was placed from its anchor wall in both, an extract had its host wall thickness set in
+	// both, and every new type would have added a third and a fourth copy. A type seeded one way on a
+	// fresh build and another way after somebody dragged a ceiling slider is a defect that only
+	// appears on the second build, which is exactly the kind this project keeps finding by eye.
+	//
+	// So there is one row per type and one seeding function per row, and BOTH loops run it. Whatever
+	// a fresh build does to a fixture is by construction what a rebuild does to it.
+	//
+	// AHFHouseActor::BuildsGeometryFor is derived from this table rather than written out beside it,
+	// which is what keeps the skirting resolver, the build report and the spawn loop agreeing about
+	// what actually exists. A type that is in the table builds; a type that is not is a row in the
+	// spec and nothing in the level.
+
+	/**
+	 * Everything a fixture actor needs from the rest of the house in order to be seeded.
+	 *
+	 * A generator may not go looking for the rest of the house and neither may an actor, so anything
+	 * that depends on more than one element is resolved by the composing layer and handed over as a
+	 * plain value - the same rule the wall's structural cuts and the ceiling's fan holes follow.
+	 */
+	struct FHFFixtureContext
+	{
+		const FHFHouseSpec* Spec = nullptr;
+		const FHFFixture* Fixture = nullptr;
+		const FHFRoom* Room = nullptr;
+		const FHFWall* AnchorWall = nullptr;
+
+		/** How far the false ceiling over this fixture hangs below the slab, at its own position. */
+		double SoffitDrop = 0.0;
+
+		/**
+		 * Walls whose cored duct has to be re-cut because the fitting blowing through them moved.
+		 *
+		 * Null on a fresh build, where the walls are generated after the fixtures are resolved and
+		 * already carry every hole. Only a rebuild has to go back and re-cut one.
+		 */
+		TSet<FName>* WallsToRecut = nullptr;
+
+		double FloorZ() const { return Room != nullptr ? Room->FloorZ : 0.0; }
+	};
+
+	/** Seeds one freshly spawned or rebuilt actor: project figures, then the drawing, then placement. */
+	using FHFSeedFixtureFn = void (*)(const FHFFixtureContext&, AHFElementActor&);
+
+	struct FHFFixtureRecipe
+	{
+		EHFFixtureType Type;
+		UClass* Class;
+		const TCHAR* NamePrefix;
+		FHFSeedFixtureFn Seed;
+	};
+
+	// The order inside every seed function below is load-bearing and the same in each: the project's
+	// figures FIRST, then the drawing over them, then anything the rest of the house decides, then the
+	// transform. ApplyFixture reads figures that ApplyProjectDefaults puts there - a module width, a
+	// plinth height - to fill in what a drawing did not state.
+
+	void SeedWardrobe(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFWardrobeActor& Actor = static_cast<AHFWardrobeActor&>(Element);
+
+		// Re-seeded in full rather than adjusted, because the bay count and the loft are derived from
+		// the height: half-applying a new one leaves a carcass built for the old.
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// A wardrobe under a ceiling that has come down is CUT SHORTER, not lowered - it stands on the
+		// floor, and FHFCeilingFit has already taken the height out of the fitted fixture.
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedCasedGoods(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFCasedGoodsActor& Actor = static_cast<AHFCasedGoodsActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// A WALL UNIT IS PLACED BY EXACTLY THE SAME RULE AS A FLOOR-STANDING RUN, which is why there is
+		// no second entry point for one. AgainstWall puts the origin at the front-left corner of the
+		// footprint at the room floor plus the fixture's own BaseZ, and a wall cabinet is simply a
+		// carcass whose BaseZ is 140 rather than 0 - see FHFCasedGoodsParams' frame note, where Z = 0 is
+		// the underside of the plinth on a floor-standing run and the underside of the carcass on a
+		// wall-hung one. That is what makes both kinds placeable without the composing layer knowing
+		// which it has.
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFFanActor& Actor = static_cast<AHFFanActor&>(Element);
+
+		// Re-seeded in full because the rod length is CUMULATIVE and there is no way to subtract the
+		// ceiling that used to be there. ApplyCeilingAbove adds to the project's figure by design, so
+		// calling it twice would hang the fan a ceiling lower each time.
+		Actor.ApplyProjectDefaults(EHFFanKind::Ceiling);
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.ApplyCeilingAbove(C.SoffitDrop);
+		Actor.SetActorTransform(AHFFanActor::PlacementFor(*C.Fixture, C.Room, C.AnchorWall));
+	}
+
+	void SeedExhaustFan(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFFanActor& Actor = static_cast<AHFFanActor&>(Element);
+
+		Actor.ApplyProjectDefaults(EHFFanKind::Exhaust);
+		Actor.ApplyFixture(*C.Fixture);
+
+		// AN EXTRACT HAS A FAR SIDE. The duct is cored through the masonry, so the wall's thickness
+		// comes to the fan as a dimension: a generator may not reach for the wall it stands in.
+		if (C.AnchorWall != nullptr)
+		{
+			Actor.Fan.HostWallThickness = C.AnchorWall->Thickness;
+
+			// The hole goes with the fan. A case that moved and a duct that did not is a bare square
+			// opening in a finished wall with the fan sitting below it.
+			if (C.WallsToRecut != nullptr)
+			{
+				C.WallsToRecut->Add(C.AnchorWall->Id);
+			}
+		}
+
+		Actor.SetActorTransform(AHFFanActor::PlacementFor(*C.Fixture, C.Room, C.AnchorWall));
+	}
+
+	/** One row per fixture type that becomes an element actor. Everything else is spec-only. */
+	const TArray<FHFFixtureRecipe>& FixtureRecipes()
+	{
+		// A function-local static rather than a file-scope one: the rows name UClasses, and
+		// StaticClass() is only answerable once the module has been loaded.
+		static const TArray<FHFFixtureRecipe> Recipes = {
+			{ EHFFixtureType::Wardrobe, AHFWardrobeActor::StaticClass(),
+				TEXT("Wardrobe"), &SeedWardrobe },
+
+			{ EHFFixtureType::KitchenBaseCabinet, AHFCasedGoodsActor::StaticClass(),
+				TEXT("Case"), &SeedCasedGoods },
+			{ EHFFixtureType::KitchenWallCabinet, AHFCasedGoodsActor::StaticClass(),
+				TEXT("Case"), &SeedCasedGoods },
+
+			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
+				TEXT("Fan"), &SeedCeilingFan },
+			{ EHFFixtureType::ExhaustFan, AHFFanActor::StaticClass(),
+				TEXT("Fan"), &SeedExhaustFan },
+		};
+
+		return Recipes;
+	}
+
+	const FHFFixtureRecipe* RecipeFor(EHFFixtureType Type)
+	{
+		for (const FHFFixtureRecipe& Recipe : FixtureRecipes())
+		{
+			if (Recipe.Type == Type)
+			{
+				return &Recipe;
+			}
+		}
+		return nullptr;
+	}
+
+	/**
+	 * How far the false ceiling in a room hangs below the slab at a point in it.
+	 *
+	 * Asked per fixture rather than per room, because the answer depends on WHERE in the room it is:
+	 * the same ceiling covers its perimeter band and leaves its centre open.
+	 */
+	double SoffitDropAt(const FHFHouseSpec& Spec, const FHFFixture& Fixture, const FHFRoom* Room)
+	{
+		if (Room == nullptr)
+		{
+			return 0.0;
+		}
+
+		double Drop = 0.0;
+		for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+		{
+			if (Ceiling.RoomId == Fixture.RoomId)
+			{
+				Drop = FMath::Max(Drop,
+					FHFGenerators::CeilingSoffitDropAt(Ceiling, *Room, Fixture.Position));
+			}
+		}
+		return Drop;
 	}
 }
 
@@ -651,113 +845,52 @@ void AHFHouseActor::BuildGeometry()
 		}
 	}
 
-	// Joinery. One fixture type so far - a wardrobe - and it is the first thing in the flat built out
-	// of FHFJoineryKit rather than out of a bespoke generator. The rest of the catalogue composes from
-	// the same kit and lands with milestone 9.
+	// ---------------------------------------------------------------------------------- fixtures
 	//
-	// The type test goes through BuildsGeometryFor as well as being written out here, so the skirting
-	// resolver, the build report and this loop cannot disagree about what exists.
+	// ONE LOOP, DRIVEN BY THE RECIPE TABLE. Which types build, which actor class each becomes and how
+	// each is seeded are all one answer, given once - so this loop, the rebuild in
+	// ApplyProjectSettingsToCeilings, the skirting resolver and the build report cannot come to
+	// different conclusions about what is in the level.
 	for (const FHFFixture& Fixture : Fixtures)
 	{
-		if (Fixture.Type != EHFFixtureType::Wardrobe || !BuildsGeometryFor(Fixture.Type))
+		const FHFFixtureRecipe* Recipe = RecipeFor(Fixture.Type);
+		if (Recipe == nullptr)
 		{
 			continue;
 		}
 
-		AHFWardrobeActor* WardrobeActor = Cast<AHFWardrobeActor>(
-			Spawn(AHFWardrobeActor::StaticClass(), Fixture.Id,
-				FString::Printf(TEXT("Wardrobe_%s"), *Fixture.Id.ToString())));
+		// Spawn returns null for a preserved element, which is what leaves a fixture somebody has
+		// modelled on holding the figures it was built with rather than having a project-wide setting
+		// reach in and change it.
+		AHFElementActor* Actor = Cast<AHFElementActor>(
+			Spawn(Recipe->Class, Fixture.Id,
+				FString::Printf(TEXT("%s_%s"), Recipe->NamePrefix, *Fixture.Id.ToString())));
 
-		if (WardrobeActor == nullptr)
+		if (Actor == nullptr)
 		{
 			continue;
 		}
 
-		// Settings first, then the drawing: ApplyFixture reads the project's module width and plinth
-		// height to fill in what a drawing did not state, so the order is load-bearing.
-		//
-		// Only on a freshly spawned actor - Spawn returns null for a preserved one - so a wardrobe
-		// somebody has modelled on keeps the figures it was built with rather than having a
-		// project-wide setting reach in and change it.
-		WardrobeActor->ApplyProjectDefaults();
-		WardrobeActor->ApplyFixture(Fixture);
+		FHFFixtureContext Context;
+		Context.Spec = &Spec;
+		Context.Fixture = &Fixture;
+		Context.Room = Spec.FindRoom(Fixture.RoomId);
+		Context.AnchorWall = Spec.FindWall(Fixture.AnchorWallId);
 
-		const FHFRoom* Room = Spec.FindRoom(Fixture.RoomId);
-		WardrobeActor->SetActorTransform(AHFWardrobeActor::PlacementFor(Fixture,
-			Room != nullptr ? Room->FloorZ : 0.0,
-			Spec.FindWall(Fixture.AnchorWallId)));
+		// WHAT IS BETWEEN A CEILING-HUNG FITTING AND THE ROOM. A ceiling fan hangs from the structural
+		// slab, so a false ceiling over it is something its rod has to get through - and a rod that was
+		// a fixed project figure built the whole rotor inside the plasterboard of any room with a full
+		// drop. Resolved for every fixture rather than only for fans: the chimney's duct has exactly
+		// the same problem one milestone later, and a second way of asking the same question is how the
+		// two answers drift.
+		Context.SoffitDrop = SoffitDropAt(Spec, Fixture, Context.Room);
 
-		WardrobeActor->Regenerate();
-	}
+		// Null: the walls above already carry every duct, because OpeningsInWall was handed this same
+		// fitted list before any of them was generated. Only a rebuild has to go back and re-cut one.
+		Context.WallsToRecut = nullptr;
 
-	// Fans. The one thing in the flat that revolves rather than opens, and until this loop existed
-	// the only production consumer of EHFMotionType::Spin was nothing at all: the mechanism was
-	// complete and tested, CeilingFan was read here solely to punch a rod hole in the false ceiling
-	// above a fan that did not exist, and ExhaustFan was not read anywhere.
-	for (const FHFFixture& Fixture : Fixtures)
-	{
-		if ((Fixture.Type != EHFFixtureType::CeilingFan && Fixture.Type != EHFFixtureType::ExhaustFan)
-			|| !BuildsGeometryFor(Fixture.Type))
-		{
-			continue;
-		}
-
-		AHFFanActor* FanActor = Cast<AHFFanActor>(
-			Spawn(AHFFanActor::StaticClass(), Fixture.Id,
-				FString::Printf(TEXT("Fan_%s"), *Fixture.Id.ToString())));
-
-		if (FanActor == nullptr)
-		{
-			continue;
-		}
-
-		// Settings first, then the drawing, exactly as a wardrobe: ApplyProjectDefaults picks the
-		// catalogue for the kind and ApplyFixture puts the drawn dimensions over it, so the order is
-		// load-bearing. Only on a freshly spawned actor - Spawn returns null for a preserved one.
-		FanActor->ApplyProjectDefaults(
-			Fixture.Type == EHFFixtureType::ExhaustFan ? EHFFanKind::Exhaust : EHFFanKind::Ceiling);
-		FanActor->ApplyFixture(Fixture);
-
-		const FHFRoom* FanRoom = Spec.FindRoom(Fixture.RoomId);
-		const FHFWall* FanWall = Spec.FindWall(Fixture.AnchorWallId);
-
-		// AN EXTRACT HAS A FAR SIDE. The duct is cored through the masonry and, with nothing on the
-		// discharge face, left as a bare square opening in a finished wall - the only opening in the
-		// flat with no lining, since it is deliberately kept out of Spec.Openings so no ventilator
-		// sash is built in it. The sleeve and cowl belong to the fan, so the wall's thickness comes
-		// to the fan as a dimension: a generator may not reach for the wall it stands in.
-		if (Fixture.Type == EHFFixtureType::ExhaustFan && FanWall != nullptr)
-		{
-			FanActor->Fan.HostWallThickness = FanWall->Thickness;
-		}
-
-		// AND THEN WHAT IS BETWEEN THE FAN AND THE ROOM. A ceiling fan hangs from the structural
-		// slab, so a false ceiling over it is something the rod has to get through - and a rod that
-		// was a fixed project figure built the whole rotor inside the plasterboard of any room with
-		// a full drop. Every ceiling fan in the reference flat sits in the open centre of a cove or
-		// peripheral ceiling, where the drop is zero and nothing showed.
-		//
-		// The drop is asked of the room, per fan, because the answer depends on WHERE in the room
-		// the fan is: the same ceiling covers its band and leaves its centre open.
-		if (Fixture.Type == EHFFixtureType::CeilingFan && FanRoom != nullptr)
-		{
-			double SoffitDrop = 0.0;
-
-			for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
-			{
-				if (Ceiling.RoomId == Fixture.RoomId)
-				{
-					SoffitDrop = FMath::Max(SoffitDrop,
-						FHFGenerators::CeilingSoffitDropAt(Ceiling, *FanRoom, Fixture.Position));
-				}
-			}
-
-			FanActor->ApplyCeilingAbove(SoffitDrop);
-		}
-
-		FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture, FanRoom, FanWall));
-
-		FanActor->Regenerate();
+		Recipe->Seed(Context, *Actor);
+		Actor->Regenerate();
 	}
 
 	// Once every element has been regenerated its parts exist again, so the poses captured above can
@@ -836,6 +969,11 @@ int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
 	// holes once from the fitted list than to edit its opening array.
 	TSet<FName> WallsToRecut;
 
+	// THE SAME TABLE AND THE SAME SEEDING FUNCTIONS THE FRESH BUILD USES. This loop used to be a
+	// switch carrying its own copy of each type's seeding sequence, one edit away from disagreeing
+	// with the build about how a fixture is put together - a difference that would only ever show on
+	// the SECOND build, after somebody dragged a settings slider. Whatever a fresh build does to a
+	// fixture is now by construction what this does to it.
 	for (const FHFFixture& Fixture : Fixtures)
 	{
 		const FHFRoom* FixtureRoom = Spec.FindRoom(Fixture.RoomId);
@@ -844,92 +982,35 @@ int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
 			continue;
 		}
 
-		switch (Fixture.Type)
+		const FHFFixtureRecipe* Recipe = RecipeFor(Fixture.Type);
+		if (Recipe == nullptr)
 		{
-		case EHFFixtureType::CeilingFan:
-		{
-			AHFFanActor* FanActor = Cast<AHFFanActor>(FindElement(AHFFanActor::StaticClass(), Fixture.Id));
-			if (FanActor == nullptr || FanActor->ShouldPreserveOnRebuild())
-			{
-				break;
-			}
-
-			// Re-seeded in full - project figures, then the drawing, then the ceiling - because the
-			// rod length is CUMULATIVE and there is no way to subtract the ceiling that used to be
-			// there. ApplyCeilingAbove adds to the project's figure by design, so calling it twice
-			// would hang the fan a ceiling lower each time.
-			double SoffitDrop = 0.0;
-			for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
-			{
-				if (Ceiling.RoomId == Fixture.RoomId)
-				{
-					SoffitDrop = FMath::Max(SoffitDrop,
-						FHFGenerators::CeilingSoffitDropAt(Ceiling, *FixtureRoom, Fixture.Position));
-				}
-			}
-
-			FanActor->ApplyProjectDefaults(EHFFanKind::Ceiling);
-			FanActor->ApplyFixture(Fixture);
-			FanActor->ApplyCeilingAbove(SoffitDrop);
-			FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture, FixtureRoom, nullptr));
-			FanActor->Regenerate();
-			++Rebuilt;
-			break;
+			continue;
 		}
 
-		case EHFFixtureType::ExhaustFan:
+		AHFElementActor* Actor = FindElement(Recipe->Class, Fixture.Id);
+
+		// Asked before anything is touched, so a hand-modelled fixture keeps its parameters as well as
+		// its mesh - a re-seed would change what Revert To Generated produced.
+		if (Actor == nullptr || Actor->ShouldPreserveOnRebuild())
 		{
-			AHFFanActor* FanActor = Cast<AHFFanActor>(FindElement(AHFFanActor::StaticClass(), Fixture.Id));
-			if (FanActor == nullptr || FanActor->ShouldPreserveOnRebuild())
-			{
-				break;
-			}
-
-			const FHFWall* FanWall = Spec.FindWall(Fixture.AnchorWallId);
-
-			FanActor->ApplyProjectDefaults(EHFFanKind::Exhaust);
-			FanActor->ApplyFixture(Fixture);
-			if (FanWall != nullptr)
-			{
-				FanActor->Fan.HostWallThickness = FanWall->Thickness;
-
-				// The hole goes with the fan. A case that moved and a duct that did not is a bare
-				// square opening in a finished wall with the fan sitting below it - the same
-				// invisible-from-the-room failure DuctOpeningFor exists to fix, only the other way up.
-				WallsToRecut.Add(FanWall->Id);
-			}
-
-			FanActor->SetActorTransform(AHFFanActor::PlacementFor(Fixture, FixtureRoom, FanWall));
-			FanActor->Regenerate();
-			++Rebuilt;
-			break;
+			continue;
 		}
 
-		case EHFFixtureType::Wardrobe:
-		{
-			AHFWardrobeActor* WardrobeActor =
-				Cast<AHFWardrobeActor>(FindElement(AHFWardrobeActor::StaticClass(), Fixture.Id));
-			if (WardrobeActor == nullptr || WardrobeActor->ShouldPreserveOnRebuild())
-			{
-				break;
-			}
+		FHFFixtureContext Context;
+		Context.Spec = &Spec;
+		Context.Fixture = &Fixture;
+		Context.Room = FixtureRoom;
+		Context.AnchorWall = Spec.FindWall(Fixture.AnchorWallId);
+		Context.SoffitDrop = SoffitDropAt(Spec, Fixture, FixtureRoom);
 
-			// A wardrobe under a ceiling that has come down is CUT SHORTER, not lowered - it stands on
-			// the floor. Re-seeded in full for the same reason a fan is: the bay count and the loft
-			// are derived from the height, so half-applying a new one would leave a carcass built for
-			// the old.
-			WardrobeActor->ApplyProjectDefaults();
-			WardrobeActor->ApplyFixture(Fixture);
-			WardrobeActor->SetActorTransform(AHFWardrobeActor::PlacementFor(Fixture,
-				FixtureRoom->FloorZ, Spec.FindWall(Fixture.AnchorWallId)));
-			WardrobeActor->Regenerate();
-			++Rebuilt;
-			break;
-		}
+		// The difference from a fresh build, and the only one: the walls already exist and were cored
+		// for the fitting where it used to be, so a fitting that has moved takes its hole with it.
+		Context.WallsToRecut = &WallsToRecut;
 
-		default:
-			break;
-		}
+		Recipe->Seed(Context, *Actor);
+		Actor->Regenerate();
+		++Rebuilt;
 	}
 
 	for (const FHFWall& Wall : Spec.Walls)
@@ -960,17 +1041,14 @@ TArray<FHFFixture> AHFHouseActor::FittedFixtures() const
 
 bool AHFHouseActor::BuildsGeometryFor(EHFFixtureType Type)
 {
-	switch (Type)
-	{
-	case EHFFixtureType::Wardrobe:
-	case EHFFixtureType::CeilingFan:
-	case EHFFixtureType::ExhaustFan:
-		return true;
-
-	default:
-		// Everything else is a row in the spec and nothing in the level: milestone 9's catalogue.
-		return false;
-	}
+	// DERIVED FROM THE SPAWN TABLE RATHER THAN WRITTEN OUT BESIDE IT. This used to be a second list of
+	// the same types, kept in step with the spawn loops by hand, and it is read by the skirting
+	// resolver - which cuts a break in a room's skirting for every fitted run standing against a wall.
+	// A type in this list but not in the table is a length of missing skirting with nothing standing
+	// in it: bare plaster meeting bare floor for the width of a unit nobody modelled. A type in the
+	// table but not in this list is a carcass driven through a skirting board. Both read as correct in
+	// every test that does not render the room.
+	return RecipeFor(Type) != nullptr;
 }
 
 TSet<FName> AHFHouseActor::BuiltFixtureIds(const TArray<FHFFixture>& Fixtures)

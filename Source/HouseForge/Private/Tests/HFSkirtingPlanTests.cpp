@@ -542,12 +542,19 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
  * triangles at the time: the foyer lost 120 cm to a shoe rack, bedroom 2 lost 120 cm to a study
  * table, and the kitchen lost 230 + 240 cm to two runs of base units - 710 cm of the flat's
  * perimeter with the board deleted and nothing in front of it, because eight fixture types answer
- * true to IsScribedJoinery and only Wardrobe is built.
+ * true to IsScribedJoinery and only Wardrobe was built.
  *
  * So this measures the two resolutions against each other. Told nothing, the resolver still cuts for
  * every scribed type, which is the right answer for a room being resolved on its own. Told what the
- * house builds, the unbuilt units leave the run whole - and the wardrobes, which ARE built, still
- * cut, because a carcass really does stand there.
+ * house builds, the unbuilt units leave the run whole - and the units that ARE built still cut,
+ * because a carcass really does stand there.
+ *
+ * THE BUILT SET GROWS AS THE CATALOGUE LANDS, AND THAT IS THE POINT OF THE TEST RATHER THAN A
+ * NUISANCE. Milestone 9's kitchen group made the two runs of base units real, so the kitchen's
+ * 230 + 240 cm came back OUT of the recovered total and went back to being genuine breaks with
+ * genuine carcasses in front of them. The assertions below are therefore written against
+ * BuildsGeometryFor rather than against a number somebody typed: a break must exist exactly where
+ * something is built, and the recovered skirting must be exactly the runs that are not.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSkirtingUnbuiltJoineryTest,
 	"HouseForge.Model.SkirtingIsNotCutForJoineryNobodyBuilds", HF_TEST_FLAGS)
@@ -560,7 +567,7 @@ bool FHFSkirtingUnbuiltJoineryTest::RunTest(const FString& Parameters)
 	const TSet<FName> BuiltIds = AHFHouseActor::BuiltFixtureIds(Spec.Fixtures);
 
 	double RecoveredTotal = 0.0;
-	int32 WardrobeBreaks = 0;
+	int32 JoineryBreaks = 0;
 
 	for (const FHFRoom& Room : Spec.Rooms)
 	{
@@ -582,18 +589,40 @@ bool FHFSkirtingUnbuiltJoineryTest::RunTest(const FString& Parameters)
 		{
 			if (Break.Cause == EHFSkirtingBreakCause::Joinery)
 			{
-				++WardrobeBreaks;
+				++JoineryBreaks;
 			}
 		}
 	}
 
-	AddInfo(FString::Printf(TEXT("Skirting recovered across the flat: %.0f cm."), RecoveredTotal));
+	AddInfo(FString::Printf(TEXT("Skirting recovered across the flat: %.0f cm over %d joinery breaks."),
+		RecoveredTotal, JoineryBreaks));
 
-	// The four unbuilt runs, to the centimetre: 120 + 120 + 230 + 240.
-	TestTrue(TEXT("The flat gets its missing skirting back"), RecoveredTotal > 700.0);
+	// WHAT IS STILL UNBUILT AND SCRIBED: the foyer's shoe rack and bedroom 2's study table, 120 cm
+	// each. The kitchen's two runs of base units were 230 + 240 of this figure until milestone 9's
+	// kitchen group built them, and they have gone back to being real breaks with real carcasses
+	// standing in them - which is the whole mechanism working, in the direction it will keep moving
+	// as the rest of the catalogue lands.
+	TestTrue(TEXT("The flat still gets back the skirting nobody builds"), RecoveredTotal > 200.0);
+	TestTrue(TEXT("And gets back only that"), RecoveredTotal < 320.0);
 
-	// And the wardrobes keep theirs, because a wardrobe really is built.
-	TestEqual(TEXT("Only the two wardrobes still cut the run"), WardrobeBreaks, 2);
+	// Every break that is left is paid for by something the house actually builds: the two wardrobes,
+	// the kitchen's north run, and the west run - which cuts TWICE, because it now runs hard into the
+	// north-west corner and so stands against two of the kitchen's walls. A run that interrupts the
+	// board on both of the walls it touches is the correct answer and not a double count.
+	TestEqual(TEXT("Only built joinery still cuts the run"), JoineryBreaks, 5);
+
+	// AND THE TWO NUMBERS ARE NOT INDEPENDENT. A break has to be earned by a carcass, so every type
+	// that cuts must be one the house builds - asked of BuildsGeometryFor rather than of a list
+	// somebody keeps in step by hand, which is exactly the drift that put 710 cm of missing board in
+	// the flat in the first place.
+	for (const FHFFixture& Fixture : Spec.Fixtures)
+	{
+		if (FHFSkirting::IsScribedJoinery(Fixture.Type) && BuiltIds.Contains(Fixture.Id))
+		{
+			TestTrue(*FString::Printf(TEXT("%s is scribed joinery and is really built"),
+				*Fixture.Id.ToString()), AHFHouseActor::BuildsGeometryFor(Fixture.Type));
+		}
+	}
 
 	// The rooms the user would have looked at first.
 	auto RoomNamed = [&Spec](const TCHAR* Id) -> const FHFRoom*

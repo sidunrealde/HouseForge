@@ -2220,7 +2220,7 @@
 			"position":
 			{
 				"x": 415,
-				"y": 6900
+				"y": 7085
 			},
 			"rotationDegrees": 90,
 			"footprint":
@@ -2257,13 +2257,13 @@
 			"label": "Base units, north run",
 			"position":
 			{
-				"x": 1750,
+				"x": 1825,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2300,
+				"x": 2150,
 				"y": 600
 			},
 			"height": 850,
@@ -2296,7 +2296,7 @@
 			"position":
 			{
 				"x": 415,
-				"y": 6900
+				"y": 7085
 			},
 			"rotationDegrees": 90,
 			"footprint":
@@ -2333,13 +2333,13 @@
 			"label": "Granite counter, north",
 			"position":
 			{
-				"x": 1750,
+				"x": 1825,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2300,
+				"x": 2150,
 				"y": 600
 			},
 			"height": 40,
