@@ -417,7 +417,7 @@ FDynamicMesh3 FHFGenerators::GenerateWall(const FHFWall& Wall, const TArray<FHFO
 }
 
 FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThickness,
-	const TArray<FVector2D>& SkirtingGaps, double GapWidth)
+	const TArray<FVector2D>& SkirtingGaps, double GapWidth, const TArray<double>& WallFaceInsets)
 {
 	FDynamicMesh3 Mesh;
 	FHFMeshOps::InitialiseMesh(Mesh);
@@ -444,6 +444,18 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 	if (Room.SkirtingHeight > 0.0)
 	{
 		constexpr double SkirtingDepth = 1.8;
+
+		/**
+		 * How far the skirting is buried in the masonry behind it.
+		 *
+		 * A skirting stops dead in the wall face, and two faces in one plane is what the whole
+		 * flashing report was about. Opposed faces are the safe case - the back of this one is
+		 * sealed against the front of that one - but there is no reason to rely on it here when the
+		 * fix is free. This is the same 3-5 mm interpenetration the door frames use to sit in a
+		 * reveal rather than on it.
+		 */
+		constexpr double Embed = 0.5;
+
 		const int32 Count = Room.Boundary.Num();
 
 		for (int32 i = 0; i < Count; ++i)
@@ -484,8 +496,21 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 				}
 
 				const FVector2D RunCentre = A + Edge.Direction * ((From + To) * 0.5);
-				// Inset so the skirting sits against the wall face rather than through it.
-				const FVector2D Offset = Edge.Normal * (SkirtingDepth * 0.5);
+
+				// AGAINST THE PLASTER, WHICH IS NOT WHERE THE BOUNDARY IS.
+				//
+				// A room boundary is the wall CENTRELINE, so the finished face of the wall stands
+				// half a wall's thickness inside it - 11.5 cm on a 230, 5.75 on a 115. This offset
+				// used to be SkirtingDepth * 0.5 and nothing else, which put a 100 mm skirting
+				// between 0 and 18 mm of the centreline: entirely inside the masonry, in every room,
+				// on every edge. Seven rooms in the reference flat declare a skirting and not one of
+				// them had a skirting you could see.
+				//
+				// The inset is per EDGE because the walls round a room are not all the same
+				// thickness, and it is passed in rather than derived because a generator cannot see
+				// the walls - see .claude/rules/04-conventions.md.
+				const double FaceInset = WallFaceInsets.IsValidIndex(i) ? WallFaceInsets[i] : 0.0;
+				const FVector2D Offset = Edge.Normal * (FaceInset - Embed + SkirtingDepth * 0.5);
 
 				FHFMeshOps::AppendBox(Mesh,
 					FVector3d(RunCentre.X + Offset.X, RunCentre.Y + Offset.Y, Room.FloorZ + Room.SkirtingHeight * 0.5),

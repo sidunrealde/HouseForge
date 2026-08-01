@@ -159,6 +159,16 @@ public:
 	double DoorwayWidth = 100.0;
 
 	/**
+	 * How far the finished wall face stands in from each boundary edge, one entry per edge.
+	 *
+	 * A room boundary is a wall CENTRELINE, so the plaster is half a wall's thickness inside it.
+	 * The skirting is laid against that face, and only the composing layer can see which wall is on
+	 * which edge - so it works this out and puts the answer here, and the generator is handed it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<double> WallFaceInsets;
+
+	/**
 	 * Also emit the structural slab soffit over this room.
 	 *
 	 * Without it, looking up in the middle of a room with a peripheral ceiling shows open sky

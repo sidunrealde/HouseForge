@@ -196,7 +196,8 @@ FDynamicMesh3 AHFWallActor::BuildMesh() const
 
 FDynamicMesh3 AHFRoomActor::BuildMesh() const
 {
-	FDynamicMesh3 Result = FHFGenerators::GenerateFloor(Room, SlabThickness, DoorwayCentres, DoorwayWidth);
+	FDynamicMesh3 Result = FHFGenerators::GenerateFloor(Room, SlabThickness, DoorwayCentres, DoorwayWidth,
+		WallFaceInsets);
 
 	if (bGenerateCeilingSlab)
 	{

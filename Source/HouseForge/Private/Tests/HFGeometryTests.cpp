@@ -470,6 +470,57 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Zero skirting height emits no skirting"),
 		FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0).TriangleCount(), Bare.TriangleCount());
 
+	// ------------------------------------------------------- and it has to be IN the room
+	//
+	// A room boundary is a wall CENTRELINE, so the plaster stands half a wall's thickness inside
+	// it. Laid on the boundary a 100 skirting spans 0 to 18 mm of the centreline and is buried in
+	// the masonry - which is where all seven of the reference flat's skirtings were. Watertight,
+	// correctly tagged, and not visible from anywhere in the room.
+	//
+	// Measured as how far the skirting reaches into the room off the south edge, against how far
+	// the wall on that edge does.
+	Room.SkirtingHeight = 10.0;
+
+	auto DeepestIntoTheRoomOffSouth = [](const FDynamicMesh3& Mesh)
+	{
+		double Deepest = 0.0;
+		for (const int32 Vid : Mesh.VertexIndicesItr())
+		{
+			const FVector3d V = Mesh.GetVertex(Vid);
+
+			// The south run alone. Above the floor excludes the slab, which spans the whole room,
+			// and the near half of the room excludes the north run, whose own front face would
+			// otherwise win at Y = 300. The east and west runs reach into this band only at their
+			// far ends, where their Y is 0 and cannot be the deepest.
+			//
+			// No filter on X: a run is ONE BOX and a box has vertices only at its corners, so
+			// asking for a vertex somewhere along the middle of the wall throws the run away.
+			if (V.Z > 0.01 && V.Y < 50.0)
+			{
+				Deepest = FMath::Max(Deepest, V.Y);
+			}
+		}
+		return Deepest;
+	};
+
+	// A 23 wall on that edge puts its face 11.5 into the room.
+	const FDynamicMesh3 AgainstAWall = FHFGenerators::GenerateFloor(
+		Room, 15.0, {}, 100.0, { 11.5, 0.0, 0.0, 0.0 });
+
+	const double Reach = DeepestIntoTheRoomOffSouth(AgainstAWall);
+
+	TestTrue(*FString::Printf(
+		TEXT("Skirting stands clear of the wall face rather than inside it (reaches %.2f, face at 11.50)"),
+		Reach), Reach > 11.5);
+
+	// And is still a skirting rather than a shelf - proud by about its own depth, not by a wall's.
+	TestTrue(*FString::Printf(TEXT("...and is only just proud of it (%.2f)"), Reach),
+		Reach < 11.5 + 2.0);
+
+	// The old behaviour, for contrast: with no inset declared it lies down the middle of the wall.
+	TestTrue(TEXT("With no inset the skirting sits on the boundary, which is what the walls bury"),
+		DeepestIntoTheRoomOffSouth(FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0)) < 11.5);
+
 	return true;
 }
 

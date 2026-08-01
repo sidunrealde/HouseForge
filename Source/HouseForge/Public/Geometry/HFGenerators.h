@@ -67,9 +67,16 @@ public:
 	 *
 	 * Doorways are omitted from the skirting: a continuous skirting across a door opening is one
 	 * of the most obvious tells that geometry was generated rather than modelled.
+	 *
+	 * @param WallFaceInsets How far the finished wall face stands in from each boundary EDGE - edge
+	 *        i running Boundary[i] to Boundary[i+1] - normally half the thickness of the wall set
+	 *        out on that line. A room boundary is a centreline, so without this the skirting is
+	 *        laid along the middle of the masonry and buried in it. Empty, or short, means zero for
+	 *        the edges it does not cover, which is what a caller with no walls to consult wants.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateFloor(const FHFRoom& Room, double SlabThickness,
-		const TArray<FVector2D>& SkirtingGaps, double GapWidth);
+		const TArray<FVector2D>& SkirtingGaps, double GapWidth,
+		const TArray<double>& WallFaceInsets = TArray<double>());
 
 	/**
 	 * A false ceiling.
