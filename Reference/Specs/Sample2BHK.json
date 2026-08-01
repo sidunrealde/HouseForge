@@ -510,7 +510,7 @@
 			"wallId": "W_CBath_Corr",
 			"offsetAlongWall": 900,
 			"width": 600,
-			"height": 450,
+			"height": 350,
 			"sillHeight": 2100,
 			"kind": "Ventilator",
 			"swing": "None"
@@ -1262,7 +1262,7 @@
 			"id": "FC_Living",
 			"roomId": "R_Living",
 			"style": "Cove",
-			"drop": 200,
+			"drop": 500,
 			"bandWidth": 600,
 			"cove":
 			{
@@ -1295,7 +1295,7 @@
 			"id": "FC_MBed",
 			"roomId": "R_MBed",
 			"style": "Peripheral",
-			"drop": 200,
+			"drop": 500,
 			"bandWidth": 600,
 			"cove":
 			{
@@ -1320,7 +1320,7 @@
 			"id": "FC_Bed2",
 			"roomId": "R_Bed2",
 			"style": "Peripheral",
-			"drop": 200,
+			"drop": 500,
 			"bandWidth": 500,
 			"cove":
 			{
@@ -1345,7 +1345,7 @@
 			"id": "FC_Kitchen",
 			"roomId": "R_Kitchen",
 			"style": "FullDrop",
-			"drop": 300,
+			"drop": 500,
 			"bandWidth": 0,
 			"cove":
 			{
@@ -1378,7 +1378,7 @@
 			"id": "FC_CBath",
 			"roomId": "R_CBath",
 			"style": "FullDrop",
-			"drop": 400,
+			"drop": 500,
 			"bandWidth": 0,
 			"cove":
 			{
@@ -1399,7 +1399,7 @@
 			"id": "FC_MBath",
 			"roomId": "R_MBath",
 			"style": "FullDrop",
-			"drop": 400,
+			"drop": 500,
 			"bandWidth": 0,
 			"cove":
 			{
@@ -1420,7 +1420,7 @@
 			"id": "FC_Corridor",
 			"roomId": "R_Corridor",
 			"style": "Bulkhead",
-			"drop": 300,
+			"drop": 500,
 			"bandWidth": 0,
 			"cove":
 			{

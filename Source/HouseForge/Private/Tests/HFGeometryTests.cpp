@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "DynamicMesh/DynamicMeshAABBTree3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFGenerators.h"
@@ -469,6 +470,57 @@ bool FHFFloorTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Zero skirting height emits no skirting"),
 		FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0).TriangleCount(), Bare.TriangleCount());
 
+	// ------------------------------------------------------- and it has to be IN the room
+	//
+	// A room boundary is a wall CENTRELINE, so the plaster stands half a wall's thickness inside
+	// it. Laid on the boundary a 100 skirting spans 0 to 18 mm of the centreline and is buried in
+	// the masonry - which is where all seven of the reference flat's skirtings were. Watertight,
+	// correctly tagged, and not visible from anywhere in the room.
+	//
+	// Measured as how far the skirting reaches into the room off the south edge, against how far
+	// the wall on that edge does.
+	Room.SkirtingHeight = 10.0;
+
+	auto DeepestIntoTheRoomOffSouth = [](const FDynamicMesh3& Mesh)
+	{
+		double Deepest = 0.0;
+		for (const int32 Vid : Mesh.VertexIndicesItr())
+		{
+			const FVector3d V = Mesh.GetVertex(Vid);
+
+			// The south run alone. Above the floor excludes the slab, which spans the whole room,
+			// and the near half of the room excludes the north run, whose own front face would
+			// otherwise win at Y = 300. The east and west runs reach into this band only at their
+			// far ends, where their Y is 0 and cannot be the deepest.
+			//
+			// No filter on X: a run is ONE BOX and a box has vertices only at its corners, so
+			// asking for a vertex somewhere along the middle of the wall throws the run away.
+			if (V.Z > 0.01 && V.Y < 50.0)
+			{
+				Deepest = FMath::Max(Deepest, V.Y);
+			}
+		}
+		return Deepest;
+	};
+
+	// A 23 wall on that edge puts its face 11.5 into the room.
+	const FDynamicMesh3 AgainstAWall = FHFGenerators::GenerateFloor(
+		Room, 15.0, {}, 100.0, { 11.5, 0.0, 0.0, 0.0 });
+
+	const double Reach = DeepestIntoTheRoomOffSouth(AgainstAWall);
+
+	TestTrue(*FString::Printf(
+		TEXT("Skirting stands clear of the wall face rather than inside it (reaches %.2f, face at 11.50)"),
+		Reach), Reach > 11.5);
+
+	// And is still a skirting rather than a shelf - proud by about its own depth, not by a wall's.
+	TestTrue(*FString::Printf(TEXT("...and is only just proud of it (%.2f)"), Reach),
+		Reach < 11.5 + 2.0);
+
+	// The old behaviour, for contrast: with no inset declared it lies down the middle of the wall.
+	TestTrue(TEXT("With no inset the skirting sits on the boundary, which is what the walls bury"),
+		DeepestIntoTheRoomOffSouth(FHFGenerators::GenerateFloor(Room, 15.0, {}, 100.0)) < 11.5);
+
 	return true;
 }
 
@@ -511,6 +563,131 @@ bool FHFStructureTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A beam narrower than the wall it sits in does not take the whole wall with it.
+ *
+ * A wall is built as RUNS, and a run is the member's full thickness with a top. That is exact for
+ * the case the flat happens to contain - every beam in it is 230 in a 230 wall, spanning the
+ * masonry completely - and wrong for every other case. Any cut that merely OVERLAPPED the wall
+ * across its thickness used to cap the run anyway: the full 230 came out over the beam's length and
+ * only the beam's own 150 went back, leaving a 40 slot open right through the wall for the length
+ * of the run.
+ *
+ * Nothing measurable was wrong with the result. Each box emitted was watertight, correctly wound,
+ * correctly sized and correctly role-tagged, and the wall had a hole you could see daylight
+ * through. A 150 or 200 beam in a 230 external wall is ordinary on the drawings this plugin exists
+ * to build from, so this is asserted by SECTION - what a ray fired through the wall meets - rather
+ * than by any count.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFNarrowBeamKeepsTheWallTest,
+	"HouseForge.Geometry.NarrowBeamLeavesTheWallStanding", HF_TEST_FLAGS)
+
+bool FHFNarrowBeamKeepsTheWallTest::RunTest(const FString& Parameters)
+{
+	constexpr double WallThickness = 23.0;
+	constexpr double BeamWidth = 15.0;
+	constexpr double BeamSoffit = 255.0;
+
+	FHFWall Wall = MakeWall(400.0, WallThickness, 300.0);
+
+	FHFBeam Beam;
+	Beam.Id = TEXT("B_Narrow");
+	Beam.Start = Wall.Start;
+	Beam.End = Wall.End;
+	Beam.Width = BeamWidth;
+	Beam.Depth = 300.0 - BeamSoffit;
+	Beam.SoffitZ = 300.0;
+
+	const FDynamicMesh3 Mesh = FHFGenerators::GenerateWall(Wall, {},
+		{ FHFGenerators::StructuralCutFor(Beam) });
+
+	/**
+	 * Every surface a ray meets, as distances along it.
+	 *
+	 * Free of any winding convention on purpose - this file's meshes do not agree with the textbook
+	 * about which way a prism's normals point, and an assertion built on that would be an assertion
+	 * about the convention. A surface is a surface from either side.
+	 */
+	auto CrossingsAlongY = [&Mesh](double X, double Z)
+	{
+		FDynamicMesh3 Copy = Mesh;
+		FDynamicMeshAABBTree3 Tree(&Copy, true);
+
+		TArray<double> Out;
+		const FVector3d Direction(0.0, 1.0, 0.0);
+		double Travelled = 0.0;
+
+		while (Travelled < 100.0 && Out.Num() < 32)
+		{
+			const FRay3d Ray(FVector3d(X, -50.0 + Travelled, Z), Direction);
+
+			double HitT = 0.0;
+			int32 Tid = IndexConstants::InvalidID;
+			if (!Tree.FindNearestHitTriangle(Ray, HitT, Tid))
+			{
+				break;
+			}
+
+			Out.Add(-50.0 + Travelled + HitT);
+			Travelled += HitT + 0.01;
+		}
+
+		return Out;
+	};
+
+	// Below the beam the wall is solid masonry: in one face, out the other, and nothing between.
+	{
+		const TArray<double> Low = CrossingsAlongY(200.0, 100.0);
+		TestEqual(TEXT("Below the beam a ray crosses the wall exactly twice"), Low.Num(), 2);
+		if (Low.Num() == 2)
+		{
+			TestNearlyEqual(TEXT("...entering at the near face"), Low[0], -WallThickness * 0.5, 0.05);
+			TestNearlyEqual(TEXT("...and leaving at the far face"), Low[1], WallThickness * 0.5, 0.05);
+		}
+	}
+
+	// THE ASSERTION THIS EXISTS FOR. At the beam's own height the masonry packs around it: two
+	// flanks of 4 either side of the 15 the concrete occupies. Before the fix this measured ZERO
+	// crossings - the wall was simply not there across its whole thickness.
+	{
+		const TArray<double> Through = CrossingsAlongY(200.0, (BeamSoffit + 300.0) * 0.5);
+
+		TestEqual(TEXT("At the beam's height a ray crosses masonry four times, not zero"),
+			Through.Num(), 4);
+
+		if (Through.Num() == 4)
+		{
+			TestNearlyEqual(TEXT("Near flank starts at the wall face"), Through[0], -WallThickness * 0.5, 0.05);
+			TestNearlyEqual(TEXT("Near flank stops at the beam"), Through[1], -BeamWidth * 0.5, 0.05);
+			TestNearlyEqual(TEXT("Far flank starts at the beam"), Through[2], BeamWidth * 0.5, 0.05);
+			TestNearlyEqual(TEXT("Far flank stops at the wall face"), Through[3], WallThickness * 0.5, 0.05);
+		}
+	}
+
+	// And the beam's own volume really is empty, or the wall would be occupying concrete instead.
+	{
+		const TArray<double> Middle = CrossingsAlongY(200.0, (BeamSoffit + 300.0) * 0.5);
+		const bool bClearOnCentreline = !Middle.ContainsByPredicate(
+			[](double Y) { return FMath::Abs(Y) < BeamWidth * 0.5 - 0.05; });
+
+		TestTrue(TEXT("No masonry stands inside the beam"), bClearOnCentreline);
+	}
+
+	// A wall the beam DOES span is unchanged: this is the case the reference flat contains, and the
+	// arithmetic path is still the one that handles it.
+	{
+		FHFWall Thin = MakeWall(400.0, BeamWidth, 300.0);
+		const FDynamicMesh3 Spanned = FHFGenerators::GenerateWall(Thin, {},
+			{ FHFGenerators::StructuralCutFor(Beam) });
+
+		TestTrue(TEXT("A wall the beam spans is still watertight"), FHFMeshOps::IsClosed(Spanned));
+		TestNearlyEqual(TEXT("...and is capped at the beam soffit"),
+			Spanned.GetBounds().Max.Z, BeamSoffit, 0.05);
+	}
+
+	return true;
+}
+
 /** Door leaves and window glazing, and the archway that is deliberately nothing. */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFOpeningInfillTest, "HouseForge.Geometry.OpeningInfill", HF_TEST_FLAGS)
 
@@ -520,9 +697,15 @@ bool FHFOpeningInfillTest::RunTest(const FString& Parameters)
 
 	const FDynamicMesh3 Leaf = FHFGenerators::GenerateOpeningInfill(MakeDoor(), Wall);
 	TestTrue(TEXT("A door produces a leaf"), Leaf.TriangleCount() > 0);
+
+	// A door's infill is its leaf AND the frame that leaf is hung in. The frame is buried a few
+	// millimetres in the lintel and in the floor, which is deliberate: a member finishing exactly in
+	// the plane of the construction around it is two coplanar surfaces fighting for every pixel.
 	const FAxisAlignedBox3d LeafBounds = Leaf.GetBounds();
-	TestTrue(TEXT("The leaf sits within the opening's height"),
-		LeafBounds.Min.Z >= -0.01 && LeafBounds.Max.Z <= 210.01);
+	TestTrue(TEXT("The infill sits within the opening's height plus the frame's embedment"),
+		LeafBounds.Min.Z >= -1.0 && LeafBounds.Max.Z <= 211.0);
+	TestTrue(TEXT("The frame is buried in the construction rather than flush with it"),
+		LeafBounds.Min.Z < -0.01 && LeafBounds.Max.Z > 210.01);
 
 	FHFOpening Window = MakeDoor(200.0, 150.0, 135.0);
 	Window.Id = TEXT("Win1");
@@ -530,7 +713,8 @@ bool FHFOpeningInfillTest::RunTest(const FString& Parameters)
 	Window.SillHeight = 90.0;
 
 	const FDynamicMesh3 Glazed = FHFGenerators::GenerateOpeningInfill(Window, Wall);
-	TestTrue(TEXT("A window produces a frame and glazing"), Glazed.TriangleCount() > Leaf.TriangleCount());
+	TestTrue(TEXT("A window produces a frame and glazing"),
+		TMeshQueries<FDynamicMesh3>::GetVolumeArea(Glazed).X > 0.0);
 
 	const FAxisAlignedBox3d GlazedBounds = Glazed.GetBounds();
 	TestNearlyEqual(TEXT("The window sits on its sill"), GlazedBounds.Min.Z, 90.0, 0.5);

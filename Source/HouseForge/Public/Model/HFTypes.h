@@ -380,6 +380,56 @@ struct HOUSEFORGE_API FHFColumn
 	EHFSurfaceRole SurfaceRole = EHFSurfaceRole::Structure;
 };
 
+/**
+ * A volume that displaces whatever is built around it.
+ *
+ * RCC GOES UP FIRST AND THE BLOCKWORK INFILLS AROUND IT. A wall under a downstand beam is built to
+ * the beam soffit; a wall meeting a column butts against its face; a beam frames into the column it
+ * lands on. In none of those does the same volume belong to both members, and the plaster that
+ * spans the junction afterwards is a finish, not a second wall.
+ *
+ * Modelled as if it did. A beam co-linear with the wall below it occupied the top 450 of that
+ * wall's own solid, so the beam and the wall each drew the same two side faces and the same top
+ * face - and two faces in one plane pointing the same way is a coin toss the depth test re-tosses
+ * every frame. That is the flashing the flat was reported for: a stippled band the whole 10.8 m
+ * length of the south elevation, a torn sawtooth along every wall-to-ceiling junction, a striped
+ * strip up the wall beside the master bedroom door. Every one of those meshes was watertight,
+ * correctly wound, correctly sized and correctly tagged.
+ *
+ * A beam and a column reduce to the same thing as far as the member they displace is concerned, so
+ * the generators see ONE concept rather than two, and a structural member added later needs no new
+ * case anywhere.
+ *
+ * A plain oriented box, because that is what every structural member in this domain is. Anything
+ * that is not - a shear wall on a curve - would arrive as several of these.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFStructuralCut
+{
+	GENERATED_BODY()
+
+	/** What displaced the masonry, for the build log. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	FName SourceId;
+
+	/** Centre of the volume, in world centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FVector Centre = FVector::ZeroVector;
+
+	/** Half-size on each axis, before rotation. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FVector Extents = FVector::ZeroVector;
+
+	/** Rotation about Z, about the centre. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double YawDegrees = 0.0;
+
+	double BottomZ() const { return Centre.Z - Extents.Z; }
+	double TopZ() const { return Centre.Z + Extents.Z; }
+
+	bool IsValid() const { return Extents.X > 0.0 && Extents.Y > 0.0 && Extents.Z > 0.0; }
+};
+
 /** An enclosed space. Its boundary drives the floor slab, skirting and false ceiling. */
 USTRUCT(BlueprintType)
 struct HOUSEFORGE_API FHFRoom
@@ -703,12 +753,32 @@ struct HOUSEFORGE_API FHFHouseSpec
 	const FHFRoom* FindRoom(const FName& RoomId) const;
 
 	/**
-	 * The deepest beam crossing a room, or nullptr if none do.
+	 * The deepest beam that SHOWS in a room, or nullptr if none does.
 	 *
 	 * This is what a false ceiling has to clear, so it is the figure the ceiling drop is chosen
 	 * against rather than a free design choice.
+	 *
+	 * Showing is the whole point, and it is not the same question as crossing. This used to return
+	 * only beams clear of every boundary, on the stated grounds that a beam set out on a wall line
+	 * is concealed by the wall itself. That is true of a 230 beam over a 230 wall and false of the
+	 * same beam over a 115 partition, which stands 57.5 proud of the plaster on both faces for the
+	 * whole run. Six of the eight beams in the reference flat are exactly that, and the resulting
+	 * ledge round the top of seven rooms was reported as a visual defect while the rule written to
+	 * prevent it sat one clause away from firing.
+	 *
+	 * See DeepestBeamCrossingRoom for the narrower question this used to answer.
 	 */
 	const FHFBeam* DeepestBeamOverRoom(const FName& RoomId) const;
+
+	/**
+	 * The deepest beam crossing the OPEN INTERIOR of a room - clear of every boundary by its own
+	 * half width - or nullptr if none does.
+	 *
+	 * A different and stricter question than DeepestBeamOverRoom. A beam here is one no wall runs
+	 * under and no perimeter band can box in; it is a layout fact about the frame rather than a
+	 * finish that can absorb it.
+	 */
+	const FHFBeam* DeepestBeamCrossingRoom(const FName& RoomId) const;
 
 	/** Total floor area of all rooms, in spec units squared. */
 	double TotalFloorArea() const;

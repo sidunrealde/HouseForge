@@ -119,10 +119,15 @@ public:
 
 	// ================================================================================= openings
 
-	/** Door leaves and sliding door panels. */
+	/** Door leaves and the timber chowkhat they are hung in. */
 	UPROPERTY(config, EditAnywhere, Category = "Openings|Doors",
 		meta = (ShowOnlyInnerProperties))
 	FHFDoorParams Door;
+
+	/** The glazed two-track sliding balcony door: a full-height sliding window with a threshold. */
+	UPROPERTY(config, EditAnywhere, Category = "Openings|Sliding Doors",
+		meta = (ShowOnlyInnerProperties))
+	FHFSlidingDoorParams SlidingDoor;
 
 	/** The two-track aluminium sliding window: the standard window of the flats this plugin builds. */
 	UPROPERTY(config, EditAnywhere, Category = "Openings|Sliding Windows",
@@ -220,11 +225,6 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Joinery|Plinth",
 		meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "0.0", UIMax = "15.0"))
 	double PlinthFrontRecess = 5.0;
-
-	/** The same setback at an end on show, in centimetres. An end dying into a wall keeps its width. */
-	UPROPERTY(config, EditAnywhere, Category = "Joinery|Plinth",
-		meta = (ClampMin = "0.0", ClampMax = "15.0", UIMin = "0.0", UIMax = "15.0"))
-	double PlinthEndRecess = 5.0;
 
 	// ========================================================================= joinery: cornice
 

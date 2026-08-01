@@ -119,6 +119,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ShowOnlyInnerProperties))
 	FHFWall Wall;
 
+	/**
+	 * Beams and columns passing through this wall.
+	 *
+	 * The RCC frame goes up first and the blockwork infills around it, so the wall is not built
+	 * where these are. Held on the actor rather than looked up, for the same reason the openings
+	 * are: a wall owns everything it needs to rebuild itself when its thickness is edited, and a
+	 * generator may not go looking for the rest of the house. See FHFStructuralCut.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FHFStructuralCut> Structure;
+
 	/** The openings cut into this wall. Held here so the wall owns everything it needs to rebuild. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	TArray<FHFOpening> Openings;
@@ -146,6 +157,16 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "1.0"))
 	double DoorwayWidth = 100.0;
+
+	/**
+	 * How far the finished wall face stands in from each boundary edge, one entry per edge.
+	 *
+	 * A room boundary is a wall CENTRELINE, so the plaster is half a wall's thickness inside it.
+	 * The skirting is laid against that face, and only the composing layer can see which wall is on
+	 * which edge - so it works this out and puts the answer here, and the generator is handed it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<double> WallFaceInsets;
 
 	/**
 	 * Also emit the structural slab soffit over this room.
@@ -194,6 +215,10 @@ class HOUSEFORGE_API AHFBeamActor : public AHFElementActor
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ShowOnlyInnerProperties))
 	FHFBeam Beam;
+
+	/** Columns this beam lands on, and any beam that runs through it. See FHFStructuralCut. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FHFStructuralCut> Structure;
 
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;

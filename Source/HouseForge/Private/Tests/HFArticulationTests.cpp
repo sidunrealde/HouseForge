@@ -306,16 +306,24 @@ bool FHFDoorLeafPartTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The leaf is watertight"), FHFMeshOps::IsClosed(Leaf.Mesh));
 	TestTrue(TEXT("The leaf faces outward"), TMeshQueries<FDynamicMesh3>::GetVolumeArea(Leaf.Mesh).X > 0.0);
 
-	// A 4 cm leaf inset half a centimetre all round, as a volume rather than a triangle count.
-	const double ExpectedVolume = (90.0 - 1.0) * 4.0 * (210.0 - 1.0);
+	// A 4 cm leaf hung in a frame, as a volume rather than a triangle count: a 900 doorway gives a
+	// 776 daylight opening between the frame's 62 mm faces, and the leaf laps 15 mm into the check on
+	// each jamb and at the head, less half a centimetre of running clearance all round and a
+	// centimetre of undercut at the floor. It is smaller than the hole, which is the whole point -
+	// before the frame existed the leaf WAS the hole.
+	constexpr double FrameInset = 6.2 - 1.5;
+	const double ExpectedVolume =
+		(90.0 - 2.0 * FrameInset - 1.0) * 4.0 * (210.0 - FrameInset - 0.5 - 1.0);
 	TestNearlyEqual(TEXT("The leaf is a solid of the declared size"),
 		TMeshQueries<FDynamicMesh3>::GetVolumeArea(Leaf.Mesh).X, ExpectedVolume, ExpectedVolume * 0.01);
 
 	// Local space: the pivot is the origin, the leaf runs out along +X and up from the sill.
 	const FAxisAlignedBox3d Local = Leaf.Mesh.GetBounds();
 	TestTrue(TEXT("The leaf starts at its own pivot"), Local.Min.X >= -0.01 && Local.Min.X <= 1.0);
-	TestNearlyEqual(TEXT("The leaf runs its width along local X"), Local.Max.X, 89.5, 0.01);
-	TestTrue(TEXT("The leaf sits on the sill in local Z"), Local.Min.Z >= -0.01);
+	TestNearlyEqual(TEXT("The leaf runs its width along local X"),
+		Local.Max.X, 90.0 - 2.0 * FrameInset - 0.5, 0.01);
+	TestTrue(TEXT("The leaf is undercut clear of the floor"), Local.Min.Z >= 0.5);
+	TestTrue(TEXT("The leaf stops under the frame's head"), Local.Max.Z <= 210.0 - FrameInset);
 
 	for (const int32 Tid : Leaf.Mesh.TriangleIndicesItr())
 	{
@@ -326,17 +334,27 @@ bool FHFDoorLeafPartTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Closed, the leaf fills the opening it belongs to: 155..245 along the wall, 0..210 up.
+	// Closed, the leaf fills the DAYLIGHT opening its frame leaves: the opening runs 155..245 along
+	// the wall, and the leaf runs between the two checks inside that.
 	const FAxisAlignedBox3d Closed = PosedBounds(Leaf, 0.0);
-	TestNearlyEqual(TEXT("Closed, the leaf spans the opening"), Closed.Min.X, 155.5, 0.01);
-	TestNearlyEqual(TEXT("Closed, the leaf reaches the far jamb"), Closed.Max.X, 244.5, 0.01);
+	TestNearlyEqual(TEXT("Closed, the leaf starts inside the near check"),
+		Closed.Min.X, 155.0 + FrameInset + 0.5, 0.01);
+	TestNearlyEqual(TEXT("Closed, the leaf reaches the far check"),
+		Closed.Max.X, 245.0 - FrameInset - 0.5, 0.01);
 	TestTrue(TEXT("Closed, the leaf lies in the plane of the wall"), Closed.Height() < 5.0);
+
+	// And it is IN its frame rather than in the hole: flush with the frame's room-side face, which
+	// stands a few millimetres proud of the wall it is fixed to.
+	TestNearlyEqual(TEXT("Closed, the leaf finishes flush with the frame's face"),
+		Closed.Max.Y, Wall.Thickness * 0.5 + 0.6, 0.01);
 
 	// Open, the same leaf stands square to the wall on the inward side, hinged at the near jamb.
 	const FAxisAlignedBox3d Open = PosedBounds(Leaf, 1.0);
 	TestTrue(TEXT("Open, the leaf is square to the wall"), Open.Width() < 5.0);
-	TestNearlyEqual(TEXT("Open, the leaf swings its full width off the wall"), Open.Max.Y, 89.5, 0.01);
-	TestTrue(TEXT("An inward-left door hinges at the near jamb"), FMath::Abs(Open.Min.X - 155.0) < 3.0);
+	TestNearlyEqual(TEXT("Open, the leaf swings its own width off its hinge"),
+		Open.Max.Y - Open.Min.Y, Local.Max.X - Local.Min.X, 0.01);
+	TestTrue(TEXT("An inward-left door hinges at the near jamb"),
+		FMath::Abs(Open.Min.X - (155.0 + FrameInset)) < 3.0);
 	TestTrue(TEXT("Open, the opening is clear"), Open.Max.X < 245.0);
 
 	// The other three swings, checked on which side of the wall the leaf ends up and which jamb it
@@ -344,15 +362,19 @@ bool FHFDoorLeafPartTest::RunTest(const FString& Parameters)
 	struct FSwingCase
 	{
 		EHFSwing Swing;
-		double ExpectedTipY;
+		double TipSide;
 		double ExpectedHingeX;
 	};
 
 	const FSwingCase Cases[] = {
-		{ EHFSwing::InwardRight,   89.5,  245.0 },
-		{ EHFSwing::OutwardLeft,  -89.5,  155.0 },
-		{ EHFSwing::OutwardRight, -89.5,  245.0 },
+		{ EHFSwing::InwardRight,   1.0,  245.0 - FrameInset },
+		{ EHFSwing::OutwardLeft,  -1.0,  155.0 + FrameInset },
+		{ EHFSwing::OutwardRight, -1.0,  245.0 - FrameInset },
 	};
+
+	// The leaf's own width off the hinge, plus the half wall the frame's face sits on: a leaf hung
+	// in a frame pivots about the frame, not about the centreline of the masonry.
+	const double ExpectedTipY = Local.Max.X + Wall.Thickness * 0.5 + 0.6;
 
 	for (const FSwingCase& Case : Cases)
 	{
@@ -365,20 +387,26 @@ bool FHFDoorLeafPartTest::RunTest(const FString& Parameters)
 		}
 
 		const FAxisAlignedBox3d Swung = PosedBounds(SwingParts[0], 1.0);
-		const double TipY = Case.ExpectedTipY > 0.0 ? Swung.Max.Y : Swung.Min.Y;
+		const double TipY = Case.TipSide > 0.0 ? Swung.Max.Y : Swung.Min.Y;
 
-		TestNearlyEqual(TEXT("The leaf swings to the declared side of the wall"), TipY, Case.ExpectedTipY, 0.5);
+		TestNearlyEqual(TEXT("The leaf swings to the declared side of the wall"),
+			TipY, Case.TipSide * ExpectedTipY, 0.5);
 		TestTrue(TEXT("The leaf hangs on the declared jamb"),
 			FMath::Abs(Swung.Center().X - Case.ExpectedHingeX) < 3.0);
 	}
 
-	// And the one-piece snapshot must still be the closed assembly, so nothing that consumed the
-	// old infill sees a behaviour change.
+	// And the one-piece snapshot is the closed assembly: the leaf AND the frame it hangs in, which
+	// is now more than the leaf. It has to contain the closed leaf exactly and reach past it to the
+	// masonry the frame is buried in.
 	const FDynamicMesh3 Snapshot = FHFGenerators::GenerateOpeningInfill(MakeDoorOpening(), Wall);
-	TestNearlyEqual(TEXT("The closed snapshot has the volume of the leaf"),
-		TMeshQueries<FDynamicMesh3>::GetVolumeArea(Snapshot).X, ExpectedVolume, ExpectedVolume * 0.01);
-	TestTrue(TEXT("The closed snapshot matches the closed pose"),
-		Snapshot.GetBounds().Min.Equals(Closed.Min, 0.01) && Snapshot.GetBounds().Max.Equals(Closed.Max, 0.01));
+	const FAxisAlignedBox3d SnapshotBounds = Snapshot.GetBounds();
+
+	TestTrue(TEXT("The closed snapshot is more than the leaf on its own"),
+		TMeshQueries<FDynamicMesh3>::GetVolumeArea(Snapshot).X > ExpectedVolume * 1.05);
+	TestTrue(TEXT("The closed snapshot contains the closed leaf"),
+		SnapshotBounds.Contains(Closed.Min) && SnapshotBounds.Contains(Closed.Max));
+	TestTrue(TEXT("The closed snapshot reaches the masonry on both jambs"),
+		SnapshotBounds.Min.X <= 155.0 && SnapshotBounds.Max.X >= 245.0);
 
 	return true;
 }
@@ -422,6 +450,36 @@ bool FHFSlidingDoorPartTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The fixed panel is watertight"), FHFMeshOps::IsClosed(Fixed->Mesh));
 	TestTrue(TEXT("The running panel is watertight"), FHFMeshOps::IsClosed(Leaf->Mesh));
 
+	// Both panels are GLAZED, and the glass is a solid with thickness rather than a plane. A pane
+	// modelled as a plane has area but no volume at all, and every bounds and triangle-count check
+	// passes on one - which is how both balcony doors in the reference flat came to be opaque boards.
+	for (const FHFMeshPart* Panel : { Fixed, Leaf })
+	{
+		TestTrue(TEXT("The panel is glazed with a solid, not a plane"),
+			RoleVolume(Panel->Mesh, EHFSurfaceRole::Glass) > 0.0);
+		TestTrue(TEXT("The panel has a sash section round its glass"),
+			RoleVolume(Panel->Mesh, EHFSurfaceRole::WindowFrame) > 0.0);
+
+		// The pane is 8 mm, not the window's 5: a door pane is a bigger, heavier sheet and it must
+		// not inherit the window's figure just because the two share a builder.
+		const FAxisAlignedBox3d Glass = RoleBounds(Panel->Mesh, EHFSurfaceRole::Glass);
+		TestNearlyEqual(TEXT("The pane is a door's 8 mm rather than a window's 5"),
+			Glass.Height(), 0.8, 0.001);
+
+		// And it is held: a shoulder of section remains outside the glass on every edge, so the pane
+		// is in the groove rather than standing through the sash into the reveal.
+		const FAxisAlignedBox3d Sash = RoleBounds(Panel->Mesh, EHFSurfaceRole::WindowFrame);
+		TestTrue(TEXT("The pane sits inside the stiles"),
+			Glass.Min.X > Sash.Min.X && Glass.Max.X < Sash.Max.X);
+		TestTrue(TEXT("The pane sits inside the rails"),
+			Glass.Min.Z > Sash.Min.Z && Glass.Max.Z < Sash.Max.Z);
+	}
+
+	// Nothing about a sliding door is a door LEAF any more. It is a framed, glazed sash, and if it
+	// carries the leaf role the material panel will paint it like a flush shutter.
+	TestNearlyEqual(TEXT("A sliding door has no opaque leaf in it"),
+		RoleVolume(Leaf->Mesh, EHFSurfaceRole::DoorLeaf), 0.0, 0.001);
+
 	// The opening spans 155..245 along this wall. Every panel stays inside it at every open amount,
 	// which is the property the old single leaf broke.
 	constexpr double OpeningMin = 155.0;
@@ -446,11 +504,31 @@ bool FHFSlidingDoorPartTest::RunTest(const FString& Parameters)
 	const FAxisAlignedBox3d Closed = PosedBounds(*Leaf, 0.0);
 	const FAxisAlignedBox3d Open = PosedBounds(*Leaf, 1.0);
 
-	// Closed, the two panels together fill the opening with no daylight between their meeting
-	// stiles - they interlock rather than merely abut.
+	// Closed, the two panels together fill the CLEAR opening with no daylight between their meeting
+	// stiles - they interlock rather than merely abut. Clear, not masonry: the outer frame eats a
+	// face width off each jamb, and the panels fill what it leaves.
+	constexpr double OuterFrameFace = 5.5;
 	TestTrue(TEXT("Closed, the panels overlap at the meeting stile"), Closed.Max.X > FixedBounds.Min.X + 1.0);
-	TestTrue(TEXT("Closed, the pair fills the opening"),
-		Closed.Min.X <= OpeningMin + 1.0 && FixedBounds.Max.X >= OpeningMax - 1.0);
+	TestTrue(TEXT("Closed, the pair fills the clear opening"),
+		Closed.Min.X <= OpeningMin + OuterFrameFace + 0.01
+			&& FixedBounds.Max.X >= OpeningMax - OuterFrameFace - 0.01);
+
+	// And the outer frame fills what is left, so nothing between the masonry and the glass is a gap.
+	const FDynamicMesh3 Outer = FHFGenerators::GenerateOpeningFixedInfill(
+		MakeDoorOpening(EHFOpeningKind::SlidingDoor, EHFSwing::None), Wall);
+	const FAxisAlignedBox3d OuterBounds = Outer.GetBounds();
+
+	TestTrue(TEXT("A sliding door has an outer frame"),
+		RoleVolume(Outer, EHFSurfaceRole::WindowFrame) > 0.0);
+	TestTrue(TEXT("The outer frame reaches both jambs"),
+		OuterBounds.Min.X <= OpeningMin + 0.01 && OuterBounds.Max.X >= OpeningMax - 0.01);
+	TestTrue(TEXT("The outer frame has tracks for the panels to run on"),
+		RoleVolume(Outer, EHFSurfaceRole::MetalHardware) > 0.0);
+
+	// The threshold: the one member a hinged door frame does not have. It stands on the floor and
+	// the panels stand on it, which is why the glass starts above the sill rather than at it.
+	TestNearlyEqual(TEXT("The threshold stands on the floor"), OuterBounds.Min.Z, 0.0, 0.01);
+	TestTrue(TEXT("The panels stand on the threshold rather than on the floor"), Closed.Min.Z >= 2.99);
 
 	// Open, the running panel has come to rest exactly over its fixed partner, which is as far as
 	// it can travel without leaving the reveal.
@@ -1365,12 +1443,21 @@ bool FHFFixedOpeningPartsTest::RunTest(const FString& Parameters)
 	Parts.Reset();
 	FHFGenerators::BuildOpeningParts(Arch, Wall, Parts);
 	TestEqual(TEXT("An archway has no moving parts"), Parts.Num(), 0);
+
+	// An archway gets no frame either, and that is a decision rather than an oversight. A cased
+	// opening in one of these flats is plastered masonry painted with the walls - a chowkhat is
+	// there to hang a leaf on, and an archway has no leaf to hang.
 	TestEqual(TEXT("An archway has no fixed geometry either"),
 		FHFGenerators::GenerateOpeningFixedInfill(Arch, Wall).TriangleCount(), 0);
 
-	// A door contributes nothing to the fixed mesh: all of it moves.
-	TestEqual(TEXT("A door's infill is entirely a moving part"),
-		FHFGenerators::GenerateOpeningFixedInfill(MakeDoorOpening(), Wall).TriangleCount(), 0);
+	// A door's LEAF is all that moves - but its frame does not, and the frame is fixed geometry.
+	// This asserted the opposite while every door in the flat was a bare leaf in a bare hole.
+	const FDynamicMesh3 DoorFrame = FHFGenerators::GenerateOpeningFixedInfill(MakeDoorOpening(), Wall);
+	TestTrue(TEXT("A door's frame is fixed geometry"),
+		TMeshQueries<FDynamicMesh3>::GetVolumeArea(DoorFrame).X > 0.0);
+	TestTrue(TEXT("A door frame is watertight"), FHFMeshOps::IsClosed(DoorFrame));
+	TestTrue(TEXT("Nothing in a door's fixed mesh is glass"),
+		FMath::IsNearlyZero(RoleVolume(DoorFrame, EHFSurfaceRole::Glass), 0.001));
 
 	return true;
 }

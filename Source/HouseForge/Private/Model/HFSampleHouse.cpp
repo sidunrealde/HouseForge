@@ -390,7 +390,11 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	//
 	// The master bathroom's is gone. It has D_BalcE onto the wash area now, and a ventilator into a
 	// corridor is a poor second to a door onto outside air.
-	B.AddOpening(TEXT("Vent_CBath"), TEXT("W_CBath_Corr"), 900.0, 600.0, 450.0, 2100.0, EHFOpeningKind::Ventilator);
+	// 600 x 350, not 600 x 450. It sits directly over D_CBath, so its sill cannot come down off the
+	// door head at 2100 - the only dimension free to move is its height. Both rooms it serves now
+	// finish at 2500, and a 450 ventilator would head out at 2550: 50 of it stranded in the plenum
+	// above the ceiling, open to a void at one end and to nothing at the other.
+	B.AddOpening(TEXT("Vent_CBath"), TEXT("W_CBath_Corr"), 900.0, 600.0, 350.0, 2100.0, EHFOpeningKind::Ventilator);
 
 	// ----------------------------------------------------------------------------- internal doors
 	// W_Mid_Lower and W_Mid_Upper both run west to east from X0, so on both of them a swing declared
@@ -451,22 +455,35 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// ------------------------------------------------------------------------ false ceilings
 	// Living gets the full cove treatment; bedrooms a peripheral band; wet areas a full drop to
 	// conceal plumbing; the corridor a bulkhead over its length.
-	B.AddCeiling(TEXT("FC_Living"), TEXT("R_Living"), EHFCeilingStyle::Cove, 200.0, 600.0,
+	//
+	// EVERY DROP HERE IS 500, AND NOT ONE OF THEM IS A DESIGN CHOICE. The beams are 450 deep hung
+	// from a 3000 slab, so their soffits are at 2550, and six of the eight are 230 wide over 115
+	// partitions - they stand 57.5 proud of the plaster on both faces and read as a ledge round the
+	// top of every room they border. A false ceiling exists to bury that. These were 200, 300 and
+	// 400: every one of them sat ABOVE the beam soffit, so the beam pierced the finished ceiling and
+	// hung below it, which is what "a ragged dark line along the top of every wall" was.
+	//
+	// 500 puts the soffit at 2500, 50 clear below the beams, and a full drop's 20 panel top at 2520
+	// still 30 clear - short of touching, because a face landing exactly on the beam soffit is two
+	// coplanar faces and the flashing starts again. Clear height 2500 is a normal finished ceiling
+	// in a flat of these proportions, and the deep perimeter box a 450 beam forces is exactly how
+	// this is detailed on site.
+	B.AddCeiling(TEXT("FC_Living"), TEXT("R_Living"), EHFCeilingStyle::Cove, 500.0, 600.0,
 		{ FVector2D(1200.0, 1200.0), FVector2D(1200.0, 2400.0), FVector2D(5400.0, 1200.0), FVector2D(5400.0, 2400.0) });
 
-	B.AddCeiling(TEXT("FC_MBed"), TEXT("R_MBed"), EHFCeilingStyle::Peripheral, 200.0, 600.0,
+	B.AddCeiling(TEXT("FC_MBed"), TEXT("R_MBed"), EHFCeilingStyle::Peripheral, 500.0, 600.0,
 		{ FVector2D(5100.0, 6300.0), FVector2D(8100.0, 6300.0) });
 
-	B.AddCeiling(TEXT("FC_Bed2"), TEXT("R_Bed2"), EHFCeilingStyle::Peripheral, 200.0, 500.0,
+	B.AddCeiling(TEXT("FC_Bed2"), TEXT("R_Bed2"), EHFCeilingStyle::Peripheral, 500.0, 500.0,
 		{ FVector2D(7500.0, 1200.0), FVector2D(9600.0, 1200.0) });
 
-	B.AddCeiling(TEXT("FC_Kitchen"), TEXT("R_Kitchen"), EHFCeilingStyle::FullDrop, 300.0, 0.0,
+	B.AddCeiling(TEXT("FC_Kitchen"), TEXT("R_Kitchen"), EHFCeilingStyle::FullDrop, 500.0, 0.0,
 		{ FVector2D(900.0, 6300.0), FVector2D(2700.0, 6300.0), FVector2D(900.0, 7800.0), FVector2D(2700.0, 7800.0) });
 
-	B.AddCeiling(TEXT("FC_CBath"), TEXT("R_CBath"), EHFCeilingStyle::FullDrop, 400.0, 0.0,
+	B.AddCeiling(TEXT("FC_CBath"), TEXT("R_CBath"), EHFCeilingStyle::FullDrop, 500.0, 0.0,
 		{ FVector2D(3000.0, 4500.0) });
 
-	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 400.0, 0.0,
+	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 500.0, 0.0,
 		{ FVector2D(9450.0, 4500.0) });
 
 	// FC_Living_Beam went with BM_Living_Cross. It existed only to box that beam in, and a 450 deep
@@ -481,7 +498,11 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Bulkhead.Id = TEXT("FC_Corridor");
 		Bulkhead.RoomId = TEXT("R_Corridor");
 		Bulkhead.Style = EHFCeilingStyle::Bulkhead;
-		Bulkhead.Drop = 300.0;
+
+		// 500 for the same reason every other ceiling in this flat is: BM_Mid_Lower and
+		// BM_Mid_Upper are the corridor's two long walls, and at 300 this bulkhead stopped 250
+		// short of burying either of them.
+		Bulkhead.Drop = 500.0;
 		Bulkhead.BandWidth = 0.0;
 		Bulkhead.ExplicitPolygon = {
 			FVector2D(X2, Y1), FVector2D(X4, Y1), FVector2D(X4, Y2), FVector2D(X2, Y2)

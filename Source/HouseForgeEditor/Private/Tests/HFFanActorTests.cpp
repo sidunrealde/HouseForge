@@ -396,16 +396,30 @@ bool FHFFanPlacementTest::RunTest(const FString& Parameters)
 			TestTrue(*FString::Printf(TEXT("'%s' hangs on a rod rather than flush to the slab (%.1f of drop)"),
 				*Where, CeilingZ - HighestBlade), CeilingZ - HighestBlade > 10.0);
 
-			// Head height in a flat, and below any false ceiling in the room. Blades buried in
-			// plasterboard is the failure the rod length exists to prevent.
+			// Head height in a flat, and below whatever the false ceiling puts OVER THIS FAN.
+			// Blades buried in plasterboard is the failure the rod length exists to prevent.
+			//
+			// Asked at the fan's own plan position, not off the ceiling's nominal drop, because for
+			// a perimeter style those are different numbers and only one of them is about this fan.
+			// A cove is a band round the edge of the room with the centre left open to the slab, and
+			// every fan in the flat hangs in that open centre - so the drop that matters over it is
+			// zero, however deep the band round the walls happens to be. Stated the other way this
+			// passed for years on a coincidence: the bands were 200 deep, blades hang 270 up, and
+			// 270 < 280 held. Deepening the bands to 500 to bury the beams broke the arithmetic
+			// without moving a single fan, which is the tell that the assertion was measuring the
+			// wrong thing. CeilingSoffitDropAt is the question the composing layer itself asks.
 			for (const FHFFalseCeiling& Ceiling : House->Spec.FalseCeilings)
 			{
-				if (Ceiling.RoomId != Fixture.RoomId || Ceiling.Style == EHFCeilingStyle::None)
+				if (Ceiling.RoomId != Fixture.RoomId || Ceiling.Style == EHFCeilingStyle::None
+					|| Room == nullptr)
 				{
 					continue;
 				}
 
-				const double Soffit = CeilingZ - Ceiling.Drop;
+				const double DropOverTheFan =
+					FHFGenerators::CeilingSoffitDropAt(Ceiling, *Room, Fixture.Position);
+
+				const double Soffit = CeilingZ - DropOverTheFan;
 				TestTrue(*FString::Printf(TEXT("'%s' hangs below the false ceiling, not inside it (%.1f under %.1f)"),
 					*Where, HighestBlade, Soffit), HighestBlade < Soffit + 0.01);
 			}
@@ -545,8 +559,22 @@ bool FHFFanUnderACeilingTest::RunTest(const FString& Parameters)
 		Spec.Fixtures.Add(Fan);
 	};
 
-	AddFan(TEXT("F_Fan_UnderKitchen"), TEXT("R_Kitchen"));   // FC_Kitchen, FullDrop 300 mm
-	AddFan(TEXT("F_Fan_UnderMBath"), TEXT("R_MBath"));       // FC_MBath,   FullDrop 400 mm
+	AddFan(TEXT("F_Fan_UnderKitchen"), TEXT("R_Kitchen"));
+	AddFan(TEXT("F_Fan_UnderMBath"), TEXT("R_MBath"));
+
+	// TWO DIFFERENT DROPS, SET HERE RATHER THAN BORROWED FROM THE FLAT'S DESIGN.
+	//
+	// The closing assertion is that a deeper ceiling gets a longer rod BY THE DIFFERENCE, which is
+	// the one thing a constant cannot fake - and it needs two drops that differ. It used to read
+	// them off the reference flat, where the kitchen happened to drop 300 and the master bath 400.
+	// Both are 500 now, for a reason that has nothing to do with fans: every drop in that flat is
+	// set by the 450 beams it has to bury. The difference went to zero and this test failed while
+	// nothing about a fan had changed. What it wants is a controlled pair, so it makes its own.
+	for (FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+	{
+		if (Ceiling.RoomId == TEXT("R_Kitchen")) { Ceiling.Drop = 300.0; }
+		if (Ceiling.RoomId == TEXT("R_MBath"))   { Ceiling.Drop = 400.0; }
+	}
 
 	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
 	if (!TestNotNull(TEXT("A house actor spawns"), House))
@@ -658,7 +686,7 @@ bool FHFFanUnderACeilingTest::RunTest(const FString& Parameters)
 		TestNotNull(TEXT("...and the master bath's, under a deeper one"), MBath))
 	{
 		// The deeper ceiling gets the longer rod, by exactly the difference between the two drops -
-		// 400 mm against 300. This is the assertion a constant cannot satisfy.
+		// 400 mm against 300, both set above. This is the assertion a constant cannot satisfy.
 		TestNearlyEqual(TEXT("A deeper ceiling gets a longer rod, by the depth it is deeper"),
 			MBath->Fan.DropLength - Kitchen->Fan.DropLength, 10.0, 1e-6);
 	}

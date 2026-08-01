@@ -500,6 +500,10 @@ bool FHFSampleHouseSwingAgreementTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("No door in the reference flat trips SwingBlocked"),
 		FHFSpecValidator::Validate(Spec).Contains(TEXT("SwingBlocked")));
 
+	// The shipped section, which is what BuildOpeningParts below is called with. The frame is what
+	// moved the hinge line off the masonry, so the arithmetic here has to know about it.
+	const FHFOpeningBuildParams Params;
+
 	int32 Checked = 0;
 
 	for (const FHFOpening& Opening : Spec.Openings)
@@ -562,10 +566,56 @@ bool FHFSampleHouseSwingAgreementTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
-		// Open means open: a leaf standing square to the wall clears the doorway by its own width.
+		// Open means open: a leaf standing square to the wall projects into the room by its own
+		// width off a hinge that is on the FRAME, so it reaches somewhere between the daylight
+		// opening it closes and the masonry opening plus the half wall its frame face sits on.
+		//
+		// Not the full opening width any more, and that is the fix rather than a regression: a leaf
+		// that measured exactly its masonry opening was a leaf hung in a hole with no frame in it.
+		const double DaylightWidth = Opening.Width - Params.Door.FrameFace * 2.0;
+		const double Reach = FMath::Abs(Across);
+
+		TestTrue(
+			*FString::Printf(TEXT("Door '%s' opens at least its daylight width off the wall (%.1f of %.1f)"),
+				*Opening.Id.ToString(), Reach, DaylightWidth),
+			Reach >= DaylightWidth);
+		TestTrue(
+			*FString::Printf(TEXT("Door '%s' does not overreach its opening"), *Opening.Id.ToString()),
+			Reach <= Opening.Width + Wall->Thickness * 0.5);
+
+		// The swing arc HFSpecValidator sweeps, and the one AHFHouseActor draws, are both struck from
+		// the MASONRY jamb ON THE WALL CENTRELINE, with the opening width for a radius - which is the
+		// arc an AutoCAD plan draws, and the reason both were left alone here.
+		//
+		// A leaf hung in a frame pivots about the frame's room-side face instead, so it reaches half
+		// a wall further into the room than that arc allows for: 107.4 cm against 105 on the main
+		// door in a 230 wall. The bound is therefore the opening width plus the half wall the frame
+		// stands on, and the residual - about 2 cm on an external wall, 1 cm internally - is a
+		// fixture band the plan arc does not reach. It is named here rather than papered over: the
+		// rule already treats a 40 mm leaf as a line with no thickness, so this is inside its
+		// existing resolution, and moving the drawn arc off the drawing's would be the worse trade.
+		const FVector2D MasonryHinge = Centre +
+			Direction * ((Opening.Swing == EHFSwing::InwardLeft || Opening.Swing == EHFSwing::OutwardLeft)
+				? -Opening.Width * 0.5 : Opening.Width * 0.5);
+
+		const double FromMasonryJamb = FVector2D::Distance(GeometryPlan, MasonryHinge);
+		const double PlanArc = Opening.Width + Wall->Thickness * 0.5;
+
+		if (FromMasonryJamb > PlanArc + 0.01)
+		{
+			AddError(FString::Printf(
+				TEXT("The leaf of door '%s' reaches %.1f cm from its masonry jamb, past the %.1f cm the plan arc covers even allowing for its frame. The swing rule and the geometry no longer describe the same door."),
+				*Opening.Id.ToString(), FromMasonryJamb, PlanArc));
+		}
+
+		// And the invariant that does hold exactly, whatever the wall: the leaf reaches its own
+		// width off its own hinge. A leaf that lost length to the frame it hangs in without the
+		// hinge moving with it would still satisfy every bound above.
+		const FVector2D HingePlan(Leaf.PivotTransform.GetLocation().X, Leaf.PivotTransform.GetLocation().Y);
 		TestNearlyEqual(
-			*FString::Printf(TEXT("Door '%s' opens its full width off the wall"), *Opening.Id.ToString()),
-			FMath::Abs(Across), Opening.Width, 1.0);
+			*FString::Printf(TEXT("Door '%s' reaches its own leaf width off its own hinge"),
+				*Opening.Id.ToString()),
+			FVector2D::Distance(GeometryPlan, HingePlan), Local.Max.X, 0.05);
 
 		const FHFRoom* GeometryRoom = Spec.Rooms.FindByPredicate(
 			[&GeometryPlan](const FHFRoom& Room)

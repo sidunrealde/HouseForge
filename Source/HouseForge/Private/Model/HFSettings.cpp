@@ -22,6 +22,7 @@ FHFBuildDefaults UHFSettings::Resolve() const
 	FHFBuildDefaults Out;
 
 	Out.Opening.Door = Door;
+	Out.Opening.SlidingDoor = SlidingDoor;
 	Out.Opening.SlidingWindow = SlidingWindow;
 	Out.Opening.Ventilator = Ventilator;
 	Out.Opening.FixedWindow = FixedWindow;
@@ -43,7 +44,6 @@ FHFBuildDefaults UHFSettings::Resolve() const
 
 	J.PlinthHeight = PlinthHeight;
 	J.PlinthFrontRecess = PlinthFrontRecess;
-	J.PlinthEndRecess = PlinthEndRecess;
 
 	J.CorniceDepth = CorniceDepth;
 	J.CorniceHeight = CorniceHeight;

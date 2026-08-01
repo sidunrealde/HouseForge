@@ -8,7 +8,10 @@
 #include "Actors/HFHouseActor.h"
 #include "Actors/HFOpeningActor.h"
 #include "Components/DynamicMeshComponent.h"
+#include "DynamicMesh/DynamicMesh3.h"
 #include "Editor.h"
+#include "UDynamicMesh.h"
+#include "VectorUtil.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Misc/AutomationTest.h"
@@ -41,6 +44,8 @@
  */
 namespace HouseForgeWalkthrough
 {
+	using namespace UE::Geometry;
+
 	/**
 	 * The trace a character makes: the world, a pawn's channel, and simple collision.
 	 *
@@ -205,6 +210,112 @@ namespace HouseForgeWalkthrough
 		House->BuildGeometry();
 		return House;
 	}
+
+	/** The actor carrying one named element of this house, or null. */
+	AHFElementActor* ElementNamed(const AHFHouseActor* House, const FName& Id)
+	{
+		if (House == nullptr)
+		{
+			return nullptr;
+		}
+
+		for (const TObjectPtr<AActor>& Actor : House->ElementActors)
+		{
+			AHFElementActor* Element = Cast<AHFElementActor>(Actor);
+			if (Element != nullptr && Element->ElementId == Id)
+			{
+				return Element;
+			}
+		}
+
+		return nullptr;
+	}
+
+	/**
+	 * Which way the floor faces at one point in a room - the RENDERED answer, not the traced one.
+	 *
+	 * The other half of "is there a floor". A downward trace is answered by collision, and collision
+	 * on a UDynamicMeshComponent is the triangle soup with no notion of a front side: a slab whose
+	 * triangles all face DOWN blocks a pawn perfectly and is invisible from above under backface
+	 * culling. That is a floor you stand on and cannot see, and it has bitten this codebase twice.
+	 * Rendering and collision are therefore asked separately, because they fail separately.
+	 *
+	 * Winding is the authority here, not the normal overlay, because winding is what culls. It is
+	 * read with FDynamicMesh3::GetTriNormal - the engine's own function, on the engine's own vertex
+	 * order - rather than a cross product written out here, so there is no second convention to get
+	 * backwards.
+	 *
+	 * Triangles are selected by covering the sample point IN PLAN and sitting at the finished floor
+	 * level, so skirting undersides and the slab's own soffit 15 cm below are not counted as votes
+	 * about the walking surface.
+	 */
+	void FloorFacingAt(const AHFElementActor* Element, const FVector2D& Plan, double FloorZ,
+		int32& OutUp, int32& OutDown)
+	{
+		OutUp = 0;
+		OutDown = 0;
+
+		UDynamicMeshComponent* Component = Element != nullptr ? Element->GetMeshComponent() : nullptr;
+		if (Component == nullptr || Component->GetDynamicMesh() == nullptr)
+		{
+			return;
+		}
+
+		const FTransform ToWorld = Component->GetComponentTransform();
+
+		Component->GetDynamicMesh()->ProcessMesh([&](const FDynamicMesh3& Mesh)
+		{
+			for (const int32 TriangleId : Mesh.TriangleIndicesItr())
+			{
+				FVector3d A, B, C;
+				Mesh.GetTriVertices(TriangleId, A, B, C);
+
+				A = ToWorld.TransformPosition(A);
+				B = ToWorld.TransformPosition(B);
+				C = ToWorld.TransformPosition(C);
+
+				// At the walking surface, and level enough to be part of it.
+				const double MeanZ = (A.Z + B.Z + C.Z) / 3.0;
+				if (FMath::Abs(MeanZ - FloorZ) > 0.5
+					|| FMath::Max3(A.Z, B.Z, C.Z) - FMath::Min3(A.Z, B.Z, C.Z) > 0.5)
+				{
+					continue;
+				}
+
+				// Under the sample point in plan. Barycentric, so a point on a shared edge is
+				// answered by both triangles rather than by neither.
+				const FVector2D P0(A.X, A.Y);
+				const FVector2D P1(B.X, B.Y);
+				const FVector2D P2(C.X, C.Y);
+
+				const double Area2 = (P1.X - P0.X) * (P2.Y - P0.Y) - (P2.X - P0.X) * (P1.Y - P0.Y);
+				if (FMath::Abs(Area2) < UE_KINDA_SMALL_NUMBER)
+				{
+					continue;
+				}
+
+				const double W0 = ((P1.X - Plan.X) * (P2.Y - Plan.Y) - (P2.X - Plan.X) * (P1.Y - Plan.Y)) / Area2;
+				const double W1 = ((P2.X - Plan.X) * (P0.Y - Plan.Y) - (P0.X - Plan.X) * (P2.Y - Plan.Y)) / Area2;
+				const double W2 = 1.0 - W0 - W1;
+
+				if (W0 < -1e-6 || W1 < -1e-6 || W2 < -1e-6)
+				{
+					continue;
+				}
+
+				// The engine's own winding normal: what the renderer culls on.
+				const FVector3d Normal = VectorUtil::Normal(A, B, C);
+				if (Normal.Z > 0.5)
+				{
+					++OutUp;
+				}
+				else if (Normal.Z < -0.5)
+				{
+					++OutDown;
+				}
+			}
+		});
+	}
 }
 
 /**
@@ -274,6 +385,30 @@ bool FHFWalkthroughFloorTest::RunTest(const FString& Parameters)
 			*FString::Printf(TEXT("Room '%s' is walkable at its finished floor level"), *Room.Id.ToString()),
 			Hit.ImpactPoint.Z, Room.FloorZ, 2.0);
 
+		// ------------------------------------------------------------------ and you can SEE it
+		//
+		// Asserted separately from the trace above, and deliberately so. The two are different
+		// failures with one symptom: a slab wound face-down blocks a pawn and vanishes under
+		// backface culling, and a slab that renders but has no cooked body is a hole you fall
+		// through while looking at a floor. Neither can be inferred from the other, so neither is
+		// allowed to stand in for it.
+		AHFElementActor* Slab = ElementNamed(House, Room.Id);
+		if (!TestNotNull(*FString::Printf(TEXT("Room '%s' has a floor actor"), *Room.Id.ToString()), Slab))
+		{
+			continue;
+		}
+
+		int32 Up = 0;
+		int32 Down = 0;
+		FloorFacingAt(Slab, Plan, Room.FloorZ, Up, Down);
+
+		if (Up == 0)
+		{
+			AddError(FString::Printf(
+				TEXT("Room '%s' has no floor to LOOK at over (%.0f, %.0f): %d triangle(s) at Z=%.1f, none of them facing up and %d facing down. Wound face-down, a slab still stops a pawn - so the walking trace above passes while the room reads as having no floor at all."),
+				*Room.Id.ToString(), Plan.X, Plan.Y, Up + Down, Room.FloorZ, Down));
+		}
+
 		++Checked;
 	}
 
@@ -312,11 +447,34 @@ bool FHFWalkthroughWallTest::RunTest(const FString& Parameters)
 
 	int32 Checked = 0;
 
+	// How much of each end of a wall belongs to the wall it butts against.
+	//
+	// Walls are set out on their CENTRELINES, so where two meet they both own the footprint of the
+	// junction. One of them is built through and the other stops at its face - see the build order
+	// in AHFHouseActor - so the last half-thickness of the wall that stops is masonry, but it is the
+	// OTHER wall's masonry. Traced there, this test asked whether a wall blocks at a point that wall
+	// does not occupy, and the honest answer is that the flat is solid and the question was wrong.
+	//
+	// The thickest wall in the spec bounds how much any junction can take, so no wall has to be
+	// looked up and nothing has to be assumed about which one wins.
+	double JunctionMargin = 0.0;
+	for (const FHFWall& Wall : Spec.Walls)
+	{
+		JunctionMargin = FMath::Max(JunctionMargin, Wall.Thickness * 0.5);
+	}
+	JunctionMargin += 5.0;
+
 	for (const FHFWall& Wall : Spec.Walls)
 	{
 		const double Length = Wall.Length();
 		if (Length <= UE_KINDA_SMALL_NUMBER || Wall.Thickness <= 0.0)
 		{
+			continue;
+		}
+
+		if (Length <= JunctionMargin * 2.0)
+		{
+			// Shorter than its own two junctions. Nothing here is unambiguously this wall's.
 			continue;
 		}
 
@@ -344,9 +502,10 @@ bool FHFWalkthroughWallTest::RunTest(const FString& Parameters)
 
 		double SolidAlong = -1.0;
 		constexpr int32 Steps = 40;
-		for (int32 i = 1; i < Steps; ++i)
+		const double Span = Length - JunctionMargin * 2.0;
+		for (int32 i = 0; i <= Steps; ++i)
 		{
-			const double Along = Length * double(i) / Steps;
+			const double Along = JunctionMargin + Span * double(i) / Steps;
 			if (IsClear(Along))
 			{
 				SolidAlong = Along;

@@ -53,6 +53,19 @@ namespace
 		return Opening;
 	}
 
+	/** The reference flat's balcony door: 1800 x 2100, the size both of its sliding units are. */
+	FHFOpening MakeSlidingDoor()
+	{
+		FHFOpening Opening;
+		Opening.Id = TEXT("D_Sanity_Slide");
+		Opening.WallId = TEXT("W_Sanity");
+		Opening.Kind = EHFOpeningKind::SlidingDoor;
+		Opening.Width = 180.0;
+		Opening.Height = 210.0;
+		Opening.OffsetAlongWall = 200.0;
+		return Opening;
+	}
+
 	FHFOpening MakeDoor()
 	{
 		FHFOpening Opening;
@@ -281,10 +294,44 @@ bool FHFOpeningSanitiseLeavesShippedFiguresAloneTest::RunTest(const FString& Par
 
 	TestEqual(TEXT("Door leaf thickness"), After.Door.LeafThickness, Shipped.Door.LeafThickness);
 	TestEqual(TEXT("Door leaf gap"), After.Door.LeafFrameGap, Shipped.Door.LeafFrameGap);
-	TestEqual(TEXT("Sliding panel overlap"),
-		After.Door.SlidingPanelOverlap, Shipped.Door.SlidingPanelOverlap);
+	TestEqual(TEXT("Door frame depth"), After.Door.FrameDepth, Shipped.Door.FrameDepth);
+	TestEqual(TEXT("Door frame face"), After.Door.FrameFace, Shipped.Door.FrameFace);
+	TestEqual(TEXT("Door rebate stop"), After.Door.RebateStop, Shipped.Door.RebateStop);
+	TestEqual(TEXT("Door leaf undercut"), After.Door.LeafUndercut, Shipped.Door.LeafUndercut);
+
+	// The sliding door is sanitised against the opening it is IN, so it is asked about a balcony
+	// door rather than about the window above. A 150 x 120 hole would clamp a 2.1 m door's section
+	// on its way past and prove nothing about the section that ships.
+	const FHFOpening BalconyDoor = MakeSlidingDoor();
+	const FHFOpeningBuildParams AfterDoor = Shipped.Sanitised(BalconyDoor.Width, BalconyDoor.Height);
+
+	TestEqual(TEXT("Sliding door frame depth"),
+		AfterDoor.SlidingDoor.FrameDepth, Shipped.SlidingDoor.FrameDepth);
+	TestEqual(TEXT("Sliding door frame face"),
+		AfterDoor.SlidingDoor.FrameFace, Shipped.SlidingDoor.FrameFace);
+	TestEqual(TEXT("Sliding door sash depth"),
+		AfterDoor.SlidingDoor.SashDepth, Shipped.SlidingDoor.SashDepth);
+	TestEqual(TEXT("Sliding door track pitch"),
+		AfterDoor.SlidingDoor.TrackPitch, Shipped.SlidingDoor.TrackPitch);
+	TestEqual(TEXT("Sliding door bottom rail"),
+		AfterDoor.SlidingDoor.BottomRailWidth, Shipped.SlidingDoor.BottomRailWidth);
+	TestEqual(TEXT("Sliding door interlock"),
+		AfterDoor.SlidingDoor.InterlockOverlap, Shipped.SlidingDoor.InterlockOverlap);
+	TestEqual(TEXT("Sliding door glass rebate"),
+		AfterDoor.SlidingDoor.GlassRebate, Shipped.SlidingDoor.GlassRebate);
+	TestEqual(TEXT("Sliding door threshold"),
+		AfterDoor.SlidingDoor.ThresholdHeight, Shipped.SlidingDoor.ThresholdHeight);
 
 	TestEqual(TEXT("Fixed window frame face"), After.FixedWindow.FrameFace, Shipped.FixedWindow.FrameFace);
+
+	// The sliding door's section closes the same way the window's does. Two 40 mm sashes on a 46 mm
+	// pitch pass one another with 6 mm to spare and occupy 86 mm of wall between them; the published
+	// 92 mm frame is that plus its own web, so the sashes are inside the frame that houses them
+	// rather than standing proud of it.
+	TestEqual(TEXT("The shipped door pitch clears the shipped door sash"),
+		Shipped.SlidingDoor.TrackPitch - Shipped.SlidingDoor.SashDepth, 0.6, 1e-9);
+	TestTrue(TEXT("The shipped door frame contains both its sashes"),
+		Shipped.SlidingDoor.FrameDepth >= Shipped.SlidingDoor.TrackPitch + Shipped.SlidingDoor.SashDepth);
 
 	// The 3 mm running clearance the shipped section already has is exactly the floor enforced, so
 	// the two must agree to the last decimal or the default has been moved by a rounding.

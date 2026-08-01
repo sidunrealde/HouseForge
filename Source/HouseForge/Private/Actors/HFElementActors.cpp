@@ -191,12 +191,13 @@ void AHFElementActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChan
 
 FDynamicMesh3 AHFWallActor::BuildMesh() const
 {
-	return FHFGenerators::GenerateWall(Wall, Openings);
+	return FHFGenerators::GenerateWall(Wall, Openings, Structure);
 }
 
 FDynamicMesh3 AHFRoomActor::BuildMesh() const
 {
-	FDynamicMesh3 Result = FHFGenerators::GenerateFloor(Room, SlabThickness, DoorwayCentres, DoorwayWidth);
+	FDynamicMesh3 Result = FHFGenerators::GenerateFloor(Room, SlabThickness, DoorwayCentres, DoorwayWidth,
+		WallFaceInsets);
 
 	if (bGenerateCeilingSlab)
 	{
@@ -213,7 +214,7 @@ FDynamicMesh3 AHFCeilingActor::BuildMesh() const
 
 FDynamicMesh3 AHFBeamActor::BuildMesh() const
 {
-	return FHFGenerators::GenerateBeam(Beam);
+	return FHFGenerators::GenerateBeam(Beam, Structure);
 }
 
 FDynamicMesh3 AHFColumnActor::BuildMesh() const

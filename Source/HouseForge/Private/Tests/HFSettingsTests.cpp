@@ -89,8 +89,29 @@ bool FHFSettingsDefaultsMatchConstantsTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Door leaf thickness"), Defaults.Opening.Door.LeafThickness, 4.0);
 	TestEqual(TEXT("Door leaf frame gap"), Defaults.Opening.Door.LeafFrameGap, 0.5);
-	TestEqual(TEXT("Sliding panel overlap"), Defaults.Opening.Door.SlidingPanelOverlap, 2.5);
-	TestEqual(TEXT("Sliding track gap"), Defaults.Opening.Door.SlidingTrackGap, 1.0);
+
+	// The chowkhat: a 100 x 62 section with a 15 mm check in it. These never were constants in
+	// HFGenerators.cpp, because until the reference flat was walked no door had a frame at all.
+	TestEqual(TEXT("Door frame depth"), Defaults.Opening.Door.FrameDepth, 10.0);
+	TestEqual(TEXT("Door frame face"), Defaults.Opening.Door.FrameFace, 6.2);
+	TestEqual(TEXT("Door frame rebate stop"), Defaults.Opening.Door.RebateStop, 1.5);
+	TestEqual(TEXT("Door leaf undercut"), Defaults.Opening.Door.LeafUndercut, 1.0);
+
+	// And the sliding door's section, which is not the window's: two 40 mm sashes plus 12 mm of
+	// running clearance in a 92 mm frame, glazed at 8 mm rather than a window's 5.
+	TestEqual(TEXT("Sliding door frame depth"), Defaults.Opening.SlidingDoor.FrameDepth, 9.2);
+	TestEqual(TEXT("Sliding door frame face"), Defaults.Opening.SlidingDoor.FrameFace, 5.5);
+	TestEqual(TEXT("Sliding door sash depth"), Defaults.Opening.SlidingDoor.SashDepth, 4.0);
+	TestEqual(TEXT("Sliding door track pitch"), Defaults.Opening.SlidingDoor.TrackPitch, 4.6);
+	TestEqual(TEXT("Sliding door bottom rail"), Defaults.Opening.SlidingDoor.BottomRailWidth, 10.0);
+	TestEqual(TEXT("Sliding door interlock"), Defaults.Opening.SlidingDoor.InterlockOverlap, 3.0);
+	TestEqual(TEXT("Sliding door glass thickness"), Defaults.Opening.SlidingDoor.GlassThickness, 0.8);
+	TestEqual(TEXT("Sliding door threshold height"), Defaults.Opening.SlidingDoor.ThresholdHeight, 3.0);
+
+	// The section closes: two sashes on that pitch occupy 86 mm and the frame that houses them is 92.
+	TestTrue(TEXT("The sliding door's frame contains both its sashes"),
+		Defaults.Opening.SlidingDoor.FrameDepth >=
+			Defaults.Opening.SlidingDoor.TrackPitch + Defaults.Opening.SlidingDoor.SashDepth);
 
 	TestEqual(TEXT("Sliding window frame depth"), Defaults.Opening.SlidingWindow.FrameDepth, 6.5);
 	TestEqual(TEXT("Sliding window frame face"), Defaults.Opening.SlidingWindow.FrameFace, 4.5);
@@ -284,7 +305,14 @@ bool FHFSettingsDoNotLeakIntoHandBuiltParamsTest::RunTest(const FString& Paramet
 	ByHand.LeafFrameGap = 0.5;
 
 	const double ByHandVolume = VolumeOf(FHFGenerators::GenerateDoorLeaf(Door, 1.0, ByHand));
-	const double Expected = (Door.Width - 1.0) * 4.0 * (Door.Height - 1.0);
+
+	// The leaf of a 900 door hung in a 62 mm frame with a 15 mm check: 47 mm of frame inset and
+	// 5 mm of running clearance off each jamb, the same off the head, and a 10 mm undercut at the
+	// floor. Spelled out rather than asked of the params, so the arithmetic is asserted and not
+	// merely reproduced.
+	const double Expected =
+		(Door.Width - 2.0 * (6.2 - 1.5) - 2.0 * 0.5) * 4.0 *
+		(Door.Height - (6.2 - 1.5) - 0.5 - 1.0);
 
 	TestEqual(TEXT("A hand-built leaf measures what its own params say"),
 		ByHandVolume, Expected, Expected * 0.001);
@@ -540,19 +568,28 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// The whole page ships, not a subset of it. A control quietly dropped between milestones is
 	// exactly what this number is here to catch.
 	//
-	// 79 leaves: 4 door + 15 sliding window + 12 ventilator + 4 fixed window under Openings, 32
-	// under Joinery, 7 under Fans, and 5 validation limits. The struct properties themselves are
-	// headings in the details panel rather than things anybody drags, so they are recursed through,
-	// not counted.
+	// 100 leaves: 8 door + 18 sliding door + 15 sliding window + 12 ventilator + 4 fixed window
+	// under Openings, 31 under Joinery, 7 under Fans, and 5 validation limits. The struct properties
+	// themselves are headings in the details panel rather than things anybody drags, so they are
+	// recursed through, not counted.
+	//
+	// 31 under Joinery, not 32: PlinthEndRecess is gone. It set a plinth back at every end on show,
+	// which put a 5 x 10 cm notch at each end of every wardrobe run in the flat with floor visible
+	// under the gable above it. A toe kick is set back at the FRONT and its ends stand on the floor,
+	// so the control was removed rather than defaulted to zero - a default is a value somebody can
+	// put back, and the geometry is wrong at every value of it but zero.
 	//
 	// 5, not 3: DoorApproachDepthCm and MinClearPassageCm are what the DoorwayNotClear rule is
 	// judged against, and a doorway blockage is a project's own call - how far in front of a door
 	// counts as being in the way, and how narrow a gap that project will let somebody squeeze
 	// through - so they belong on the page beside MinHeadroomCm rather than compiled in.
-	// 79 rather than 78: the single BladePitchDegrees became one control per kind, because one
-	// figure covering a ceiling fan and an extract was a figure that was wrong for the extract.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 79);
-	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
+	//
+	// 100 rather than 79: doors gained the six figures of the chowkhat they are hung in, which did
+	// not exist while every door in the flat was a bare leaf in a bare hole; and the two sliding
+	// panel figures that used to live under Doors moved into the eighteen of the glazed sliding
+	// DOOR section, which is a sliding window with a threshold rather than a pair of boards.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 100);
+	TestEqual(TEXT("Every joinery control is still there"), Joinery, 31);
 
 	return true;
 }
@@ -815,7 +852,7 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 
 	// The same guard the marking test carries: a walk that silently stopped finding anything would
 	// otherwise pass.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 79);
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 100);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

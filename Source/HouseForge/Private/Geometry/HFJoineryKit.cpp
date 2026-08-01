@@ -48,15 +48,6 @@ FHFPlinthParams FHFJoineryKit::SanitisePlinth(const FHFPlinthParams& Params)
 	Out.FrontRecess = FMath::Clamp(Out.FrontRecess, Out.ShutterOverlay,
 		FMath::Max(Out.ShutterOverlay, Out.Depth - Out.PanelThickness));
 
-	// End setbacks only exist where an end is on show, and together they cannot eat the run.
-	const int32 ExposedEnds = (Out.bLeftEndExposed ? 1 : 0) + (Out.bRightEndExposed ? 1 : 0);
-	Out.EndRecess = FMath::Max(Out.EndRecess, 0.0);
-	if (ExposedEnds > 0)
-	{
-		const double Available = FMath::Max(0.0, Out.Width - Out.PanelThickness);
-		Out.EndRecess = FMath::Min(Out.EndRecess, Available / ExposedEnds);
-	}
-
 	return Out;
 }
 
@@ -67,11 +58,15 @@ FDynamicMesh3 FHFJoineryKit::GeneratePlinth(const FHFPlinthParams& Params)
 
 	const FHFPlinthParams P = SanitisePlinth(Params);
 
-	const double LeftRecess = P.bLeftEndExposed ? P.EndRecess : 0.0;
-	const double RightRecess = P.bRightEndExposed ? P.EndRecess : 0.0;
-
-	const double X0 = LeftRecess;
-	const double X1 = P.Width - RightRecess;
+	// FLUSH AT BOTH ENDS, always. The plinth is what the run stands on, so its ends are directly
+	// under the gables and directly under the shutters at each extremity: set either of them back
+	// and the carcass above it overhangs daylight. That is what an end setback of 5 did to every
+	// wardrobe in the flat - a 5 x 10 notch at each end of a 2400 run, floor visible under both
+	// corners, and nothing measuring it because the plinth was still a valid closed solid.
+	//
+	// The toe kick is at the FRONT, and FrontFaceY below is where that happens.
+	const double X0 = 0.0;
+	const double X1 = P.Width;
 
 	// The kick is asked for from the shutter face and built off the carcass front plane. Taking
 	// FrontRecess as the plane directly - which is what this used to do while the struct documented
@@ -686,6 +681,16 @@ FHFPartMotion FHFJoineryKit::ShutterMotion(const FHFShutterParams& Params)
 
 	if (Params.IsSliding())
 	{
+		// THE STANDING LEAF OF THE PAIR DOES NOT RUN, and that is the whole of how a slider opens.
+		// Two leaves driven outward from the meeting line by one amount exchange tracks and uncover
+		// nothing; see FHFShutterParams::bStandingLeaf, which is what the master bedroom wardrobe was
+		// doing while both its leaves reported 118 cm of travel.
+		if (Params.bStandingLeaf)
+		{
+			Motion.Type = EHFMotionType::None;
+			return Motion;
+		}
+
 		// It runs along the module, towards its neighbour's bay, and comes to rest exactly over it -
 		// the same stopping rule a sliding door's panel obeys, from the same set-out.
 		Motion.Type = EHFMotionType::Slide;

@@ -27,23 +27,56 @@ class HOUSEFORGE_API FHFGenerators
 {
 public:
 	/**
-	 * A wall, with its openings cut out.
+	 * A wall, with its openings cut out and the structure it is built around taken out of it.
 	 *
 	 * Built from the centreline outward, so changing thickness grows the wall symmetrically and
 	 * leaves its neighbours' junctions alone. Openings are subtracted as boxes that overshoot the
 	 * wall faces, because a cutter flush with the surface leaves coplanar faces the boolean has to
 	 * resolve and often does badly.
+	 *
+	 * @param Structure Beams and columns passing through this wall. THE RCC FRAME GOES UP FIRST AND
+	 *        THE BLOCKWORK INFILLS AROUND IT: masonry is built up to a beam's soffit and butted to a
+	 *        column's face, so the wall does not exist where the structure is. Leaving it there gave
+	 *        both members the same faces to draw, and the whole flat flashed - see FHFStructuralCut.
+	 *        The composing layer works out which members reach this wall; a generator cannot know.
 	 */
-	static UE::Geometry::FDynamicMesh3 GenerateWall(const FHFWall& Wall, const TArray<FHFOpening>& OpeningsInWall);
+	static UE::Geometry::FDynamicMesh3 GenerateWall(const FHFWall& Wall, const TArray<FHFOpening>& OpeningsInWall,
+		const TArray<FHFStructuralCut>& Structure = TArray<FHFStructuralCut>());
+
+	/**
+	 * The volume a beam or a column displaces, ready to be handed to another member as structure.
+	 *
+	 * Pure conversions, and here rather than on the structs because a beam's orientation comes from
+	 * its centreline and only this file knows how that is resolved.
+	 */
+	static FHFStructuralCut StructuralCutFor(const FHFBeam& Beam);
+	static FHFStructuralCut StructuralCutFor(const FHFColumn& Column);
+
+	/**
+	 * A wall as a volume, for the wall it is built through.
+	 *
+	 * Masonry displaces masonry too. Walls are set out on their CENTRELINES, so a balcony parapet
+	 * running to the main wall's centreline buries its last 115 in it and the two share a footprint.
+	 * On site one run is built through and the other butts to its face; here the one that runs
+	 * through is handed to the one that stops, exactly as a beam is.
+	 */
+	static FHFStructuralCut StructuralCutFor(const FHFWall& Wall);
 
 	/**
 	 * A room's floor slab, plus skirting swept around its boundary.
 	 *
 	 * Doorways are omitted from the skirting: a continuous skirting across a door opening is one
 	 * of the most obvious tells that geometry was generated rather than modelled.
+	 *
+	 * @param WallFaceInsets How far the finished wall face stands in from each boundary EDGE - edge
+	 *        i running Boundary[i] to Boundary[i+1] - normally half the thickness of the wall set
+	 *        out on that line. A room boundary is a centreline, so without this the skirting is
+	 *        laid along the middle of the masonry and buried in it. Empty, or short, means zero for
+	 *        the edges it does not cover, which is what a caller with no walls to consult wants.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateFloor(const FHFRoom& Room, double SlabThickness,
-		const TArray<FVector2D>& SkirtingGaps, double GapWidth);
+		const TArray<FVector2D>& SkirtingGaps, double GapWidth,
+		const TArray<double>& WallFaceInsets = TArray<double>());
 
 	/**
 	 * A false ceiling.
@@ -86,8 +119,16 @@ public:
 	/** The structural slab soffit over a room - what you see looking up where nothing conceals it. */
 	static UE::Geometry::FDynamicMesh3 GenerateCeilingSlab(const FHFRoom& Room, double SlabThickness);
 
-	/** A downstand beam, hanging below the slab soffit. */
-	static UE::Geometry::FDynamicMesh3 GenerateBeam(const FHFBeam& Beam);
+	/**
+	 * A downstand beam, hanging below the slab soffit.
+	 *
+	 * @param Structure Columns this beam lands on, and any beam that runs through it. A column is
+	 *        cast before the beams that frame into it, and where two beams cross one is continuous
+	 *        and the other stops at its face. Two beam soffits sharing a patch of the same plane is
+	 *        a flash directly overhead, in the one surface a room's ceiling is made of.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateBeam(const FHFBeam& Beam,
+		const TArray<FHFStructuralCut>& Structure = TArray<FHFStructuralCut>());
 
 	/** A column. */
 	static UE::Geometry::FDynamicMesh3 GenerateColumn(const FHFColumn& Column);

@@ -7,7 +7,9 @@
 #include "Actors/HFHouseActor.h"
 #include "Actors/HFWardrobeActor.h"
 #include "Components/DynamicMeshComponent.h"
+#include "DynamicMesh/DynamicMesh3.h"
 #include "Editor.h"
+#include "UDynamicMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Misc/AutomationTest.h"
@@ -655,6 +657,274 @@ bool FHFWardrobesInTheFlatTest::RunTest(const FString& Parameters)
 		TestNearlyEqual(*FString::Printf(TEXT("'%s' stands on the floor of its room"), *Where),
 			Corner.Z, FloorZ + Fixture.BaseZ, 1e-6);
 	}
+
+	return true;
+}
+
+/**
+ * Every wardrobe in the flat actually OPENS - measured as aperture, not as parts that move.
+ *
+ * THE DEFECT THIS EXISTS FOR PASSED EVERY MOTION ASSERTION IN THE SUITE. The master bedroom's 2400
+ * sliding run had two body leaves, both of which travelled their full 118.45 cm when swept, in
+ * opposite directions, off one open amount. They exchanged tracks. The front elevation of the body
+ * was 100% covered at open 0.0, at 1.0 and at every value between, and the four top-hung loft flaps
+ * above it lifted perfectly - which is why it was reported as "the bottom section is not opening"
+ * rather than as a wardrobe that does nothing.
+ *
+ * So a sweep that asks "did this part move" cannot catch it and is not what is asserted here. What
+ * is asserted is the thing a person in the room can see: HOW MUCH OF THE RUN IS STILL COVERED. Both
+ * sections are measured separately, because the whole point of the report was that one of them
+ * opened and the other did not, and a figure for the wardrobe as a whole would have averaged the
+ * defect away.
+ *
+ * The per-part sweep is kept alongside it, because the two catch different things: a leaf that
+ * silently stops articulating is invisible to a coverage figure its neighbour already accounts for.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFWardrobeApertureTest,
+	"HouseForge.Editor.EveryWardrobeSectionOpens", HF_TEST_FLAGS)
+
+namespace HouseForgeWardrobe
+{
+	/** A leaf's footprint on the front elevation of the run, in the wardrobe's own local space. */
+	struct FElevationRect
+	{
+		double MinX = 0.0;
+		double MaxX = 0.0;
+		double MinZ = 0.0;
+		double MaxZ = 0.0;
+	};
+
+	/**
+	 * Where a part stands on its wardrobe's front elevation, right now.
+	 *
+	 * Read off the LIVE component transform and the part's own mesh, so it measures where the leaf
+	 * has actually gone rather than where the parameters say it should be - which is the difference
+	 * between testing the geometry and testing the arithmetic that produced it.
+	 */
+	bool ElevationOf(const AHFWardrobeActor& Wardrobe, UDynamicMeshComponent& Part, FElevationRect& Out)
+	{
+		if (Part.GetDynamicMesh() == nullptr)
+		{
+			return false;
+		}
+
+		FAxisAlignedBox3d Local = FAxisAlignedBox3d::Empty();
+		Part.GetDynamicMesh()->ProcessMesh([&Local](const FDynamicMesh3& Mesh)
+		{
+			Local = Mesh.GetBounds();
+		});
+
+		if (Local.IsEmpty())
+		{
+			return false;
+		}
+
+		// Component space to the wardrobe's own space, corner by corner: the leaf may have swung, so
+		// its box does not stay axis-aligned through the transform and a min/max pair would be wrong.
+		const FTransform ToWardrobe = Part.GetComponentTransform().GetRelativeTransform(Wardrobe.GetActorTransform());
+
+		FAxisAlignedBox3d InRun = FAxisAlignedBox3d::Empty();
+		for (int32 Corner = 0; Corner < 8; ++Corner)
+		{
+			InRun.Contain(ToWardrobe.TransformPosition(Local.GetCorner(Corner)));
+		}
+
+		Out.MinX = InRun.Min.X;
+		Out.MaxX = InRun.Max.X;
+		Out.MinZ = InRun.Min.Z;
+		Out.MaxZ = InRun.Max.Z;
+		return true;
+	}
+
+	/**
+	 * The fraction of one band of the front elevation that leaves still cover.
+	 *
+	 * Sampled on a grid rather than summed, because leaves overlap - a slider laps its neighbour when
+	 * shut and parks wholly over it when open - and added areas would count the lap twice and report
+	 * a run as more than fully covered.
+	 */
+	double CoveredFraction(const TArray<FElevationRect>& Leaves, double Width, double ZMin, double ZMax)
+	{
+		constexpr int32 Steps = 60;
+		if (Width <= 0.0 || ZMax - ZMin <= 0.0)
+		{
+			return 0.0;
+		}
+
+		int32 Covered = 0;
+		for (int32 i = 0; i < Steps; ++i)
+		{
+			const double X = Width * (i + 0.5) / Steps;
+			for (int32 j = 0; j < Steps; ++j)
+			{
+				const double Z = FMath::Lerp(ZMin, ZMax, (j + 0.5) / Steps);
+
+				for (const FElevationRect& Leaf : Leaves)
+				{
+					if (X >= Leaf.MinX && X <= Leaf.MaxX && Z >= Leaf.MinZ && Z <= Leaf.MaxZ)
+					{
+						++Covered;
+						break;
+					}
+				}
+			}
+		}
+
+		return double(Covered) / double(Steps * Steps);
+	}
+}
+
+bool FHFWardrobeApertureTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+	if (!TestNotNull(TEXT("A house actor spawns"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); } };
+
+	House->SetSpec(FHFSampleHouse::Make2BHK());
+	House->BuildGeometry();
+
+	int32 Measured = 0;
+
+	for (AActor* Element : House->ElementActors)
+	{
+		AHFWardrobeActor* Wardrobe = Cast<AHFWardrobeActor>(Element);
+		if (Wardrobe == nullptr)
+		{
+			continue;
+		}
+
+		const FString Where = Wardrobe->ElementId.ToString();
+		const FHFWardrobeParams& P = Wardrobe->Wardrobe;
+
+		// The two sections, by the part ids the kit fixes them to. Named rather than inferred from
+		// height, because "the bottom section" is exactly what the report was about.
+		TArray<UDynamicMeshComponent*> Body;
+		TArray<UDynamicMeshComponent*> Loft;
+		for (int32 Index = 0; Index < 8; ++Index)
+		{
+			if (UDynamicMeshComponent* Part = Wardrobe->GetPartComponent(AHFWardrobeActor::ShutterPartId(Index)))
+			{
+				Body.Add(Part);
+			}
+			if (UDynamicMeshComponent* Part = Wardrobe->GetPartComponent(AHFWardrobeActor::LoftPartId(Index)))
+			{
+				Loft.Add(Part);
+			}
+		}
+
+		if (!TestTrue(*FString::Printf(TEXT("'%s' has body leaves at all"), *Where), Body.Num() > 0))
+		{
+			continue;
+		}
+
+		auto CoverageNow = [&](const TArray<UDynamicMeshComponent*>& Parts, double ZMin, double ZMax)
+		{
+			TArray<FElevationRect> Rects;
+			for (UDynamicMeshComponent* Part : Parts)
+			{
+				FElevationRect Rect;
+				if (Part != nullptr && ElevationOf(*Wardrobe, *Part, Rect))
+				{
+					Rects.Add(Rect);
+				}
+			}
+			return CoveredFraction(Rects, P.Width, ZMin, ZMax);
+		};
+
+		const double BodyBottom = P.BodyBottomZ();
+		const double BodyTop = P.BodyTopZ();
+
+		Wardrobe->SetMasterOpenAmount(0.0);
+		const double BodyShut = CoverageNow(Body, BodyBottom, BodyTop);
+		const double LoftShut = Loft.Num() > 0 ? CoverageNow(Loft, BodyTop, P.Height) : 0.0;
+
+		Wardrobe->SetMasterOpenAmount(1.0);
+		const double BodyOpen = CoverageNow(Body, BodyBottom, BodyTop);
+		const double LoftOpen = Loft.Num() > 0 ? CoverageNow(Loft, BodyTop, P.Height) : 0.0;
+
+		Wardrobe->SetMasterOpenAmount(0.0);
+
+		// Shut means shut. A run that was already open has nothing to prove by opening.
+		TestTrue(*FString::Printf(TEXT("'%s' body is covered when shut (%.0f%%)"), *Where, BodyShut * 100.0),
+			BodyShut > 0.9);
+
+		// A REAL APERTURE, not merely movement. A two-leaf slider gives up about half its elevation;
+		// a side-hung run gives up nearly all of it. A quarter is the floor, and the defect scored
+		// zero: the master bedroom's body was 100% covered at full open.
+		if (BodyShut - BodyOpen < 0.25)
+		{
+			AddError(FString::Printf(
+				TEXT("'%s' does not open its BODY: %.0f%% of the front elevation is covered shut and %.0f%% at full open, so it uncovers %.0f%%. Leaves that all move and cancel each other out pass every part-motion assertion and leave a wardrobe nobody can get into."),
+				*Where, BodyShut * 100.0, BodyOpen * 100.0, (BodyShut - BodyOpen) * 100.0));
+		}
+
+		if (Loft.Num() > 0)
+		{
+			TestTrue(*FString::Printf(TEXT("'%s' loft is covered when shut (%.0f%%)"), *Where, LoftShut * 100.0),
+				LoftShut > 0.9);
+
+			if (LoftShut - LoftOpen < 0.25)
+			{
+				AddError(FString::Printf(
+					TEXT("'%s' does not open its LOFT: %.0f%% covered shut, %.0f%% at full open."),
+					*Where, LoftShut * 100.0, LoftOpen * 100.0));
+			}
+		}
+
+		// ------------------------------------------------------------------ and every leaf sweeps
+		//
+		// Kept alongside the aperture measurement rather than instead of it. A leaf that quietly
+		// stops articulating in a run where its neighbours already uncover the elevation would not
+		// move the coverage figure at all.
+		//
+		// A part declared FIXED is allowed not to move, and exactly one leaf of a sliding pair is:
+		// see FHFShutterParams::bStandingLeaf. It is proved to be at most one below, because a pair
+		// with both leaves standing is a wardrobe that does not open and would otherwise be silent.
+		int32 Standing = 0;
+		TArray<UDynamicMeshComponent*> AllLeaves = Body;
+		AllLeaves.Append(Loft);
+
+		for (UDynamicMeshComponent* Part : AllLeaves)
+		{
+			FElevationRect Shut;
+			FElevationRect Open;
+
+			Wardrobe->SetMasterOpenAmount(0.0);
+			if (!ElevationOf(*Wardrobe, *Part, Shut))
+			{
+				continue;
+			}
+
+			Wardrobe->SetMasterOpenAmount(1.0);
+			ElevationOf(*Wardrobe, *Part, Open);
+			Wardrobe->SetMasterOpenAmount(0.0);
+
+			const double Moved = FMath::Max3(
+				FMath::Abs(Open.MinX - Shut.MinX), FMath::Abs(Open.MinZ - Shut.MinZ),
+				FMath::Abs(Open.MaxX - Shut.MaxX));
+
+			if (Moved < 1.0)
+			{
+				++Standing;
+			}
+		}
+
+		TestTrue(*FString::Printf(TEXT("'%s' has at most one leaf that stands still (%d of %d)"),
+			*Where, Standing, AllLeaves.Num()), Standing <= 1);
+
+		++Measured;
+	}
+
+	TestTrue(TEXT("The reference flat has wardrobes to open"), Measured >= 2);
 
 	return true;
 }

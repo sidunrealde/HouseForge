@@ -25,7 +25,6 @@ namespace
 		Params.Depth = 60.0;
 		Params.Height = 10.0;
 		Params.FrontRecess = 5.0;
-		Params.EndRecess = 5.0;
 		Params.PanelThickness = 1.8;
 		return Params;
 	}
@@ -44,10 +43,8 @@ namespace
 	 */
 	double ExpectedFrameVolume(const FHFPlinthParams& Params)
 	{
-		const double Left = Params.bLeftEndExposed ? Params.EndRecess : 0.0;
-		const double Right = Params.bRightEndExposed ? Params.EndRecess : 0.0;
-
-		const double Span = Params.Width - Left - Right;
+		// Full width at both ends, whatever they are finished as. See the end assertions below.
+		const double Span = Params.Width;
 		const double Reach = Params.Depth - Params.FrontRecess;
 		const double T = Params.PanelThickness;
 
@@ -285,40 +282,49 @@ bool FHFPlinthRecessTest::RunTest(const FString& Parameters)
 			FHFJoineryKit::GeneratePlinth(TooShallow).GetBounds().Min.Y, 0.0, 0.001);
 	}
 
-	// An end on show is set back the same way, so the carcass reads as floating from the side too.
+	// ------------------------------------------------------------------ THE ENDS REACH THE FLOOR
+	//
+	// This used to assert the opposite - that an exposed end was set back 5 cm "so the carcass reads
+	// as floating from the side too" - and it passed on geometry a person standing in the bedroom
+	// could see was wrong: a 5 x 10 notch at each end of every 2400 wardrobe run with floor showing
+	// under the gable above it. A run floats because of its TOE KICK. Its ends are what it stands
+	// on.
+	//
+	// Whether an end is on show changes what the board is FINISHED as and nothing about where it
+	// lands, so both are checked here on the same width.
 	FHFPlinthParams LeftOpen = Base;
 	LeftOpen.bLeftEndExposed = true;
 	const FDynamicMesh3 LeftMesh = FHFJoineryKit::GeneratePlinth(LeftOpen);
 
-	TestNearlyEqual(TEXT("An exposed end is set back"), LeftMesh.GetBounds().Min.X, 5.0, 0.001);
-	TestNearlyEqual(TEXT("The end against a wall still runs full width"),
+	TestNearlyEqual(TEXT("An exposed end runs out to the end of the run"),
+		LeftMesh.GetBounds().Min.X, 0.0, 0.001);
+	TestNearlyEqual(TEXT("The end against a wall runs full width too"),
 		LeftMesh.GetBounds().Max.X, 240.0, 0.001);
-	TestNearlyEqual(TEXT("An exposed end costs the board it removes"),
-		Volume(Recessed) - Volume(LeftMesh), 2.0 * 1.8 * 10.0 * 5.0, 0.01);
-	TestNearlyEqual(TEXT("Its board matches a frame of the shortened span"),
+	TestNearlyEqual(TEXT("Exposing an end costs no board: it is a finish, not a setback"),
+		Volume(LeftMesh), Volume(Recessed), 0.01);
+	TestNearlyEqual(TEXT("Its board matches a frame of the full span"),
 		Volume(LeftMesh), ExpectedFrameVolume(LeftOpen), ExpectedFrameVolume(LeftOpen) * 0.001);
 
 	// An exposed end return is on show, so it is finished board where a concealed one is carcass.
 	// The region isolates the end rail from the front and back rails, which present a face on the
 	// same plane and would otherwise answer for it.
-	FaceHasRole(*this, LeftMesh, FAxisAlignedBox3d(FVector3d(4.9, 10.0, -1.0), FVector3d(5.1, 50.0, 11.0)),
+	FaceHasRole(*this, LeftMesh, FAxisAlignedBox3d(FVector3d(-0.1, 10.0, -1.0), FVector3d(0.1, 50.0, 11.0)),
 		EHFSurfaceRole::ShutterLaminate, TEXT("An exposed end is finished board"));
 
 	FHFPlinthParams BothOpen = Base;
 	BothOpen.bLeftEndExposed = true;
 	BothOpen.bRightEndExposed = true;
 	const FDynamicMesh3 BothMesh = FHFJoineryKit::GeneratePlinth(BothOpen);
-	TestNearlyEqual(TEXT("Both ends set back on the left"), BothMesh.GetBounds().Min.X, 5.0, 0.001);
-	TestNearlyEqual(TEXT("Both ends set back on the right"), BothMesh.GetBounds().Max.X, 235.0, 0.001);
+
+	// The measurement the defect would have failed on. The carcass above spans 0..Width, so anything
+	// narrower than that leaves it standing over daylight at one corner or both.
+	TestNearlyEqual(TEXT("Both ends stand on the floor at the left"), BothMesh.GetBounds().Min.X, 0.0, 0.001);
+	TestNearlyEqual(TEXT("Both ends stand on the floor at the right"), BothMesh.GetBounds().Max.X, 240.0, 0.001);
 	TestTrue(TEXT("A plinth open at both ends is still watertight"), FHFMeshOps::IsClosed(BothMesh));
 
-	// An end setback on an end that is not on show would leave a gap against the wall.
-	FHFPlinthParams Inert = Base;
-	Inert.EndRecess = 20.0;
-	const FDynamicMesh3 InertMesh = FHFJoineryKit::GeneratePlinth(Inert);
-	TestNearlyEqual(TEXT("An end setback is inert where no end is on show"),
-		Volume(InertMesh), Volume(Recessed), 0.01);
-	TestNearlyEqual(TEXT("A concealed end still meets the wall"), InertMesh.GetBounds().Min.X, 0.0, 0.001);
+	// Exposure is a finish and costs no material, whichever ends carry it.
+	TestNearlyEqual(TEXT("A plinth open at both ends is the same board as one open at neither"),
+		Volume(BothMesh), Volume(Recessed), 0.01);
 
 	return true;
 }
