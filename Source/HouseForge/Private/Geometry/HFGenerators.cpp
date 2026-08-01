@@ -298,12 +298,24 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 	constexpr double PanelThickness = 2.0;
 
 	/**
-	 * Pieces that meet lap into one another by this much instead of stopping on a shared plane.
+	 * How far a piece laps into the one beside it, rather than stopping in its face.
 	 *
-	 * Two solids that end on the same face hand the depth test a tie, and it breaks the tie
-	 * differently from pixel to pixel and frame to frame - the flashing this flat was reported for.
+	 * TWO FACES IN THE SAME PLANE FACING THE SAME WAY IS A COIN TOSS the depth test re-tosses every
+	 * frame, which is the flashing this flat was reported for. Two faces in the same plane facing
+	 * OPPOSITE ways is not: one of them is always the back of a solid the other one closes, so the
+	 * pair is sealed inside the assembly and neither is ever drawn. That distinction decides where a
+	 * lap is needed and where it would cause the very thing it is meant to prevent:
+	 *
+	 *   - Sideways, into a piece that stands beside this one - lap it. The tray's inner panel would
+	 *     otherwise stop in the band's inner face, two vertical faces in a plane the room can see.
+	 *   - Upward, onto a piece that stands ON this one - do NOT lap it. A fascia lapped down into
+	 *     its panel would leave 5 mm of both their outer faces in the same plane facing the same
+	 *     way, all the way round the edge. Sitting it exactly on the panel's top face instead
+	 *     leaves the two outer faces edge to edge, reading as one continuous face, and seals the
+	 *     horizontal pair between them.
+	 *
 	 * 5 mm is under any board tolerance a builder would measure and far above what the depth buffer
-	 * can confuse at room distances.
+	 * confuses at room distances.
 	 */
 	constexpr double Lap = 0.5;
 
@@ -349,9 +361,9 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 		Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Outline, FanHoles, SoffitZ, SoffitZ + PanelThickness,
 			EHFSurfaceRole::CeilingSoffit));
 
-		// Lapped down into the panel rather than started at its top face, and never started at the
-		// soffit: either would put a second horizontal face in a plane the room can see.
-		Checked(AppendFascia(Outline, SoffitZ + PanelThickness - Lap, StructuralZ));
+		// Standing on the panel's top face - see the note on Lap - and never at the soffit, which
+		// would put a second horizontal face in the one plane the room certainly can see.
+		Checked(AppendFascia(Outline, SoffitZ + PanelThickness, StructuralZ));
 		break;
 	}
 
@@ -371,15 +383,15 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 
 		const double InnerSoffitZ = StructuralZ - Ceiling.Drop * 0.5;
 
-		// The inner panel laps into the band instead of stopping in its face, and carries a fascia
-		// of its own. Normally that fascia is buried in the band; it is what closes the step when
-		// the band is too narrow to survive the inset.
+		// The inner panel laps into the band instead of stopping in its face, so the two never share
+		// a vertical plane. It needs no fascia of its own: the band IS the fascia for this step -
+		// it runs from the lower soffit to the slab and the panel's edge ends inside it - and a
+		// fascia here would stand a fin of its own proud of the band's inner face.
 		const double InnerInset = (Ceiling.BandWidth > Lap) ? Ceiling.BandWidth - Lap : Ceiling.BandWidth;
 		for (const TArray<FVector2D>& Loop : FHFMeshOps::InsetPolygon(Outline, InnerInset))
 		{
 			Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, FanHoles, InnerSoffitZ,
 				InnerSoffitZ + PanelThickness, EHFSurfaceRole::CeilingSoffit));
-			Checked(AppendFascia(Loop, InnerSoffitZ + PanelThickness - Lap, StructuralZ));
 		}
 		break;
 	}
@@ -407,24 +419,23 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 		// The upstand has to clear the board it stands on or it shields nothing.
 		const double LipRise = FMath::Max(Ceiling.Cove.LipHeight, PanelThickness + 1.0);
 		const double SolidBand = FMath::Max(Ceiling.BandWidth - ChannelWidth - LipWidth, 1.0);
+		const double BoardTopZ = SoffitZ + PanelThickness;
 
-		Checked(AppendBand(Outline, SolidBand, SoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
+		// ONE board across the whole band. Band, trough floor and lip all show the room the same
+		// plane, and one piece is what keeps it one face: a board per zone would butt them together
+		// in the soffit, which is the plane a person in the room is looking straight at.
+		Checked(AppendBand(Outline, Ceiling.BandWidth, SoffitZ, BoardTopZ, EHFSurfaceRole::CeilingSoffit));
 
-		// One board under the trough and the lip together, lapped into the band. One piece and not
-		// two, because any joint in the soffit plane is two coplanar downward faces.
-		for (const TArray<FVector2D>& Board : FHFMeshOps::InsetPolygon(Outline, SolidBand - Lap))
-		{
-			Checked(AppendBand(Board, ChannelWidth + LipWidth + Lap, SoffitZ, SoffitZ + PanelThickness,
-				EHFSurfaceRole::CeilingSoffit));
-		}
+		// The band above the board, solid to the slab, standing on the board rather than lapped
+		// into it - see the note on Lap.
+		Checked(AppendBand(Outline, SolidBand, BoardTopZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
 
 		// The upstand. CoveInterior rather than CeilingSoffit: the faces that matter here are the
 		// trough side the strip washes and the sliver the room sees above the soffit line, and both
 		// belong to the cove detail rather than to the flat ceiling around it.
 		for (const TArray<FVector2D>& LipLoop : FHFMeshOps::InsetPolygon(Outline, SolidBand + ChannelWidth))
 		{
-			Checked(AppendBand(LipLoop, LipWidth, SoffitZ + PanelThickness - Lap, SoffitZ + LipRise,
-				EHFSurfaceRole::CoveInterior));
+			Checked(AppendBand(LipLoop, LipWidth, BoardTopZ, SoffitZ + LipRise, EHFSurfaceRole::CoveInterior));
 		}
 		break;
 	}
