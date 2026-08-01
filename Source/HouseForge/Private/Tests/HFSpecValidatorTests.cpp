@@ -1014,12 +1014,22 @@ bool FHFValidatorBulkheadOverBeamTest::RunTest(const FString& Parameters)
 	{
 		FHFHouseSpec Spec = FHFSampleHouse::Make2BHK();
 
+		// 550 DEEP, WHERE THE HISTORICAL BEAM WAS 400, AND THE DEPTH IS LOAD-BEARING ON THE TEST.
+		//
+		// The rule asks about the DEEPEST beam showing in the room, and the living room's own
+		// perimeter beams are 450 - they run over 115 partitions and stand proud of them, which is
+		// something this rule can see now and could not before. A 400 cross beam would simply lose
+		// the comparison to them, the rule would engage on a perimeter beam no bulkhead is over, and
+		// the exemption under test would never be reached. Made deeper than anything else in the
+		// room so it is unambiguously the beam being reasoned about, and the flat's own 500 cove is
+		// left alone: it clears the perimeter beams and not this one, which is exactly the situation
+		// a bulkhead is detailed for.
 		FHFBeam Cross;
 		Cross.Id = TEXT("BM_Living_Cross");
 		Cross.Start = FVector2D(0.0, 1800.0);
 		Cross.End = FVector2D(6600.0, 1800.0);
 		Cross.Width = 230.0;
-		Cross.Depth = 400.0;
+		Cross.Depth = 550.0;
 		Cross.SoffitZ = 3000.0;
 		Spec.Beams.Add(Cross);
 
@@ -1052,7 +1062,7 @@ bool FHFValidatorBulkheadOverBeamTest::RunTest(const FString& Parameters)
 	// Over the beam and deep enough: the exemption still works, which it has to, or the rule would
 	// simply be refusing the detail it exists to allow.
 	TestFalse(TEXT("A bulkhead over the beam excuses the cove"),
-		CoveIsReported(SpecWithBulkhead(450.0, {
+		CoveIsReported(SpecWithBulkhead(550.0, {
 			FVector2D(0.0, 1700.0), FVector2D(6600.0, 1700.0),
 			FVector2D(6600.0, 1900.0), FVector2D(0.0, 1900.0) })));
 
@@ -1060,14 +1070,14 @@ bool FHFValidatorBulkheadOverBeamTest::RunTest(const FString& Parameters)
 	// exemption waved through, and it is not a contrived one: a bulkhead over the TV unit along the
 	// south wall is the commonest bulkhead there is in a living room.
 	TestTrue(TEXT("A bulkhead at the wrong end of the room excuses nothing"),
-		CoveIsReported(SpecWithBulkhead(450.0, {
+		CoveIsReported(SpecWithBulkhead(550.0, {
 			FVector2D(0.0, 200.0), FVector2D(6600.0, 200.0),
 			FVector2D(6600.0, 400.0), FVector2D(0.0, 400.0) })));
 
 	// Covering only part of the beam's run across the room is not covering it: the rest of the beam
 	// still hangs out of the soffit, which is what somebody standing in the room would see.
 	TestTrue(TEXT("A bulkhead over half the beam excuses nothing"),
-		CoveIsReported(SpecWithBulkhead(450.0, {
+		CoveIsReported(SpecWithBulkhead(550.0, {
 			FVector2D(0.0, 1700.0), FVector2D(3000.0, 1700.0),
 			FVector2D(3000.0, 1900.0), FVector2D(0.0, 1900.0) })));
 
@@ -1078,11 +1088,113 @@ bool FHFValidatorBulkheadOverBeamTest::RunTest(const FString& Parameters)
 			FVector2D(0.0, 1700.0), FVector2D(6600.0, 1700.0),
 			FVector2D(6600.0, 1900.0), FVector2D(0.0, 1900.0) })));
 
-	// The flat as it stands has no beam over any room to conceal, so nothing here is being kept
-	// quiet by an exemption at all.
+	// The flat as it stands buries every beam that shows in a room it has a ceiling for, so nothing
+	// here is being kept quiet by an exemption at all. Its beams are NOT invisible to this rule any
+	// more - six of the eight stand proud of the partitions they sit on - so this is now an
+	// assertion about the drops being right rather than about the question never being asked.
 	TestFalse(TEXT("No ceiling in the reference flat is hiding a beam behind an exemption"),
 		FHFSpecValidator::Validate(FHFSampleHouse::Make2BHK())
 			.Contains(TEXT("CeilingDoesNotClearBeam")));
+
+	return true;
+}
+
+/**
+ * A beam over a wall is only concealed as far as the wall reaches.
+ *
+ * CeilingDoesNotClearBeam asks DeepestBeamOverRoom which beams a ceiling has to bury, and that
+ * function used to answer with beams clear of every room boundary and nothing else, on the stated
+ * grounds that a beam set out on a wall line is "concealed by the wall itself". Half true. It holds
+ * for a 230 beam over a 230 wall, which is flush on both faces and genuinely invisible. It is false
+ * for the same beam over a 115 partition, which stands 57.5 proud of the plaster on BOTH sides for
+ * the whole run - a continuous ledge round the top of every room that partition borders.
+ *
+ * Six of the eight beams in the reference flat are that second case, and all seven false ceilings
+ * were set above their soffits. The rule written to catch precisely this could not see any of it,
+ * which is how 201 green tests coexisted with a dark line round the top of every room in the flat.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorPerimeterBeamTest,
+	"HouseForge.Validation.CeilingMustBuryAPerimeterBeam", HF_TEST_FLAGS)
+
+bool FHFValidatorPerimeterBeamTest::RunTest(const FString& Parameters)
+{
+	// The fixture is in CENTIMETRES, so these are the reference flat's own sections: a 23 beam,
+	// 45 deep, hung from the 300 slab so its soffit lands at 255, sitting on the south wall's line.
+	auto SpecWith = [](double WallThickness, double BeamWidth, double CeilingDrop)
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		for (FHFWall& Wall : Spec.Walls)
+		{
+			if (Wall.Id == TEXT("W_South"))
+			{
+				Wall.Thickness = WallThickness;
+			}
+		}
+
+		FHFBeam Beam;
+		Beam.Id = TEXT("BM_South");
+		Beam.Start = FVector2D(0.0, 0.0);
+		Beam.End = FVector2D(400.0, 0.0);
+		Beam.Width = BeamWidth;
+		Beam.Depth = 45.0;
+		Beam.SoffitZ = 300.0;
+		Spec.Beams.Add(Beam);
+
+		FHFFalseCeiling Ceiling;
+		Ceiling.Id = TEXT("FC_Bedroom");
+		Ceiling.RoomId = TEXT("R_Bedroom");
+		Ceiling.Style = EHFCeilingStyle::FullDrop;
+		Ceiling.Drop = CeilingDrop;
+		Ceiling.BandWidth = 0.0;
+		Spec.FalseCeilings.Add(Ceiling);
+
+		return Spec;
+	};
+
+	auto Reported = [](const FHFHouseSpec& Spec)
+	{
+		return FHFSpecValidator::Validate(Spec).Contains(TEXT("CeilingDoesNotClearBeam"));
+	};
+
+	// ---------------------------------------------------------------- what the beam actually does
+	//
+	// Measured on the model rather than inferred from the warning, so a rule that stops calling this
+	// function cannot quietly take the assertion with it.
+	{
+		const FHFHouseSpec Proud = SpecWith(11.5, 23.0, 20.0);
+		const FHFBeam* Shows = Proud.DeepestBeamOverRoom(TEXT("R_Bedroom"));
+
+		TestNotNull(TEXT("A 23 beam over an 11.5 wall shows in the room it borders"), Shows);
+		if (Shows != nullptr)
+		{
+			TestEqual(TEXT("...and it is the beam on that wall"), Shows->Id, FName(TEXT("BM_South")));
+		}
+
+		// The narrower question is still answered narrowly. Nothing about this beam crosses the
+		// open floor of the room, and a rule that cares about that must not start seeing it.
+		TestNull(TEXT("The same beam still crosses nothing"),
+			Proud.DeepestBeamCrossingRoom(TEXT("R_Bedroom")));
+	}
+
+	TestNull(TEXT("A 23 beam over a 23 wall is flush, and shows nothing"),
+		SpecWith(23.0, 23.0, 20.0).DeepestBeamOverRoom(TEXT("R_Bedroom")));
+
+	// ------------------------------------------------------------------------- and what it raises
+	TestTrue(TEXT("A ceiling dropping 20 under a 45 beam standing proud of its wall is reported"),
+		Reported(SpecWith(11.5, 23.0, 20.0)));
+
+	TestFalse(TEXT("The same 45 beam flush in a 23 wall is not the ceiling's problem"),
+		Reported(SpecWith(23.0, 23.0, 20.0)));
+
+	TestFalse(TEXT("A ceiling dropping 50 buries the beam and is not reported"),
+		Reported(SpecWith(11.5, 23.0, 50.0)));
+
+	// The reference flat itself, which is the case this was written for. Every drop in it is 500
+	// against 450 deep beams, and it has to come back clean by the corrected rule and not by the
+	// blind spot that used to excuse it.
+	TestFalse(TEXT("No ceiling in the reference flat leaves a beam hanging out of it"),
+		Reported(FHFSampleHouse::Make2BHK()));
 
 	return true;
 }

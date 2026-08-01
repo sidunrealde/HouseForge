@@ -753,12 +753,32 @@ struct HOUSEFORGE_API FHFHouseSpec
 	const FHFRoom* FindRoom(const FName& RoomId) const;
 
 	/**
-	 * The deepest beam crossing a room, or nullptr if none do.
+	 * The deepest beam that SHOWS in a room, or nullptr if none does.
 	 *
 	 * This is what a false ceiling has to clear, so it is the figure the ceiling drop is chosen
 	 * against rather than a free design choice.
+	 *
+	 * Showing is the whole point, and it is not the same question as crossing. This used to return
+	 * only beams clear of every boundary, on the stated grounds that a beam set out on a wall line
+	 * is concealed by the wall itself. That is true of a 230 beam over a 230 wall and false of the
+	 * same beam over a 115 partition, which stands 57.5 proud of the plaster on both faces for the
+	 * whole run. Six of the eight beams in the reference flat are exactly that, and the resulting
+	 * ledge round the top of seven rooms was reported as a visual defect while the rule written to
+	 * prevent it sat one clause away from firing.
+	 *
+	 * See DeepestBeamCrossingRoom for the narrower question this used to answer.
 	 */
 	const FHFBeam* DeepestBeamOverRoom(const FName& RoomId) const;
+
+	/**
+	 * The deepest beam crossing the OPEN INTERIOR of a room - clear of every boundary by its own
+	 * half width - or nullptr if none does.
+	 *
+	 * A different and stricter question than DeepestBeamOverRoom. A beam here is one no wall runs
+	 * under and no perimeter band can box in; it is a layout fact about the frame rather than a
+	 * finish that can absorb it.
+	 */
+	const FHFBeam* DeepestBeamCrossingRoom(const FName& RoomId) const;
 
 	/** Total floor area of all rooms, in spec units squared. */
 	double TotalFloorArea() const;

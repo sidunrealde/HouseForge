@@ -73,30 +73,19 @@ const FHFRoom* FHFHouseSpec::FindRoom(const FName& RoomId) const
 	return Rooms.FindByPredicate([&RoomId](const FHFRoom& R) { return R.Id == RoomId; });
 }
 
-const FHFBeam* FHFHouseSpec::DeepestBeamOverRoom(const FName& RoomId) const
+namespace
 {
-	const FHFRoom* Room = FindRoom(RoomId);
-	if (Room == nullptr || Room->Boundary.Num() < 3)
-	{
-		return nullptr;
-	}
-
-	// Sample along the beam rather than doing a true polygon-segment intersection. A beam either
-	// spans a room or misses it entirely, so sampling is sufficient here.
-	constexpr int32 SampleCount = 24;
-
-	// Most beams sit directly over a wall, which means their centreline runs exactly along a room
-	// boundary. Those are concealed by the wall itself and are not what a ceiling has to clear, so
-	// a sample only counts when it is clear of every boundary edge - a plain inside/outside test
-	// would report every perimeter beam as crossing every room it borders.
-	auto DistanceToBoundary = [Room](const FVector2D& Point)
+	/**
+	 * Distance from a plan point to the nearest edge of a room, unsigned.
+	 */
+	double HFDistanceToBoundary(const FHFRoom& Room, const FVector2D& Point)
 	{
 		double Nearest = TNumericLimits<double>::Max();
-		const int32 Count = Room->Boundary.Num();
+		const int32 Count = Room.Boundary.Num();
 		for (int32 i = 0, j = Count - 1; i < Count; j = i++)
 		{
-			const FVector2D& A = Room->Boundary[j];
-			const FVector2D& B = Room->Boundary[i];
+			const FVector2D& A = Room.Boundary[j];
+			const FVector2D& B = Room.Boundary[i];
 			const FVector2D Edge = B - A;
 			const double LengthSq = Edge.SizeSquared();
 
@@ -107,7 +96,120 @@ const FHFBeam* FHFHouseSpec::DeepestBeamOverRoom(const FName& RoomId) const
 			Nearest = FMath::Min(Nearest, FVector2D::Distance(Point, A + Edge * T));
 		}
 		return Nearest;
-	};
+	}
+
+	/**
+	 * Half the thickness of the wall running directly beneath a beam at a plan point, or 0 where the
+	 * beam has no wall under it.
+	 *
+	 * WHAT A WALL CAN AND CANNOT CONCEAL, which is the whole question a ceiling drop turns on.
+	 *
+	 * A beam is set out on a wall's centreline, so it is hidden by that wall only as far as the wall
+	 * itself reaches: a 230 beam over a 230 wall is flush on both faces and genuinely invisible, and
+	 * the SAME beam over a 115 partition stands 57.5 proud of the plaster on both sides for the
+	 * whole length of the run. That is not a subtlety - it is a continuous ledge round the top of
+	 * every room the partition borders, and it is what "a ragged dark line along the top of every
+	 * wall" turned out to be once the flashing behind it was fixed.
+	 *
+	 * Only walls PARALLEL to the beam are asked. A partition crossing under a beam touches its
+	 * centreline at a single point and conceals nothing along it; counting its thickness would let
+	 * one junction vouch for a whole run.
+	 */
+	double HFConcealingWallHalfThickness(const TArray<FHFWall>& Walls, const FVector2D& Point,
+		const FVector2D& BeamDirection, double Tolerance)
+	{
+		double Half = 0.0;
+
+		for (const FHFWall& Wall : Walls)
+		{
+			const double Length = Wall.Length();
+			if (Length <= UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const FVector2D Direction = (Wall.End - Wall.Start) / Length;
+			if (FMath::Abs(FVector2D::DotProduct(Direction, BeamDirection)) < 0.999)
+			{
+				continue;
+			}
+
+			const double T = FMath::Clamp(
+				FVector2D::DotProduct(Point - Wall.Start, Direction) / Length, 0.0, 1.0);
+
+			if (FVector2D::Distance(Point, FMath::Lerp(Wall.Start, Wall.End, T)) <= Tolerance)
+			{
+				Half = FMath::Max(Half, Wall.Thickness * 0.5);
+			}
+		}
+
+		return Half;
+	}
+
+	/** Sample along a beam rather than intersecting polygons. A beam either runs with a room's edge or crosses it. */
+	constexpr int32 HFBeamSampleCount = 24;
+}
+
+const FHFBeam* FHFHouseSpec::DeepestBeamOverRoom(const FName& RoomId) const
+{
+	const FHFRoom* Room = FindRoom(RoomId);
+	if (Room == nullptr || Room->Boundary.Num() < 3)
+	{
+		return nullptr;
+	}
+
+	// Below this a beam is flush with its wall for modelling purposes. In CENTIMETRES, converted
+	// into whatever the spec declares, because "a centimetre of concrete does not read as a ledge"
+	// is a statement about the building and not about the numbers it happens to be written in.
+	const double Scale = FHFUnits::ToCentimeterScale(Units);
+	const double Flush = (Scale > UE_KINDA_SMALL_NUMBER) ? (1.0 / Scale) : 1.0;
+
+	const FHFBeam* Deepest = nullptr;
+	for (const FHFBeam& Beam : Beams)
+	{
+		const double BeamLength = Beam.Length();
+		if (BeamLength <= UE_KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector2D Direction = (Beam.End - Beam.Start) / BeamLength;
+
+		bool bShows = false;
+		for (int32 i = 0; i <= HFBeamSampleCount && !bShows; ++i)
+		{
+			const double T = static_cast<double>(i) / HFBeamSampleCount;
+			const FVector2D Point = FMath::Lerp(Beam.Start, Beam.End, T);
+
+			// How far into the room the beam's own footprint reaches, signed from the boundary.
+			// A centreline on the boundary reaches in by half the beam's width; one already inside
+			// reaches further; one outside has to make the distance up before it counts at all.
+			const double Inside = Room->ContainsPoint(Point)
+				? HFDistanceToBoundary(*Room, Point)
+				: -HFDistanceToBoundary(*Room, Point);
+
+			const double Reach = Inside + Beam.Width * 0.5;
+			const double Concealed = HFConcealingWallHalfThickness(Walls, Point, Direction, Flush);
+
+			bShows = Reach > Concealed + Flush;
+		}
+
+		if (bShows && (Deepest == nullptr || Beam.Depth > Deepest->Depth))
+		{
+			Deepest = &Beam;
+		}
+	}
+
+	return Deepest;
+}
+
+const FHFBeam* FHFHouseSpec::DeepestBeamCrossingRoom(const FName& RoomId) const
+{
+	const FHFRoom* Room = FindRoom(RoomId);
+	if (Room == nullptr || Room->Boundary.Num() < 3)
+	{
+		return nullptr;
+	}
 
 	const FHFBeam* Deepest = nullptr;
 	for (const FHFBeam& Beam : Beams)
@@ -117,14 +219,16 @@ const FHFBeam* FHFHouseSpec::DeepestBeamOverRoom(const FName& RoomId) const
 			continue;
 		}
 
+		// Clear of every boundary edge by its own half width: the beam is in open room, not running
+		// along a wall line. A plain inside/outside test would call every perimeter beam a crossing.
 		const double Clearance = Beam.Width * 0.5;
 
 		bool bCrosses = false;
-		for (int32 i = 0; i <= SampleCount && !bCrosses; ++i)
+		for (int32 i = 0; i <= HFBeamSampleCount && !bCrosses; ++i)
 		{
-			const double T = static_cast<double>(i) / SampleCount;
+			const double T = static_cast<double>(i) / HFBeamSampleCount;
 			const FVector2D Point = FMath::Lerp(Beam.Start, Beam.End, T);
-			bCrosses = Room->ContainsPoint(Point) && DistanceToBoundary(Point) > Clearance;
+			bCrosses = Room->ContainsPoint(Point) && HFDistanceToBoundary(*Room, Point) > Clearance;
 		}
 
 		if (bCrosses && (Deepest == nullptr || Beam.Depth > Deepest->Depth))

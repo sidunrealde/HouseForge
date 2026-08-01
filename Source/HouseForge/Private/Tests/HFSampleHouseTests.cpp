@@ -181,8 +181,8 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Sample has 3 balconies"), Balconies, 3);
 
-	// No beam crosses the interior of any room. Every one of the eight sits over a wall for its
-	// whole length, where the wall itself conceals it.
+	// No beam crosses the open interior of any room. Every one of the eight sits over a wall for
+	// its whole length.
 	//
 	// This used to say the opposite for the living room: BM_Living_Cross was asserted PRESENT, and
 	// the assertion was written as though a beam through the middle of a room were a feature of the
@@ -190,9 +190,29 @@ bool FHFSampleHouseShapeTest::RunTest(const FString& Parameters)
 	// all along - it is what would have caught the beam, and it holds the line for the next one.
 	for (const FHFRoom& Room : Spec.Rooms)
 	{
-		const FHFBeam* Crossing = Spec.DeepestBeamOverRoom(Room.Id);
+		const FHFBeam* Crossing = Spec.DeepestBeamCrossingRoom(Room.Id);
 		TestNull(*FString::Printf(TEXT("No beam crosses the interior of '%s' (%s)"),
 			*Room.Id.ToString(), *Room.Name), Crossing);
+	}
+
+	// SITTING OVER A WALL IS NOT THE SAME AS BEING HIDDEN BY IT, and this is the assertion whose
+	// absence let a defect through. Six of the eight beams are 230 wide over 115 partitions, so they
+	// stand 57.5 proud of the plaster on both faces - a continuous ledge round the top of every room
+	// those partitions border. Where the room has a false ceiling, the ceiling is what has to bury
+	// it, and the drop is not free to be chosen by eye.
+	for (const FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
+	{
+		const FHFBeam* Showing = Spec.DeepestBeamOverRoom(Ceiling.RoomId);
+		if (Showing == nullptr)
+		{
+			continue;
+		}
+
+		TestTrue(*FString::Printf(
+			TEXT("Ceiling '%s' drops %.0f, enough to bury beam '%s' which hangs %.0f into room '%s'"),
+			*Ceiling.Id.ToString(), Ceiling.Drop, *Showing->Id.ToString(), Showing->Depth,
+			*Ceiling.RoomId.ToString()),
+			Ceiling.Drop >= Showing->Depth);
 	}
 
 	// Every room must be reachable by the builder, and every opening must host on a real wall.
