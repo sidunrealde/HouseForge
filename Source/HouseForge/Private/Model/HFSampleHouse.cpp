@@ -629,10 +629,17 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		BaseWest.Params.PlinthHeight = 100.0;
 		BaseWest.Params.HandleStyle = EHFHandleStyle::JProfile;
 
-		// X 750..2900: clear of the west run's corner at one end, and dying into W_Kitchen_Util,
+		// X 760..2900: clear of the west run's corner at one end, and dying into W_Kitchen_Util,
 		// whose west face is at 2942.5, at the other.
+		//
+		// 760 AND NOT 715, BECAUSE THE STONE OVERSAILS THE DOORS. The west run's carcass front is at
+		// 715 and its doors hang 20 in front of that, and the granite over them oversails the doors by
+		// another 20 - so the west counter's front edge is at 755, not 715. Started at 715 the north
+		// run's slab and the west run's slab drove 5 mm into each other in the corner, which no
+		// coplanar scan catches because the two faces that met were perpendicular rather than
+		// co-planar. Measured off the built geometry rather than off the drawn footprint.
 		FHFFixture& BaseNorth = B.AddFixture(TEXT("F_Kitchen_BaseN"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, north run"), FVector2D(1825.0, 7985.0), FVector2D(2150.0, 600.0), 850.0);
+			TEXT("Base units, north run"), FVector2D(1830.0, 7985.0), FVector2D(2140.0, 600.0), 850.0);
 		BaseNorth.AnchorWallId = TEXT("W_North");
 		BaseNorth.Params.ShutterCount = 3;
 		BaseNorth.Params.DrawerCount = 2;
@@ -647,7 +654,7 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		CounterW.Params.UpstandHeight = 100.0;
 
 		FHFFixture& CounterN = B.AddFixture(TEXT("F_Kitchen_CounterN"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, north"), FVector2D(1825.0, 7985.0), FVector2D(2150.0, 600.0), 40.0, 0.0, 850.0);
+			TEXT("Granite counter, north"), FVector2D(1830.0, 7985.0), FVector2D(2140.0, 600.0), 40.0, 0.0, 850.0);
 		CounterN.AnchorWallId = TEXT("W_North");
 		CounterN.Params.UpstandHeight = 100.0;
 
@@ -681,8 +688,22 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		B.AddFixture(TEXT("F_Kitchen_Hob"), TEXT("R_Kitchen"), EHFFixtureType::Hob,
 			TEXT("4-burner hob"), FVector2D(415.0, 6300.0), FVector2D(580.0, 500.0), 60.0, 90.0, 850.0);
 
+		// X 365, NOT 415: A CHIMNEY'S BACK IS FLAT AGAINST THE WALL. Drawn on the same centre as the
+		// hob it hangs over, it stood 50 mm clear of the plaster for its whole 700 height with the
+		// wall visible behind it - which is exactly what it looked like in the first render of this
+		// room, and what no assertion about the spec would ever have said. The hob is centred on the
+		// COUNTER because that is where a hob goes; the chimney is set against the WALL because that
+		// is where a chimney goes, and the two are not the same line.
+		//
+		// 115 (the west wall's inner face) + 250 (half its depth) + 10 = 375.
+		//
+		// THE 10 IS NOT SLACK. Set hard against the plaster, the canopy's back panel landed in exactly
+		// the plane of the wall's finished face and 1617 cm2 of the two z-fought - both surfaces drawn,
+		// the depth test picking a different winner each frame, the whole back of the hood strobing as
+		// the camera moves. A real chimney hangs on a bracket with a gap behind it for the same
+		// practical reason it is easier to fit that way.
 		FHFFixture& Chimney = B.AddFixture(TEXT("F_Kitchen_Chimney"), TEXT("R_Kitchen"), EHFFixtureType::Chimney,
-			TEXT("Chimney"), FVector2D(415.0, 6300.0), FVector2D(600.0, 500.0), 700.0, 90.0, 1500.0);
+			TEXT("Chimney"), FVector2D(375.0, 6300.0), FVector2D(600.0, 500.0), 700.0, 90.0, 1500.0);
 		Chimney.AnchorWallId = TEXT("W_West");
 
 		// On the kitchen's south wall, not in the corner by the utility.

@@ -25,7 +25,7 @@ namespace
 	 * HouseForge.Editor.NothingIsSetIntoADrawer measures it in the built flat rather than trusting it.
 	 */
 	void ComposeBays(FHFCaseUnit& Unit, const FHFFixtureParams& Spec, EHFShutterMotion Motion,
-		EHFShelfMaterial ShelfMaterial)
+		EHFShelfMaterial ShelfMaterial, bool bBankAtStart)
 	{
 		const int32 ShutterBays = FMath::Max(Spec.ShutterCount, 0);
 		const int32 DrawerBays = Spec.DrawerCount > 0 ? 1 : 0;
@@ -60,12 +60,22 @@ namespace
 			// rather than left to the kit, because a bay carrying both is a shelf through a drawer.
 			Bank.Interior = EHFCaseInterior::None;
 
-			Unit.Bays.Last() = Bank;
+			// WHICH end, decided by the composing layer, because a pull-out needs somewhere to pull
+			// out TO. In an L-shaped kitchen the return run stands in front of one end of the other
+			// run, and a bank put there is a bank that cannot open - see bBankAtRunStart.
+			if (bBankAtStart)
+			{
+				Unit.Bays[0] = Bank;
+			}
+			else
+			{
+				Unit.Bays.Last() = Bank;
+			}
 		}
 	}
 
 	/** Everything the drawing states about a run, and what its type makes of it. */
-	void ReadFixture(const FHFFixture& Fixture, FHFCasedGoodsParams& P)
+	void ReadFixture(const FHFFixture& Fixture, FHFCasedGoodsParams& P, bool bBankAtStart)
 	{
 		const FHFFixtureParams& Spec = Fixture.Params;
 
@@ -97,7 +107,7 @@ namespace
 			// NO TOP BOARD. The granite is this carcass's top, which is both how a base unit is built
 			// and the only construction a sink or a hob can be set into - see FHFCarcassParams::bHasTop.
 			Unit.bHasTop = false;
-			ComposeBays(Unit, Spec, Spec.ShutterMotion, EHFShelfMaterial::Ply);
+			ComposeBays(Unit, Spec, Spec.ShutterMotion, EHFShelfMaterial::Ply, bBankAtStart);
 			break;
 
 		case EHFFixtureType::KitchenWallCabinet:
@@ -110,12 +120,12 @@ namespace
 			// they sag past 600, and FHFShelfStackParams' own span rule breaks the stack with a mid
 			// partition rather than letting one bow on camera.
 			ComposeBays(Unit, Spec, Spec.ShutterMotion,
-				Spec.bHasGlassInsert ? EHFShelfMaterial::Glass : EHFShelfMaterial::Ply);
+				Spec.bHasGlassInsert ? EHFShelfMaterial::Glass : EHFShelfMaterial::Ply, bBankAtStart);
 			break;
 
 		default:
 			P.Mount = EHFCaseMount::Plinth;
-			ComposeBays(Unit, Spec, Spec.ShutterMotion, EHFShelfMaterial::Ply);
+			ComposeBays(Unit, Spec, Spec.ShutterMotion, EHFShelfMaterial::Ply, bBankAtStart);
 			break;
 		}
 
@@ -149,14 +159,14 @@ void AHFCasedGoodsActor::ApplyProjectDefaults()
 
 void AHFCasedGoodsActor::ApplyFixture(const FHFFixture& Fixture)
 {
-	ReadFixture(Fixture, Case);
+	ReadFixture(Fixture, Case, bBankAtRunStart);
 }
 
 FHFCasedGoodsParams AHFCasedGoodsActor::ParamsFor(const FHFFixture& Fixture)
 {
 	FHFCasedGoodsParams P;
 	P.Joinery = FHFBuildDefaults::FromProjectSettings().Joinery;
-	ReadFixture(Fixture, P);
+	ReadFixture(Fixture, P, /*bBankAtStart*/ false);
 
 	return FHFCasedGoodsKit::Sanitise(P);
 }

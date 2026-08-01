@@ -46,6 +46,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ShowOnlyInnerProperties))
 	FHFCasedGoodsParams Case;
 
+	/**
+	 * Puts the drawer bank at the -X end of the run instead of the +X end.
+	 *
+	 * A PULL-OUT NEEDS SOMEWHERE TO PULL OUT TO, and in an L-shaped kitchen one end of each run has
+	 * the return run standing in front of it. The west run's corner drawer had 2.5 cm of clear travel
+	 * out of 55 before it drove into the north run's carcasses - a drawer that reports full travel,
+	 * sweeps its whole declared distance, satisfies every assertion about motion, and cannot be
+	 * opened. Exactly the failure mode the wardrobe's cancelling leaf pair was.
+	 *
+	 * Set by the composing layer, because only it can see the run standing in the way. Call before
+	 * ApplyFixture, which is what reads it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	bool bBankAtRunStart = false;
+
 	/** Seeds the project's construction figures. Called by the composing layer, not by generation. */
 	void ApplyProjectDefaults();
 

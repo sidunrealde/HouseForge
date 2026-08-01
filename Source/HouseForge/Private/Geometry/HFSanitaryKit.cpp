@@ -64,7 +64,7 @@ namespace
 		return Out;
 	}
 
-	/** Scales a closed polygon about a centre - how a bowl's inner face is got from its outer. */
+	/** Scales a closed polygon about a centre - how a bowl's base is got from its mouth. */
 	TArray<FVector2D> ScaledAbout(const TArray<FVector2D>& Polygon, const FVector2D& Centre, double Scale)
 	{
 		TArray<FVector2D> Out;
@@ -145,14 +145,32 @@ FHFSinkBuild FHFSanitaryKit::BuildSink(const FHFSinkParams& Params)
 	// z-fighting, invisible in a still and strobing the moment the camera moves. The coplanar scan
 	// caught it on the first build.
 
-	TArray<FVector2D> BowlOutlines[3];
+	// A BOWL IS A THIN PRESSING, AND ITS WALL IS BUILT AS A SOLID MINUS A SOLID rather than as a
+	// thin annulus swept down. Swept, the annulus between the bowl's outer face and its inner is
+	// about a millimetre and a half across a 20 cm drop, and a triangulator handed a ring that thin
+	// resolves it as the outer polygon alone - which is a SOLID BLOCK the shape of the bowl, in
+	// exactly the place a bowl should be, with the rim sitting correctly on top of it. It looks
+	// perfect from every angle and it is not a sink. Two robust solid prisms and one boolean cannot
+	// fail that way, and the volume test below is what says so.
+	const double Wall = FMath::Min(BowlWallThickness * 2.0,
+		FMath::Min(BowlHalf.X, BowlHalf.Y) * 0.5);
+
+	TArray<FVector2D> BowlOuter[3];
+	TArray<FVector2D> BowlInner[3];
 	TArray<TArray<FVector2D>> RimHoles;
 
 	for (int32 Bowl = 0; Bowl < P.BowlCount; ++Bowl)
 	{
 		const FVector2D Centre(-P.Width * 0.5 + ModuleWidth * (Bowl + 0.5), 0.0);
-		BowlOutlines[Bowl] = RoundedRect(Centre, BowlHalf, P.BowlCornerRadius);
-		RimHoles.Add(BowlOutlines[Bowl]);
+
+		BowlOuter[Bowl] = RoundedRect(Centre, BowlHalf, P.BowlCornerRadius);
+		BowlInner[Bowl] = RoundedRect(Centre, BowlHalf - FVector2D(Wall, Wall),
+			P.BowlCornerRadius - Wall);
+
+		// The rim laps the TOP OF THE BOWL WALL, which is what a pressing does - the flange and the
+		// bowl are one piece of steel folded over. Holed at the inner face, so the wall's top edge is
+		// covered rather than meeting the rim's hole in a shared vertical plane.
+		RimHoles.Add(BowlInner[Bowl]);
 	}
 
 	const TArray<FVector2D> RimOutline = {
@@ -177,39 +195,34 @@ FHFSinkBuild FHFSanitaryKit::BuildSink(const FHFSinkParams& Params)
 	// The walls draw IN towards the base, which is how a bowl is pressed and what makes water find
 	// the waste rather than standing in the corners.
 
-	constexpr double BowlTaper = 0.94;
 	const double BaseZ = -P.BowlDepth;
 
 	for (int32 Bowl = 0; Bowl < P.BowlCount; ++Bowl)
 	{
-		const FVector2D Centre(-P.Width * 0.5 + ModuleWidth * (Bowl + 0.5), 0.0);
+		// The tub as a solid, from the underside of its base up to the rim.
+		FDynamicMesh3 Tub;
+		FHFMeshOps::InitialiseMesh(Tub);
 
-		const TArray<FVector2D>& Outer = BowlOutlines[Bowl];
-		const TArray<FVector2D> Inner = ScaledAbout(Outer, Centre,
-			FMath::Max(1.0 - BowlWallThickness / FMath::Max(BowlHalf.X, UE_KINDA_SMALL_NUMBER), 0.0));
-
-		// The wall, as an annulus swept from rim to base. Tapered by scaling the whole section, so the
-		// corner radius closes with it and the press stays plausible.
-		FDynamicMesh3 Wall;
-		FHFMeshOps::InitialiseMesh(Wall);
-
-		if (FHFMeshOps::AppendPrismWithHoles(Wall, Outer, { Inner }, BaseZ, 0.0,
+		if (!FHFMeshOps::AppendPrism(Tub, BowlOuter[Bowl], BaseZ - Wall, 0.0,
 			EHFSurfaceRole::Sanitary))
 		{
-			FHFMeshOps::AppendPreservingRoles(Out.Shell, Wall);
+			continue;
 		}
 
-		// The base, closing the bottom of the tub.
-		FDynamicMesh3 Base;
-		FHFMeshOps::InitialiseMesh(Base);
+		// And the water's worth of it taken back out, open at the top. Carried up past the rim so the
+		// cut face reaches daylight rather than leaving a skin of steel over the mouth.
+		FDynamicMesh3 Cavity;
+		FHFMeshOps::InitialiseMesh(Cavity);
 
-		if (FHFMeshOps::AppendPrism(Base, ScaledAbout(Outer, Centre, BowlTaper),
-			BaseZ - BowlWallThickness, BaseZ, EHFSurfaceRole::Sanitary))
+		if (FHFMeshOps::AppendPrism(Cavity, BowlInner[Bowl], BaseZ, P.RimThickness + 1.0,
+			EHFSurfaceRole::Sanitary))
 		{
-			FHFMeshOps::AppendPreservingRoles(Out.Shell, Base);
+			FHFMeshOps::SubtractInPlace(Tub, Cavity);
 		}
 
-		Out.BowlVolume += (2.0 * BowlHalf.X) * (2.0 * BowlHalf.Y) * P.BowlDepth;
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Tub);
+
+		Out.BowlVolume += (2.0 * (BowlHalf.X - Wall)) * (2.0 * (BowlHalf.Y - Wall)) * P.BowlDepth;
 	}
 
 	// -------------------------------------------------------------------------------------- the tap
@@ -314,10 +327,14 @@ FHFSinkBuild FHFSanitaryKit::BuildSink(const FHFSinkParams& Params)
 
 			Lever.PivotTransform = FTransform(TapBase + FVector3d(0.0, 0.0, P.Tap.BodyHeight));
 
-			// Lifting is a rotation about the axis ACROSS the tap: the lever rises at its far end.
+			// Lifting is a rotation about the axis ACROSS the tap, and the SIGN is the whole content
+			// of it: the lever runs backwards from the top of the body along +Y, so a positive turn
+			// about +X carries its far end upwards. Negative, it pressed the handle down through the
+			// worktop instead - a movement of exactly the same size, in the one direction a mixer
+			// lever cannot go, and indistinguishable from correct in any still.
 			Lever.Motion.Type = EHFMotionType::Hinge;
 			Lever.Motion.Axis = FVector::XAxisVector;
-			Lever.Motion.MaxAngleDegrees = -P.Tap.LeverLiftDegrees;
+			Lever.Motion.MaxAngleDegrees = P.Tap.LeverLiftDegrees;
 			Lever.DefaultOpenAmount = 0.0;
 
 			Out.Parts.Add(MoveTemp(Lever));

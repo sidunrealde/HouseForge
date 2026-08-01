@@ -300,6 +300,9 @@ namespace
 		/** Where the sinks and hobs are, for the counters they are cut into and for themselves. */
 		const FHFSetInResolution* SetIn = nullptr;
 
+		/** Every fitted fixture, for the few decisions that depend on what else is standing nearby. */
+		const TArray<FHFFixture>* Fixtures = nullptr;
+
 		/** How far the false ceiling over this fixture hangs below the slab, at its own position. */
 		double SoffitDrop = 0.0;
 
@@ -344,11 +347,95 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	/**
+	 * Is there another run standing in front of one end of this one?
+	 *
+	 * A PULL-OUT NEEDS SOMEWHERE TO PULL OUT TO. In an L-shaped kitchen the return run stands in
+	 * front of one end of the other run, and a drawer bank put at that end has 2.5 cm of clear travel
+	 * out of 55 before it drives into the return's carcasses - a drawer that sweeps its whole declared
+	 * distance, satisfies every assertion about motion, and cannot be opened. That is the wardrobe's
+	 * cancelling-leaf failure again in a different fitting, and only this layer can see it, because
+	 * neither run knows the other exists.
+	 *
+	 * Probed rather than reasoned about: a point out in front of the end bay, at the distance a drawer
+	 * actually comes out to, tested against everything else the house is going to build on the floor.
+	 *
+	 * @param bStartEnd True to probe the -X end of the run, false for the +X end.
+	 */
+	bool RunEndIsObstructed(const FHFFixtureContext& C, bool bStartEnd)
+	{
+		if (C.Fixtures == nullptr || C.Fixture->Footprint.X <= 0.0)
+		{
+			return false;
+		}
+
+		// How far out a drawer in this run comes. A full-extension runner clears the carcass, so the
+		// probe goes to where the FRONT of an open drawer ends up rather than to the door face.
+		const double PullOut = C.Fixture->Footprint.Y * 0.6;
+
+		const double Yaw = FHFFixturePlacement::FacingYaw(*C.Fixture, C.AnchorWall);
+		const FRotator Rotation(0.0, Yaw, 0.0);
+
+		// The run's own frame: origin at the front-left corner of the footprint, +Y back into it.
+		const FVector Corner = Rotation.RotateVector(
+			FVector(-C.Fixture->Footprint.X * 0.5, -C.Fixture->Footprint.Y * 0.5, 0.0));
+		const FVector2D Origin(C.Fixture->Position.X + Corner.X, C.Fixture->Position.Y + Corner.Y);
+
+		// SEVERAL POINTS ACROSS THE END BAY AND ALONG THE PULL, not one. A single probe at the middle
+		// of the end bay landed exactly on the return run's front edge, where the inside test is a
+		// coin toss - and the answer came back "clear" for a drawer with 2.5 cm of travel. The
+		// obstruction is a rectangle overlapping part of a bay, so the question is whether ANY of the
+		// space the drawer sweeps is occupied, not whether one particular point is.
+		static constexpr double AlongEnd[] = { 0.62, 0.80, 0.96 };
+		static constexpr double OutBy[] = { 0.35, 0.70, 1.0 };
+
+		for (const double Along : AlongEnd)
+		{
+			const double AlongRun = C.Fixture->Footprint.X * (bStartEnd ? 1.0 - Along : Along);
+
+			for (const double Out : OutBy)
+			{
+				const FVector Local = Rotation.RotateVector(FVector(AlongRun, -PullOut * Out, 0.0));
+				const FVector2D Probe(Origin.X + Local.X, Origin.Y + Local.Y);
+
+				for (const FHFFixture& Other : *C.Fixtures)
+				{
+					if (Other.Id == C.Fixture->Id || !AHFHouseActor::BuildsGeometryFor(Other.Type))
+					{
+						continue;
+					}
+
+					// Only what stands ON THE FLOOR can block a drawer. A wall cabinet at 140 is over
+					// it, and a counter is the thing the drawer is under.
+					if (Other.IsCeilingMounted() || Other.BaseZ > 50.0
+						|| AHFCounterActor::Builds(Other.Type))
+					{
+						continue;
+					}
+
+					if (FHFFixturePlacement::FootprintContains(Other, Probe))
+					{
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
 	void SeedCasedGoods(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFCasedGoodsActor& Actor = static_cast<AHFCasedGoodsActor&>(Element);
 
 		Actor.ApplyProjectDefaults();
+
+		// Which end the drawer bank goes at, decided before ApplyFixture reads it. The far end by
+		// default, because that is where a bank belongs when nothing is in the way - it keeps the bay
+		// under a sink or a hob free for a cupboard - and the near end when the far one is blocked.
+		Actor.bBankAtRunStart = RunEndIsObstructed(C, /*bStartEnd*/ false)
+			&& !RunEndIsObstructed(C, /*bStartEnd*/ true);
+
 		Actor.ApplyFixture(*C.Fixture);
 
 		// A WALL UNIT IS PLACED BY EXACTLY THE SAME RULE AS A FLOOR-STANDING RUN, which is why there is
@@ -1093,6 +1180,7 @@ void AHFHouseActor::BuildGeometry()
 		Context.Room = Spec.FindRoom(Fixture.RoomId);
 		Context.AnchorWall = Spec.FindWall(Fixture.AnchorWallId);
 		Context.SetIn = &SetIn;
+		Context.Fixtures = &Fixtures;
 
 		// WHAT IS BETWEEN A CEILING-HUNG FITTING AND THE ROOM. A ceiling fan hangs from the structural
 		// slab, so a false ceiling over it is something its rod has to get through - and a rod that was
@@ -1226,6 +1314,7 @@ int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
 		Context.Room = FixtureRoom;
 		Context.AnchorWall = Spec.FindWall(Fixture.AnchorWallId);
 		Context.SetIn = &SetIn;
+		Context.Fixtures = &Fixtures;
 		Context.SoffitDrop = SoffitDropAt(Spec, Fixture, FixtureRoom);
 
 		// The difference from a fresh build, and the only one: the walls already exist and were cored

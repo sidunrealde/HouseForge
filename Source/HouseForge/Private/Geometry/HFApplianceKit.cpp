@@ -437,7 +437,13 @@ FHFApplianceBuild FHFApplianceKit::BuildChimney(const FHFChimneyParams& Params)
 
 		Filter.Motion.Type = EHFMotionType::Hinge;
 		Filter.Motion.Axis = FVector::XAxisVector;
-		Filter.Motion.MaxAngleDegrees = -P.FilterDropDegrees;
+
+		// POSITIVE, SO THE PANEL DROPS OUT OF THE HOOD AND NOT INTO IT. A rotation about +X carries
+		// the top of the filter towards -Y, which is forward into the room, and down - which is what
+		// a released baffle does and what makes it reachable. The other sign tipped the top backwards
+		// into the canopy, through the wall behind it, and it looked plausible in the render until
+		// the direction of travel was checked against where a hand would have to go.
+		Filter.Motion.MaxAngleDegrees = P.FilterDropDegrees;
 		Filter.DefaultOpenAmount = 0.0;
 
 		Out.Parts.Add(MoveTemp(Filter));

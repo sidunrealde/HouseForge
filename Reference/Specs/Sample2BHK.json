@@ -2257,13 +2257,13 @@
 			"label": "Base units, north run",
 			"position":
 			{
-				"x": 1825,
+				"x": 1830,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2150,
+				"x": 2140,
 				"y": 600
 			},
 			"height": 850,
@@ -2333,13 +2333,13 @@
 			"label": "Granite counter, north",
 			"position":
 			{
-				"x": 1825,
+				"x": 1830,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2150,
+				"x": 2140,
 				"y": 600
 			},
 			"height": 40,
@@ -2523,7 +2523,7 @@
 			"label": "Chimney",
 			"position":
 			{
-				"x": 415,
+				"x": 375,
 				"y": 6300
 			},
 			"rotationDegrees": 90,
