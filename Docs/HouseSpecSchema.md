@@ -164,15 +164,42 @@ treated as crossing that room — only beams passing through the interior force 
 
 One per room that has one. Every drawing in this domain has several.
 
+### Name a template; do not tune six numbers
+
+**`template` is the field to write.** It names a DESIGN, and the project's False Ceilings settings
+decide what that design means here — band width, drop, cove section, downlight pitch, and how big a
+ring is needed to bury a beam. Everything below it is then filled in before anything validates or
+builds, so what is committed and what a validator reads are still plain numbers.
+
+| Template | What you get |
+|---|---|
+| `Custom` | Nothing is stamped. The figures below stand exactly as written. |
+| `PlainBand` | A shallow perimeter band with a run of recessed downlights in it |
+| `Cove` | The same band with a trough at its inner edge throwing light UP onto the slab |
+| `SteppedTray` | Two levels: an outer band and a shallower step inside it |
+| `FramedPanel` | A frame band round a centre panel that sits HIGHER than the frame, cove between |
+
+Write `Custom` only for a ceiling whose figures are genuinely particular — a wet area's full drop, or
+a bulkhead following its own polygon. A `Custom` ceiling gets no beam ring and no downlight run laid
+out for it, so both have to be written by hand.
+
+### The figures
+
 | Field | Type | Notes |
 |---|---|---|
 | `id`, `roomId` | name | |
+| `template` | enum | see above. Prefer this to writing the figures |
 | `style` | enum | see below |
-| `drop` | number | How far below the slab the ceiling hangs |
+| `drop` | number | How far below the slab the ceiling hangs. **100–200 is the range**, not 500 |
 | `bandWidth` | number | Width of the perimeter band; ignored by `FullDrop` |
-| `cove` | object | `{ channelWidth, lipHeight, setback, bHasLedStrip }` |
+| `innerDrop` | number | Drop of the step inside the band, for `Tray`. `0` means half the outer drop |
+| `centrePanelDrop` | number | A panel filling the centre, this far below the slab. Must be **less** than `drop` — it is recessed above the band, not hung below it. `0`: no panel |
+| `perimeterBulkheadWidth` | number | A deeper ring round the outside, boxing in the beams that run round the room |
+| `perimeterBulkheadDrop` | number | Drop of that ring. Deeper than `drop`, or no ring is built |
+| `cove` | object | `{ channelWidth, lipHeight, setback, bHasLedStrip, stripWidth, stripHeight, stripSetback }` |
+| `downlight` | object | `{ cutoutDiameter, flangeDiameter, flangeProjection, bodyDepth, bRecessed }` |
 | `explicitPolygon` | array of `{x, y}` | Overrides the room boundary. **Required for `Bulkhead`** |
-| `lightPositions` | array of `{x, y}` | Recessed spotlights |
+| `lightPositions` | array of `{x, y}` | Recessed downlights, bored through the soffit where they fit |
 
 | Style | Meaning |
 |---|---|
@@ -182,6 +209,22 @@ One per room that has one. Every drawing in this domain has several.
 | `Tray` | Stepped levels, inner region higher |
 | `Cove` | Peripheral band with a recessed channel hiding an LED strip |
 | `Bulkhead` | Localised drop over a wardrobe run, kitchen counter or corridor |
+
+### A beam is boxed in where it runs; it does not deepen the room
+
+A ceiling shallower than a beam crossing its room leaves the beam hanging through the finished
+soffit, and `CeilingDoesNotClearBeam` says so. **The answer is not a deeper ceiling.** Nobody drops
+twenty-four square metres of living room by half a metre to hide one beam, and doing it destroys the
+design — a cove at the bottom of a 500 well is a 6:1 trough that absorbs its own light.
+
+Two remedies the rule accepts, both positional:
+
+- **A perimeter bulkhead ring**, for a beam running along a wall line — which in these layouts is
+  every beam. A 230 beam over a 115 partition stands 57.5 proud of the plaster on both faces, and a
+  ring 300 wide dropping 480 buries it while everything further in stays at 150. A templated ceiling
+  derives its own ring from the beams; a `Custom` one has to state it.
+- **A separate `Bulkhead` ceiling** with its own polygon, for a beam crossing the open interior of a
+  room. It has to be over the beam along the beam's whole run inside that room.
 
 ## `fixtures[]`
 
