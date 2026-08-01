@@ -27,8 +27,10 @@ namespace
 
 		if (P.Kind == EHFFanKind::Exhaust)
 		{
-			// An extract's case depth is how far it stands out of the wall, which is the smaller of the
-			// two plan dimensions - the drawing's 250 x 100 is a 250 fan in a 100 deep case.
+			// An extract's case depth is the depth of its BODY, which is the smaller of the two plan
+			// dimensions - the drawing's 250 x 100 is a 250 fan in a 100 deep case. It used to be
+			// read as how far the case stood out of the wall; it is now how far it goes IN, and the
+			// drawn figure means the same thing either way because it is the fan that was bought.
 			const double Shallow = FMath::Min(Fixture.Footprint.X, Fixture.Footprint.Y);
 			if (Shallow > 0.0)
 			{

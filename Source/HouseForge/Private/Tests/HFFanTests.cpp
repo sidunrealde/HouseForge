@@ -418,10 +418,12 @@ bool FHFExhaustFanTest::RunTest(const FString& Parameters)
 		Actual < Solid * 0.8);
 	TestTrue(TEXT("...and is still a case rather than a ring of nothing"), Actual > 0.0);
 
-	// A wall fan stands proud of what it is fixed to, in the same frame a ceiling fan hangs below it.
-	// With no wall thickness given there is nothing to line, so nothing is built behind the face -
-	// which is the case this fan was declared without one to state.
+	// WITH NO WALL TO SINK INTO, THE CASE HAS NOWHERE TO GO AND STANDS ON THE FACE. That is the
+	// honest answer to "an extract that was never told what it is fixed to", and it is why
+	// HousedDepth returns zero for a thickness of zero rather than guessing one: a fan half buried in
+	// a wall nobody described is worse than a fan standing on it.
 	TestTrue(TEXT("Told nothing about a wall, nothing is built behind the face"), Case.Min.Z > -1e-6);
+	TestNearlyEqual(TEXT("...and nothing houses, so the whole body is proud"), P.ProudDepth(), P.CaseDepth, 1e-9);
 	TestTrue(TEXT("The rotor sits inside the case, not in front of it"),
 		Built.BladePlaneZ > 0.0 && Built.BladePlaneZ < P.CaseDepth);
 
@@ -490,11 +492,18 @@ bool FHFExtractDischargeTest::RunTest(const FString& Parameters)
 	// corners of the cored duct are precisely what shows past something sized on the side alone.
 	const double DuctHalf = Lined.DuctSide() * 0.5;
 
-	TestTrue(*FString::Printf(TEXT("The cowl's flange covers the cored hole (%.2f x %.2f over a %.2f duct)"),
-		Behind.Width() * 0.5, Behind.Depth() * 0.5, DuctHalf),
-		Behind.Width() * 0.5 > DuctHalf && Behind.Depth() * 0.5 > DuctHalf);
+	// WIDTH AND HEIGHT, WHICH ARE X AND Y. FAxisAlignedBox3's Depth() is its Z extent, and this used
+	// to ask for it - so half the assertion was measuring how far the fan reached along its own axis
+	// against a dimension in the plane of the wall. It passed only because the case used to stand
+	// 12 cm out of the room, and the moment the case was housed in the masonry the same correct
+	// geometry failed it.
+	const double CornerReach = DuctHalf * UE_DOUBLE_SQRT_2;
 
-	// But it is not wider than the case that sits on the room side, or the fan is a plate with a
+	TestTrue(*FString::Printf(TEXT("The cowl's flange covers the cored hole, corners and all (%.2f x %.2f over a %.2f half-diagonal)"),
+		Behind.Width() * 0.5, Behind.Height() * 0.5, CornerReach),
+		Behind.Width() * 0.5 > CornerReach && Behind.Height() * 0.5 > CornerReach);
+
+	// But it is not wider than the bezel that sits on the room side, or the fan is a plate with a
 	// smaller fan in front of it.
 	TestTrue(TEXT("...without growing wider than the fan itself"),
 		Behind.Width() * 0.5 <= Lined.CaseHalfWidth() + 1e-6);
@@ -535,8 +544,40 @@ bool FHFExtractDischargeTest::RunTest(const FString& Parameters)
 
 	// And the fan still works: lining the wall must not have eaten the aperture the blades turn in.
 	TestTrue(TEXT("The lined extract still has its rotor"), With.Parts.Num() == 1);
-	TestTrue(TEXT("...and still stands proud of the wall on the room side"),
-		Behind.Max.Z > Lined.CaseDepth * 0.5);
+
+	// ------------------------------------------------------- AND IT IS IN THE WALL, NOT ON IT
+	//
+	// This assertion used to read "still stands proud of the wall on the room side", and demanded
+	// more than half the case depth of it. That is what the flat was reported for: a white box
+	// standing out into the bathroom with the rotor visible inside it. A real extract is a body in a
+	// cored hole and a flange over it, so what is asserted now is the opposite of what was.
+	TestTrue(*FString::Printf(TEXT("The case is housed in the wall, not standing in the room (reaches %.2f cm past the plaster)"),
+		Behind.Max.Z),
+		Behind.Max.Z <= Lined.BezelProud + 0.001);
+
+	TestNearlyEqual(TEXT("An 11.5 cm wall swallows a 10 cm body whole"), Lined.HousedDepth(), 10.0, 1e-9);
+	TestNearlyEqual(TEXT("...so none of it is left over to stand proud"), Lined.ProudDepth(), 0.0, 1e-9);
+
+	// The impeller turns inside the masonry, which is the whole of the difference.
+	TestTrue(*FString::Printf(TEXT("The rotor turns inside the wall (blade plane at %.2f)"), With.BladePlaneZ),
+		With.BladePlaneZ < 0.0 && With.BladePlaneZ > -Lined.HostWallThickness);
+
+	// A WALL TOO THIN IS NOT SILENTLY IGNORED. The body houses as far as it can, a centimetre of
+	// masonry is left behind it so it never breaks the far face, and the remainder stands proud
+	// where anybody can see the wall could not take it.
+	FHFFanParams Thin = Lined;
+	Thin.HostWallThickness = 6.0;
+
+	TestNearlyEqual(TEXT("A 6 cm wall houses all but a centimetre of itself"), Thin.HousedDepth(), 5.0, 1e-9);
+	TestNearlyEqual(TEXT("...and says so: the rest stands proud"), Thin.ProudDepth(), 5.0, 1e-9);
+
+	const FHFFanBuild Squeezed = FHFFanKit::Build(Thin);
+	if (TestTrue(TEXT("An extract in a wall too thin still builds"), Squeezed.bValid))
+	{
+		TestTrue(TEXT("...and never breaks the far face of it"),
+			Squeezed.Shell.GetBounds().Min.Z >= -Thin.HostWallThickness - 8.0);
+		TestTrue(TEXT("...and is watertight all the same"), FHFMeshOps::IsClosed(Squeezed.Shell));
+	}
 
 	return true;
 }

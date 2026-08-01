@@ -18,6 +18,16 @@ namespace
 	constexpr double MinStock = 0.05;
 
 	/**
+	 * How far a flange reaches past the CORNER of the square hole it covers.
+	 *
+	 * Past the corner, not past the side. A cored duct is square and its corners reach the
+	 * half-diagonal; a plate sized on the side alone leaves four bright wedges of cut masonry where
+	 * a fitter would see a plate. Used by the room-side bezel and by the cowl on the far face, so
+	 * the two cannot be given different answers to the same question.
+	 */
+	constexpr double BezelLap = 0.8;
+
+	/**
 	 * Turns a mesh about an axis through the origin.
 	 *
 	 * MeshTransforms::Rotate takes an FRotator, which cannot express a rotation about an arbitrary
@@ -148,6 +158,31 @@ namespace
 	}
 
 	/**
+	 * A circle, centred on the axis, as a closed loop wound the same way as SquareLoop.
+	 *
+	 * The throat, as a HOLE IN A PROFILE rather than as a cylinder subtracted afterwards. The
+	 * boolean was the right tool while the case was one solid box standing on the wall; it is the
+	 * wrong one now that the case is a body plus a bezel, because two overlapping solids are not
+	 * valid input to a mesh boolean and it simply declined - "computed=0, target left uncut", twelve
+	 * times per house build, leaving every extract in the flat a solid block with a fan sealed
+	 * inside it. Extruding the annulus cannot fail, is watertight by construction, and carries its
+	 * roles without a boolean having to preserve them.
+	 */
+	TArray<FVector2D> RoundLoop(double Radius)
+	{
+		TArray<FVector2D> Loop;
+		Loop.Reserve(RevolveSides);
+
+		for (int32 Index = 0; Index < RevolveSides; ++Index)
+		{
+			const double Angle = 2.0 * UE_DOUBLE_PI * Index / RevolveSides;
+			Loop.Add(FVector2D(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius));
+		}
+
+		return Loop;
+	}
+
+	/**
 	 * What the far side of the wall sees: a sleeve through the masonry and a louvred cowl over it.
 	 *
 	 * AN EXTRACT HAS TWO SIDES, and only one of them was built. The duct was cored and then left as a
@@ -180,18 +215,28 @@ namespace
 
 		// ---------------------------------------------------------------- the sleeve through the wall
 		//
-		// Lines the cored hole for its full depth, so a glance into the duct from either side finds a
-		// spigot rather than the cut face of the masonry. Held a hair inside the hole so the two
-		// surfaces are never coincident - two faces in the same plane flicker under any camera move,
-		// which is the sort of thing only a walkthrough ever shows.
-		FHFMeshOps::AppendPrismWithHoles(Shell, SquareLoop(DuctHalf - 0.05), { SquareLoop(BoreHalf) },
-			-Thickness, 0.0, EHFSurfaceRole::MetalHardware);
+		// Lines the cored hole so a glance into the duct from either side finds a spigot rather than
+		// the cut face of the masonry. Held a hair inside the hole so the two surfaces are never
+		// coincident - two faces in the same plane flicker under any camera move, which is the sort
+		// of thing only a walkthrough ever shows.
+		//
+		// FROM THE FAR FACE TO THE BACK OF THE CASE, not the full thickness. The case is housed in
+		// this same hole now, so a sleeve run to the room face would be a second box inside the
+		// first for the case's whole depth - four coplanar pairs, and a flicker exactly where the
+		// room can see it through the throat.
+		const double SleeveFront = -P.HousedDepth();
+		if (SleeveFront - -Thickness > MinStock)
+		{
+			FHFMeshOps::AppendPrismWithHoles(Shell, SquareLoop(DuctHalf - 0.05), { SquareLoop(BoreHalf) },
+				-Thickness, SleeveFront, EHFSurfaceRole::MetalHardware);
+		}
 
 		// ------------------------------------------------------------------------ the cowl outside it
 		//
 		// A flanged frame standing proud of the discharge face. The flange is what covers the arris of
-		// the cored hole - the same job DuctSide's 10% margin does on the room side.
-		const double FlangeHalf = DuctHalf * 1.18;
+		// the cored hole - the same job the bezel does on the room side, and sized the same way: past
+		// the hole's CORNERS, which is what a 1.18 multiple of the half-side did not do.
+		const double FlangeHalf = DuctHalf * UE_DOUBLE_SQRT_2 + BezelLap;
 		const double CowlDepth = FMath::Max(DuctHalf * 0.22, 1.2);
 
 		FHFMeshOps::AppendPrismWithHoles(Shell, SquareLoop(FlangeHalf), { SquareLoop(BoreHalf) },
@@ -255,23 +300,58 @@ namespace
 
 // ------------------------------------------------------------------------------------ parameters
 
-double FHFFanParams::CaseHalfWidth() const
-{
-	return FMath::Max(SweepRadius() * 1.25, MotorDiameter * 0.5 + MinStock);
-}
-
 double FHFFanParams::ThroatRadius() const
 {
 	return FMath::Max(SweepRadius() * 1.05, MotorDiameter * 0.5 + MinStock);
 }
 
+double FHFFanParams::CaseBodyHalfWidth() const
+{
+	// The bore plus the sheet it is pressed from. What the body has to contain is the impeller, so
+	// this is derived from the throat and not from the bezel - which is the whole difference between
+	// a case that goes INTO the hole and one that sits over it.
+	return ThroatRadius() + FMath::Max(ThroatRadius() * 0.06, MinStock);
+}
+
 double FHFFanParams::DuctSide() const
 {
-	// Inscribed in the case - a square hole's corners reach its half-diagonal, so the side is bounded
-	// by the case width over root two - with a tenth held back as the flange that hides the arris.
-	const double InsideTheCase = CaseHalfWidth() * 2.0 * 0.9 / UE_DOUBLE_SQRT_2;
+	// THE HOLE NOW HAS TO SWALLOW THE FAN, not merely pass its air.
+	//
+	// It used to be min(SweepDiameter, inscribed-in-the-case), which made a hole NARROWER than the
+	// blades - correct while the impeller turned in the room in front of the wall, and impossible
+	// once it turns inside the masonry. A 22 cm sweep was cored a 17.5 cm hole; the blade tips had
+	// 2 cm of brick either side of them.
+	//
+	// So it is set out from the body it houses, with a fitting gap round it, and the bezel is sized
+	// from this rather than the other way about.
+	constexpr double FittingGap = 0.4;
 
-	return FMath::Max(FMath::Min(SweepDiameter, InsideTheCase), 0.0);
+	return FMath::Max(CaseBodyHalfWidth() * 2.0 + FittingGap, 0.0);
+}
+
+double FHFFanParams::CaseHalfWidth() const
+{
+	// COVERS THE HOLE'S CORNERS, not merely its sides. The chase is square and a square reaches its
+	// HALF-DIAGONAL, so a bezel sized on the side alone leaves four wedges of raw cut masonry
+	// showing at the corners - the same trap CanopyRadius is written against on the ceiling side.
+	//
+	// Floored at the old case width so a bezel is never smaller than the box it replaced.
+	return FMath::Max(DuctSide() * 0.5 * UE_DOUBLE_SQRT_2 + BezelLap, SweepRadius() * 1.25);
+}
+
+double FHFFanParams::HousedDepth() const
+{
+	// Masonry left behind the body so the case can never break the far face of the wall.
+	constexpr double MinBackReveal = 1.0;
+
+	const double WhatTheWallCanTake = FMath::Max(0.0, HostWallThickness - MinBackReveal);
+
+	return FMath::Clamp(FMath::Max(CaseDepth, 0.0), 0.0, WhatTheWallCanTake);
+}
+
+double FHFFanParams::ProudDepth() const
+{
+	return FMath::Max(0.0, FMath::Max(CaseDepth, 0.0) - HousedDepth());
 }
 
 double FHFFanParams::RodHoleHalfSide() const
@@ -296,12 +376,24 @@ double FHFFanParams::OverallDepth() const
 {
 	return Kind == EHFFanKind::Ceiling
 		? FMath::Max(DropLength, 0.0) + FMath::Max(MotorHeight, 0.0)
-		: FMath::Max(CaseDepth, 0.0);
+		// The extract's reach INTO THE ROOM, which is now the bezel and whatever the wall could not
+		// swallow - not the whole case, which is behind the plaster. Everything that asks a fan how
+		// much room it needs is asking about the room, so this is the figure that had to change.
+		: FMath::Max(ProudDepth() + FMath::Max(BezelProud, 0.0), 0.0);
 }
 
 bool FHFFanParams::IsValid() const
 {
-	return SweepDiameter > 0.0 && MotorDiameter > 0.0 && OverallDepth() > 0.0;
+	if (SweepDiameter <= 0.0 || MotorDiameter <= 0.0)
+	{
+		return false;
+	}
+
+	// An extract is measured by its BODY, not by how far it reaches into the room: a fan housed
+	// flush, with the bezel dialled to nothing, is a buildable fan and OverallDepth is legitimately
+	// zero for it. Asking OverallDepth here - which it used to - made "fits the wall perfectly" and
+	// "describes nothing" the same answer.
+	return Kind == EHFFanKind::Ceiling ? OverallDepth() > 0.0 : CaseDepth > 0.0;
 }
 
 FHFFanParams FHFFanKit::DefaultsFor(EHFFanKind Kind)
@@ -312,8 +404,11 @@ FHFFanParams FHFFanKit::DefaultsFor(EHFFanKind Kind)
 	if (Kind == EHFFanKind::Exhaust)
 	{
 		// A bathroom extract: small, fast, many blades, and set into the wall rather than hung off it.
+		//
+		// 10 rather than 12, so the body houses whole in a 115 mm internal wall with a centimetre of
+		// masonry behind it. CaseDepth is the body now, and the body is inside the wall.
 		P.SweepDiameter = 22.0;
-		P.CaseDepth = 12.0;
+		P.CaseDepth = 10.0;
 		P.BladeCount = 5;
 		P.BladeChord = 4.5;
 		P.BladeThickness = 0.25;
@@ -446,41 +541,67 @@ FHFFanBuild FHFFanKit::Build(const FHFFanParams& Params)
 	}
 	else
 	{
-		// ------------------------------------------------------------ an extract, set into the wall
+		// -------------------------------------------------------------- an extract, IN the wall
 		//
-		// A square case standing proud of the wall with a round aperture through it, which is what a
-		// window or wall extract is. The aperture is subtracted rather than triangulated as an
-		// annulus because the tool carries the role the cut faces end up with - the inside of the
-		// throat is the cutter's own wall - and SubtractInPlace is what keeps that role intact.
-
-		// Shared with the hole cored through the wall behind it, so the two cannot drift apart and
-		// leave the masonry showing round the edge of the case. See FHFFanParams::DuctSide.
-		const double CaseHalf = P.CaseHalfWidth();
+		// THE DATUM IS THE FINISHED PLASTER AND THE CASE IS BEHIND IT. What used to be here built the
+		// case at 0..+CaseDepth - twelve centimetres of box standing in the bathroom with the
+		// impeller turning in the open air of the room, which is what the flat was reported for. A
+		// real extract is a body pushed into a cored hole with a flange over the arris; the only
+		// thing in the room is that flange.
+		//
+		// So the body occupies -HousedDepth..+ProudDepth, which on every wall in the reference flat
+		// is -CaseDepth..0, and the bezel occupies +ProudDepth..+ProudDepth+BezelProud. See
+		// FHFFanParams::HousedDepth for the wall too thin to take it.
+		//
+		// The aperture is subtracted rather than triangulated as an annulus because the tool carries
+		// the role the cut faces end up with - the inside of the throat is the cutter's own wall -
+		// and SubtractInPlace is what keeps that role intact.
+		const double BezelHalf = P.CaseHalfWidth();
+		const double BodyHalf = P.CaseBodyHalfWidth();
 		const double ThroatRadius = P.ThroatRadius();
 
-		FHFMeshOps::AppendBox(Out.Shell, FVector3d(0.0, 0.0, P.CaseDepth * 0.5),
-			FVector3d(CaseHalf, CaseHalf, P.CaseDepth * 0.5), 0.0, EHFSurfaceRole::Appliance);
+		const double Housed = P.HousedDepth();
+		const double Proud = P.ProudDepth();
 
-		FDynamicMesh3 Throat;
-		FHFMeshOps::InitialiseMesh(Throat);
+		// The body, sunk into the cored hole. Its front face is the plaster line when the wall took
+		// the whole of it.
+		const double BodyBack = -Housed;
+		const double BodyFront = Proud;
 
-		// Overshooting both faces, so the cutter never leaves coplanar surfaces for the boolean to
-		// resolve - the same reason a wall's opening cutters overshoot.
-		FHFMeshOps::AppendRevolvedProfile(Throat,
-			{ FVector2D(0.0, ThroatRadius), FVector2D(P.CaseDepth + 2.0, ThroatRadius) },
-			FVector3d(0.0, 0.0, -1.0), FVector3d::UnitZ(), RevolveSides, EHFSurfaceRole::Appliance);
+		// THE BEZEL BITES INTO THE WALL rather than sitting on its face. A plate whose back is exactly
+		// in the plaster plane is two coplanar surfaces with nothing between them, which flickers
+		// under any camera move - the defect the whole flat was reported for. Three millimetres of
+		// embedment costs nothing and cannot fight.
+		constexpr double BezelBite = 0.3;
 
-		FHFMeshOps::SubtractInPlace(Out.Shell, Throat);
+		const double BezelBack = BodyFront - BezelBite;
 
-		// AND WHAT THE OTHER SIDE OF THE WALL SEES. Appended after the boolean on purpose: the throat
-		// cutter is a cylinder that overshoots both faces of the case, and running it through the
-		// sleeve and cowl as well would take the middle out of both.
+		// The case as an extruded annulus, NOT a box with a cylinder booleaned out of it. See
+		// RoundLoop: the old subtraction had one solid to work on and now has two, and it declines
+		// rather than failing loudly.
+		if (BezelBack - BodyBack > MinStock)
+		{
+			FHFMeshOps::AppendPrismWithHoles(Out.Shell, SquareLoop(BodyHalf), { RoundLoop(ThroatRadius) },
+				BodyBack, BezelBack, EHFSurfaceRole::Appliance);
+		}
+
+		// The bezel over it: past the CORNERS of the cored hole, so the chase's arris and the fitting
+		// gap round the body are both covered.
+		if (P.BezelProud > MinStock)
+		{
+			FHFMeshOps::AppendPrismWithHoles(Out.Shell, SquareLoop(BezelHalf), { RoundLoop(ThroatRadius) },
+				BezelBack, BodyFront + P.BezelProud, EHFSurfaceRole::Appliance);
+		}
+
+		// AND WHAT THE OTHER SIDE OF THE WALL SEES.
 		if (P.HostWallThickness > MinStock)
 		{
 			AppendDischargeSide(Out.Shell, P);
 		}
 
-		RotorZ = P.CaseDepth * 0.5;
+		// Mid-body, which is now mid-WALL. The impeller is inside the masonry where it belongs, and
+		// the bezel's aperture is what you see it through.
+		RotorZ = (BodyBack + BodyFront) * 0.5;
 
 		FHFMeshOps::AppendRevolvedProfile(Rotor,
 			{

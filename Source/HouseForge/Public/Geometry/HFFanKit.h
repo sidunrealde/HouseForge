@@ -102,9 +102,33 @@ struct HOUSEFORGE_API FHFFanParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
 	double CanopyDrop = 0.0;
 
-	/** Exhaust fan only: how far the case stands proud of the wall it is set into. */
+	/**
+	 * Exhaust fan only: depth of the case body along the axis - HOUSED IN THE WALL, not proud of it.
+	 *
+	 * This used to mean "how far the case stands proud of the wall", and it was built that way: a
+	 * 12 cm box occupying 0..+12 on the ROOM side of the plaster, with the impeller turning in the
+	 * open air of the bathroom. A real extract is a body pushed into a cored hole with a flange
+	 * covering the arris; nothing but that flange is in the room. The case now occupies
+	 * -HousedDepth(Wall)..0, and BezelProud is all that comes forward.
+	 *
+	 * 10, not 12, so that the whole body houses in a 115 mm internal wall with a centimetre of
+	 * masonry left behind it. See HousedDepth for what happens on a wall too thin even for that.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
-	double CaseDepth = 12.0;
+	double CaseDepth = 10.0;
+
+	/**
+	 * Exhaust fan only: how far the front bezel stands proud of the finished plaster.
+	 *
+	 * The one part of an extract that IS in the room. It laps the cored hole, so it covers the arris
+	 * of the chase and the fitting gap round the body, which is the job the old proud case was doing
+	 * by accident by being bigger than its hole.
+	 *
+	 * Small on purpose. A grille plate stands off a wall by a centimetre or two; anything more is a
+	 * box on the wall again, which is the defect this replaced.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double BezelProud = 1.5;
 
 	/**
 	 * Exhaust fan only: thickness of the wall it discharges through. 0 builds nothing behind it.
@@ -242,11 +266,39 @@ struct HOUSEFORGE_API FHFFanParams
 	 */
 	double CanopyRadius() const;
 
-	/** Exhaust fan only: half the width of the square case that stands proud of the wall. */
+	/**
+	 * Exhaust fan only: half the width of the square BEZEL - the flange in the room.
+	 *
+	 * The only part of an extract with a footprint on the finished wall, so it is sized to lap the
+	 * cored hole rather than to contain the fan: the body is inside the hole now, not over it.
+	 */
 	double CaseHalfWidth() const;
+
+	/** Exhaust fan only: half the width of the square case BODY, which houses inside the cored hole. */
+	double CaseBodyHalfWidth() const;
 
 	/** Exhaust fan only: radius of the aperture through the case, which the blades turn inside. */
 	double ThroatRadius() const;
+
+	/**
+	 * Exhaust fan only: how much of CaseDepth actually fits inside this wall.
+	 *
+	 * The whole of it, on any wall thick enough - a 100 mm body in a 115 mm internal wall leaves
+	 * 15 mm behind it, and in a 230 mm external wall it leaves 130 mm of sleeve.
+	 *
+	 * ON A WALL TOO THIN, THE BODY STOPS SHORT AND THE REMAINDER STANDS PROUD, deliberately and
+	 * visibly. The alternative is a case that breaks the far face and hangs into the next room,
+	 * which is the same defect as before with the sign flipped and nobody in the bathroom able to
+	 * see it. A fitter faced with a wall this thin surface-mounts the fan, and so does this: the
+	 * geometry then says plainly that the wall cannot take it. MinBackReveal is what is held back.
+	 *
+	 * HostWallThickness of 0 means the wall is unknown, and nothing houses - which keeps a fan built
+	 * with no wall behind it a complete object rather than half of one buried in nothing.
+	 */
+	double HousedDepth() const;
+
+	/** Exhaust fan only: the part of the case body the wall could not take, standing proud. 0 normally. */
+	double ProudDepth() const;
 
 	/**
 	 * Exhaust fan only: the side of the square hole cored through the wall behind it.
