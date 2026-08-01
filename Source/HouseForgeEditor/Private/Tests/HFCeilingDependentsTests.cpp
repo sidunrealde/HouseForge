@@ -126,17 +126,31 @@ namespace HouseForgeCeilingDependents
 		Fan.Footprint = FVector2D(120.0, 120.0);
 		Fan.Height = 30.0;
 
-		// High on the north wall, at the height the reference flat's bathroom extracts are drawn at:
-		// 230 to 255, which is 30 mm inside a soffit at 252.
+		// High on the SOUTH wall, at the height the reference flat's bathroom extracts are drawn at:
+		// 230 to 255.
+		//
+		// The south wall specifically, because that is the one BM1 runs along and therefore the one
+		// the ring lands on. The ring follows the edges a beam shows along rather than going round
+		// the room, so an extract on the north wall - where this used to be - has a shallow band
+		// over it and nothing to clear, which is right and tests nothing.
 		FHFFixture& Extract = Spec.Fixtures.AddDefaulted_GetRef();
 		Extract.Id = TEXT("EXH1");
 		Extract.RoomId = TEXT("R1");
 		Extract.Type = EHFFixtureType::ExhaustFan;
-		Extract.Position = FVector2D(250.0, 394.0);
+		Extract.Position = FVector2D(250.0, 6.0);
 		Extract.Footprint = FVector2D(25.0, 10.0);
 		Extract.BaseZ = 230.0;
 		Extract.Height = 25.0;
-		Extract.AnchorWallId = TEXT("W_North");
+		Extract.AnchorWallId = TEXT("W_South");
+
+		// AND ONE THE RING DOES NOT REACH, on the wall with no beam over it. Without the pair, a
+		// resolver that simply lowered every extract in the flat would satisfy the assertion below;
+		// with it, the per-edge ring is what is actually being measured.
+		FHFFixture& Clear = Spec.Fixtures.AddDefaulted_GetRef();
+		Clear = Extract;
+		Clear.Id = TEXT("EXH2");
+		Clear.Position = FVector2D(250.0, 394.0);
+		Clear.AnchorWallId = TEXT("W_North");
 
 		// Against the east wall, tall enough to be worth cutting and with a TOP-HUNG loft on it -
 		// the one moving part in this flat whose leading edge travels UPWARD when it opens.
@@ -270,7 +284,17 @@ bool FHFCeilingTemplateRehangsDependentsTest::RunTest(const FString& Parameters)
 	{
 		if (AHFFanActor* Fan = Cast<AHFFanActor>(Element))
 		{
-			(Fan->ElementId == FName(TEXT("FAN1")) ? CeilingFan : Extract) = Fan;
+			// By id, all three of them. "Whichever fan is not the ceiling fan" was fine while there
+			// was one extract and picks either of two now, so the assertions below would be made
+			// against EXH2 half the time - and EXH2 is deliberately the one nothing happens to.
+			if (Fan->ElementId == FName(TEXT("FAN1")))
+			{
+				CeilingFan = Fan;
+			}
+			else if (Fan->ElementId == FName(TEXT("EXH1")))
+			{
+				Extract = Fan;
+			}
 		}
 	}
 
@@ -301,8 +325,19 @@ bool FHFCeilingTemplateRehangsDependentsTest::RunTest(const FString& Parameters)
 
 		if (TestNotNull(TEXT("The extract is in the fitted list"), FittedExtract))
 		{
-			TestTrue(TEXT("The extract had to come down to clear the ring over it"),
+			TestTrue(TEXT("The extract under the ring had to come down to clear it"),
 				FittedExtract->BaseZ < 230.0 - 0.01);
+		}
+
+		// The other one, on the wall the ring does not run along, is left exactly where it was drawn.
+		if (const FHFFixture* Untouched = FindFitted(Fitted, TEXT("EXH2")))
+		{
+			TestEqual(TEXT("The extract away from the ring is left where the drawing put it"),
+				Untouched->BaseZ, 230.0, 0.01);
+		}
+		else
+		{
+			AddError(TEXT("The second extract is missing from the fitted list."));
 		}
 	}
 
@@ -383,25 +418,27 @@ bool FHFCeilingTemplateRehangsDependentsTest::RunTest(const FString& Parameters)
 	// The case covers exactly the spot where the hole is, so a duct left at the drawn height is a
 	// bare square opening in a finished wall with the fan sitting below it.
 	{
-		AHFWallActor* North = nullptr;
+		// W_South, which is EXH1's wall - the one under the beam and therefore under the ring. Both
+		// walls carry a duct now, and W_North's belongs to the extract nothing moved.
+		AHFWallActor* Host = nullptr;
 		for (AActor* Element : House->ElementActors)
 		{
 			AHFWallActor* Candidate = Cast<AHFWallActor>(Element);
-			if (Candidate != nullptr && Candidate->ElementId == FName(TEXT("W_North")))
+			if (Candidate != nullptr && Candidate->ElementId == FName(TEXT("W_South")))
 			{
-				North = Candidate;
+				Host = Candidate;
 				break;
 			}
 		}
 
-		if (TestNotNull(TEXT("The extract's wall was built"), North))
+		if (TestNotNull(TEXT("The extract's wall was built"), Host))
 		{
-			const FHFOpening* Duct = North->Openings.FindByPredicate(
+			const FHFOpening* Duct = Host->Openings.FindByPredicate(
 				[](const FHFOpening& O) { return O.Kind == EHFOpeningKind::Ventilator; });
 
 			if (TestNotNull(TEXT("The wall carries a duct for the extract"), Duct))
 			{
-				const double DuctCentreZ = North->Wall.BaseZ + Duct->SillHeight + Duct->Height * 0.5;
+				const double DuctCentreZ = Host->Wall.BaseZ + Duct->SillHeight + Duct->Height * 0.5;
 
 				TestEqual(TEXT("The duct is cored at the height the fan ended up turning at"),
 					DuctCentreZ, Extract->GetActorLocation().Z, 0.1);
@@ -589,7 +626,17 @@ bool FHFCeilingChangeRespectsHandEditsTest::RunTest(const FString& Parameters)
 	{
 		if (AHFFanActor* Fan = Cast<AHFFanActor>(Element))
 		{
-			(Fan->ElementId == FName(TEXT("FAN1")) ? CeilingFan : Extract) = Fan;
+			// By id, all three of them. "Whichever fan is not the ceiling fan" was fine while there
+			// was one extract and picks either of two now, so the assertions below would be made
+			// against EXH2 half the time - and EXH2 is deliberately the one nothing happens to.
+			if (Fan->ElementId == FName(TEXT("FAN1")))
+			{
+				CeilingFan = Fan;
+			}
+			else if (Fan->ElementId == FName(TEXT("EXH1")))
+			{
+				Extract = Fan;
+			}
 		}
 	}
 

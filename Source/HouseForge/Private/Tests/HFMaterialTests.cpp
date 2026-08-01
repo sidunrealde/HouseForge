@@ -120,7 +120,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFEveryRoleResolvesTest,
 
 bool FHFEveryRoleResolvesTest::RunTest(const FString& Parameters)
 {
-	TestEqual(TEXT("There are sixteen surface roles"), FHFMeshOps::NumSurfaceRoles(), 16);
+	// Seventeen: the sixteen finishes, plus LightSource - the one role that is not a finish, added
+	// so a cove's strip and a downlight's lens have something to be made of.
+	TestEqual(TEXT("There are seventeen surface roles"), FHFMeshOps::NumSurfaceRoles(), 17);
+
+	// AND THE LAST ONE ROUND-TRIPS. Both mapping tables used to bound themselves on Structure by
+	// name, so everything past it fell back to WallPaint - a slot quietly rendering the wrong
+	// material, which nothing else here would have caught.
+	for (const EHFSurfaceRole Role : AllRoles())
+	{
+		TestTrue(*FString::Printf(TEXT("Role '%s' survives its material id"), *RoleName(Role)),
+			FHFMeshOps::RoleForMaterialId(FHFMeshOps::MaterialIdForRole(Role)) == Role);
+	}
 
 	for (const EHFSurfaceRole Role : AllRoles())
 	{

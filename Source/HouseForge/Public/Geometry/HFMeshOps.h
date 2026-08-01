@@ -36,7 +36,7 @@ public:
 	static EHFSurfaceRole RoleForMaterialId(int32 MaterialId);
 
 	/** Number of material slots a fully-dressed HouseForge component carries: one per role. */
-	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::Structure) + 1; }
+	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::LightSource) + 1; }
 
 	/**
 	 * Writes each triangle's material id from the surface role its polygroup already carries.
@@ -319,6 +319,26 @@ public:
 	 *         failure - it means the band is wider than the room.
 	 */
 	static TArray<TArray<FVector2D>> InsetPolygon(const TArray<FVector2D>& Polygon, double Amount);
+
+	/**
+	 * Subject minus the union of Cutters, as closed loops.
+	 *
+	 * WHAT MAKES A PERIMETER TREATMENT ANSWER TO THE ROOM RATHER THAN GO ROUND IT. A beam bulkhead
+	 * belongs on the edges a beam actually shows along - two of the living room's four - and an inset
+	 * cannot express that, because an inset is the same on every side by construction. Cutting the
+	 * ceiling's outline with a strip per boundary edge can.
+	 *
+	 * Holes in the result are dropped: nothing in this domain subtracts an island out of the middle
+	 * of a ceiling, and a loop with a hole in it is not something AppendPrism could build anyway.
+	 *
+	 * @return Empty when the cutters consume the subject entirely, which is a real answer.
+	 */
+	static TArray<TArray<FVector2D>> SubtractPolygons(const TArray<FVector2D>& Subject,
+		const TArray<TArray<FVector2D>>& Cutters);
+
+	/** Subject clipped to the union of Clips, as closed loops. The other half of SubtractPolygons. */
+	static TArray<TArray<FVector2D>> IntersectPolygons(const TArray<FVector2D>& Subject,
+		const TArray<TArray<FVector2D>>& Clips);
 
 	/** True if the mesh is closed - every edge shared by exactly two triangles. */
 	static bool IsClosed(const UE::Geometry::FDynamicMesh3& Mesh);

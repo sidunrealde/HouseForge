@@ -690,6 +690,14 @@ namespace
 		 */
 		TArray<TArray<FVector2D>> StyledLoops;
 
+		/**
+		 * The ring's own footprint, clipped to the outline. Empty when there is no ring.
+		 *
+		 * A REGION RATHER THAN A WIDTH, because the ring runs along the edges a beam actually shows
+		 * on and not round the whole room - see FHFFalseCeiling::PerimeterBulkheadEdges.
+		 */
+		TArray<TArray<FVector2D>> RingLoops;
+
 		double StructuralZ = 0.0;
 
 		/** Soffit of the styled ceiling: the shallow one. */
@@ -744,18 +752,25 @@ namespace
 		// everything further in than the ring is free to be as shallow as the design wants.
 		if (Ceiling.HasPerimeterBulkhead())
 		{
-			Layout.bRing = true;
 			Layout.RingSoffitZ = Layout.StructuralZ - Ceiling.PerimeterBulkheadDrop;
 
-			const double Inward = Ceiling.PerimeterBulkheadWidth - HFCeilingLap;
-			TArray<TArray<FVector2D>> Inside = (Inward > 0.0)
-				? FHFMeshOps::InsetPolygon(Layout.Outline, Inward)
-				: TArray<TArray<FVector2D>>{ Layout.Outline };
+			Layout.RingLoops = FHFMeshOps::IntersectPolygons(Layout.Outline,
+				Ceiling.BulkheadStrips(Layout.Outline, Ceiling.PerimeterBulkheadWidth));
 
-			// The ring swallowed the room. That is an honest answer for a small bathroom rather
-			// than an error - what is left is a full drop at the ring's depth - and it is what
-			// AppendBand does with an over-wide band for the same reason.
-			Layout.StyledLoops = MoveTemp(Inside);
+			Layout.bRing = !Layout.RingLoops.IsEmpty();
+
+			if (Layout.bRing)
+			{
+				// The styled part laps INTO the ring rather than stopping in its face, so the two
+				// never share a vertical plane - the same lap rule every other piece follows.
+				const double Inward = FMath::Max(Ceiling.PerimeterBulkheadWidth - HFCeilingLap, 0.0);
+
+				// The ring swallowed the room. That is an honest answer for a small bathroom rather
+				// than an error - what is left is a full drop at the ring's depth - and it is what
+				// AppendBand does with an over-wide band for the same reason.
+				Layout.StyledLoops = FHFMeshOps::SubtractPolygons(Layout.Outline,
+					Ceiling.BulkheadStrips(Layout.Outline, Inward));
+			}
 		}
 
 		switch (Ceiling.Style)
@@ -947,15 +962,15 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 				EHFSurfaceRole::MetalHardware);
 		}
 
-		// The lens, set back up the can. Glass rather than metal because it is the emitting face:
-		// this is the surface a real light gets parented to, and a role the material panel can
-		// already reach is what makes that possible without a new one.
+		// The lens, set back up the can. LightSource rather than Glass: it is the emitting face, and
+		// as glass it was a pale disc up a hole - which is why a run of downlights read as a row of
+		// faint pencil circles in every render of the flat.
 		if (Fitting.BodyDepth > 0.0)
 		{
 			const double LensZ = SoffitPlaneZ + Fitting.BodyDepth;
 			bBuilt &= FHFMeshOps::AppendPrism(Mesh,
 				CirclePolygon(Position, FMath::Max(CutRadius - 0.2, 0.1), 20),
-				LensZ, LensZ + 0.4, EHFSurfaceRole::Glass);
+				LensZ, LensZ + 0.4, EHFSurfaceRole::LightSource);
 		}
 
 		return bBuilt;
@@ -967,8 +982,23 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 	// IS the fascia of the level change, and there is no edge left open by construction.
 	if (Layout.bRing)
 	{
-		Checked(AppendBand(Layout.Outline, Ceiling.PerimeterBulkheadWidth,
-			Layout.RingSoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit, FanHoles));
+		for (const TArray<FVector2D>& Loop : Layout.RingLoops)
+		{
+			// Solid from its own soffit to the slab, so its inner face IS the fascia of the level
+			// change and no edge is left open by construction. Only the fan holes that fall in this
+			// piece: a hole outside its outline is not a hole, it is a triangulation that refuses.
+			TArray<TArray<FVector2D>> Holes;
+			for (const TArray<FVector2D>& Hole : FanHoles)
+			{
+				if (!Hole.IsEmpty() && PointInPolygon2D(Loop, Hole[0]))
+				{
+					Holes.Add(Hole);
+				}
+			}
+
+			Checked(FHFMeshOps::AppendPrismWithHoles(Mesh, Loop, Holes,
+				Layout.RingSoffitZ, StructuralZ, EHFSurfaceRole::CeilingSoffit));
+		}
 	}
 
 	// ------------------------------------------------------------------------ the styled ceiling
@@ -1076,15 +1106,21 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 
 			// The band above the board, solid to the slab, standing on the board rather than lapped
 			// into it - see the note on the lap.
+			//
+			// COVEINTERIOR, AND THE ONLY PIECE THAT IS. Every face of this one is buried except its
+			// inner face, and that inner face IS the outer wall of the trough - the surface the strip
+			// washes and the only thing in the cove that a warm finish belongs on.
 			Checked(AppendBand(Outline, SolidBand, BoardTopZ, StructuralZ,
-				EHFSurfaceRole::CeilingSoffit, SoffitHoles));
+				EHFSurfaceRole::CoveInterior, SoffitHoles));
 
-			// The upstand. CoveInterior rather than CeilingSoffit: the faces that matter here are the
-			// trough side the strip washes and the sliver the room sees above the soffit line, and both
-			// belong to the cove detail rather than to the flat ceiling around it.
+			// The upstand. CEILINGSOFFIT, not CoveInterior: this is a plastered POP upstand painted
+			// with the rest of the ceiling, and the face of it the room can actually see is the one
+			// pointing INWARD, at the middle of the room. Tagged as cove interior it came out as a
+			// 30 mm tan pinstripe running round every room - which, with nothing emitting anywhere,
+			// was the entire visible result of a cove.
 			for (const TArray<FVector2D>& LipLoop : FHFMeshOps::InsetPolygon(Outline, SolidBand + ChannelWidth))
 			{
-				Checked(AppendBand(LipLoop, LipWidth, BoardTopZ, SoffitZ + LipRise, EHFSurfaceRole::CoveInterior));
+				Checked(AppendBand(LipLoop, LipWidth, BoardTopZ, SoffitZ + LipRise, EHFSurfaceRole::CeilingSoffit));
 			}
 
 			// THE STRIP ITSELF, lying in the trough. Its top has to stay below the lip top or the
@@ -1104,8 +1140,11 @@ FDynamicMesh3 FHFGenerators::GenerateCeiling(const FHFFalseCeiling& Ceiling, con
 			{
 				for (const TArray<FVector2D>& StripLoop : FHFMeshOps::InsetPolygon(Outline, StripOuter))
 				{
+					// LIGHTSOURCE, so something can be made of it. Tagged MetalHardware the strip was
+					// a grey bar lying in a trough nobody could see into, which is a faithful model
+					// of an LED that is switched off.
 					Checked(AppendBand(StripLoop, StripWidth, BoardTopZ,
-						BoardTopZ + Ceiling.Cove.StripHeight, EHFSurfaceRole::MetalHardware));
+						BoardTopZ + Ceiling.Cove.StripHeight, EHFSurfaceRole::LightSource));
 				}
 			}
 			break;
@@ -1176,6 +1215,80 @@ TArray<FVector> FHFGenerators::CeilingDownlights(const FHFFalseCeiling& Ceiling,
 	}
 
 	return Out;
+}
+
+TArray<FHFCoveLightRun> FHFGenerators::CeilingCoveLights(const FHFFalseCeiling& Ceiling,
+	const FHFRoom& Room)
+{
+	TArray<FHFCoveLightRun> Runs;
+
+	if (Ceiling.Style != EHFCeilingStyle::Cove || !Ceiling.Cove.bHasLedStrip)
+	{
+		return Runs;
+	}
+
+	const FHFCeilingLayout Layout = ResolveCeilingLayout(Ceiling, Room);
+	if (!Layout.bValid)
+	{
+		return Runs;
+	}
+
+	// Set out from exactly the figures GenerateCeiling lays the strip with. Two derivations of one
+	// position is how a light comes to sit in the plasterboard beside its own strip.
+	const double ChannelWidth = FMath::Max(Ceiling.Cove.ChannelWidth, 1.0);
+	const double LipWidth = FMath::Max(Ceiling.Cove.Setback, 1.0);
+	const double SolidBand = FMath::Max(Ceiling.BandWidth - ChannelWidth - LipWidth, 1.0);
+	const double BoardTopZ = Layout.SoffitZ + HFCeilingPanel;
+
+	const double StripWidth = FMath::Min(FMath::Max(Ceiling.Cove.StripWidth, 0.0), ChannelWidth);
+	const double StripOuter = SolidBand + ChannelWidth
+		- FMath::Clamp(Ceiling.Cove.StripSetback, 0.0, ChannelWidth - StripWidth) - StripWidth;
+
+	if (StripWidth <= 0.0 || Ceiling.Cove.StripHeight <= 0.0 || StripOuter <= 0.0)
+	{
+		return Runs;
+	}
+
+	// What the wash lands on: the centre panel where there is one, otherwise the slab.
+	const double WashedZ = (Ceiling.CentrePanelDrop > 0.0 && Ceiling.CentrePanelDrop < Ceiling.Drop)
+		? Layout.StructuralZ - Ceiling.CentrePanelDrop
+		: Layout.StructuralZ;
+
+	const double StripTopZ = BoardTopZ + Ceiling.Cove.StripHeight;
+
+	for (const TArray<FVector2D>& Outline : Layout.StyledLoops)
+	{
+		// The centreline of the strip, which is the loop the geometry is built on offset by half
+		// the strip's own width.
+		for (const TArray<FVector2D>& Loop : FHFMeshOps::InsetPolygon(Outline, StripOuter + StripWidth * 0.5))
+		{
+			for (int32 Index = 0; Index < Loop.Num(); ++Index)
+			{
+				const FVector2D& A = Loop[Index];
+				const FVector2D& B = Loop[(Index + 1) % Loop.Num()];
+
+				const double Length = FVector2D::Distance(A, B);
+
+				// A mitre at a corner is a few centimetres of edge, not a run of lighting.
+				if (Length <= ChannelWidth)
+				{
+					continue;
+				}
+
+				const FVector2D Middle = (A + B) * 0.5;
+				const FVector2D Direction = (B - A) / Length;
+
+				FHFCoveLightRun& Run = Runs.AddDefaulted_GetRef();
+				Run.Centre = FVector(Middle.X, Middle.Y, StripTopZ);
+				Run.YawDegrees = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X));
+				Run.Length = Length;
+				Run.Width = ChannelWidth;
+				Run.ThrowHeight = FMath::Max(WashedZ - StripTopZ, 1.0);
+			}
+		}
+	}
+
+	return Runs;
 }
 
 double FHFGenerators::CeilingSoffitDropAt(const FHFFalseCeiling& Ceiling, const FHFRoom& Room,

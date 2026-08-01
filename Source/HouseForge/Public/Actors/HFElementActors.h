@@ -11,6 +11,7 @@
 #include "HFElementActors.generated.h"
 
 class UDynamicMeshComponent;
+class ULightComponent;
 
 /**
  * Base for every generated element.
@@ -238,6 +239,43 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "HouseForge")
 	TArray<FVector> DownlightPositions() const;
+
+	/**
+	 * Puts real lights in the cove trough and up each downlight can.
+	 *
+	 * WITHOUT THIS A COVE IS A PAINTED LINE. The strip is concealed from every camera in the flat by
+	 * construction - that is the whole point of the detail - so what a person is meant to see is the
+	 * WASH it throws on the slab above, and nothing was throwing one. DownlightPositions has
+	 * returned the aperture rather than the plan dot since it was written, precisely so a light
+	 * could be parented there, and until now it had no caller at all.
+	 *
+	 * Idempotent: the lights are destroyed and rebuilt, so regenerating a ceiling or re-seeding it
+	 * from the settings page does not accumulate them.
+	 *
+	 * Rebuilt by Regenerate, so a ceiling whose design changes takes its lighting with it.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
+	int32 RebuildLights();
+
+	/** Off leaves the fittings modelled but dark, which is what the flat did before this existed. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting")
+	bool bBuildLights = true;
+
+	/** Lumens per recessed downlight. A 3-inch COB is 600 to 900. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "0.0"))
+	double DownlightLumens = 700.0;
+
+	/** Lumens per metre of cove strip. A domestic warm-white COB tape is 700 to 1200. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "0.0"))
+	double CoveLumensPerMetre = 900.0;
+
+	/** Colour temperature of both, in kelvin. 3000 is the warm white these flats are lit with. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "1700.0", ClampMax = "12000.0"))
+	double LightTemperatureKelvin = 3000.0;
+
+	/** The lights this ceiling owns, so a rebuild can take them away again. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Lighting")
+	TArray<TObjectPtr<ULightComponent>> Lights;
 
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;

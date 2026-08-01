@@ -3,6 +3,8 @@
 #include "Actors/HFElementActors.h"
 
 #include "Components/DynamicMeshComponent.h"
+#include "Components/RectLightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Geometry/HFGenerators.h"
 #include "Geometry/HFMeshOps.h"
 #include "HouseForge.h"
@@ -243,7 +245,121 @@ TArray<FVector> AHFCeilingActor::DownlightPositions() const
 
 FDynamicMesh3 AHFCeilingActor::BuildMesh() const
 {
+	// The mesh is what a bare BuildMesh call is for, but a ceiling is the one element whose design
+	// IS partly its lighting, so the two are rebuilt together. See RebuildLights.
+	const_cast<AHFCeilingActor*>(this)->RebuildLights();
+
 	return FHFGenerators::GenerateCeiling(Ceiling, Room, FanDrops, FanDropRadius);
+}
+
+int32 AHFCeilingActor::RebuildLights()
+{
+	// Thrown away and rebuilt rather than adjusted: a ceiling that changes template changes how
+	// many lights it has and where they are, and reconciling two lists is how a level ends up with
+	// the previous design's downlights still burning in the plasterboard.
+	for (const TObjectPtr<ULightComponent>& Light : Lights)
+	{
+		if (Light != nullptr)
+		{
+			Light->DestroyComponent();
+		}
+	}
+	Lights.Reset();
+
+	if (!bBuildLights)
+	{
+		return 0;
+	}
+
+	const FTransform ToWorld = GetActorTransform();
+
+	auto Common = [this](ULightComponent* Light)
+	{
+		// Movable, because everything here is regenerated on a property change and a static light
+		// would need its lighting rebuilt to notice. The bake milestone is where that changes.
+		Light->SetMobility(EComponentMobility::Movable);
+		Light->SetUseTemperature(true);
+		Light->SetTemperature(static_cast<float>(LightTemperatureKelvin));
+		Light->SetCastShadows(true);
+		Light->RegisterComponent();
+		Light->AttachToComponent(GetRootComponent(),
+			FAttachmentTransformRules::KeepWorldTransform);
+		Lights.Add(Light);
+	};
+
+	// ---------------------------------------------------------------------------- the cove
+	//
+	// A rect light per straight run, lying in the trough and facing UP - which is the direction a
+	// cove throws and the reason its light is worth having. A point light in the middle of the room
+	// would light the middle of the room.
+	for (const FHFCoveLightRun& Run : FHFGenerators::CeilingCoveLights(Ceiling, Room))
+	{
+		URectLightComponent* Rect = NewObject<URectLightComponent>(this);
+		if (Rect == nullptr)
+		{
+			continue;
+		}
+
+		// X is the direction a rect light emits and Y is its width, so the frame is built from
+		// "up" and the direction the run travels.
+		const FVector Direction(FMath::Cos(FMath::DegreesToRadians(Run.YawDegrees)),
+			FMath::Sin(FMath::DegreesToRadians(Run.YawDegrees)), 0.0);
+
+		Rect->SetWorldTransform(FTransform(
+			FRotationMatrix::MakeFromXY(FVector::UpVector, Direction).Rotator(),
+			ToWorld.TransformPosition(Run.Centre)));
+
+		Rect->SetSourceWidth(static_cast<float>(Run.Length));
+		Rect->SetSourceHeight(static_cast<float>(Run.Width));
+
+		// Barn doors down to the channel, so the wash stays in the trough's own aperture instead of
+		// spilling out over the lip into the room - which is the difference between a cove and a
+		// bright line at the ceiling.
+		Rect->SetBarnDoorAngle(60.0f);
+		Rect->SetBarnDoorLength(static_cast<float>(Run.Width * 0.5));
+
+		Rect->SetIntensityUnits(ELightUnits::Lumens);
+		Rect->SetIntensity(static_cast<float>(CoveLumensPerMetre * Run.Length / 100.0));
+
+		// It only ever has to reach the surface above it, and a cove that lights the far wall is a
+		// cove nobody would recognise.
+		Rect->SetAttenuationRadius(static_cast<float>(FMath::Max(Run.ThrowHeight * 6.0, 100.0)));
+
+		Common(Rect);
+	}
+
+	// ---------------------------------------------------------------------- the downlights
+	//
+	// At the APERTURE, up inside the can, which is what CeilingDownlights has always returned and
+	// what nothing has ever asked it for. Parented at the soffit instead, a spotlight is shaded by
+	// its own trim ring.
+	const double ConeDegrees = 45.0;
+
+	for (const FVector& Position : FHFGenerators::CeilingDownlights(Ceiling, Room))
+	{
+		USpotLightComponent* Spot = NewObject<USpotLightComponent>(this);
+		if (Spot == nullptr)
+		{
+			continue;
+		}
+
+		Spot->SetWorldTransform(FTransform(
+			FRotator(-90.0, 0.0, 0.0), ToWorld.TransformPosition(Position)));
+
+		Spot->SetInnerConeAngle(static_cast<float>(ConeDegrees * 0.5));
+		Spot->SetOuterConeAngle(static_cast<float>(ConeDegrees));
+		Spot->SetIntensityUnits(ELightUnits::Lumens);
+		Spot->SetIntensity(static_cast<float>(DownlightLumens));
+		Spot->SetAttenuationRadius(1200.0f);
+
+		// A real COB has a lens a few centimetres across, and that width is most of what makes the
+		// scallop on the wall soft rather than a hard-edged circle.
+		Spot->SetSourceRadius(static_cast<float>(Ceiling.Downlight.CutoutRadius()));
+
+		Common(Spot);
+	}
+
+	return Lights.Num();
 }
 
 FDynamicMesh3 AHFBeamActor::BuildMesh() const

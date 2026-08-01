@@ -521,23 +521,26 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	B.AddTemplatedCeiling(TEXT("FC_Bed2"),   TEXT("R_Bed2"),   EHFCeilingTemplate::SteppedTray);
 	B.AddTemplatedCeiling(TEXT("FC_Foyer"),  TEXT("R_Foyer"),  EHFCeilingTemplate::PlainBand);
 
-	// THE WET AREAS AND THE CORRIDOR KEEP THEIR FULL DROP, and that is not an oversight left over
-	// from the old figures - it is what these rooms get built. A kitchen hides a chimney duct and a
-	// bathroom hides its plumbing and its extract, so both are ceiled flat across the whole room;
-	// a corridor is where the services run between them. None of the reference photographs is of a
-	// bathroom. What did change is the depth: 480 rather than 500, which is the beam's 450 plus the
-	// board and a service gap and no more, and it is the same figure the perimeter rings use.
+	// THE KITCHEN IS A PRIMARY ROOM AND GETS A DESIGN. It is 4200 x 3000 - bigger than bedroom 2 -
+	// and it was left flat at 480 across the whole of it, which renders as a white lid over the one
+	// room in the flat somebody stands in for an hour a day. The drawings put a band over the
+	// walkway with the units under the shallow part, so that is a PlainBand: the band takes the
+	// downlights along the working side and the beams at its edges are boxed by the ring.
+	B.AddTemplatedCeiling(TEXT("FC_Kitchen"), TEXT("R_Kitchen"), EHFCeilingTemplate::PlainBand);
+
+	// THE WET AREAS AND THE CORRIDOR ARE FLAT, and now they SAY they are flat. A bathroom is ceiled
+	// across the whole room because that is what hides its plumbing and its extract, and a corridor
+	// is where the services run between them - none of the reference photographs is of a bathroom.
+	// Left on Custom, though, "flat on purpose" is indistinguishable from "not done yet", and that
+	// is exactly how these three kept a 480 blanket drop through a round of work whose whole subject
+	// was blanket drops.
 	//
-	// 480 is short of touching on purpose. A soffit landing exactly on the beam soffit at 2550 is
-	// two coplanar faces and the flashing starts again.
-	B.AddCeiling(TEXT("FC_Kitchen"), TEXT("R_Kitchen"), EHFCeilingStyle::FullDrop, 480.0, 0.0,
-		{ FVector2D(900.0, 6300.0), FVector2D(2700.0, 6300.0), FVector2D(900.0, 7800.0), FVector2D(2700.0, 7800.0) });
-
-	B.AddCeiling(TEXT("FC_CBath"), TEXT("R_CBath"), EHFCeilingStyle::FullDrop, 480.0, 0.0,
-		{ FVector2D(3000.0, 4500.0) });
-
-	B.AddCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingStyle::FullDrop, 480.0, 0.0,
-		{ FVector2D(9450.0, 4500.0) });
+	// Flat is not the same as DEEP. 480 was never about services: it was the only way to bury a 450
+	// beam before the perimeter ring existed. With the ring taking the edges the flat part answers
+	// to what actually runs above it, which is 250, and clear height in these rooms goes from 2520
+	// everywhere to 2750 over the middle with 2520 in the 300 band at the edge where the beam is.
+	B.AddTemplatedCeiling(TEXT("FC_CBath"), TEXT("R_CBath"), EHFCeilingTemplate::FlatSoffit);
+	B.AddTemplatedCeiling(TEXT("FC_MBath"), TEXT("R_MBath"), EHFCeilingTemplate::FlatSoffit);
 
 	// FC_Living_Beam went with BM_Living_Cross. It existed only to box that beam in, and a 450 deep
 	// bulkhead crossing the middle of the living room for no reason is worse than the beam was - the
@@ -545,25 +548,14 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// Nothing else in R_Living needs a localised drop: its cove is a perimeter band, its downlights
 	// sit in that band, and the beams round its edge are buried by its perimeter ring.
 
-	{
-		// A bulkhead follows its own polygon rather than the room, so it needs one explicitly.
-		FHFFalseCeiling Bulkhead;
-		Bulkhead.Id = TEXT("FC_Corridor");
-		Bulkhead.RoomId = TEXT("R_Corridor");
-		Bulkhead.Template = EHFCeilingTemplate::Custom;
-		Bulkhead.Style = EHFCeilingStyle::Bulkhead;
-
-		// BM_Mid_Lower and BM_Mid_Upper are the corridor's two long walls, so this has to bury 450
-		// over its whole width - which for a 1500 wide corridor is a full drop and nothing else.
-		Bulkhead.Drop = 480.0;
-		Bulkhead.BandWidth = 0.0;
-		Bulkhead.Downlight = FSampleBuilder::MillimetreDownlight();
-		Bulkhead.ExplicitPolygon = {
-			FVector2D(X2, Y1), FVector2D(X4, Y1), FVector2D(X4, Y2), FVector2D(X2, Y2)
-		};
-		Bulkhead.LightPositions = { FVector2D(5400.0, 4500.0), FVector2D(6900.0, 4500.0) };
-		B.Spec.FalseCeilings.Add(Bulkhead);
-	}
+	// The corridor, flat, for the same reason as the bathrooms and by the same named design.
+	//
+	// It used to be a Bulkhead with its own polygon and a 480 drop across the lot, on the grounds
+	// that BM_Mid_Lower and BM_Mid_Upper run along both its long walls and a 1500 wide corridor has
+	// no middle left once you box them. That was true when boxing a beam meant dropping everything.
+	// The ring boxes the two edges it needs to and the middle stays at 250, so a person walking the
+	// length of the flat has 2750 over their head instead of 2520.
+	B.AddTemplatedCeiling(TEXT("FC_Corridor"), TEXT("R_Corridor"), EHFCeilingTemplate::FlatSoffit);
 
 	// ------------------------------------------------------------------------------ fixtures
 	// Living / dining

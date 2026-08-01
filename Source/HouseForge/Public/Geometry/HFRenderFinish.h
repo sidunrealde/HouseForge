@@ -103,6 +103,9 @@ struct HOUSEFORGE_API FHFBevelParams
 			return StoneWidth;
 
 		case EHFSurfaceRole::MetalHardware:
+		// An emitting face is the lens of a fitting or the diffuser on an extrusion. Both are
+		// small, machined and want the metal figure rather than a plasterer's arris.
+		case EHFSurfaceRole::LightSource:
 			return MetalWidth;
 
 		case EHFSurfaceRole::Glass:

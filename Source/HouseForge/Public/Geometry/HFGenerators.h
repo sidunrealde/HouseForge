@@ -10,6 +10,31 @@
 #include "Model/HFTypes.h"
 
 /**
+ * One straight run of LED strip lying in a cove trough, described so a light can be built on it.
+ *
+ * Geometry, not a light: the generators may not touch a world and a light is a component. What is
+ * returned is where the strip is, which way it runs and how big the aperture above it is, and the
+ * composing layer turns that into whatever the renderer wants.
+ */
+struct HOUSEFORGE_API FHFCoveLightRun
+{
+	/** Middle of the run, in world centimetres, at the top of the strip. */
+	FVector Centre = FVector::ZeroVector;
+
+	/** Which way the run travels in plan, as a yaw in degrees. */
+	double YawDegrees = 0.0;
+
+	/** How long the run is. */
+	double Length = 0.0;
+
+	/** The trough's channel width - the aperture the wash leaves through. */
+	double Width = 0.0;
+
+	/** How far it is from the strip up to the surface being washed. Sizes the light's reach. */
+	double ThrowHeight = 0.0;
+};
+
+/**
  * Element generators.
  *
  * Each is a pure function from parameters to a mesh, in world centimetres. No world, no actor, no
@@ -114,6 +139,23 @@ public:
 	 * Pure, like everything else here. The composing layer asks; nothing is spawned.
 	 */
 	static TArray<FVector> CeilingDownlights(const FHFFalseCeiling& Ceiling, const FHFRoom& Room);
+
+	/**
+	 * The straight runs of LED strip lying in a cove's trough, as things a light can be made from.
+	 *
+	 * THE COVE IS THE POINT OF THE WHOLE REFERENCE SET and it had nothing in it that emits. The
+	 * concealment argument is exactly what makes that fatal rather than cosmetic: the strip is
+	 * hidden from every camera in the flat by construction, so with no light and no emissive
+	 * material there is, correctly, nothing to see. What a person is supposed to see is the WASH -
+	 * a band of light thrown up the trough onto the slab or the centre panel above it - and that
+	 * only exists if something puts it there.
+	 *
+	 * A run per straight segment rather than one light for the room, because the wash follows the
+	 * trough round the corners and a point light in the middle would light the middle.
+	 *
+	 * Pure. The composing layer asks and spawns; nothing here touches a world.
+	 */
+	static TArray<FHFCoveLightRun> CeilingCoveLights(const FHFFalseCeiling& Ceiling, const FHFRoom& Room);
 
 	/**
 	 * How far below the structural slab this ceiling's panel hangs over a plan point. 0 if none does.

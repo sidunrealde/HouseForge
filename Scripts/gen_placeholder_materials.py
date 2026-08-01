@@ -57,7 +57,19 @@ ROLES = [
     ("Fabric",           (0.47, 0.41, 0.36),      0.95,  0.0,   0.20, None),
     ("Appliance",        (0.66, 0.67, 0.68),      0.26,  1.0,   0.50, None),
     ("Structure",        (0.56, 0.55, 0.53),      0.88,  0.0,   0.30, None),
+    # THE ONE ROLE THAT EMITS. A cove hides its strip from every camera in the flat by construction,
+    # so with nothing emissive and no light in the trough there was, correctly, nothing to see - and
+    # "the false ceiling types are not properly visible" is mostly that. Warm white at 3000 K, which
+    # is what these flats are lit with, and the intensity is a stop below where the bloom takes over
+    # the frame, because the wash on the slab is the subject and not the strip itself.
+    ("LightSource",      (1.00, 0.89, 0.75),      0.35,  0.0,   0.35, None),
 ]
+
+# Roles whose emissive is turned up, and by how much. Everything absent from this table gets zero,
+# which is what keeps the sixteen existing instances looking exactly as they did.
+EMISSIVE = {
+    "LightSource": 12.0,
+}
 
 
 def srgb_to_linear(c):
@@ -75,10 +87,27 @@ def linear_colour(srgb, alpha=1.0):
 
 
 def replace_asset(name, asset_class, factory):
-    """Creates an asset, deleting any existing one so a re-run is a clean re-author."""
+    """Returns the asset, re-authored from scratch: loaded and emptied, or created if absent.
+
+    IN PLACE RATHER THAN DELETE-AND-RECREATE, which is what this used to do and could not do
+    reliably. Under -run=pythonscript the asset registry has not finished its scan when the script
+    starts, so does_asset_exist answers False for a .uasset sitting right there on disk: the delete
+    is skipped, create_asset then refuses with "already exists in package", and it surfaces as a
+    None three calls away inside set_editor_property. load_asset does not care about the registry -
+    it loads the package by path - so that is what decides.
+
+    Re-authoring in place is the better behaviour anyway: the asset keeps its identity, so every
+    material instance and every saved level goes on pointing at it and nothing needs re-saving.
+    """
     path = "{}/{}".format(FOLDER, name)
-    if unreal.EditorAssetLibrary.does_asset_exist(path):
-        unreal.EditorAssetLibrary.delete_asset(path)
+
+    existing = unreal.EditorAssetLibrary.load_asset(path)
+    if existing is not None:
+        if isinstance(existing, unreal.Material):
+            # Emptied, so a re-run is a clean re-author and not a second copy of every node.
+            unreal.MaterialEditingLibrary.delete_all_material_expressions(existing)
+        return existing
+
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     return tools.create_asset(name, FOLDER, asset_class, factory)
 
@@ -126,6 +155,28 @@ def build_parent(name, translucent):
     connect(metal, "", unreal.MaterialProperty.MP_METALLIC)
     connect(spec, "", unreal.MaterialProperty.MP_SPECULAR)
 
+    # EMISSIVE, AS COLOUR TIMES STRENGTH, defaulting to a strength of zero.
+    #
+    # Two parameters rather than one so an instance can set how bright a fitting is without also
+    # restating its colour, and so every existing role keeps its look by leaving the strength alone.
+    # This is the hook the cove and the downlight lens hang on, and it is the smallest change to the
+    # master material that makes a false ceiling readable at all.
+    emissive_colour = vector_param(
+        material, "EmissiveColor", unreal.LinearColor(1.0, 1.0, 1.0, 1.0), -400, 680
+    )
+    emissive_strength = scalar_param(material, "EmissiveStrength", 0.0, -400, 800)
+
+    emissive = unreal.MaterialEditingLibrary.create_material_expression(
+        material, unreal.MaterialExpressionMultiply, -180, 720
+    )
+    unreal.MaterialEditingLibrary.connect_material_expressions(
+        emissive_colour, "", emissive, "A"
+    )
+    unreal.MaterialEditingLibrary.connect_material_expressions(
+        emissive_strength, "", emissive, "B"
+    )
+    connect(emissive, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+
     if translucent:
         opacity = scalar_param(material, "Opacity", 0.15, -400, 560)
         connect(opacity, "", unreal.MaterialProperty.MP_OPACITY)
@@ -156,12 +207,32 @@ def build_instance(role, colour, rough, metal, spec, opacity, opaque, glazed):
             instance, "Opacity", opacity
         )
 
+    strength = EMISSIVE.get(role, 0.0)
+    if strength > 0.0:
+        unreal.MaterialEditingLibrary.set_material_instance_vector_parameter_value(
+            instance, "EmissiveColor", linear_colour(colour)
+        )
+        unreal.MaterialEditingLibrary.set_material_instance_scalar_parameter_value(
+            instance, "EmissiveStrength", strength
+        )
+
     unreal.MaterialEditingLibrary.update_material_instance(instance)
     unreal.EditorAssetLibrary.save_loaded_asset(instance)
     return instance
 
 
 def main():
+    # THE REGISTRY HAS TO HAVE SEEN THIS FOLDER FIRST.
+    #
+    # Run as a commandlet the asset registry never scans the plugin's own content, so load_asset
+    # fails with "could not be found in the Asset Registry" for a .uasset sitting right there on
+    # disk, and create_asset then refuses with "already exists in package". Neither message reaches
+    # the caller: what surfaces is a None three calls away inside set_editor_property, which is a
+    # very long way from "nobody scanned the folder".
+    unreal.AssetRegistryHelpers.get_asset_registry().scan_paths_synchronous(
+        [FOLDER], force_rescan=True
+    )
+
     if not unreal.EditorAssetLibrary.does_directory_exist(FOLDER):
         unreal.EditorAssetLibrary.make_directory(FOLDER)
 

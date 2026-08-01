@@ -598,10 +598,30 @@ bool FHFFanUnderACeilingTest::RunTest(const FString& Parameters)
 	// Both are 500 now, for a reason that has nothing to do with fans: every drop in that flat is
 	// set by the 450 beams it has to bury. The difference went to zero and this test failed while
 	// nothing about a fan had changed. What it wants is a controlled pair, so it makes its own.
+	//
+	// AND IT HAS TO SAY SO IN THE SPEC'S OWN LANGUAGE. Setting a figure is not enough: SetSpec
+	// re-resolves every templated ceiling, so a hand-set drop on a ceiling that still names a
+	// template is stamped straight back over. Custom is exactly the word for "these figures stand
+	// as written", and both of these rooms carry a named design now - a PlainBand in the kitchen
+	// and a FlatSoffit in the bathroom - so without it the pair silently became 0 and 25 again.
 	for (FHFFalseCeiling& Ceiling : Spec.FalseCeilings)
 	{
-		if (Ceiling.RoomId == TEXT("R_Kitchen")) { Ceiling.Drop = 300.0; }
-		if (Ceiling.RoomId == TEXT("R_MBath"))   { Ceiling.Drop = 400.0; }
+		if (Ceiling.RoomId != TEXT("R_Kitchen") && Ceiling.RoomId != TEXT("R_MBath"))
+		{
+			continue;
+		}
+
+		Ceiling.Template = EHFCeilingTemplate::Custom;
+
+		// Flat across the whole room, so the drop under the fan IS the drop. A band leaves the
+		// centre of the room open and the fan under it would answer zero however deep the band is.
+		Ceiling.Style = EHFCeilingStyle::FullDrop;
+		Ceiling.BandWidth = 0.0;
+		Ceiling.PerimeterBulkheadWidth = 0.0;
+		Ceiling.PerimeterBulkheadDrop = 0.0;
+		Ceiling.PerimeterBulkheadEdges.Reset();
+
+		Ceiling.Drop = (Ceiling.RoomId == TEXT("R_Kitchen")) ? 300.0 : 400.0;
 	}
 
 	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();

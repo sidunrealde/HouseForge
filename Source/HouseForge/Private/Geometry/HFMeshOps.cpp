@@ -7,6 +7,7 @@
 #include "CompGeom/PolygonTriangulation.h"
 #include "ConstrainedDelaunay2.h"
 #include "Curve/GeneralPolygon2.h"
+#include "Curve/PolygonIntersectionUtils.h"
 #include "Curve/PolygonOffsetUtils.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "DynamicMesh/MeshNormals.h"
@@ -347,13 +348,21 @@ namespace
 EHFSurfaceRole FHFMeshOps::RoleForGroup(int32 GroupId)
 {
 	const int32 Index = GroupId - 1;
-	const int32 Max = static_cast<int32>(EHFSurfaceRole::Structure);
+	// THE LAST ENUMERATOR, whichever that is, and not a role named by hand. Naming one is how the
+	// bound came to be Structure, and the moment a role was added after it every triangle and every
+	// slot beyond Structure fell back to WallPaint - a surface silently rendering the wrong material,
+	// which is the one failure this table exists to prevent.
+	const int32 Max = NumSurfaceRoles() - 1;
 	return (Index >= 0 && Index <= Max) ? static_cast<EHFSurfaceRole>(Index) : EHFSurfaceRole::WallPaint;
 }
 
 EHFSurfaceRole FHFMeshOps::RoleForMaterialId(int32 MaterialId)
 {
-	const int32 Max = static_cast<int32>(EHFSurfaceRole::Structure);
+	// THE LAST ENUMERATOR, whichever that is, and not a role named by hand. Naming one is how the
+	// bound came to be Structure, and the moment a role was added after it every triangle and every
+	// slot beyond Structure fell back to WallPaint - a surface silently rendering the wrong material,
+	// which is the one failure this table exists to prevent.
+	const int32 Max = NumSurfaceRoles() - 1;
 	return (MaterialId >= 0 && MaterialId <= Max) ? static_cast<EHFSurfaceRole>(MaterialId) : EHFSurfaceRole::WallPaint;
 }
 
@@ -1525,6 +1534,114 @@ TArray<TArray<FVector2D>> FHFMeshOps::InsetPolygon(const TArray<FVector2D>& Poly
 	}
 
 	return Out;
+}
+
+namespace
+{
+	/** A closed loop as Clipper wants it: counter-clockwise, so "inside" is unambiguous. */
+	bool ToGeneralPolygon(const TArray<FVector2D>& Loop, FGeneralPolygon2d& Out)
+	{
+		if (Loop.Num() < 3)
+		{
+			return false;
+		}
+
+		TArray<FVector2d> Points;
+		Points.Reserve(Loop.Num());
+		for (const FVector2D& Point : Loop)
+		{
+			Points.Add(FVector2d(Point.X, Point.Y));
+		}
+
+		FPolygon2d Outer(Points);
+		if (Outer.SignedArea() < 0.0)
+		{
+			Outer.Reverse();
+		}
+
+		Out = FGeneralPolygon2d(Outer);
+		return true;
+	}
+
+	TArray<TArray<FVector2D>> FromGeneralPolygons(const TArray<FGeneralPolygon2d>& In)
+	{
+		TArray<TArray<FVector2D>> Out;
+		for (const FGeneralPolygon2d& Polygon : In)
+		{
+			const TArray<FVector2d>& Vertices = Polygon.GetOuter().GetVertices();
+			if (Vertices.Num() < 3)
+			{
+				continue;
+			}
+
+			TArray<FVector2D>& Loop = Out.AddDefaulted_GetRef();
+			Loop.Reserve(Vertices.Num());
+			for (const FVector2d& Vertex : Vertices)
+			{
+				Loop.Add(FVector2D(Vertex.X, Vertex.Y));
+			}
+		}
+		return Out;
+	}
+
+	/** Both booleans differ only in which one they call, so they share everything else. */
+	TArray<TArray<FVector2D>> PolygonBoolean(const TArray<FVector2D>& Subject,
+		const TArray<TArray<FVector2D>>& Others, bool bSubtract)
+	{
+		FGeneralPolygon2d SubjectPolygon;
+		if (!ToGeneralPolygon(Subject, SubjectPolygon))
+		{
+			return {};
+		}
+
+		TArray<FGeneralPolygon2d> OtherPolygons;
+		for (const TArray<FVector2D>& Loop : Others)
+		{
+			FGeneralPolygon2d Polygon;
+			if (ToGeneralPolygon(Loop, Polygon))
+			{
+				OtherPolygons.Add(MoveTemp(Polygon));
+			}
+		}
+
+		if (OtherPolygons.IsEmpty())
+		{
+			// Nothing to cut with. Subtracting nothing leaves the subject; intersecting with
+			// nothing leaves nothing, and both are the honest answers rather than failures.
+			TArray<TArray<FVector2D>> Untouched;
+			if (bSubtract)
+			{
+				Untouched.Add(Subject);
+			}
+			return Untouched;
+		}
+
+		const TArray<FGeneralPolygon2d> SubjectArray = { SubjectPolygon };
+
+		TArray<FGeneralPolygon2d> Result;
+		const bool bOk = bSubtract
+			? PolygonsDifference(SubjectArray, OtherPolygons, Result)
+			: PolygonsIntersection(SubjectArray, OtherPolygons, Result);
+
+		if (!bOk)
+		{
+			return {};
+		}
+
+		return FromGeneralPolygons(Result);
+	}
+}
+
+TArray<TArray<FVector2D>> FHFMeshOps::SubtractPolygons(const TArray<FVector2D>& Subject,
+	const TArray<TArray<FVector2D>>& Cutters)
+{
+	return PolygonBoolean(Subject, Cutters, /*bSubtract*/ true);
+}
+
+TArray<TArray<FVector2D>> FHFMeshOps::IntersectPolygons(const TArray<FVector2D>& Subject,
+	const TArray<TArray<FVector2D>>& Clips)
+{
+	return PolygonBoolean(Subject, Clips, /*bSubtract*/ false);
 }
 
 bool FHFMeshOps::IsClosed(const FDynamicMesh3& Mesh)

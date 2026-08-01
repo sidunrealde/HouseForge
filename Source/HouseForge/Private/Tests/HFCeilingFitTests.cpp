@@ -58,7 +58,17 @@ namespace
 		Ceiling.Id = TEXT("FC_Fit");
 		Ceiling.RoomId = Room.Id;
 		Ceiling.Template = Template;
-		FHFCeilingTemplates::Apply(Ceiling, Room, Beam, FHFCeilingDefaults(), 1.0);
+
+		// The beam, when there is one, runs along boundary edge 0 - the south wall the fittings
+		// under test are fixed to, which is what makes the ring land over them.
+		TArray<const FHFBeam*> PerEdge;
+		PerEdge.SetNumZeroed(Room.Boundary.Num());
+		if (Beam != nullptr && PerEdge.Num() > 0)
+		{
+			PerEdge[0] = Beam;
+		}
+
+		FHFCeilingTemplates::Apply(Ceiling, Room, PerEdge, FHFCeilingDefaults(), 1.0);
 		return Ceiling;
 	}
 
@@ -487,9 +497,17 @@ bool FHFCeilingFitWholeFlatTest::RunTest(const FString& Parameters)
 /**
  * THE SEVEN THE USER FOUND, named, so this cannot regress quietly.
  *
- * The flat as committed puts both bathroom geysers, both bathroom extracts and all three curtain
+ * The flat as committed put both bathroom geysers, both bathroom extracts and all three curtain
  * pelmets 30 mm inside their own ceilings. A general "nothing is buried" test would go green if
- * somebody deleted the pelmets, so the fittings are named and the fix is asserted on each of them.
+ * somebody deleted the pelmets, so the fittings are named and the outcome is asserted on each.
+ *
+ * FOUR OF THE SEVEN NO LONGER FOUL ANYTHING, and that is the shallow ceilings arriving rather than
+ * this test decaying. F_MBath_Exhaust, F_Pelmet_MBed and F_Pelmet_Bed2 are drawn at heads of 2550
+ * to 2583 under soffits that used to sit at 2520 and now sit at 2750 to 2850. The premise clause
+ * that used to read "this really is buried" is exactly what caught the change - it was written to -
+ * so it becomes the sharper question: a fitting that fouls must be lowered, and a fitting that does
+ * NOT foul must be left precisely where the drawing put it. The second half is the one that would
+ * catch a resolver quietly lowering everything.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCeilingFitReportedFittingsTest,
 	"HouseForge.Ceiling.TheFittingsThatWereClippingClearNow", HF_TEST_FLAGS)
@@ -508,6 +526,9 @@ bool FHFCeilingFitReportedFittingsTest::RunTest(const FString& Parameters)
 
 	const TMap<FName, double> BuiltHeights = BuiltHeightsFor(Spec);
 	const TArray<FHFFixture> Fitted = FHFCeilingFit::FitAll(Spec, 1.0, &BuiltHeights, nullptr);
+
+	int32 StillFouls = 0;
+	int32 Clears = 0;
 
 	for (const TCHAR* Id : Reported)
 	{
@@ -536,18 +557,42 @@ bool FHFCeilingFitReportedFittingsTest::RunTest(const FString& Parameters)
 		AddInfo(FString::Printf(TEXT("%s: drawn head %.1f, soffit %.1f, built head %.1f."),
 			Id, DrawnTopZ, SoffitZ, FittedTopZ));
 
-		// The premise: this really was buried as drawn. If a later change moves the ceilings up, this
-		// clause is what says so rather than letting the test pass for the wrong reason.
-		TestTrue(FString::Printf(TEXT("'%s' as drawn really does foul its ceiling"), Id),
-			DrawnTopZ > SoffitZ);
-
 		TestTrue(FString::Printf(TEXT("'%s' as built clears it"), Id), FittedTopZ <= SoffitZ + 0.001);
+
+		if (DrawnTopZ > SoffitZ)
+		{
+			++StillFouls;
+
+			// It had to move, so it must actually have moved.
+			TestTrue(FString::Printf(TEXT("'%s' was lowered to clear its ceiling"), Id),
+				FittedTopZ < DrawnTopZ - 0.001);
+		}
+		else
+		{
+			++Clears;
+
+			// AND IT MUST NOT HAVE MOVED. A resolver that lowered everything by the clearance
+			// would satisfy every other assertion here and would quietly drop three fittings in
+			// the reference flat away from the height the drawing states.
+			TestEqual(FString::Printf(TEXT("'%s' fits as drawn and is left where it was drawn"), Id),
+				FittedTopZ, DrawnTopZ, 0.001);
+		}
 
 		// And it kept its size. An extract that fitted by being made smaller would be a different
 		// extract from the one that was bought.
 		TestEqual(FString::Printf(TEXT("'%s' is the same fitting, just lower"), Id),
 			Fitted[Index].Height, Drawn.Height, 0.001);
 	}
+
+	AddInfo(FString::Printf(
+		TEXT("Of the seven reported fittings, %d still foul their ceiling and are lowered; "
+			 "%d now clear it as drawn, because the ceilings above them got shallower."),
+		StillFouls, Clears));
+
+	// The mechanism still has work to do in this flat. If every fitting cleared, this test would be
+	// asserting nothing about the resolver and somebody should be told rather than left with a
+	// green run.
+	TestTrue(TEXT("The reference flat still exercises the fit"), StillFouls > 0);
 
 	return true;
 }

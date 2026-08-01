@@ -55,7 +55,13 @@ struct HOUSEFORGE_API FHFCeilingDefaults
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	double CoveDrop = 15.0;
 
-	/** The trough, its lip and the strip lying in it. */
+	/**
+	 * The trough, its lip and the strip lying in it.
+	 *
+	 * Left to FHFCoveProfile's own defaults, which are the researched figures - 100 channel, 75 lip,
+	 * 30 upstand - and are asserted against the sizing rules by
+	 * HouseForge.Model.CoveProfileObeysItsOwnSizingRules rather than left as prose.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFCoveProfile Cove;
 
@@ -131,6 +137,47 @@ struct HOUSEFORGE_API FHFCeilingDefaults
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	double MinBeamBulkheadWidth = 30.0;
 
+	// ------------------------------------------------------- making the band answer to the room
+
+	/**
+	 * Narrowest a band may be squeezed to before it is dropped altogether, in centimetres.
+	 *
+	 * THE FIGURES ABOVE ARE FOR A ROOM THAT CAN TAKE THEM. Stamped without asking, a 450 band and a
+	 * 300 ring consumed 750 off every side of the 1800 square foyer and left 300 - so the foyer got
+	 * a 310 mm square hole punched through the middle of its plaster, open to the slab, which is the
+	 * single most obviously wrong thing a render of the flat has shown. A band is a band because
+	 * there is a middle for it to be around.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double MinBandWidth = 30.0;
+
+	/**
+	 * How many band widths across the open centre has to be before the band still reads as one.
+	 *
+	 * A ratio, and the ratio is two: a frame whose opening is narrower than twice its own width has
+	 * stopped being a frame and become a shaft. Below it the band is narrowed, and if even
+	 * MinBandWidth will not fit, the treatment is abandoned and the room gets an honest flat soffit -
+	 * which is what a 1.8 m foyer gets on site.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double MinOpenCentreFactor = 2.0;
+
+	// -------------------------------------------------------------------------- the flat soffit
+
+	/**
+	 * Drop of a plain flat ceiling, in centimetres - a kitchen, a bathroom, a corridor.
+	 *
+	 * NOT EVERY ROOM WANTS A DESIGN, and saying so is different from not having got to it. A wet
+	 * area is ceiled flat across the whole room because that is what hides its plumbing and its
+	 * extract, and a corridor is where the services run between them - but flat is not the same as
+	 * DEEP. The four rooms left on Custom in the reference flat sat at 480 across their whole area
+	 * for one reason only: the beams at their edges are 450, and before the ring existed the only
+	 * way to bury one was to drop everything. With the ring taking the edges, the flat part answers
+	 * to what actually runs above it, which is 250 of plenum and not 480.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	double FlatSoffitDrop = 25.0;
+
 	// ------------------------------------------------------ what else in the room has to clear it
 
 	/**
@@ -177,14 +224,15 @@ public:
 	static void Apply(FHFHouseSpec& Spec, const FHFCeilingDefaults& Defaults);
 
 	/**
-	 * One ceiling, given the room it covers and the deepest beam showing in that room.
+	 * One ceiling, given the room it covers and what shows along each of its edges.
 	 *
-	 * @param DeepestShowingBeam What the ceiling has to bury, or null if nothing shows. From
-	 *        FHFHouseSpec::DeepestBeamOverRoom - a beam flush in the wall under it shows nothing and
-	 *        needs no ring.
+	 * @param ShowingBeamPerEdge One entry per boundary edge, in order: the deepest beam standing
+	 *        proud along that edge, or null where nothing does. From
+	 *        FHFHouseSpec::DeepestBeamOnRoomEdge. A shorter array is read as "nothing on the rest".
 	 * @param UnitScale Spec units per centimetre: 10 for a millimetre spec, 1 for a centimetre one.
 	 */
-	static void Apply(FHFFalseCeiling& Ceiling, const FHFRoom& Room, const FHFBeam* DeepestShowingBeam,
+	static void Apply(FHFFalseCeiling& Ceiling, const FHFRoom& Room,
+		const TArray<const FHFBeam*>& ShowingBeamPerEdge,
 		const FHFCeilingDefaults& Defaults, double UnitScale);
 
 	/**

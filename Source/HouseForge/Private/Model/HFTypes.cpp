@@ -203,6 +203,150 @@ const FHFBeam* FHFHouseSpec::DeepestBeamOverRoom(const FName& RoomId) const
 	return Deepest;
 }
 
+TArray<TArray<FVector2D>> FHFFalseCeiling::BulkheadStrips(const TArray<FVector2D>& Outline,
+	double Width) const
+{
+	TArray<TArray<FVector2D>> Strips;
+
+	const int32 Count = Outline.Num();
+	if (Count < 3 || Width <= 0.0)
+	{
+		return Strips;
+	}
+
+	// Which way is into the room. The boundary is documented counter-clockwise, but a drawing that
+	// arrived the other way round would otherwise put every strip outside the building.
+	double TwiceArea = 0.0;
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const FVector2D& A = Outline[i];
+		const FVector2D& B = Outline[(i + 1) % Count];
+		TwiceArea += A.X * B.Y - B.X * A.Y;
+	}
+	const double Handedness = (TwiceArea >= 0.0) ? 1.0 : -1.0;
+
+	for (int32 i = 0; i < Count; ++i)
+	{
+		if (!PerimeterBulkheadEdges.IsEmpty() && !PerimeterBulkheadEdges.Contains(i))
+		{
+			continue;
+		}
+
+		const FVector2D& A = Outline[i];
+		const FVector2D& B = Outline[(i + 1) % Count];
+
+		const double Length = FVector2D::Distance(A, B);
+		if (Length <= UE_KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector2D Direction = (B - A) / Length;
+		const FVector2D Inward = FVector2D(-Direction.Y, Direction.X) * Handedness;
+
+		const FVector2D Along = Direction * Width;
+		const FVector2D In = Inward * Width;
+		const FVector2D Out = Inward * -Width;
+
+		Strips.Add({ A - Along + Out, B + Along + Out, B + Along + In, A - Along + In });
+	}
+
+	return Strips;
+}
+
+const FHFBeam* FHFHouseSpec::DeepestBeamOnRoomEdge(const FName& RoomId, int32 EdgeIndex) const
+{
+	const FHFRoom* Room = FindRoom(RoomId);
+	if (Room == nullptr || Room->Boundary.Num() < 3
+		|| EdgeIndex < 0 || EdgeIndex >= Room->Boundary.Num())
+	{
+		return nullptr;
+	}
+
+	const double Scale = FHFUnits::ToCentimeterScale(Units);
+	const double Flush = (Scale > UE_KINDA_SMALL_NUMBER) ? (1.0 / Scale) : 1.0;
+
+	const FVector2D& EdgeA = Room->Boundary[EdgeIndex];
+	const FVector2D& EdgeB = Room->Boundary[(EdgeIndex + 1) % Room->Boundary.Num()];
+
+	const double EdgeLength = FVector2D::Distance(EdgeA, EdgeB);
+	if (EdgeLength <= UE_KINDA_SMALL_NUMBER)
+	{
+		return nullptr;
+	}
+
+	const FVector2D EdgeDirection = (EdgeB - EdgeA) / EdgeLength;
+	const FVector2D EdgeNormal(-EdgeDirection.Y, EdgeDirection.X);
+
+	const FHFBeam* Deepest = nullptr;
+
+	for (const FHFBeam& Beam : Beams)
+	{
+		const double BeamLength = Beam.Length();
+		if (BeamLength <= UE_KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector2D Direction = (Beam.End - Beam.Start) / BeamLength;
+
+		// ALONG THIS EDGE, not merely somewhere in the room. A beam running with a wall leaves the
+		// nib that a ring exists to bury; one crossing the open middle of the room is a different
+		// problem with a different answer - its own Bulkhead ceiling, which the validator asks for -
+		// and giving it a ring on all four sides is how a room comes to be boxed in for nothing.
+		if (FMath::Abs(FVector2D::DotProduct(Direction, EdgeDirection)) < 0.966)
+		{
+			continue;
+		}
+
+		// Its centreline has to be ON the edge line, within its own half width: the beam sits on the
+		// wall the boundary is set out along.
+		const double OffsetStart = FVector2D::DotProduct(Beam.Start - EdgeA, EdgeNormal);
+		const double OffsetEnd = FVector2D::DotProduct(Beam.End - EdgeA, EdgeNormal);
+		const double Reach = Beam.Width * 0.5 + Flush;
+
+		if (FMath::Abs(OffsetStart) > Reach || FMath::Abs(OffsetEnd) > Reach)
+		{
+			continue;
+		}
+
+		// And it has to run along a real stretch of it, not clip a corner.
+		const double AlongStart = FVector2D::DotProduct(Beam.Start - EdgeA, EdgeDirection);
+		const double AlongEnd = FVector2D::DotProduct(Beam.End - EdgeA, EdgeDirection);
+
+		const double OverlapFrom = FMath::Max(0.0, FMath::Min(AlongStart, AlongEnd));
+		const double OverlapTo = FMath::Min(EdgeLength, FMath::Max(AlongStart, AlongEnd));
+
+		if (OverlapTo - OverlapFrom <= Flush)
+		{
+			continue;
+		}
+
+		// Then the same test DeepestBeamOverRoom applies, restricted to the overlapping stretch: a
+		// 230 beam on a 230 wall is flush and shows nothing however far it runs.
+		bool bShows = false;
+		for (int32 i = 0; i <= HFBeamSampleCount && !bShows; ++i)
+		{
+			const double T = static_cast<double>(i) / HFBeamSampleCount;
+			const FVector2D Point = EdgeA + EdgeDirection * FMath::Lerp(OverlapFrom, OverlapTo, T);
+
+			const double Inside = Room->ContainsPoint(Point)
+				? HFDistanceToBoundary(*Room, Point)
+				: -HFDistanceToBoundary(*Room, Point);
+
+			const double Concealed = HFConcealingWallHalfThickness(Walls, Point, Direction, Flush);
+			bShows = (Inside + Beam.Width * 0.5) > Concealed + Flush;
+		}
+
+		if (bShows && (Deepest == nullptr || Beam.Depth > Deepest->Depth))
+		{
+			Deepest = &Beam;
+		}
+	}
+
+	return Deepest;
+}
+
 const FHFBeam* FHFHouseSpec::DeepestBeamCrossingRoom(const FName& RoomId) const
 {
 	const FHFRoom* Room = FindRoom(RoomId);

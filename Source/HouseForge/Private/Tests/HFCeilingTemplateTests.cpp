@@ -69,8 +69,16 @@ namespace
 		Ceiling.RoomId = Room.Id;
 		Ceiling.Template = Template;
 
+		// The beam, when there is one, runs along boundary edge 0 - the south wall.
+		TArray<const FHFBeam*> PerEdge;
+		PerEdge.SetNumZeroed(Room.Boundary.Num());
+		if (Beam != nullptr && PerEdge.Num() > 0)
+		{
+			PerEdge[0] = Beam;
+		}
+
 		// UnitScale 1: the figures are in centimetres and so is this room.
-		FHFCeilingTemplates::Apply(Ceiling, Room, Beam, FHFCeilingDefaults(), 1.0);
+		FHFCeilingTemplates::Apply(Ceiling, Room, PerEdge, FHFCeilingDefaults(), 1.0);
 		return Ceiling;
 	}
 
@@ -314,20 +322,10 @@ bool FHFCeilingTemplateStripHiddenTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
-		// Where the strip is, from the same figures the generator sets it out from. The ring pushes
-		// the whole design inboard, so the band is measured from the styled loop rather than the room.
-		const double RingInset = Ceiling.HasPerimeterBulkhead()
-			? Ceiling.PerimeterBulkheadWidth - 0.5
-			: 0.0;
-
 		const double SoffitZ = StructuralZ - Ceiling.Drop;
 		const double BoardTopZ = SoffitZ + 2.0;
 		const double StripTopZ = BoardTopZ + Ceiling.Cove.StripHeight;
 		const double LipTopZ = SoffitZ + Ceiling.Cove.LipHeight;
-
-		const double SolidBand = Ceiling.BandWidth - Ceiling.Cove.ChannelWidth - Ceiling.Cove.Setback;
-		const double StripCentre = RingInset + SolidBand + Ceiling.Cove.ChannelWidth
-			- Ceiling.Cove.StripSetback - Ceiling.Cove.StripWidth * 0.5;
 
 		AddInfo(FString::Printf(
 			TEXT("%s: strip top %.2f, lip top %.2f, slab %.2f; trough %.1f deep by %.1f wide."),
@@ -369,14 +367,46 @@ bool FHFCeilingTemplateStripHiddenTest::RunTest(const FString& Parameters)
 				FDynamicMeshAABBTree3::FQueryOptions(Distance - 0.5)) == IndexConstants::InvalidID;
 		};
 
-		// All four runs of the trough: a lip that hid the strip along one wall and not along the
-		// next would pass any single-probe test.
-		const TArray<FVector3d> Targets = {
-			FVector3d(253.0, StripCentre, StripTopZ - 0.05),
-			FVector3d(253.0, 400.0 - StripCentre, StripTopZ - 0.05),
-			FVector3d(StripCentre, 197.0, StripTopZ - 0.05),
-			FVector3d(500.0 - StripCentre, 197.0, StripTopZ - 0.05)
-		};
+		// WHERE THE STRIP ACTUALLY IS, TAKEN OFF THE MESH. Derived from the band figures instead,
+		// this measured a point the strip is not at: the derivation assumed the perimeter ring runs
+		// right round, and it does not - it follows the edges a beam shows along - so on the other
+		// three sides the target sat in open air and the sweep dutifully reported it visible. The
+		// strip carries its own surface role now, so the geometry can simply be asked.
+		//
+		// The top of each strip triangle is what is cast at, because the top is the first part of it
+		// that could come into view.
+		TArray<FVector3d> Targets;
+		{
+			const int32 EmitterGroup =
+				FHFMeshOps::MaterialIdForRole(EHFSurfaceRole::LightSource) + 1;
+
+			// AT THE STRIP'S OWN HEIGHT, because the strip is not the only emitter on this ceiling.
+			// A downlight's lens carries the same role and sits higher - up the can at soffit plus
+			// the body depth - so "the highest emitting face" finds the lenses, and a lens is
+			// SUPPOSED to be visible: looking up into one is what a downlight is. Aimed at those,
+			// this test measured a fitting working correctly and called it a cove leaking.
+			for (const int32 Tid : Mesh.TriangleIndicesItr())
+			{
+				if (Mesh.GetTriangleGroup(Tid) != EmitterGroup)
+				{
+					continue;
+				}
+
+				const FVector3d Centroid = Mesh.GetTriCentroid(Tid);
+				if (FMath::IsNearlyEqual(Centroid.Z, StripTopZ, 0.01))
+				{
+					Targets.Add(FVector3d(Centroid.X, Centroid.Y, Centroid.Z - 0.05));
+				}
+			}
+		}
+
+		if (!TestTrue(*FString::Printf(TEXT("%s's strip is in the mesh to be aimed at"), *Name),
+			Targets.Num() >= 4))
+		{
+			continue;
+		}
+
+		AddInfo(FString::Printf(TEXT("%s: %d strip faces to check."), *Name, Targets.Num()));
 
 		int32 Cast = 0;
 		int32 Seen = 0;

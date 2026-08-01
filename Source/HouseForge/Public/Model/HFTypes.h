@@ -130,7 +130,19 @@ enum class EHFCeilingTemplate : uint8
 	 * A frame band around a centre panel that sits higher than the frame, with the cove channel
 	 * between them as the shadow gap. The light washes the panel rather than the slab.
 	 */
-	FramedPanel
+	FramedPanel,
+
+	/**
+	 * Flat across the whole room, with a downlight or two in it. A kitchen, a bathroom, a corridor.
+	 *
+	 * A DESIGN, AND SAYING SO IS THE POINT. These rooms really are ceiled flat - a wet area hides
+	 * its plumbing and its extract, a corridor is where the services run between them - but left on
+	 * Custom that is indistinguishable from nobody having got to them, which is exactly how four
+	 * rooms of the reference flat kept a 480 blanket drop through a round of fixing the blanket
+	 * drop. Naming the design also puts them on the perimeter-ring machinery, so the flat part can
+	 * be as shallow as the services need while the beams at the edges are still buried.
+	 */
+	FlatSoffit
 };
 
 /** Everything the drawings show that becomes an object in the level. */
@@ -272,7 +284,23 @@ enum class EHFSurfaceRole : uint8
 	Fabric,
 	Appliance,
 	/** Exposed structure - beams and columns. */
-	Structure
+	Structure,
+	/**
+	 * A surface that EMITS: an LED strip lying in a cove, the lens up inside a downlight can.
+	 *
+	 * The one role that is not a finish. It exists because a cove is the most characteristic thing
+	 * in the whole reference set and the plugin built it with nothing to see: the strip was tagged
+	 * MetalHardware, the lens Glass, neither placeholder had an emissive input, and nothing anywhere
+	 * spawned a light - so every cove in the flat rendered as a painted line at a step. A cove that
+	 * does not glow is not a cove, and "the false ceiling types are not properly visible" is most of
+	 * what the user was looking at.
+	 *
+	 * Kept separate from MetalHardware because the profile the strip sits in really is aluminium and
+	 * really does want a metal chamfer and a metal roughness; it is the light coming off it that is
+	 * different. The material panel gets one place to set that, and AHFCeilingActor puts real lights
+	 * at the same coordinates so the wash is light and not just a bright texel.
+	 */
+	LightSource
 };
 
 /**
@@ -559,13 +587,21 @@ struct HOUSEFORGE_API FHFCoveProfile
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double ChannelWidth = 10.0;
 
-	/** How far the inner lip rises above the band soffit, shielding the strip from view, in centimetres. */
+	/**
+	 * How far the inner lip rises above the band soffit, shielding the strip from view, in centimetres.
+	 *
+	 * 75, not 50. The rule three paragraphs up asks for at least 40 mm of lip standing clear of the
+	 * trough floor and the trough floor is a 20 board, so 50 leaves 30 - a figure that fails the
+	 * struct's own stated rule and shipped anyway, because the rule was written in a comment and
+	 * asserted nowhere. 75 leaves 55, and the strip's 36 has 39 mm of margin: a thicker diffuser, a
+	 * bare strip on a bracket or a 10 mm setting-out error all still stay hidden.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
-	double LipHeight = 5.0;
+	double LipHeight = 7.5;
 
-	/** Distance from the band's inner edge to the channel, in centimetres. */
+	/** Distance from the band's inner edge to the channel, in centimetres. A POP upstand under 25 chips. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
-	double Setback = 2.0;
+	double Setback = 3.0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	bool bHasLedStrip = true;
@@ -725,6 +761,21 @@ struct HOUSEFORGE_API FHFFalseCeiling
 	double PerimeterBulkheadDrop = 0.0;
 
 	/**
+	 * Which edges of the outline the ring runs along, as indices into the boundary.
+	 *
+	 * A RING ON FOUR SIDES BURIES NOTHING ON TWO OF THEM. In the living room only BM_Mid_Lower and
+	 * BM_Living_Bed2 stand proud of the 115 partitions under them; BM_South and BM_West are flush in
+	 * the 230 external walls and show nothing at all. Dropped 480 right round anyway, the room reads
+	 * as a deep three-level frame with 63% of its ceiling below the slab - not the shallow band with
+	 * a high centre the reference designs are.
+	 *
+	 * So the ring answers per edge. Empty means every edge, which is what a hand-authored ceiling
+	 * naming none of them means, and FHFCeilingTemplates always writes the list out.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<int32> PerimeterBulkheadEdges;
+
+	/**
 	 * Overrides the room boundary when the ceiling does not follow the walls - which is the
 	 * normal case for Bulkhead. Empty means "derive from the room".
 	 */
@@ -740,6 +791,19 @@ struct HOUSEFORGE_API FHFFalseCeiling
 	{
 		return PerimeterBulkheadWidth > 0.0 && PerimeterBulkheadDrop > Drop;
 	}
+
+	/**
+	 * The ring's footprint, as one strip per edge it runs along.
+	 *
+	 * Strips rather than an inset, because an inset is the same on every side by construction and
+	 * the whole point is that it is not. Each strip straddles its edge - out as far as it reaches in
+	 * - and overruns both ends by its own width, so two strips meeting at a corner mitre instead of
+	 * leaving a notch. What is outside the outline is clipped off by whoever uses them.
+	 *
+	 * @param Outline The ceiling's own outline, which is ExplicitPolygon or the room boundary.
+	 * @param Width   How far into the room the ring reaches.
+	 */
+	TArray<TArray<FVector2D>> BulkheadStrips(const TArray<FVector2D>& Outline, double Width) const;
 
 	/**
 	 * The deepest this ceiling reaches below the slab, anywhere.
@@ -985,6 +1049,20 @@ struct HOUSEFORGE_API FHFHouseSpec
 	 * See DeepestBeamCrossingRoom for the narrower question this used to answer.
 	 */
 	const FHFBeam* DeepestBeamOverRoom(const FName& RoomId) const;
+
+	/**
+	 * The deepest beam that shows along ONE edge of a room's boundary, or nullptr if none does.
+	 *
+	 * WHICH SIDES OF THE ROOM ACTUALLY NEED BOXING IN. DeepestBeamOverRoom answers for the room as a
+	 * whole, and a ceiling that takes that answer wraps a 480 ring round all four walls to bury a nib
+	 * that shows along two of them. In the living room that is 15.0 of 23.8 square metres dropped
+	 * below the slab, and the reference designs it is meant to look like drop a tenth of that.
+	 *
+	 * A beam counts here only if it RUNS WITH this edge - on its line, within its own half width,
+	 * over a real stretch of it - and then only if a wall does not already conceal it. A beam
+	 * crossing the open middle of a room is not this question's business; see DeepestBeamCrossingRoom.
+	 */
+	const FHFBeam* DeepestBeamOnRoomEdge(const FName& RoomId, int32 EdgeIndex) const;
 
 	/**
 	 * The deepest beam crossing the OPEN INTERIOR of a room - clear of every boundary by its own
