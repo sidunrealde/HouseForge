@@ -744,9 +744,24 @@ TArray<FVector2D> FHFMeshOps::RoundedRectangle(const FVector2D& Centre, const FV
 		Centre + FVector2D(-(Half.X - R), Half.Y - R)
 	};
 
+	// ------------------------------------------------------------------ WHICH QUADRANT EACH ARC IS IN
+	//
+	// The front-left corner's arc runs from pointing LEFT to pointing DOWN - 180 degrees to 270 - and
+	// each corner after it is a quarter turn on. Started a quarter turn earlier, as this was, every
+	// arc is drawn in the quadrant belonging to the NEXT corner: the front-left one sweeps from below
+	// the corner centre across to its right, into the middle of the shape.
+	//
+	// At a small radius that is a shallow notch at each corner and reads as a slightly odd rounding.
+	// At the radius a piece of sanitaryware needs - four fifths of the half-extent, because a cast
+	// bowl is nearly an ellipse - the four notches meet in the middle and the outline becomes a
+	// FOUR-LOBED CLOVER. Every WC pan, every basin and every one of the sink's bowls was one.
+	//
+	// Nothing measured it: a clover spans exactly the same bounding box as the rounded rectangle it
+	// should have been, it is closed, its volume is plausible, and its corner radius is right where it
+	// is drawn at all. It took rendering the bathroom and looking at the seat.
 	for (int32 Corner = 0; Corner < 4; ++Corner)
 	{
-		const double Start = -HALF_PI + Corner * HALF_PI;
+		const double Start = PI + Corner * HALF_PI;
 
 		for (int32 Step = 0; Step <= Steps; ++Step)
 		{

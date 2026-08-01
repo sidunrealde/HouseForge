@@ -155,6 +155,98 @@ namespace
 	}
 }
 
+// ================================================================================== the primitives
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFRoundedRectangleTest,
+	"HouseForge.Sanitary.RoundedRectangleIsRoundedAndConvex", HF_TEST_FLAGS)
+
+bool FHFRoundedRectangleTest::RunTest(const FString& Parameters)
+{
+	// THE TEST THAT WOULD HAVE CAUGHT THE CLOVER. Every corner arc was drawn a quarter turn early, in
+	// the quadrant belonging to the next corner, so at the radius sanitaryware needs the four arcs
+	// swept into the middle and the outline came out a FOUR-LOBED CLOVER. Every WC pan, every basin
+	// and every one of the sink's bowls was one, and it took rendering a bathroom to see it.
+	//
+	// Nothing measured it because a clover measures the same as the shape it should have been: the
+	// same bounding box, closed, plausible volume, right corner radius wherever it is drawn at all.
+	// What separates them is CONVEXITY, which is cheap and exact.
+	const FVector2D Centre(3.0, -4.0);
+	const FVector2D Half(19.0, 21.0);
+
+	for (const double Fraction : { 0.0, 0.15, 0.5, 0.8, 1.0 })
+	{
+		const double Radius = FMath::Min(Half.X, Half.Y) * Fraction;
+		const TArray<FVector2D> Ring = FHFMeshOps::RoundedRectangle(Centre, Half, Radius, 5);
+
+		TestEqual(TEXT("The ring is drawn at a fixed point count whatever the radius"), Ring.Num(), 24);
+		TestTrue(TEXT("And wound counter-clockwise"), FHFMeshOps::SignedArea(Ring) > 0.0);
+
+		// Convex: every turn from one edge to the next goes the same way. A clover reverses at each
+		// lobe, which is the whole of the difference.
+		bool bConvex = true;
+		FBox2D Box(ForceInit);
+
+		for (int32 Index = 0; Index < Ring.Num(); ++Index)
+		{
+			const FVector2D& A = Ring[Index];
+			const FVector2D& B = Ring[(Index + 1) % Ring.Num()];
+			const FVector2D& C = Ring[(Index + 2) % Ring.Num()];
+
+			Box += A;
+
+			// Consecutive points COINCIDE wherever a corner's radius has eaten its whole half-extent -
+			// the two arcs either side of the flat then share an end - and a zero-length edge has no
+			// direction to turn from. Skipped rather than measured; it is not a reversal.
+			const FVector2D U = B - A;
+			const FVector2D V = C - B;
+
+			if (U.SizeSquared() < 1e-12 || V.SizeSquared() < 1e-12)
+			{
+				continue;
+			}
+
+			// Normalised, so the threshold means an angle rather than an area and does not tighten as
+			// the outline grows.
+			const FVector2D Un = U.GetSafeNormal();
+			const FVector2D Vn = V.GetSafeNormal();
+			const double Turn = Un.X * Vn.Y - Un.Y * Vn.X;
+
+			if (Turn < -1e-6)
+			{
+				if (bConvex)
+				{
+					AddError(FString::Printf(
+						TEXT("Radius %.1f turns the wrong way at point %d: (%.3f, %.3f) -> (%.3f, %.3f) -> (%.3f, %.3f), sin %.6f."),
+						Radius, Index, A.X, A.Y, B.X, B.Y, C.X, C.Y, Turn));
+				}
+				bConvex = false;
+			}
+		}
+
+		TestTrue(*FString::Printf(TEXT("At radius %.1f the outline is convex"), Radius), bConvex);
+
+		// And it really is the rectangle it was asked for, at every radius: an outline that shrank to
+		// fit its own corners would be convex too.
+		TestNearlyEqual(TEXT("It spans its full width"), Box.Max.X - Box.Min.X, Half.X * 2.0, 0.001);
+		TestNearlyEqual(TEXT("It spans its full depth"), Box.Max.Y - Box.Min.Y, Half.Y * 2.0, 0.001);
+		TestNearlyEqual(TEXT("Centred where it was asked for"),
+			(Box.Max.X + Box.Min.X) * 0.5, Centre.X, 0.001);
+
+		// The corners really are taken off: a square rectangle has the full area, a fully rounded one
+		// is an ellipse at pi/4 of it.
+		const double Area = FHFMeshOps::SignedArea(Ring);
+		const double Full = Half.X * Half.Y * 4.0;
+
+		AddInfo(FString::Printf(TEXT("At radius %.1f the outline holds %.0f%% of its box."),
+			Radius, Area / Full * 100.0));
+
+		TestTrue(TEXT("It never has more area than its box"), Area <= Full + 0.001);
+		TestTrue(TEXT("Nor less than an ellipse in it"), Area >= Full * 0.77);
+	}
+
+	return true;
+}
+
 // ============================================================================================ WC
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFWCFormTest, "HouseForge.Sanitary.WCIsAHollowLoftedPan",
@@ -603,6 +695,35 @@ bool FHFBasinTapTest::RunTest(const FString& Parameters)
 
 	AddInfo(FString::Printf(TEXT("The lever's tip lifts %.1f cm."), Lifted.Z - Rest.Z));
 	TestTrue(TEXT("The lever goes up"), Lifted.Z > Rest.Z + 1.5);
+
+	// ---------------------------------------------------------------- AND IT STAYS OFF THE PLASTER
+	//
+	// A monobloc's lever runs BACKWARDS, and a basin's back is on the wall. At the flat's own figures
+	// a 70 mm lever on a tap centred in its ledge ended 20 mm INSIDE the masonry, on both basins -
+	// and there is no view of the fitting from which that shows except along the wall. So the tap is
+	// set forward on its ledge and the lever clamped to what is left, and both are measured HERE
+	// rather than in the flat, because a fitting that only fits in the room it happens to be in is a
+	// fitting that will not fit the next one.
+	const double Back = Built.Used.Depth * 0.5;
+
+	for (const double Amount : { 0.0, 0.5, 1.0 })
+	{
+		TestTrue(*FString::Printf(TEXT("At %.0f%% open the lever is still clear of the wall"),
+			Amount * 100.0), PosedPoint(*Lever, Tip, Amount).Y < Back);
+	}
+
+	AddInfo(FString::Printf(TEXT("The lever's tip stops %.1f cm short of the basin's back."),
+		Back - PosedPoint(*Lever, Tip, 0.0).Y));
+
+	// And the same for the fixed tap body, which is the thing actually bolted through the ledge.
+	for (const int32 Vertex : Built.Shell.VertexIndicesItr())
+	{
+		if (Built.Shell.GetVertex(Vertex).Z > Built.Used.Height + 0.5)
+		{
+			TestTrue(TEXT("Nothing on the tap ledge reaches past the basin's back"),
+				Built.Shell.GetVertex(Vertex).Y <= Back + 0.01);
+		}
+	}
 
 	return true;
 }

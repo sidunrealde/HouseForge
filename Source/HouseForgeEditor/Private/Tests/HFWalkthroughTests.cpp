@@ -141,6 +141,9 @@ namespace HouseForgeWalkthrough
 		// standing with half a foot inside a wardrobe is not standing.
 		constexpr double StandingMargin = 20.0;
 
+		/** Where the floor probe drops from. Anything reaching below this is something you would hit. */
+		constexpr double ProbeStartHeight = 150.0;
+
 		auto IsFloor = [&Room, &Fixtures](const FVector2D& Point)
 		{
 			if (!Room.ContainsPoint(Point))
@@ -155,9 +158,16 @@ namespace HouseForgeWalkthrough
 					continue;
 				}
 
-				// Only what stands ON the floor is in the way. A wall cabinet at 140 and a ceiling fan
-				// are things you walk under, and a pawn stands underneath both of them quite happily.
-				if (Fixture.IsCeilingMounted() || Fixture.BaseZ > StandingMargin)
+				// ANYTHING THE TRACE CAN REACH IS IN THE WAY, and that is not the same as anything on
+				// the floor. It used to be: a fixture whose base was above ankle height was assumed to
+				// be something a pawn walks under. A ceiling fan is; a towel rail at 1200 and a mirror
+				// at 1000 are not, and the probe drops from 1500 - so it came down THROUGH the rail and
+				// reported that the common bathroom's floor was a piece of chrome tube.
+				//
+				// The physical question is whether a person standing here would be inside something,
+				// and the answer is the same one the trace asks: does this fixture occupy any of the
+				// height the probe passes through.
+				if (Fixture.IsCeilingMounted() || Fixture.BaseZ > ProbeStartHeight)
 				{
 					continue;
 				}
@@ -413,7 +423,7 @@ bool FHFWalkthroughFloorTest::RunTest(const FString& Parameters)
 		}
 
 		// Straight down from head height onto the finished floor level.
-		const FVector Start(Plan.X, Plan.Y, Room.FloorZ + 150.0);
+		const FVector Start(Plan.X, Plan.Y, Room.FloorZ + 150.0);   // ProbeStartHeight
 		const FVector End(Plan.X, Plan.Y, Room.FloorZ - 50.0);
 
 		FHitResult Hit;

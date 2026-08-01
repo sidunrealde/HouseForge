@@ -1093,17 +1093,45 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// The extract is NOT in here. It was, on NorthWall, and that is what put both of them in the
 		// wrong wall: see below.
 		auto FitOutBathroom = [&B](const FName& Prefix, const FName& RoomId,
-			double ShowerX, double BasinX, double TowelX,
+			double GeyserX, double BasinX, double TowelX,
 			const FName& NorthWall, const FName& SouthWall)
 		{
+			// ------------------------------------------------- why the geyser is not over the shower
+			//
+			// IT WAS, AND IT DOES NOT FIT THERE. Both geysers were set out at the shower's own centre
+			// line, which is where a plan puts one and where the hot water is wanted. The ceiling is
+			// what makes it impossible: the wet rooms have a 250 flat soffit at 2600, a geyser drawn
+			// 2100..2550 needs clearance under it, and FHFCeilingFit correctly LOWERS it to 2060. The
+			// shower's arm is at 2100. So the vessel's underside came down through the arm, and the
+			// rose ended up hanging directly out of the bottom of a 25-litre pressure vessel.
+			//
+			// It is 7 mm of interpenetration and it is entirely visible: the two are the only things
+			// in the top of the room and they are touching. Nothing but a clash check in the built
+			// flat finds it, because both fittings are correct and the ceiling fit that moved them
+			// together is correct too.
+			//
+			// Moving it along the wall is also what a plumber does. A geyser's inlet and outlet drop
+			// out of its underside, and a geyser over the rose puts both of them in the spray.
 			FHFFixture& Geyser = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Geyser"))), RoomId,
 				EHFFixtureType::Geyser, TEXT("Storage water heater"),
-				FVector2D(ShowerX, 5250.0), FVector2D(450.0, 400.0), 450.0, 0.0, 2100.0);
+				FVector2D(GeyserX, 5250.0), FVector2D(450.0, 400.0), 450.0, 0.0, 2100.0);
 			Geyser.AnchorWallId = NorthWall;
 
+			// ------------------------------------------------- why the mirror is not at 1000 any more
+			//
+			// IT WAS SITTING ON THE BASIN. The common bath's basin is drawn 800..1000 and the mirror
+			// was drawn from 1000, so the mirror's bottom edge and the basin's rim were the same plane
+			// - two elements, thirty millimetres of build-up, six hundred wide, in exact contact. That
+			// is the coplanar case this plugin has been bitten by before, and it is wrong before it is
+			// a rendering problem: a mirror goes ABOVE the splashback, not resting on the china.
+			//
+			// It also has to clear the tap. A basin mixer on a ledge at 1000 stands to about 1150, so
+			// anything below 1200 is a mirror with a tap in front of it. 1200..2000 is where a
+			// bathroom mirror actually goes, and it leaves the towel rail at the same height
+			// undisturbed - the two are 700 apart along the wall.
 			FHFFixture& Mirror = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Mirror"))), RoomId,
 				EHFFixtureType::Mirror, TEXT("Mirror"),
-				FVector2D(BasinX, 3720.0), FVector2D(600.0, 30.0), 800.0, 0.0, 1000.0);
+				FVector2D(BasinX, 3720.0), FVector2D(600.0, 30.0), 800.0, 0.0, 1200.0);
 			Mirror.AnchorWallId = SouthWall;
 
 			FHFFixture& Towel = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Towel"))), RoomId,
@@ -1112,9 +1140,19 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			Towel.AnchorWallId = SouthWall;
 		};
 
-		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 2900.0, 2200.0, 3500.0,
+		// The common bath's geyser goes EAST of its shower. The shower occupies X 2450..3350 and the
+		// room's clear width runs to 4142.5, so 3600 puts a 450 vessel at 3375..3825: 25 clear of the
+		// shower's wet area, 317 clear of the east wall, and clear in plan of the riser at 2900 and of
+		// the arm that reaches out from it.
+		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 3600.0, 2200.0, 3500.0,
 			TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
-		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 8610.0, 8700.0, 9950.0,
+
+		// The master's has less choice. Its shower is at the WEST end (X 8160..9060) and D_MBath takes
+		// X 9200..9950 of the same wall, which leaves 250 mm between them and 735 east of the door. So
+		// the geyser goes east of the doorway at 10300: X 10075..10525, 125 clear of the door's jamb
+		// and 160 clear of the east wall. Further from the shower than anybody would choose, and the
+		// only place on this wall a 450 vessel fits without standing over a door or over the rose.
+		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 10300.0, 8700.0, 9950.0,
 			TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
 
 		// ------------------------------------------------------ where a bathroom fan actually blows

@@ -3967,7 +3967,7 @@
 			"label": "Storage water heater",
 			"position":
 			{
-				"x": 2900,
+				"x": 3600,
 				"y": 5250
 			},
 			"rotationDegrees": 0,
@@ -4015,7 +4015,7 @@
 				"y": 30
 			},
 			"height": 800,
-			"baseZ": 1000,
+			"baseZ": 1200,
 			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
@@ -4081,7 +4081,7 @@
 			"label": "Storage water heater",
 			"position":
 			{
-				"x": 8610,
+				"x": 10300,
 				"y": 5250
 			},
 			"rotationDegrees": 0,
@@ -4129,7 +4129,7 @@
 				"y": 30
 			},
 			"height": 800,
-			"baseZ": 1000,
+			"baseZ": 1200,
 			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{

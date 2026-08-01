@@ -19,49 +19,21 @@ namespace
 	constexpr double BowlWallThickness = 0.15;
 
 	/**
-	 * A rounded rectangle in plan, wound counter-clockwise.
+	 * A rounded rectangle in plan, wound counter-clockwise, at the bowl corner step count.
 	 *
 	 * A PRESSED BOWL HAS NO SQUARE CORNERS, because it is drawn from a single sheet and a right angle
 	 * cannot be drawn without tearing. It is also the detail that most gives a generated sink away: a
 	 * box with a hole in it reads as a box however well it is proportioned, and the corner radius is
 	 * the first thing the eye picks up when light runs round the inside of the bowl.
+	 *
+	 * A THIN WRAPPER, and it used to be its own copy of the same twenty lines. The copy carried the
+	 * same defect FHFMeshOps::RoundedRectangle did - every corner arc drawn a quarter turn early, in
+	 * the quadrant belonging to the next corner - and it had to be found and fixed twice. There is one
+	 * of these now, and everything lofted or pressed in this kit goes through it.
 	 */
 	TArray<FVector2D> RoundedRect(const FVector2D& Centre, const FVector2D& Half, double Radius)
 	{
-		const double R = FMath::Clamp(Radius, 0.0, FMath::Min(Half.X, Half.Y));
-
-		TArray<FVector2D> Out;
-		if (R <= UE_KINDA_SMALL_NUMBER)
-		{
-			Out.Add(Centre + FVector2D(-Half.X, -Half.Y));
-			Out.Add(Centre + FVector2D(Half.X, -Half.Y));
-			Out.Add(Centre + FVector2D(Half.X, Half.Y));
-			Out.Add(Centre + FVector2D(-Half.X, Half.Y));
-			return Out;
-		}
-
-		// Corner centres, counter-clockwise from the front-left.
-		const FVector2D Corners[4] = {
-			Centre + FVector2D(-(Half.X - R), -(Half.Y - R)),
-			Centre + FVector2D(Half.X - R, -(Half.Y - R)),
-			Centre + FVector2D(Half.X - R, Half.Y - R),
-			Centre + FVector2D(-(Half.X - R), Half.Y - R)
-		};
-
-		// Each corner's arc starts a quarter turn on from the previous, beginning pointing at -Y.
-		for (int32 Corner = 0; Corner < 4; ++Corner)
-		{
-			const double Start = -HALF_PI + Corner * HALF_PI;
-
-			for (int32 Step = 0; Step <= BowlCornerSteps; ++Step)
-			{
-				const double Angle = Start + HALF_PI * static_cast<double>(Step)
-					/ static_cast<double>(BowlCornerSteps);
-				Out.Add(Corners[Corner] + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * R);
-			}
-		}
-
-		return Out;
+		return FHFMeshOps::RoundedRectangle(Centre, Half, Radius, BowlCornerSteps);
 	}
 
 	/** Scales a closed polygon about a centre - how a bowl's base is got from its mouth. */
@@ -668,6 +640,44 @@ FHFWCBuild FHFSanitaryKit::BuildWC(const FHFWCParams& Params)
 
 	if (P.CisternHeight > 0.0 && P.CisternDepth > 0.0)
 	{
+		// ------------------------------------------------------------ WHAT THE CISTERN STANDS ON
+		//
+		// A close-coupled cistern is BOLTED TO THE BACK OF THE PAN, and the back of the pan is solid
+		// ceramic from the floor up to the shelf it sits on. Without it the cistern is a box hanging in
+		// mid-air behind the bowl, and that is exactly what the first render of both bathrooms showed:
+		// six litres of china floating 384 mm off the floor with daylight under it.
+		//
+		// Nothing measured it. The cistern was in the right place, the right size, watertight, inside
+		// the drawn box and its flush plate moved; there is simply no assertion about a solid that says
+		// "and something holds this up". It took looking at the WC from across the room.
+		//
+		// Overlapped INTO the pan's foot rather than butted against it - the foot draws back as it
+		// descends, so at floor level the two would otherwise miss each other by a millimetre.
+		const double PedestalFrontY = PanBackY - 4.0;
+
+		const FVector2D PedestalCentre(0.0, (PedestalFrontY + P.Projection * 0.5) * 0.5);
+		const double PedestalHalfY = (P.Projection * 0.5 - PedestalFrontY) * 0.5;
+
+		const TArray<TArray<FVector2D>> PedestalRings = {
+			FHFMeshOps::RoundedRectangle(
+				FVector2D(0.0, PedestalCentre.Y + PedestalHalfY * 0.15),
+				FVector2D(P.Width * 0.32, PedestalHalfY * 0.85),
+				P.Width * 0.1, LoftCornerSteps),
+			FHFMeshOps::RoundedRectangle(PedestalCentre,
+				FVector2D(P.Width * 0.5 - 0.4, PedestalHalfY),
+				P.Width * 0.1, LoftCornerSteps)
+		};
+		const TArray<double> PedestalHeights = { 0.0, RimZ };
+
+		FDynamicMesh3 Pedestal;
+		FHFMeshOps::InitialiseMesh(Pedestal);
+
+		if (FHFMeshOps::AppendLoft(Pedestal, PedestalRings, PedestalHeights, true, true,
+			EHFSurfaceRole::Sanitary))
+		{
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Pedestal);
+		}
+
 		const FVector2D CisternCentre(0.0, (CisternFrontY + P.Projection * 0.5) * 0.5);
 		const FVector2D CisternHalf(FMath::Max(P.Width * 0.5 - P.CisternInset, 0.01),
 			P.CisternDepth * 0.5);
@@ -916,9 +926,18 @@ FHFBasinParams FHFSanitaryKit::SanitiseBasin(const FHFBasinParams& Params)
 	P.Tap.BodyRadius = FMath::Max(P.Tap.BodyRadius, 0.0);
 	P.Tap.SpoutRadius = FMath::Clamp(P.Tap.SpoutRadius, 0.0, FMath::Max(P.Tap.BodyRadius, 0.0));
 	P.Tap.SpoutReach = FMath::Max(P.Tap.SpoutReach, 0.0);
-	P.Tap.LeverLength = FMath::Max(P.Tap.LeverLength, 0.0);
 	P.Tap.LeverLiftDegrees = FMath::Clamp(P.Tap.LeverLiftDegrees, 0.0, 90.0);
 	P.Tap.SpoutSwivelDegrees = FMath::Clamp(P.Tap.SpoutSwivelDegrees, 0.0, 180.0);
+
+	// THE LEVER MAY NOT REACH PAST THE BACK OF THE BASIN. A monobloc's lever runs BACKWARDS from the
+	// top of its body, which is right on a kitchen sink out in the middle of a worktop and wrong on a
+	// basin whose back is on the plaster: at the flat's figures a 70 mm lever ended 20 mm inside the
+	// wall, on both of them. Clamped rather than shortened at the call site, because the clearance is
+	// a property of the basin - see FHFBasinParams::TapBaseY, which is the other half of the answer.
+	//
+	// A centimetre of margin, so a lever at full lift clears the tiles rather than grazing them.
+	P.Tap.LeverLength = FMath::Clamp(P.Tap.LeverLength, 0.0,
+		FMath::Max(P.Depth * 0.5 - P.TapBaseY() - 1.0, 0.0));
 
 	return P;
 }
@@ -980,11 +999,17 @@ FHFBasinBuild FHFSanitaryKit::BuildBasin(const FHFBasinParams& Params)
 		FDynamicMesh3 Cavity;
 		FHFMeshOps::InitialiseMesh(Cavity);
 
+		// THE OPENING'S CORNERS FOLLOW THE RIM'S, LESS THE RIM. Given a radius of its own the bowl's
+		// mouth is rounder at the corners than the outline it sits inside, and the rim between them
+		// pinches to a knife edge at all four - which is the first thing the eye finds on a basin,
+		// because the rim is the part of it a hand rests on. A constant-width rim is what a cast basin
+		// has and what this arithmetic gives.
+		const double MouthRadius = FMath::Max(P.CornerRadius - P.RimWidth, 0.5);
+
 		const TArray<TArray<FVector2D>> CavityRings = {
 			FHFMeshOps::RoundedRectangle(BowlCentre, BowlHalf * 0.86,
-				FMath::Min(BowlHalf.X, BowlHalf.Y) * 0.55, LoftCornerSteps),
-			FHFMeshOps::RoundedRectangle(BowlCentre, BowlHalf,
-				FMath::Min(BowlHalf.X, BowlHalf.Y) * 0.7, LoftCornerSteps)
+				MouthRadius * 0.86, LoftCornerSteps),
+			FHFMeshOps::RoundedRectangle(BowlCentre, BowlHalf, MouthRadius, LoftCornerSteps)
 		};
 		const TArray<double> CavityHeights = { -1.0, P.Height + 1.0 };
 
@@ -1007,7 +1032,7 @@ FHFBasinBuild FHFSanitaryKit::BuildBasin(const FHFBasinParams& Params)
 
 		if (FHFMeshOps::AppendPrism(Floor,
 			FHFMeshOps::RoundedRectangle(BowlCentre, BowlHalf * FloorScale,
-				FMath::Min(BowlHalf.X, BowlHalf.Y) * 0.55, LoftCornerSteps),
+				MouthRadius * FloorScale, LoftCornerSteps),
 			BowlFloorZ - P.CeramicThickness * 2.5, BowlFloorZ, EHFSurfaceRole::Sanitary))
 		{
 			FHFMeshOps::AppendPreservingRoles(Out.Shell, Floor);
@@ -1078,8 +1103,7 @@ FHFBasinBuild FHFSanitaryKit::BuildBasin(const FHFBasinParams& Params)
 
 	if (P.bHasTap)
 	{
-		AppendTap(Out.Shell, Out.Parts, P.Tap,
-			FVector3d(0.0, P.Depth * 0.5 - P.TapLedgeWidth * 0.5, P.Height));
+		AppendTap(Out.Shell, Out.Parts, P.Tap, FVector3d(0.0, P.TapBaseY(), P.Height));
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Out.Shell);

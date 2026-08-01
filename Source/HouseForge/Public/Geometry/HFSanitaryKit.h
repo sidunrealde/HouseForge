@@ -366,6 +366,24 @@ struct HOUSEFORGE_API FHFBasinParams
 		return Mount == EHFBasinMount::WallHung ? -FMath::Max(ShroudDrop, 0.0) : 0.0;
 	}
 
+	/** Where the bowl's mouth stops and the tap ledge begins, in the basin's own frame. */
+	double LedgeFrontY() const { return Depth * 0.5 - TapLedgeWidth; }
+
+	/**
+	 * Where the tap stands on the ledge - as far FORWARD on it as the bowl allows.
+	 *
+	 * NOT IN THE MIDDLE OF THE LEDGE, and the difference is the whole clearance a lever has. A
+	 * monobloc's lever runs BACKWARDS from the top of its body, which is right on a kitchen sink
+	 * standing in the middle of a worktop and wrong here: a basin's back is on the plaster, so a 70 mm
+	 * lever on a tap centred in a 99 mm ledge ends 20 mm INSIDE the wall. Both of the flat's basins
+	 * did, and nothing but a rendered elevation shows it - the fitting reads as correct from every
+	 * angle except along the wall.
+	 *
+	 * Set forward, and the lever clamped to what is left behind it, a tap ledge does what a tap ledge
+	 * is for.
+	 */
+	double TapBaseY() const { return LedgeFrontY() + Tap.BodyRadius * 1.6; }
+
 	bool IsValid() const { return Width > 0.0 && Depth > 0.0 && Height > 0.0; }
 };
 
