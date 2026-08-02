@@ -251,9 +251,22 @@ struct HOUSEFORGE_API FHFDistributionBoardParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
 	double DoorThickness = 0.6;
 
+	/**
+	 * How far the door opens, in degrees.
+	 *
+	 * 90, NOT 110, AND THE WALL IS THE REASON. A consumer unit is screwed to the plaster and its door
+	 * is hinged on the front of the box; at exactly 90 degrees the leaf lies in the plane of the
+	 * wall, and every degree past that carries its free edge INTO the wall. The reference flat's
+	 * board went 110 and put 50 mm of door inside W_Mid_Upper - and, at the far end of its arc,
+	 * clipped the head of D_Kitchen next to it.
+	 *
+	 * Surface-mounted enclosures really do stop there, which is why the flush-mounted ones that open
+	 * further are the ones sold on it. A board recessed into the masonry can be given more here; one
+	 * standing proud of it cannot, whatever the catalogue says.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions",
 		meta = (ClampMin = "0.0", ClampMax = "170.0"))
-	double DoorSwingDegrees = 110.0;
+	double DoorSwingDegrees = 90.0;
 
 	/** How far a breaker toggle throws from on to off. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))

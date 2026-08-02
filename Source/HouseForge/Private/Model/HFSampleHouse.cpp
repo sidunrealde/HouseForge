@@ -697,8 +697,23 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		//
 		// See HouseForge.Living.DiningClearance, which measures all of them from the spec rather than
 		// trusting this comment.
+		// X 5400, NOT 5000: THE TABLE WAS STANDING WHERE THE TV CONSOLE'S DRAWERS COME OUT.
+		//
+		// F_TVUnit_E runs from 3200 to 4400 on the south wall and its three drawers pull out to Y 795.
+		// The table was drawn at 4300..5700 by 700..1500 - overlapping the console in plan by 100 mm
+		// and standing 95 mm inside the line its drawers travel to. Every drawer in the console drove
+		// into the table's top rail, and the west end chair with it.
+		//
+		// Nothing about either object could see it: the console is where a TV console goes, its
+		// drawers are the right size on the right runners with the right travel, and the table is a
+		// 4-seater in a living-dining. It is only wrong as a pair, and only once the drawers are open.
+		//
+		// East rather than north, because north is the coffee table: at 3250..4350 by 1500..2100 it
+		// leaves the table nowhere to go that way. 5400 puts the dining end east of the television
+		// with 300 mm between the drawers' travel and the table, which is also what the room wants -
+		// the seating end and the eating end stop sharing floor.
 		B.AddFixture(TEXT("F_DiningTable"), TEXT("R_Living"), EHFFixtureType::DiningTable,
-			TEXT("4-seater dining"), FVector2D(5000.0, 1100.0), FVector2D(1400.0, 800.0), 750.0);
+			TEXT("4-seater dining"), FVector2D(5400.0, 1100.0), FVector2D(1400.0, 800.0), 750.0);
 
 		// THE CHAIRS THE TABLE IMPLIES, declared rather than taken as read.
 		//
@@ -741,10 +756,15 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			//
 			// Centred in the clear span leaves 35 either side of each chair and 130 between them,
 			// which is what a set of four round a table this size actually looks like.
-			AddChair(TEXT("F_Chair_D1"), FVector2D(4710.0, 1590.0), 0.0);
-			AddChair(TEXT("F_Chair_D2"), FVector2D(5290.0, 1590.0), 0.0);
-			AddChair(TEXT("F_Chair_D3"), FVector2D(4210.0, 1100.0), 90.0);
-			AddChair(TEXT("F_Chair_D4"), FVector2D(5790.0, 1100.0), 270.0);
+			AddChair(TEXT("F_Chair_D1"), FVector2D(5110.0, 1590.0), 0.0);
+			AddChair(TEXT("F_Chair_D2"), FVector2D(5690.0, 1590.0), 0.0);
+			// THE TWO END CHAIRS TUCK 250 RATHER THAN 150, and the reason is at the west end: at 150
+			// the west chair's back stood 30 mm inside the line F_TVUnit_E's drawers travel to, so the
+			// top drawer of the console met it on the way out. Tucking further is what a chair at the
+			// end of a table does anyway - the ends are where somebody pushes a chair right in - and
+			// it moves both of them off the traffic round the table.
+			AddChair(TEXT("F_Chair_D3"), FVector2D(4710.0, 1100.0), 90.0);
+			AddChair(TEXT("F_Chair_D4"), FVector2D(6090.0, 1100.0), 270.0);
 		}
 
 		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_Living"), TEXT("R_Living"), EHFFixtureType::CeilingFan,
@@ -1018,8 +1038,22 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// Y 300 with W_South's face at 115: a 185 mm gap behind a queen bed, wide enough to read from
 		// the doorway as a bed that has been pulled away from the wall. 1200 leaves 85, which is what
 		// F_MBed_Bed already has and is a bed standing against a wall with its skirting behind it.
+		// X 8600, NOT 8300: THE STUDY'S DRAWERS HAD NOWHERE TO COME OUT TO.
+		//
+		// F_Bed2_Study stands on the west wall with its 550 depth running east, so its two pedestal
+		// drawers pull east into the room - 550 of full-extension travel, out to X 7775. The bed's
+		// west side was at 7550. Both drawers drove into the mattress, the lower one by 45 mm, and
+		// neither could be opened past about two fifths.
+		//
+		// A desk drawer that cannot be pulled out is the same defect as the kitchen's corner drawer
+		// with 25 mm of travel: real motion, real axis, full declared travel, and a fixture nobody can
+		// use. It is only visible with the drawer open and the bed built, which is a pair of
+		// conditions no test in the bedroom group put together.
+		//
+		// 8600 leaves 75 mm between the open drawer and the bed, and still leaves 735 between the
+		// bed's foot and F_Bed2_Wardrobe at 10085 - which is the walking room down that side.
 		FHFFixture& Bed = B.AddFixture(TEXT("F_Bed2_Bed"), TEXT("R_Bed2"), EHFFixtureType::Bed,
-			TEXT("Queen bed"), FVector2D(8300.0, 1200.0), FVector2D(1500.0, 2000.0), 600.0);
+			TEXT("Queen bed"), FVector2D(8600.0, 1200.0), FVector2D(1500.0, 2000.0), 600.0);
 		Bed.AnchorWallId = TEXT("W_South");
 
 		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_Bed2_Wardrobe"), TEXT("R_Bed2"), EHFFixtureType::Wardrobe,

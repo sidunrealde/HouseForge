@@ -1354,7 +1354,20 @@ FHFShowerBuild FHFSanitaryKit::BuildShower(const FHFShowerParams& Params)
 				FVector(-P.MixerWidth * 0.5 + P.MixerRadius * 1.2, MixerY, MixerZ));
 			Lever.Motion.Type = EHFMotionType::Hinge;
 			Lever.Motion.Axis = FVector::XAxisVector;
-			Lever.Motion.MaxAngleDegrees = P.LeverSweepDegrees;
+
+			// NEGATIVE, SO IT LIFTS OUT INTO THE ROOM AND NOT BACK INTO THE TILE.
+			//
+			// Local +Y runs BACK into the wall a shower is fixed to, and a lever hanging down from
+			// the pivot and turned by a positive angle about X carries its tip to +Y. Both showers in
+			// the reference flat therefore drove their handles into W_Mid_Upper - 5 mm in at a fifth
+			// open and 38 mm at the stop, through the whole of the range anybody would ever put it
+			// in.
+			//
+			// Nothing on the shower could see it. The lever was the right length, on a real hinge, on
+			// a real axis, through a real sweep, and it moved. It is only wrong against the wall
+			// behind it, and it is the way every mixer in the world actually works: the handle comes
+			// UP and TOWARDS you.
+			Lever.Motion.MaxAngleDegrees = -P.LeverSweepDegrees;
 			Lever.DefaultOpenAmount = 0.0;
 
 			Out.Parts.Add(MoveTemp(Lever));
