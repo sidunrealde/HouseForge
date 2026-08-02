@@ -2030,7 +2030,7 @@
 			"position":
 			{
 				"x": 3800,
-				"y": 1800
+				"y": 1850
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2143,8 +2143,8 @@
 			"label": "4-seater dining",
 			"position":
 			{
-				"x": 5000,
-				"y": 1100
+				"x": 5200,
+				"y": 1200
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2181,8 +2181,8 @@
 			"label": "Dining chair",
 			"position":
 			{
-				"x": 4670,
-				"y": 1590
+				"x": 4910,
+				"y": 1690
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2219,8 +2219,8 @@
 			"label": "Dining chair",
 			"position":
 			{
-				"x": 5330,
-				"y": 1590
+				"x": 5490,
+				"y": 1690
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2257,8 +2257,8 @@
 			"label": "Dining chair",
 			"position":
 			{
-				"x": 4210,
-				"y": 1100
+				"x": 4510,
+				"y": 1200
 			},
 			"rotationDegrees": 90,
 			"footprint":
@@ -2295,8 +2295,8 @@
 			"label": "Dining chair",
 			"position":
 			{
-				"x": 5790,
-				"y": 1100
+				"x": 5890,
+				"y": 1200
 			},
 			"rotationDegrees": 270,
 			"footprint":
@@ -2403,19 +2403,19 @@
 			}
 		},
 		{
-			"id": "F_Kitchen_BaseN",
+			"id": "F_Kitchen_BaseNW",
 			"roomId": "R_Kitchen",
 			"type": "KitchenBaseCabinet",
-			"label": "Base units, north run",
+			"label": "Base unit, north run west of the sink",
 			"position":
 			{
-				"x": 1830,
+				"x": 1045,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2140,
+				"x": 570,
 				"y": 600
 			},
 			"height": 850,
@@ -2423,7 +2423,83 @@
 			"anchorWallId": "W_North",
 			"params":
 			{
-				"shutterCount": 3,
+				"shutterCount": 1,
+				"drawerCount": 0,
+				"shelfCount": 1,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 100,
+				"handleStyle": "JProfile",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_BaseSink",
+			"roomId": "R_Kitchen",
+			"type": "KitchenBaseCabinet",
+			"label": "Sink base unit, north run",
+			"position":
+			{
+				"x": 1780,
+				"y": 7985
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 900,
+				"y": 600
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 1,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 100,
+				"handleStyle": "JProfile",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_BaseN",
+			"roomId": "R_Kitchen",
+			"type": "KitchenBaseCabinet",
+			"label": "Base units, north run east of the sink",
+			"position":
+			{
+				"x": 2565,
+				"y": 7985
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 670,
+				"y": 600
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 0,
 				"drawerCount": 2,
 				"shelfCount": 0,
 				"bHasLoft": false,
@@ -2637,7 +2713,7 @@
 			"label": "4-burner hob",
 			"position":
 			{
-				"x": 415,
+				"x": 435,
 				"y": 6300
 			},
 			"rotationDegrees": 90,
@@ -2979,7 +3055,7 @@
 			"label": "Queen bed",
 			"position":
 			{
-				"x": 8300,
+				"x": 8600,
 				"y": 1200
 			},
 			"rotationDegrees": 0,

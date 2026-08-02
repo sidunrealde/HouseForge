@@ -633,7 +633,7 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Sofa.AnchorWallId = TEXT("W_Mid_Lower");
 
 		B.AddFixture(TEXT("F_CoffeeTable"), TEXT("R_Living"), EHFFixtureType::CoffeeTable,
-			TEXT("Coffee table"), FVector2D(3800.0, 1800.0), FVector2D(1100.0, 600.0), 400.0);
+			TEXT("Coffee table"), FVector2D(3800.0, 1850.0), FVector2D(1100.0, 600.0), 400.0);
 
 		// The TV run, built around the balcony door rather than beside it.
 		//
@@ -708,12 +708,23 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// drawers are the right size on the right runners with the right travel, and the table is a
 		// 4-seater in a living-dining. It is only wrong as a pair, and only once the drawers are open.
 		//
-		// East rather than north, because north is the coffee table: at 3250..4350 by 1500..2100 it
-		// leaves the table nowhere to go that way. 5400 puts the dining end east of the television
-		// with 300 mm between the drawers' travel and the table, which is also what the room wants -
-		// the seating end and the eating end stop sharing floor.
+		// East AND a little north, and the two are set by three limits that meet at one place.
+		//
+		// East of the console's drawers, which reach X 4400: the table starts at 4500.
+		// North of where those drawers reach in the other direction, which is Y 917, so the west end
+		// chair sits clear of them at 1025 rather than across them.
+		// And not so far east that the EAST end chair cannot be pulled out: at 6100 it had 480 of
+		// chair and 350 of pulling to do in the 442 left before W_Living_Bed2's plaster, and it drove
+		// 115 mm into it. 5200 leaves 62.
+		//
+		// North further is the coffee table, which has itself gone 50 north to 1550..2150 to keep 125
+		// between it and the west end chair PULLED OUT - a chair that cannot be got out of is the same
+		// fault as one that cannot be got into.
+		//
+		// Four constraints and about 60 mm of slack at the tightest of them, which is what a
+		// living-dining of this size actually is once everything in it is solid.
 		B.AddFixture(TEXT("F_DiningTable"), TEXT("R_Living"), EHFFixtureType::DiningTable,
-			TEXT("4-seater dining"), FVector2D(5400.0, 1100.0), FVector2D(1400.0, 800.0), 750.0);
+			TEXT("4-seater dining"), FVector2D(5200.0, 1200.0), FVector2D(1400.0, 800.0), 750.0);
 
 		// THE CHAIRS THE TABLE IMPLIES, declared rather than taken as read.
 		//
@@ -756,15 +767,15 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			//
 			// Centred in the clear span leaves 35 either side of each chair and 130 between them,
 			// which is what a set of four round a table this size actually looks like.
-			AddChair(TEXT("F_Chair_D1"), FVector2D(5110.0, 1590.0), 0.0);
-			AddChair(TEXT("F_Chair_D2"), FVector2D(5690.0, 1590.0), 0.0);
+			AddChair(TEXT("F_Chair_D1"), FVector2D(4910.0, 1690.0), 0.0);
+			AddChair(TEXT("F_Chair_D2"), FVector2D(5490.0, 1690.0), 0.0);
 			// THE TWO END CHAIRS TUCK 250 RATHER THAN 150, and the reason is at the west end: at 150
 			// the west chair's back stood 30 mm inside the line F_TVUnit_E's drawers travel to, so the
 			// top drawer of the console met it on the way out. Tucking further is what a chair at the
 			// end of a table does anyway - the ends are where somebody pushes a chair right in - and
 			// it moves both of them off the traffic round the table.
-			AddChair(TEXT("F_Chair_D3"), FVector2D(4710.0, 1100.0), 90.0);
-			AddChair(TEXT("F_Chair_D4"), FVector2D(6090.0, 1100.0), 270.0);
+			AddChair(TEXT("F_Chair_D3"), FVector2D(4510.0, 1200.0), 90.0);
+			AddChair(TEXT("F_Chair_D4"), FVector2D(5890.0, 1200.0), 270.0);
 		}
 
 		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_Living"), TEXT("R_Living"), EHFFixtureType::CeilingFan,
