@@ -1079,9 +1079,30 @@ bool FHFMeshOps::AppendSoftBox(FDynamicMesh3& Mesh, const FVector3d& Min, const 
 			FMath::Max(Size.X * 0.5 - Inset, UE_KINDA_SMALL_NUMBER),
 			FMath::Max(SlabY * 0.5 - Inset, UE_KINDA_SMALL_NUMBER));
 
-		// Clamped per ring rather than once: the rolled levels are narrower than the middle, and a
-		// plan radius wider than what is left of them would pinch those rings to a lens.
-		const double Radius = FMath::Clamp(Params.CornerRadius, 0.0, FMath::Min(Half.X, Half.Y));
+		// THE PLAN RADIUS CLOSES AS THE ROLL TURNS, and getting this wrong is visible from across the
+		// room. Held constant while the ring drew in, the corner of a cushion came out as a flat
+		// lozenge where the vertical radius and the plan radius failed to meet - a facet with its own
+		// highlight, on all four corners of every cushion and both ends of both arms, in a kit whose
+		// entire purpose is that nothing on it reads as machined.
+		//
+		// Taking the inset off the radius makes the surface the offset of an inner box by one distance
+		// in every direction, which is what a fillet actually is: the corner becomes a sphere octant
+		// and the three radii meet in one continuous surface. It also means a plan radius smaller than
+		// the roll cannot blend, so the kits above keep CornerRadius at or above both rolls.
+		//
+		// FLOORED RATHER THAN LET TO ZERO, and that floor is not cosmetic. RoundedRectangle at zero
+		// radius emits its corner point CornerSteps + 1 times over, so the ring above a fully closed
+		// corner is joined to a stack of coincident vertices and the skin there is a fan of zero-area
+		// triangles. Those have no normal, ComputeShadingNormals averages the nothing they contribute
+		// into the real vertices around them, and the result is a hard crease diagonally across every
+		// corner of every cushion - on a mesh that measures perfectly and renders visibly wrong.
+		//
+		// A fifth of the radius keeps four distinct points in the arc at the tightest ring, which is
+		// under a millimetre of shape on a 70 mm roll and is exactly what a modeller would do rather
+		// than converge a quad grid to a pole.
+		const double Floor = Params.CornerRadius * 0.2;
+		const double Radius = FMath::Clamp(Params.CornerRadius - Inset, Floor,
+			FMath::Max(FMath::Min(Half.X, Half.Y), 0.0));
 
 		Sections.Add(RoundedRectangle(Centre, Half, Radius, CornerSteps));
 	}

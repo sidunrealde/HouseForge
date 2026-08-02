@@ -160,9 +160,9 @@ FHFSofaBuild FHFUpholsteryKit::BuildSofa(const FHFSofaParams& Params)
 	// becomes its arms rather than one slab running from the floor to the seat.
 	{
 		FHFSoftBoxParams Soft;
-		Soft.CornerRadius = FMath::Min(P.CushionRoll * 0.5, P.BaseInset + 1.0);
-		Soft.TopRadius = 1.0;
 		Soft.BottomRadius = 2.0;
+		Soft.TopRadius = 1.0;
+		Soft.CornerRadius = Soft.BottomRadius;
 
 		AppendSoft(Out.Base,
 			FVector3d(P.BaseInset, P.BaseInset, P.LegHeight),
@@ -178,11 +178,20 @@ FHFSofaBuild FHFUpholsteryKit::BuildSofa(const FHFSofaParams& Params)
 	// on top, so an arm reads as a bolster from above and in elevation rather than as a rectangle
 	// with a rounded lid.
 	{
+		// The plan radius carries both rolls, so the corner of an arm is a sphere octant. See
+		// FHFSoftBoxParams::CornerRadius - held below the roll it comes out as a flat lozenge, which on
+		// the widest radius in the flat is the most conspicuous version of that defect there is.
 		FHFSoftBoxParams Soft;
 		Soft.CornerRadius = FMath::Min(P.ArmRoll, P.ArmWidth * 0.45);
-		Soft.TopRadius = P.ArmRoll;
-		Soft.BottomRadius = FMath::Min(3.0, P.ArmRoll);
-		Soft.RollSteps = 4;
+		Soft.TopRadius = Soft.CornerRadius;
+		Soft.BottomRadius = FMath::Min(3.0, Soft.CornerRadius);
+
+		// FINER THAN THE KIT'S DEFAULT, and this is the one place in the flat where that is worth
+		// paying for. An arm's corner is a 70 mm sphere octant at eye level a metre from the camera:
+		// drawn in four steps by four it shades as a diamond-shaped highlight patch, which is a
+		// low-polygon tell rather than a soft form. Six by five is where it stops reading as one.
+		Soft.CornerSteps = 6;
+		Soft.RollSteps = 5;
 
 		const double ArmX[2][2] = { { 0.0, InnerX0 }, { InnerX1, P.Width } };
 
@@ -216,9 +225,9 @@ FHFSofaBuild FHFUpholsteryKit::BuildSofa(const FHFSofaParams& Params)
 	// height, which is exactly the failure the bed kit's headboard note describes.
 	{
 		FHFSoftBoxParams Soft;
-		Soft.CornerRadius = FMath::Min(P.CushionRoll * 0.75, P.BackThickness * 0.45);
-		Soft.TopRadius = FMath::Min(P.ArmRoll * 0.8, P.BackThickness * 0.45);
-		Soft.BottomRadius = 2.0;
+		Soft.CornerRadius = FMath::Min(P.ArmRoll * 0.8, P.BackThickness * 0.45);
+		Soft.TopRadius = Soft.CornerRadius;
+		Soft.BottomRadius = FMath::Min(2.0, Soft.CornerRadius);
 
 		AppendSoft(Out.Back,
 			FVector3d(FMath::Max(InnerX0 - Lap, 0.0), BackFaceY, P.LegHeight),
@@ -239,18 +248,22 @@ FHFSofaBuild FHFUpholsteryKit::BuildSofa(const FHFSofaParams& Params)
 	const double BackCushionY0 = P.BackCushionY0();
 	const double BackCushionY1 = BackCushionY0 + P.BackCushionThickness + P.BackRake;
 
+	// Drawn finer than the kit's default, for the reason the arms are: a cushion corner is the
+	// closest soft form to the camera in the whole flat.
 	FHFSoftBoxParams SeatSoft;
-	SeatSoft.CornerRadius = P.CushionRoll;
-	SeatSoft.TopRadius = P.CushionRoll * 1.25;
+	SeatSoft.CornerRadius = P.CushionRoll * 1.25;
+	SeatSoft.TopRadius = SeatSoft.CornerRadius;
 	SeatSoft.BottomRadius = P.CushionRoll * 0.5;
-	SeatSoft.RollSteps = 4;
+	SeatSoft.CornerSteps = 6;
+	SeatSoft.RollSteps = 5;
 
 	FHFSoftBoxParams BackSoft;
-	BackSoft.CornerRadius = P.CushionRoll * 1.2;
-	BackSoft.TopRadius = P.CushionRoll * 1.5;
+	BackSoft.CornerRadius = P.CushionRoll * 1.5;
+	BackSoft.TopRadius = BackSoft.CornerRadius;
 	BackSoft.BottomRadius = P.CushionRoll;
 	BackSoft.RakeY = P.BackRake;
-	BackSoft.RollSteps = 4;
+	BackSoft.CornerSteps = 6;
+	BackSoft.RollSteps = 5;
 
 	for (int32 Seat = 0; Seat < P.SeatCount; ++Seat)
 	{

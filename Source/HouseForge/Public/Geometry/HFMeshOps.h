@@ -48,7 +48,14 @@
  */
 struct FHFSoftBoxParams
 {
-	/** Radius on the four vertical arrises, in plan. A cushion's corner; an arm's roll seen from above. */
+	/**
+	 * Radius on the four vertical arrises, in plan. A cushion's corner; an arm's roll seen from above.
+	 *
+	 * KEEP THIS AT OR ABOVE BOTH ROLLS. The plan radius closes as a roll turns, so that the three
+	 * radii meet in one surface and the corner becomes a sphere octant rather than a flat lozenge with
+	 * its own highlight - see AppendSoftBox. A plan radius smaller than the roll runs out before the
+	 * roll finishes and the blend is only partly there.
+	 */
 	double CornerRadius = 0.0;
 
 	/** Radius on the top horizontal arris, all the way round. The one that catches light on a cushion. */

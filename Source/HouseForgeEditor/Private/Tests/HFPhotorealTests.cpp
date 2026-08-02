@@ -30,7 +30,7 @@
  * Everything here is measured on the reference 2BHK as it is really built, because the whole point
  * of these attributes is that they exist on every surface a camera can see. A chamfer on a test box
  * proves the operation works; a chamfer on all 22 walls, 19 openings, 12 rooms, 8 beams, 11 columns,
- * 7 false ceilings and 69 fixtures is the thing the renders depend on.
+ * 7 false ceilings and every built fixture is the thing the renders depend on.
  */
 namespace HouseForgePhotoreal
 {

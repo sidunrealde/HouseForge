@@ -36,13 +36,18 @@ namespace
 		FHFMeshOps::AppendSoftBox(Mesh, Min, Max, Soft, Role);
 	}
 
-	/** The arris radius a square timber member carries. Clamped so it cannot swallow the member. */
+	/**
+	 * The arris radius a square timber member carries. Clamped so it cannot swallow the member.
+	 *
+	 * The plan radius is kept at or above both rolls so the three meet in one surface at the corner -
+	 * see FHFSoftBoxParams::CornerRadius.
+	 */
 	FHFSoftBoxParams TimberArris(double Roll, double Section)
 	{
 		FHFSoftBoxParams Soft;
 		Soft.CornerRadius = FMath::Min(Roll, Section * 0.4);
-		Soft.TopRadius = FMath::Min(Roll * 0.5, Section * 0.4);
-		Soft.BottomRadius = FMath::Min(Roll * 0.5, Section * 0.4);
+		Soft.TopRadius = Soft.CornerRadius * 0.5;
+		Soft.BottomRadius = Soft.CornerRadius * 0.5;
 		Soft.CornerSteps = 2;
 		Soft.RollSteps = 2;
 		return Soft;
@@ -248,7 +253,8 @@ FHFTableBuild FHFFrameKit::BuildTable(const FHFTableParams& Params)
 	// catches across a room: a 1 mm chamfer at that scale is a hard line with a highlight on it.
 	{
 		FHFSoftBoxParams Soft;
-		Soft.CornerRadius = FMath::Min(P.EdgeRoll * 2.0, FMath::Min(HalfW, HalfD) * 0.2);
+		Soft.CornerRadius = FMath::Max(
+			FMath::Min(P.EdgeRoll * 2.0, FMath::Min(HalfW, HalfD) * 0.2), P.EdgeRoll);
 		Soft.TopRadius = P.EdgeRoll;
 		Soft.BottomRadius = P.EdgeRoll;
 		Soft.CornerSteps = 3;
@@ -324,7 +330,7 @@ FHFTableBuild FHFFrameKit::BuildTable(const FHFTableParams& Params)
 	{
 		FHFSoftBoxParams Soft;
 		Soft.CornerRadius = FMath::Min(P.EdgeRoll, P.ShelfThickness * 0.4);
-		Soft.TopRadius = FMath::Min(P.EdgeRoll * 0.5, P.ShelfThickness * 0.4);
+		Soft.TopRadius = Soft.CornerRadius * 0.5;
 		Soft.BottomRadius = Soft.TopRadius;
 		Soft.CornerSteps = 2;
 		Soft.RollSteps = 2;
@@ -477,7 +483,7 @@ FHFChairBuild FHFFrameKit::BuildChair(const FHFChairParams& Params)
 	{
 		FHFSoftBoxParams Soft;
 		Soft.CornerRadius = P.CushionRoll * 1.5;
-		Soft.TopRadius = P.CushionRoll;
+		Soft.TopRadius = Soft.CornerRadius;
 		Soft.BottomRadius = P.CushionRoll * 0.4;
 		Soft.RollSteps = 3;
 

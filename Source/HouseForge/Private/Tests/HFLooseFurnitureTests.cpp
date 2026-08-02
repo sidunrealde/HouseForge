@@ -191,8 +191,10 @@ bool FHFSoftBoxTest::RunTest(const FString& Parameters)
 	const FVector3d Min(0.0, 0.0, 0.0);
 	const FVector3d Max(60.0, 60.0, 14.0);
 
+	// The plan radius carries the top roll, which is what makes the corner a sphere octant rather
+	// than a flat lozenge - see FHFSoftBoxParams::CornerRadius.
 	FHFSoftBoxParams Soft;
-	Soft.CornerRadius = 4.0;
+	Soft.CornerRadius = 5.0;
 	Soft.TopRadius = 5.0;
 	Soft.BottomRadius = 2.0;
 	Soft.RollSteps = 4;
@@ -220,8 +222,51 @@ bool FHFSoftBoxTest::RunTest(const FString& Parameters)
 	// THE ASSERTION THE WHOLE PRIMITIVE EXISTS FOR. Below the bevel threshold everywhere, so
 	// ComputeShadingNormals welds it smooth and the chamfer pass has nothing to do to it.
 	const FHFBevelParams Bevel;
-	TestTrue(TEXT("No edge on a soft box is sharp enough to need a chamfer"),
-		SharpestEdgeDegrees(Mesh) < Bevel.MinAngleDegrees);
+	TestTrue(FString::Printf(TEXT("No edge on a soft box is sharp enough to need a chamfer (%.1f deg)"),
+		SharpestEdgeDegrees(Mesh)), SharpestEdgeDegrees(Mesh) < Bevel.MinAngleDegrees);
+
+	// THE CORNER IS A CONTINUOUS SURFACE AND NOT A FLAT LOZENGE, which is the one thing about this
+	// primitive that a volume or a bounds check cannot see and that was plainly visible the first
+	// time the sofa was rendered. Held constant while the ring drew in, the plan radius fails to meet
+	// the roll and leaves a facet with its own highlight on every corner of every cushion.
+	//
+	// Measured as the plan radius surviving at the top ring: it has to have closed to nothing by the
+	// time the roll has finished turning, or the two radii never met.
+	{
+		// Where the top cap's own corner would be if its plan radius had closed to nothing.
+		const FVector2D CapCorner(Min.X + Soft.TopRadius, Min.Y + Soft.TopRadius);
+
+		double NearestOnCap = TNumericLimits<double>::Max();
+		double NearestAtMidHeight = TNumericLimits<double>::Max();
+
+		for (const int32 Vertex : Mesh.VertexIndicesItr())
+		{
+			const FVector3d Point = Mesh.GetVertex(Vertex);
+			const double ToCorner = FVector2D::Distance(FVector2D(Point.X, Point.Y), CapCorner);
+
+			if (Point.Z >= Max.Z - 0.01)
+			{
+				NearestOnCap = FMath::Min(NearestOnCap, ToCorner);
+			}
+			else if (FMath::IsNearlyEqual(Point.Z, Min.Z + Soft.BottomRadius, 0.01))
+			{
+				// The widest ring, where the plan radius is at its full figure.
+				NearestAtMidHeight = FMath::Min(NearestAtMidHeight,
+					FVector2D::Distance(FVector2D(Point.X, Point.Y), FVector2D(Min.X, Min.Y)));
+			}
+		}
+
+		// With CornerRadius equal to TopRadius the plan radius has closed almost to nothing exactly
+		// where the roll finishes. Almost, rather than exactly: a corner allowed to converge on a
+		// point stacks coincident vertices and creases - see AppendSoftBox's floor.
+		TestTrue(FString::Printf(TEXT("The plan radius closes as the roll turns (%.2f cm from the cap corner)"),
+			NearestOnCap), NearestOnCap < Soft.CornerRadius * 0.25);
+
+		// And at full width it has NOT: the widest ring keeps its corner radius, so nothing there gets
+		// anywhere near the box's own corner. This is the half that fails if the blend is removed.
+		TestTrue(FString::Printf(TEXT("The widest ring is still rounded in plan (%.2f cm)"),
+			NearestAtMidHeight), NearestAtMidHeight > Soft.CornerRadius * 0.3);
+	}
 
 	// A radius bigger than the box can carry is clamped rather than turning the solid inside out.
 	{
