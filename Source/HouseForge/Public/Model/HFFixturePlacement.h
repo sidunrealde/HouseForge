@@ -116,6 +116,68 @@ public:
 	static FTransform OnWallFace(const FHFFixture& Fixture, double FloorZ, const FHFWall* AnchorWall);
 
 	/**
+	 * Centred ON the wall's own centreline in plan, standing at the fixture's BaseZ. A balustrade.
+	 *
+	 * ## Why neither of the two rules above is this one
+	 *
+	 * A balcony railing does not stand in front of a parapet and it is not made to fit a gap: it
+	 * stands ON TOP of one, on base plates bolted through the coping, and the coping's centre is where
+	 * the plates go. AgainstWall leaves the drawn position alone, and OnWallFace lands the fixture's
+	 * BACK on a face - both of which put a 60 mm railing entirely on the room side of a 115 mm coping,
+	 * with nothing under any of its posts.
+	 *
+	 * In the reference flat that is exactly what the drawing does. All three railings are drawn 60 mm
+	 * off their parapet's centreline, so 32.5 of a 60 wide railing overlaps the coping and 27.5 hangs
+	 * over the balcony. Corrected here rather than in the spec, for the reason OnWallFace's correction
+	 * is: it is a property of how a railing is fixed, not a number three fixtures should each carry a
+	 * copy of.
+	 *
+	 * The position ALONG the wall and the height are untouched; only the offset across it is resolved.
+	 * With no anchor wall there is no coping to find and this is FreeStanding.
+	 *
+	 * @param FloorZ Finished floor level of the balcony the railing stands on.
+	 * @param AnchorWall The parapet it stands on, or null.
+	 */
+	static FTransform OnWallTop(const FHFFixture& Fixture, double FloorZ, const FHFWall* AnchorWall);
+
+	/** How far OnWallTop has to move a fixture to centre it on the coping. Signed, along the back. */
+	static double WallCentrelineCorrection(const FHFFixture& Fixture, const FHFWall* AnchorWall);
+
+	/**
+	 * Back plane on the plaster, and the TOP of the fixture at a soffit the caller resolved.
+	 *
+	 * ## Why a pelmet is not placed like a geyser
+	 *
+	 * OnWallFace puts a fitting at the height the drawing gave it, which is right for everything
+	 * measured up from the floor - a socket at 300, a geyser at 2100, a mirror over a basin. A curtain
+	 * pelmet is not measured up from anything. It is fixed to the ceiling, and its drawn BaseZ is the
+	 * ceiling's height minus its own depth, worked out by whoever drew it against whatever the false
+	 * ceiling was that week.
+	 *
+	 * In this flat that figure is 2350, and it is stale by 300 mm: the ceilings became shallow bands,
+	 * the living room's soffit came up from 2550 to 2850, and the pelmets stayed where they were
+	 * drawn. Built at 2350 they hang with 300 of bare wall above them - a box screwed near a ceiling
+	 * rather than a step in it - and nothing in the spec says so.
+	 *
+	 * So the ceiling is asked instead of the drawing, exactly as a sink's rim height is asked of the
+	 * counter it is set into rather than taken from its drawn 690. See OnSurface, which is the same
+	 * argument the other way up.
+	 *
+	 * ## The embedment is deliberate
+	 *
+	 * The top board is pushed UP past the soffit by Embedment rather than stopped on it. A board that
+	 * stops exactly on a plane leaves two coplanar faces flashing against each other, and a board that
+	 * stops short of it leaves a slot into the plenum. It is screwed to the ceiling, so it goes into
+	 * it - the same joint rule the frame kit's members follow.
+	 *
+	 * @param SoffitZ World Z of the finished ceiling over the fixture, resolved by the composing layer.
+	 * @param AnchorWall The wall it is fixed to, or null - in which case only the height is resolved.
+	 * @param Embedment How far the top is driven up into the ceiling. Small; see above.
+	 */
+	static FTransform UnderSoffit(const FHFFixture& Fixture, double SoffitZ, const FHFWall* AnchorWall,
+		double Embedment = 0.3);
+
+	/**
 	 * How far OnWallFace has to move a fixture to bring its back onto the plaster. Signed.
 	 *
 	 * Positive when the fixture is standing off the wall and has to move towards it, negative when it

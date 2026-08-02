@@ -13,6 +13,7 @@
 #include "Actors/HFFanActor.h"
 #include "Actors/HFSanitaryActors.h"
 #include "Actors/HFServiceActors.h"
+#include "Actors/HFTrimActors.h"
 #include "Actors/HFWardrobeActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
@@ -783,6 +784,56 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	// ----------------------------------------------------------------------------------- the trim
+	//
+	// TWO FIXTURES THAT ARE PLACED BY WHAT THEY ARE FIXED TO RATHER THAN BY WHAT THE DRAWING SAYS, and
+	// they are the last two in the catalogue to need it. A railing stands on a parapet whose height
+	// only this layer can see; a pelmet is fixed to a ceiling whose depth is a project figure. Both
+	// drawn positions are stale against the thing they attach to, in exactly the way a sink's drawn
+	// 690 is stale against the counter it is set into.
+
+	void SeedRailing(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFRailingActor& Actor = static_cast<AHFRailingActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// THE PARAPET AS A DIMENSION. A code height is measured from the balcony floor, so the same
+		// 800 railing is a compliant guard on a 450 dwarf wall and a 800 mm hazard on nothing. A
+		// generator may not reach for the wall it stands on, so it is measured here - the same rule
+		// an extract's host wall thickness follows.
+		Actor.ApplyMount(C.AnchorWall != nullptr ? C.AnchorWall->Height : 0.0);
+
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallTop(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedPelmet(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFPelmetActor& Actor = static_cast<AHFPelmetActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// THE CEILING DECIDES THE HEIGHT, NOT THE DRAWING. Asked over the whole footprint rather than
+		// at the centre - a 2.2 m pelmet in a 60 cm band routinely spans a level change, and the one
+		// that matters is the lowest soffit anywhere over it, not whichever happens to be over its
+		// middle. That is the same question FHFCeilingFit::Fit asks, asked through the same function,
+		// so the resolver and the placement cannot come to different answers.
+		double SoffitZ = 0.0;
+
+		if (C.Room != nullptr && C.Spec != nullptr)
+		{
+			SoffitZ = FHFCeilingFit::LowestSoffitZOver(*C.Fixture, *C.Room, C.Spec->FalseCeilings);
+		}
+		else if (C.Room != nullptr)
+		{
+			SoffitZ = C.Room->FloorZ + C.Room->CeilingHeight - C.SoffitDrop;
+		}
+
+		Actor.SetActorTransform(FHFFixturePlacement::UnderSoffit(*C.Fixture, SoffitZ, C.AnchorWall));
+	}
+
 	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFFanActor& Actor = static_cast<AHFFanActor&>(Element);
@@ -912,6 +963,13 @@ namespace
 				TEXT("Fridge"), &SeedRefrigerator },
 			{ EHFFixtureType::WashingMachine, AHFWashingMachineActor::StaticClass(),
 				TEXT("Washer"), &SeedWashingMachine },
+
+			// THE TRIM. Both are placed by what they are fixed to rather than by what the drawing
+			// says - see the seeds above - and neither articulates, for reasons stated on the actors.
+			{ EHFFixtureType::Railing, AHFRailingActor::StaticClass(),
+				TEXT("Railing"), &SeedRailing },
+			{ EHFFixtureType::Pelmet, AHFPelmetActor::StaticClass(),
+				TEXT("Pelmet"), &SeedPelmet },
 
 			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
 				TEXT("Fan"), &SeedCeilingFan },

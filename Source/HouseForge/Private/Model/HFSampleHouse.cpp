@@ -55,7 +55,33 @@ namespace
 	constexpr double ParapetThickness  = 115.0;
 
 	constexpr double WallHeight    = 3000.0;
-	constexpr double ParapetHeight = 1100.0;
+
+	// ------------------------------------------------------------- why the parapet is a DWARF wall
+	//
+	// IT WAS 1100, AND THE RAILING DRAWN ON TOP OF IT MADE A 1900 mm BARRIER.
+	//
+	// Both figures are in the drawing and both are individually sensible. A 1100 masonry parapet is a
+	// compliant guard on its own - NBC 2016 Part 4 asks 1050 - and an 800 MS railing is a normal
+	// balustrade. Stacked, they are 1900 above the balcony floor, and that is not a balcony; it is a
+	// cage. Standing eye level is about 1600, so you cannot see out of any of the three, and from the
+	// living room the south window - sill 900, head 2100 - looks straight into a grille over its whole
+	// lower half. Nothing in the spec says so and every test passed on it, which is how it survived
+	// three milestones.
+	//
+	// The two readings that make one object out of the two numbers are: a full parapet with a HANDRAIL
+	// on it, or a dwarf wall with a GUARD on it. The drawing settles which - it marks 800 of MS
+	// railing, and posts, a top rail, a bottom rail and infill are a guard rather than a rail on a
+	// coping. So the masonry is the dwarf wall.
+	//
+	// 450 is the standard kerb an Indian balcony railing bolts to, and it puts the guard at
+	// 450 + 800 = 1250 above the finished balcony floor. That clears the 1050 minimum and the 1200
+	// some bye-laws ask above 15 m, and it leaves 800 above the coping - which is the OTHER height
+	// that matters, because a coping is a foothold and the usual requirement above one is 750. See
+	// FHFRailingParams::GuardHeightAboveFloor and HeightAboveFoothold, which assert both.
+	//
+	// Nothing else in the flat measures from this. The balconies have no ceilings, no openings in
+	// their parapets and no skirting; the two condensing units stand on the floor beside them.
+	constexpr double ParapetHeight = 450.0;
 
 	constexpr double DoorWidth     = 900.0;
 	constexpr double DoorHeight    = 2100.0;
@@ -1264,6 +1290,11 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// ------------------------------------------------------------------------- balconies
 	{
+		// All three are drawn 60 mm inboard of their parapet's centreline, which leaves 27.5 of a 60
+		// wide railing hanging over the balcony with nothing under its base plates. Left exactly as
+		// drawn: FHFFixturePlacement::OnWallTop centres it on the coping, because that is a fact
+		// about how a balustrade is fixed rather than a number three fixtures should each carry a
+		// copy of - the same argument OnWallFace's correction is made from.
 		auto AddRailing = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
 			const FVector2D& Footprint, double Rotation, const FName& AnchorWall)
 		{

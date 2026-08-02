@@ -262,11 +262,152 @@ struct HOUSEFORGE_API FHFDistributionBoardParams
 	bool IsValid() const { return Width > 0.0 && Height > 0.0 && Depth > DoorThickness; }
 };
 
+/**
+ * A curtain pelmet: a board and a fascia forming a downward slot that hides a curtain track.
+ *
+ * ## Frame
+ *
+ * Centimetres, origin at the CENTRE of the drawn footprint in plan, Z = 0 at the BOTTOM of the drawn
+ * box, +Y running BACK into the wall - the same datum FHFMirrorParams and FHFAccessoryPlateParams
+ * use. The back plane is at +Depth/2 and lands on the plaster; the TOP is what matters here, because
+ * a pelmet is set out from the ceiling rather than from the floor. See FHFFixturePlacement::UnderSoffit.
+ *
+ * ## Why it is a drop under the ceiling and not a pocket cut into it
+ *
+ * A pelmet in a flat with a false ceiling is usually a POCKET: the ceiling stops short of the window
+ * wall and the track hangs in the slot that leaves, so nothing at all projects below the finished
+ * soffit. That is the better detail and it is not what this builds, for two reasons that are both
+ * numbers rather than preferences.
+ *
+ * FIRST, THE BAND IS TOO SHALLOW TO POCKET. The living room's ceiling is a 600 wide cove band
+ * dropping 150. Cut a 180 pocket into it and the slot is 150 deep less the 20 board, so 130 of clear
+ * height - and a curtain track is 25 with a pinch-pleat heading of 75 to 90 hanging off it, before
+ * any fixing. The heading would show below the ceiling line, which is the one thing a pelmet exists
+ * to prevent. The cove wins the 150; the pelmet takes its own 200 below it.
+ *
+ * SECOND, A FIXTURE MAY NOT DECIDE WHERE A CEILING IS. FHFCeilingFit resolves every fixture in a room
+ * AGAINST the finished soffit. A pelmet that cut its own aperture in the ceiling would make the
+ * soffit depend on the fixtures, and the fixtures depend on the soffit - a cycle, in the one
+ * mechanism in this plugin that exists to stop fittings and ceilings disagreeing.
+ *
+ * So it hangs 200 below the band with its top board BURIED in it rather than touching it, its front
+ * face 180 from the plaster and therefore well inside the 600 band. From the room it reads as a
+ * second step of the same ceiling over the window, which is what it is.
+ *
+ * ## What moves: nothing, and the curtain is why
+ *
+ * The obvious moving part is a pair of curtain leaves sliding to each side, and they are deliberately
+ * not built. A curtain is not a rigid body: drawn back it GATHERS to about a fifth of its width, and
+ * no translation of a solid does that. A leaf modelled closed and slid sideways runs a metre past the
+ * end of its own pelmet; a leaf modelled gathered and slid across covers a 1900 window with a 350
+ * rag. Both measure as motion and both are visible lies - which is the failure this project already
+ * has a name for, from a wardrobe whose two leaves each travelled their full 118 cm and cancelled.
+ *
+ * EHFFixtureType::Curtain is its own type for exactly this reason and the reference flat declares
+ * none. So the pelmet carries the track and the slot, and nothing on it moves.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFPelmetParams
+{
+	GENERATED_BODY()
+
+	/** Length of the run along the wall. Wider than the window, so the stack clears the glass. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Width = 190.0;
+
+	/** Wall face to the front of the fascia. 150-200 is what a track and a heading need to hide in. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Depth = 18.0;
+
+	/** How far the fascia hangs below the finished soffit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Height = 20.0;
+
+	/**
+	 * The boards. A project figure, resolved by the composing layer from the joinery defaults.
+	 *
+	 * A pelmet is made of the same 18 mm ply the joinery in the flat is made of, by the same carpenter
+	 * on the same day. Reading it here rather than declaring a number of its own is what keeps it that
+	 * way when somebody changes the board on the settings page.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double BoardThickness = 1.8;
+
+	/** Width of the aluminium track section. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double TrackWidth = 2.5;
+
+	/** Depth of the track section below the board it is screwed to. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double TrackDepth = 1.5;
+
+	/**
+	 * Gap between the back of the fascia and the front of the track.
+	 *
+	 * What a curtain hangs in. Too small and the heading fouls the fascia every time it is drawn; too
+	 * large and the curtain hangs away from the window with a light gap behind it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double TrackSetback = 3.5;
+
+	/** Radius rolled onto the fascia's bottom arris. The line the room actually sees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Softness", meta = (ClampMin = "0.0"))
+	double EdgeRoll = 0.3;
+
+	/** Clear length of the slot, between the two end returns. */
+	double ClearWidth() const { return FMath::Max(Width - 2.0 * BoardThickness, 0.0); }
+
+	/** Front-to-back of the slot, behind the fascia. */
+	double SlotDepth() const { return FMath::Max(Depth - BoardThickness, 0.0); }
+
+	/**
+	 * How much curtain heading the fascia hides, below the track. THE MEASUREMENT THAT SAYS IT WORKS.
+	 *
+	 * A pinch-pleat heading is 75 to 90 mm tall and it hangs off the track's gliders. A pelmet whose
+	 * fascia stops above that shows a row of hooks, which is the one thing the whole fitting exists to
+	 * prevent - and it is invisible in plan, in section and in every test that only measures the box.
+	 */
+	double ConcealedHeadingHeight() const
+	{
+		return FMath::Max(Height - BoardThickness - TrackDepth, 0.0);
+	}
+
+	/** The drawn box IS the object: nothing on a pelmet stands above its own top board. */
+	double BuiltHeight() const { return Height; }
+
+	bool IsValid() const
+	{
+		return Width > 2.0 * BoardThickness && Depth > BoardThickness
+			&& Height > BoardThickness && BoardThickness > 0.0;
+	}
+};
+
 /** A composed wall plate. Plain data carrying meshes by value. */
 struct HOUSEFORGE_API FHFWallPlateBuild
 {
 	UE::Geometry::FDynamicMesh3 Shell;
 	TArray<FHFMeshPart> Parts;
+	bool bValid = false;
+};
+
+/**
+ * A composed pelmet, with the track kept apart from the case that hides it.
+ *
+ * Separate for the reason every build struct here keeps its sub-assemblies: "the fascia hides the
+ * track" is a statement about the gap between two solids, and it stops being answerable the moment
+ * they are one mesh.
+ */
+struct HOUSEFORGE_API FHFPelmetBuild
+{
+	UE::Geometry::FDynamicMesh3 Shell;
+
+	/** Fascia, top board and the two end returns, finished as the ceiling is. */
+	UE::Geometry::FDynamicMesh3 Case;
+
+	/** The track section, in MetalHardware. */
+	UE::Geometry::FDynamicMesh3 Track;
+
+	FHFPelmetParams Used;
 	bool bValid = false;
 };
 
@@ -276,6 +417,7 @@ public:
 	static FHFMirrorParams SanitiseMirror(const FHFMirrorParams& Params);
 	static FHFAccessoryPlateParams SanitiseAccessoryPlate(const FHFAccessoryPlateParams& Params);
 	static FHFDistributionBoardParams SanitiseDistributionBoard(const FHFDistributionBoardParams& Params);
+	static FHFPelmetParams SanitisePelmet(const FHFPelmetParams& Params);
 
 	/** Backing board and bevelled glass. Nothing moves; see FHFMirrorParams. */
 	static FHFWallPlateBuild BuildMirror(const FHFMirrorParams& Params);
@@ -285,6 +427,13 @@ public:
 
 	/** Enclosure, rail, breakers, and the door they are sequenced behind. */
 	static FHFWallPlateBuild BuildDistributionBoard(const FHFDistributionBoardParams& Params);
+
+	/**
+	 * Fascia, top board, two end returns and the track they hide. Nothing moves; see FHFPelmetParams.
+	 *
+	 * @return A build with bValid false and empty meshes when the parameters describe no pelmet.
+	 */
+	static FHFPelmetBuild BuildPelmet(const FHFPelmetParams& Params);
 
 	/** Part id of a rocker, left to right. */
 	static FName RockerPartId(int32 Index);

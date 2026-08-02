@@ -299,11 +299,254 @@ struct HOUSEFORGE_API FHFChairParams
 	}
 };
 
+/** What fills the frame of a balcony guard between its posts and its rails. */
+UENUM(BlueprintType)
+enum class EHFRailingInfill : uint8
+{
+	/**
+	 * Vertical bars. The MS railing this flat is drawn with, and the only infill that is safe by
+	 * construction rather than by care.
+	 *
+	 * VERTICAL, and never a second horizontal rail between the top and the bottom. A guard with
+	 * intermediate horizontals is a ladder: a child climbs it, arrives above the handrail, and the
+	 * height that made the guard compliant is now the height they fall from. That is the reason the
+	 * infill is an enum with two members rather than a bar count with a spacing - "horizontal bars"
+	 * is not one of the choices on offer.
+	 */
+	Balusters,
+
+	/** A toughened panel captured in the frame. Thickness is real; a plane refracts nothing. */
+	Glass
+};
+
+/**
+ * A balcony guard: posts on a dwarf parapet, a top rail, a bottom rail, and infill between them.
+ *
+ * ## Frame
+ *
+ * Centimetres, origin at the CENTRE of the drawn footprint in plan, Z = 0 at the BOTTOM of the drawn
+ * box - which is the top of the parapet coping the base plates bolt to. The run lies along +X.
+ *
+ * ## The two numbers that make this a guard rather than a decoration
+ *
+ * A balcony railing is one of the few things in a flat that has a code behind it, and both figures
+ * are real:
+ *
+ *   - **The guard must be at least 1050 above the balcony floor.** NBC 2016 Part 4; bye-laws for
+ *     towers above 15 m commonly ask 1200. That is a statement about the WHOLE guard - the parapet
+ *     plus the railing standing on it - and a railing cannot check it alone, so the parapet arrives
+ *     as MountBaseHeight from the composing layer, exactly as an extract's host wall thickness does.
+ *     See GuardHeightAboveFloor.
+ *
+ *   - **No gap anywhere may pass a 100 mm sphere.** The one that catches people out is not the gap
+ *     between the balusters, which everybody counts; it is the gap UNDER the bottom rail, which is
+ *     whatever is left over once the rail has been put where it looks right. See
+ *     BottomRailClearance and WorstClearGap.
+ *
+ * A third rule has no number and is expressed as a type instead: the infill must not be climbable.
+ * See EHFRailingInfill::Balusters.
+ *
+ * ## What moves: nothing, and it is said out loud
+ *
+ * A gate in a balustrade swings and a French-window guard folds. This is 4200 of fixed MS balustrade
+ * on a parapet with no opening in it anywhere, so it has no hinge, no travel limit and no open
+ * amount that would mean anything. See .claude/rules/04-conventions.md - the rule is that a thing
+ * which moves in the real object moves here.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFRailingParams
+{
+	GENERATED_BODY()
+
+	/** Length of the run, along +X. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Width = 420.0;
+
+	/** Across the run. The widest member - the top rail - is exactly this, so the drawn box is the object. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Depth = 6.0;
+
+	/** Coping to the top of the handrail. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Height = 80.0;
+
+	/**
+	 * How high the thing this stands on is, above the balcony floor. The parapet.
+	 *
+	 * NOT SOMETHING THE RAILING KNOWS, and that is why it is a parameter. A generator may not go
+	 * looking for the wall under it, so the composing layer measures the parapet and hands the figure
+	 * over - the same rule AHFFanActor takes its host wall's thickness by. Zero is a railing standing
+	 * on the floor, which is a guard that has to make the whole 1050 by itself.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double MountBaseHeight = 0.0;
+
+	/** Square section of a post. 50 x 50 x 2 SHS is what an MS balustrade of this span is made of. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double PostSection = 5.0;
+
+	/**
+	 * Greatest centre-to-centre spacing of the posts. The post count is derived from it, never declared.
+	 *
+	 * 1200 is what a 50 x 50 post carrying a 100 kg/m horizontal line load spans before the deflection
+	 * at the handrail stops feeling solid under a hand. A drawing states a railing's length, never its
+	 * post count - so the count is worked out here and a longer run simply gets more posts.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "1.0"))
+	double MaxPostSpacing = 120.0;
+
+	/** Height of the handrail section capping the posts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double TopRailHeight = 4.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double BottomRailHeight = 4.0;
+
+	/** Depth of the bottom rail. Narrower than the top, so the handrail reads as the handrail. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double BottomRailDepth = 4.0;
+
+	/**
+	 * Clear gap between the coping and the underside of the bottom rail.
+	 *
+	 * THE GAP EVERYBODY FORGETS. The balusters get counted because the eye counts them; this one is
+	 * whatever is left when the bottom rail has been put where it looks right, and at 150 it passes a
+	 * toddler head first. Sanitise clamps it to MaxClearGap rather than trusting the figure.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double BottomRailClearance = 7.5;
+
+	/** Base plate bolted to the coping under each post. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double BasePlateThickness = 0.8;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Front")
+	EHFRailingInfill Infill = EHFRailingInfill::Balusters;
+
+	/** Square section of a baluster. 16 mm MS bar. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double BalusterSection = 1.6;
+
+	/** Toughened panel, for a glass infill. 10-12 mm is what a captured balcony panel is cut from. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double GlassThickness = 1.2;
+
+	/**
+	 * The largest gap any part of this guard may leave. 100 mm, and it is not a preference.
+	 *
+	 * The sphere rule: NBC 2016 Part 4, and the same figure in every code that has one. It sets the
+	 * baluster count, it clamps BottomRailClearance, and WorstClearGap reports what was achieved so a
+	 * test can assert against the rule rather than against a spacing somebody typed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Safety", meta = (ClampMin = "1.0"))
+	double MaxClearGap = 10.0;
+
+	/** Arris radius on the steel. Small, and the reason a post is not a pencil line in a render. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Softness", meta = (ClampMin = "0.0"))
+	double SteelArris = 0.25;
+
+	/** How many posts the run gets. Derived from MaxPostSpacing; never fewer than the two ends. */
+	int32 PostCount() const
+	{
+		if (Width <= 0.0 || MaxPostSpacing <= 0.0)
+		{
+			return 2;
+		}
+		return FMath::Max(FMath::CeilToInt32(Width / MaxPostSpacing) + 1, 2);
+	}
+
+	/** Clear width of one bay, post face to post face. */
+	double BayClearWidth() const
+	{
+		const int32 Posts = PostCount();
+		return FMath::Max((Width - Posts * PostSection) / FMath::Max(Posts - 1, 1), 0.0);
+	}
+
+	/** Clear height of the infill, bottom rail top to top rail underside. */
+	double InfillClearHeight() const
+	{
+		return FMath::Max(Height - TopRailHeight - BottomRailClearance - BottomRailHeight, 0.0);
+	}
+
+	/** How many bars one bay needs so that no gap in it passes the sphere. */
+	int32 BalustersPerBay() const
+	{
+		const double Bay = BayClearWidth();
+		if (Bay <= MaxClearGap || BalusterSection <= 0.0 || MaxClearGap <= 0.0)
+		{
+			return 0;
+		}
+
+		// n bars leave n + 1 gaps. The smallest n with (Bay - n * Section) / (n + 1) <= MaxGap.
+		return FMath::Max(FMath::CeilToInt32((Bay - MaxClearGap) / (MaxClearGap + BalusterSection)), 0);
+	}
+
+	/** The gap actually achieved between two bars, or across a bay with none. */
+	double BalusterClearGap() const
+	{
+		const int32 Bars = BalustersPerBay();
+		return FMath::Max((BayClearWidth() - Bars * BalusterSection) / (Bars + 1), 0.0);
+	}
+
+	/**
+	 * The widest opening anywhere in the guard. THE NUMBER THE SPHERE RULE IS ABOUT.
+	 *
+	 * A glass panel captured on all four sides leaves nothing but the gap under the bottom rail, so
+	 * the two infills are answered by one function rather than by two assertions that can disagree.
+	 */
+	double WorstClearGap() const
+	{
+		const double Under = BottomRailClearance;
+		return (Infill == EHFRailingInfill::Glass) ? Under : FMath::Max(Under, BalusterClearGap());
+	}
+
+	/** Top of the handrail above the BALCONY FLOOR, which is what a code height is measured from. */
+	double GuardHeightAboveFloor() const { return MountBaseHeight + Height; }
+
+	/**
+	 * Handrail height above the parapet coping - the highest thing a child can get a foot on.
+	 *
+	 * A solid parapet is not a foothold; its coping is. So the guard has two heights to answer for,
+	 * and this is the one a dwarf wall makes worse rather than better: raise the parapet and this
+	 * figure falls. 750 above a foothold is the usual requirement.
+	 */
+	double HeightAboveFoothold() const { return Height; }
+
+	/** The drawn box IS the object: the handrail's top is the top of the railing. */
+	double BuiltHeight() const { return Height; }
+
+	bool IsValid() const
+	{
+		return Width > 0.0 && Depth > 0.0 && PostSection > 0.0
+			&& Height > TopRailHeight + BottomRailHeight + BottomRailClearance;
+	}
+};
+
 /** A composed frame. Plain data carrying meshes by value. */
 struct HOUSEFORGE_API FHFFrameBuild
 {
 	UE::Geometry::FDynamicMesh3 Shell;
 	TArray<FHFMeshPart> Parts;
+	bool bValid = false;
+};
+
+/**
+ * A composed balcony guard, with the infill kept apart from the frame that captures it.
+ *
+ * Separate for the reason every build struct in this kit keeps its sub-assemblies: the gaps are the
+ * whole safety case, and a gap between two solids stops being answerable once they are one mesh.
+ */
+struct HOUSEFORGE_API FHFRailingBuild
+{
+	UE::Geometry::FDynamicMesh3 Shell;
+
+	/** Base plates, posts, top rail and bottom rail, in MetalHardware. */
+	UE::Geometry::FDynamicMesh3 Frame;
+
+	/** Balusters, in MetalHardware, or the captured panels, in Glass. */
+	UE::Geometry::FDynamicMesh3 Infill;
+
+	FHFRailingParams Used;
 	bool bValid = false;
 };
 
@@ -368,6 +611,19 @@ public:
 	 * @return A build with bValid false and empty meshes when the parameters describe no table.
 	 */
 	static FHFTableBuild BuildTable(const FHFTableParams& Params);
+
+	static FHFRailingParams SanitiseRailing(const FHFRailingParams& Params);
+
+	/**
+	 * Base plates, posts, a handrail, a bottom rail and the infill between them.
+	 *
+	 * Nothing moves; see FHFRailingParams. The post count and the baluster count are both DERIVED -
+	 * from MaxPostSpacing and from MaxClearGap - so a run made longer gets more posts and a bay made
+	 * wider gets more bars, rather than the same count stretched over a bigger opening.
+	 *
+	 * @return A build with bValid false and empty meshes when the parameters describe no railing.
+	 */
+	static FHFRailingBuild BuildRailing(const FHFRailingParams& Params);
 
 	static FHFChairParams SanitiseChair(const FHFChairParams& Params);
 

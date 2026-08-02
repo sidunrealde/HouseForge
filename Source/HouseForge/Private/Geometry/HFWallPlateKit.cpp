@@ -741,3 +741,144 @@ FHFWallPlateBuild FHFWallPlateKit::BuildDistributionBoard(const FHFDistributionB
 	Out.bValid = Out.Shell.TriangleCount() > 0;
 	return Out;
 }
+
+// ------------------------------------------------------------------------------- curtain pelmet
+//
+// Four boards and a track. Every member is its own closed solid joined through AppendPreservingRoles,
+// which is what makes an assembly with an OPEN underside watertight: the slot is a gap between
+// solids, not a hole in one.
+//
+// The case carries EHFSurfaceRole::CeilingSoffit rather than a joinery role, and that is a decision
+// rather than an oversight. A pelmet is painted with the ceiling it hangs off, by the same painter on
+// the same day, and it is the finish - not the geometry - that decides whether the room reads a step
+// in its ceiling or a box screwed to its wall. See FHFPelmetParams.
+
+FHFPelmetParams FHFWallPlateKit::SanitisePelmet(const FHFPelmetParams& Params)
+{
+	FHFPelmetParams P = Params;
+
+	P.Width = FMath::Max(P.Width, 0.0);
+	P.Depth = FMath::Max(P.Depth, 0.0);
+	P.Height = FMath::Max(P.Height, 0.0);
+
+	// The board may not be more than the box can carry in any direction. A drawing that gave a 150
+	// deep pelmet has not asked for a 60 mm board leaving a 30 mm slot.
+	P.BoardThickness = FMath::Clamp(P.BoardThickness, 0.05,
+		FMath::Max(FMath::Min3(P.Width * 0.25, P.Depth * 0.5, P.Height * 0.5), 0.05));
+
+	P.TrackDepth = FMath::Clamp(P.TrackDepth, 0.0,
+		FMath::Max(P.Height - P.BoardThickness, 0.0));
+
+	// The track has to fit in the slot behind the fascia, setback included. Squeezed rather than
+	// refused: a pelmet drawn 100 deep is a shallow one, not an invalid one.
+	const double Slot = P.SlotDepth();
+	P.TrackWidth = FMath::Clamp(P.TrackWidth, 0.0, FMath::Max(Slot, 0.0));
+	P.TrackSetback = FMath::Clamp(P.TrackSetback, 0.0, FMath::Max(Slot - P.TrackWidth, 0.0));
+
+	P.EdgeRoll = FMath::Clamp(P.EdgeRoll, 0.0, FMath::Max(P.BoardThickness * 0.4, 0.0));
+
+	return P;
+}
+
+FHFPelmetBuild FHFWallPlateKit::BuildPelmet(const FHFPelmetParams& Params)
+{
+	FHFPelmetBuild Out;
+	FHFMeshOps::InitialiseMesh(Out.Shell);
+	FHFMeshOps::InitialiseMesh(Out.Case);
+	FHFMeshOps::InitialiseMesh(Out.Track);
+
+	const FHFPelmetParams P = SanitisePelmet(Params);
+	Out.Used = P;
+
+	if (!P.IsValid())
+	{
+		return Out;
+	}
+
+	const double HalfW = P.Width * 0.5;
+	const double HalfD = P.Depth * 0.5;
+	const double T = P.BoardThickness;
+
+	// The plaster is at +HalfD and the fascia's front face at -HalfD, so the drawn depth is the whole
+	// projection off the wall and nothing is allowed past it.
+	const double FrontY = -HalfD;
+	const double BackY = HalfD;
+
+	FHFSoftBoxParams Board;
+	Board.CornerRadius = FMath::Min(P.EdgeRoll, T * 0.4);
+	Board.TopRadius = Board.CornerRadius * 0.5;
+	Board.BottomRadius = Board.CornerRadius * 0.5;
+	Board.CornerSteps = 2;
+	Board.RollSteps = 2;
+
+	auto AppendBoard = [&Out, &Board](const FVector3d& Min, const FVector3d& Max)
+	{
+		const FVector3d Size = Max - Min;
+		if (Size.X <= 0.05 || Size.Y <= 0.05 || Size.Z <= 0.05)
+		{
+			return;
+		}
+		FHFMeshOps::AppendSoftBox(Out.Case, Min, Max, Board, EHFSurfaceRole::CeilingSoffit);
+	};
+
+	// ------------------------------------------------------------------------------ the fascia
+	//
+	// FULL HEIGHT AND FULL WIDTH, at the front. It is the only part of the fitting the room sees,
+	// and the rolled arris along its bottom edge is the line that separates a pelmet from a shadow.
+	AppendBoard(FVector3d(-HalfW, FrontY, 0.0), FVector3d(HalfW, FrontY + T, P.Height));
+
+	// --------------------------------------------------------------------------- the top board
+	//
+	// BEHIND the fascia rather than over it, so the two do not share a plane at the front - two
+	// coplanar faces in a mesh flash against each other from any distance, which is exactly the
+	// defect FHFStructuralCut exists to prevent on the walls.
+	AppendBoard(FVector3d(-HalfW, FrontY + T, P.Height - T), FVector3d(HalfW, BackY, P.Height));
+
+	// ------------------------------------------------------------------------ the end returns
+	//
+	// A pelmet without them is a slot you can see straight into from the side of the room, and every
+	// one of these is on a window wall with the room's seating looking along it.
+	AppendBoard(FVector3d(-HalfW, FrontY + T, 0.0), FVector3d(-HalfW + T, BackY, P.Height));
+	AppendBoard(FVector3d(HalfW - T, FrontY + T, 0.0), FVector3d(HalfW, BackY, P.Height));
+
+	// ------------------------------------------------------------------------------- the track
+	//
+	// A real section with a real opening in it, not a bar: the whole reason a pelmet is 180 deep is
+	// that a track and a heading hang in it, and a solid rectangle where the track goes says nothing
+	// about whether they would fit.
+	if (P.TrackWidth > 0.05 && P.TrackDepth > 0.05 && P.ClearWidth() > 0.05)
+	{
+		const double TrackFrontY = FrontY + T + P.TrackSetback;
+		const double TrackTopZ = P.Height - T;
+
+		// A channel opening downward, in (u, v) = (Y, Z) with the sweep running along +X.
+		const double W = P.TrackWidth;
+		const double D = P.TrackDepth;
+		const double Web = FMath::Min(W * 0.3, D * 0.5);
+
+		const TArray<FVector2D> Section = {
+			FVector2D(0.0, 0.0),
+			FVector2D(W, 0.0),
+			FVector2D(W, -D),
+			FVector2D(W - Web, -D),
+			FVector2D(W - Web, -D + Web),
+			FVector2D(Web, -D + Web),
+			FVector2D(Web, -D),
+			FVector2D(0.0, -D)
+		};
+
+		FHFMeshOps::AppendExtrudedSection(Out.Track, Section,
+			FVector3d(-HalfW + T, TrackFrontY, TrackTopZ),
+			FVector3d::UnitY(), FVector3d::UnitX(), P.ClearWidth(),
+			EHFSurfaceRole::MetalHardware);
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Case);
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Track);
+
+	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.Case);
+	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.Track);
+
+	Out.bValid = Out.Shell.TriangleCount() > 0;
+	return Out;
+}

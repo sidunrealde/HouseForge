@@ -110,6 +110,66 @@ FTransform FHFFixturePlacement::OnWallFace(const FHFFixture& Fixture, double Flo
 		FVector(Corrected.X, Corrected.Y, FloorZ + Fixture.BaseZ));
 }
 
+double FHFFixturePlacement::WallCentrelineCorrection(const FHFFixture& Fixture, const FHFWall* AnchorWall)
+{
+	if (AnchorWall == nullptr)
+	{
+		return 0.0;
+	}
+
+	const double Radians = FMath::DegreesToRadians(FacingYaw(Fixture, AnchorWall));
+	const FVector2D Back(-FMath::Sin(Radians), FMath::Cos(Radians));
+
+	// The centreline itself, not a face: base plates go on the middle of a coping. Signed along the
+	// fixture's own back direction, so the sign says which way it has to move.
+	const FVector2D OnCentreline =
+		FMath::ClosestPointOnSegment2D(Fixture.Position, AnchorWall->Start, AnchorWall->End);
+
+	return FVector2D::DotProduct(Fixture.Position - OnCentreline, Back);
+}
+
+FTransform FHFFixturePlacement::OnWallTop(const FHFFixture& Fixture, double FloorZ,
+	const FHFWall* AnchorWall)
+{
+	if (AnchorWall == nullptr)
+	{
+		return FreeStanding(Fixture, FloorZ);
+	}
+
+	const double Yaw = FacingYaw(Fixture, AnchorWall);
+	const double Radians = FMath::DegreesToRadians(Yaw);
+	const FVector2D Back(-FMath::Sin(Radians), FMath::Cos(Radians));
+
+	// ACROSS THE WALL AND NOWHERE ELSE, as OnWallFace does. Where a railing starts and stops along
+	// its parapet is a real decision on the drawing; only the offset across it is a fixing detail.
+	const FVector2D Corrected = Fixture.Position - Back * WallCentrelineCorrection(Fixture, AnchorWall);
+
+	return FTransform(FRotator(0.0, Yaw, 0.0),
+		FVector(Corrected.X, Corrected.Y, FloorZ + Fixture.BaseZ));
+}
+
+FTransform FHFFixturePlacement::UnderSoffit(const FHFFixture& Fixture, double SoffitZ,
+	const FHFWall* AnchorWall, double Embedment)
+{
+	// The top of the drawn box lands on the soffit, driven up into it by the embedment. The BaseZ the
+	// drawing carries is deliberately not read: see the header.
+	const double BottomZ = SoffitZ + FMath::Max(Embedment, 0.0) - Fixture.Height;
+
+	if (AnchorWall == nullptr)
+	{
+		return FTransform(FRotator(0.0, Fixture.RotationDegrees, 0.0),
+			FVector(Fixture.Position.X, Fixture.Position.Y, BottomZ));
+	}
+
+	const double Yaw = FacingYaw(Fixture, AnchorWall);
+	const double Radians = FMath::DegreesToRadians(Yaw);
+	const FVector2D Back(-FMath::Sin(Radians), FMath::Cos(Radians));
+
+	const FVector2D Corrected = Fixture.Position - Back * WallFaceCorrection(Fixture, AnchorWall);
+
+	return FTransform(FRotator(0.0, Yaw, 0.0), FVector(Corrected.X, Corrected.Y, BottomZ));
+}
+
 bool FHFFixturePlacement::FootprintContains(const FHFFixture& Fixture, const FVector2D& Point, double Margin)
 {
 	const double Radians = FMath::DegreesToRadians(Fixture.RotationDegrees);

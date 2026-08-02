@@ -532,3 +532,194 @@ FHFChairBuild FHFFrameKit::BuildChair(const FHFChairParams& Params)
 	Out.bValid = Out.Shell.TriangleCount() > 0;
 	return Out;
 }
+
+// ------------------------------------------------------------------------------- balcony guard
+//
+// A railing is the same construction problem as a towel rail at twenty times the length: every
+// dimension that matters is a centre line, every joint is a member dying into another member's
+// surface, and the whole thing is thin enough that a seam at a joint reads from across the balcony.
+// So JointOverlap applies here exactly as it does above - the balusters run INTO the rails and the
+// posts INTO the handrail, rather than up to them.
+//
+// What is different is that the numbers are not a matter of taste. The post count comes from the
+// span, the baluster count comes from the sphere rule, and neither is a figure anybody types.
+
+FHFRailingParams FHFFrameKit::SanitiseRailing(const FHFRailingParams& Params)
+{
+	FHFRailingParams P = Params;
+
+	P.Width = FMath::Max(P.Width, 0.0);
+	P.Depth = FMath::Max(P.Depth, 0.0);
+	P.Height = FMath::Max(P.Height, 0.0);
+	P.MountBaseHeight = FMath::Max(P.MountBaseHeight, 0.0);
+	P.MaxClearGap = FMath::Max(P.MaxClearGap, 1.0);
+	P.MaxPostSpacing = FMath::Max(P.MaxPostSpacing, 1.0);
+
+	// No member may be thicker than the box it was drawn in. A drawing that gave a 60 mm railing has
+	// not asked for a 100 mm post standing 40 out of it.
+	P.PostSection = FMath::Clamp(P.PostSection, 0.0, FMath::Max(P.Depth, 0.0));
+	P.BottomRailDepth = FMath::Clamp(P.BottomRailDepth, 0.0, FMath::Max(P.Depth, 0.0));
+	P.BalusterSection = FMath::Clamp(P.BalusterSection, 0.0, FMath::Max(P.Depth, 0.0));
+	P.GlassThickness = FMath::Clamp(P.GlassThickness, 0.0, FMath::Max(P.Depth, 0.0));
+
+	// THE SPHERE RULE IS ENFORCED, NOT DOCUMENTED. The gap under the bottom rail is the one nobody
+	// counts, and a figure typed at 150 because it looked right is a guard a toddler goes through
+	// head first. Clamped here so no caller can express it, exactly as FHFCeilingDefaults clamps a
+	// band drop that would push a downlight through the slab.
+	P.BottomRailClearance = FMath::Clamp(P.BottomRailClearance, 0.0, P.MaxClearGap);
+
+	// The rails and the clearance together may not eat the whole height; a guard with no infill left
+	// in it is two rails and some air.
+	const double Stack = P.TopRailHeight + P.BottomRailHeight + P.BottomRailClearance;
+	if (Stack > 0.0 && Stack >= P.Height)
+	{
+		const double Scale = P.Height * 0.6 / Stack;
+		P.TopRailHeight *= Scale;
+		P.BottomRailHeight *= Scale;
+		P.BottomRailClearance *= Scale;
+	}
+
+	P.BasePlateThickness = FMath::Clamp(P.BasePlateThickness, 0.0,
+		FMath::Max(P.BottomRailClearance, 0.0));
+
+	P.SteelArris = FMath::Clamp(P.SteelArris, 0.0, FMath::Max(P.PostSection * 0.35, 0.0));
+
+	return P;
+}
+
+FHFRailingBuild FHFFrameKit::BuildRailing(const FHFRailingParams& Params)
+{
+	FHFRailingBuild Out;
+	FHFMeshOps::InitialiseMesh(Out.Shell);
+	FHFMeshOps::InitialiseMesh(Out.Frame);
+	FHFMeshOps::InitialiseMesh(Out.Infill);
+
+	const FHFRailingParams P = SanitiseRailing(Params);
+	Out.Used = P;
+
+	if (!P.IsValid())
+	{
+		return Out;
+	}
+
+	const double HalfW = P.Width * 0.5;
+	const double HalfD = P.Depth * 0.5;
+
+	const FHFSoftBoxParams Steel = TimberArris(P.SteelArris, P.PostSection);
+
+	// ------------------------------------------------------------------------------- the posts
+	//
+	// Set out so the END posts' outer faces land exactly on the ends of the run: the drawn width is
+	// the object, and a railing whose posts are centred on the ends overhangs its own parapet by half
+	// a section at each end.
+	const int32 Posts = P.PostCount();
+	const double PostPitch = (Posts > 1) ? (P.Width - P.PostSection) / (Posts - 1) : 0.0;
+
+	TArray<double> PostCentreX;
+	PostCentreX.Reserve(Posts);
+	for (int32 Index = 0; Index < Posts; ++Index)
+	{
+		PostCentreX.Add(-HalfW + P.PostSection * 0.5 + PostPitch * Index);
+	}
+
+	for (const double CentreX : PostCentreX)
+	{
+		// The post runs the whole height, INTO the handrail rather than up to it.
+		AppendSoft(Out.Frame,
+			FVector3d(CentreX - P.PostSection * 0.5, -P.PostSection * 0.5, 0.0),
+			FVector3d(CentreX + P.PostSection * 0.5, P.PostSection * 0.5, P.Height),
+			Steel, EHFSurfaceRole::MetalHardware);
+
+		// The base plate. As deep as the drawn box and no deeper - a 100 x 100 plate is what one
+		// really is, and it would stand 20 mm proud of a railing drawn 60 thick on both faces.
+		if (P.BasePlateThickness > 0.0)
+		{
+			// Clamped to the run as well as to the depth. The end posts stand hard against the ends,
+			// so an unclamped plate would put steel a whole half-plate past the drawn width - which is
+			// a railing overhanging its own parapet at both ends, and bounds that no longer answer for
+			// the object.
+			const double PlateX0 = FMath::Max(CentreX - P.PostSection, -HalfW);
+			const double PlateX1 = FMath::Min(CentreX + P.PostSection, HalfW);
+
+			AppendSoft(Out.Frame,
+				FVector3d(PlateX0, -HalfD, 0.0),
+				FVector3d(PlateX1, HalfD, P.BasePlateThickness),
+				TimberArris(P.SteelArris * 0.5, P.BasePlateThickness), EHFSurfaceRole::MetalHardware);
+		}
+	}
+
+	// -------------------------------------------------------------------------------- the rails
+	//
+	// The handrail is the full drawn depth, which is what makes the drawn box the object: it is the
+	// widest member on the railing and the only one anybody puts a hand on.
+	AppendSoft(Out.Frame,
+		FVector3d(-HalfW, -HalfD, P.Height - P.TopRailHeight),
+		FVector3d(HalfW, HalfD, P.Height),
+		TimberArris(P.SteelArris, P.TopRailHeight), EHFSurfaceRole::MetalHardware);
+
+	const double BottomRailZ0 = P.BottomRailClearance;
+	const double BottomRailZ1 = BottomRailZ0 + P.BottomRailHeight;
+
+	AppendSoft(Out.Frame,
+		FVector3d(-HalfW, -P.BottomRailDepth * 0.5, BottomRailZ0),
+		FVector3d(HalfW, P.BottomRailDepth * 0.5, BottomRailZ1),
+		TimberArris(P.SteelArris, P.BottomRailHeight), EHFSurfaceRole::MetalHardware);
+
+	// ------------------------------------------------------------------------------- the infill
+
+	const double InfillZ0 = BottomRailZ1 - JointOverlap;
+	const double InfillZ1 = P.Height - P.TopRailHeight + JointOverlap;
+
+	if (InfillZ1 > InfillZ0 + MinSolid)
+	{
+		for (int32 Bay = 0; Bay + 1 < Posts; ++Bay)
+		{
+			const double BayX0 = PostCentreX[Bay] + P.PostSection * 0.5;
+			const double BayX1 = PostCentreX[Bay + 1] - P.PostSection * 0.5;
+			const double BayWidth = BayX1 - BayX0;
+
+			if (BayWidth <= MinSolid)
+			{
+				continue;
+			}
+
+			if (P.Infill == EHFRailingInfill::Glass)
+			{
+				// Captured on all four sides, and running INTO the frame on every one of them: a panel
+				// that stops on the rail's face is a pane resting in a groove it does not reach.
+				AppendSoft(Out.Infill,
+					FVector3d(BayX0 - JointOverlap, -P.GlassThickness * 0.5, InfillZ0),
+					FVector3d(BayX1 + JointOverlap, P.GlassThickness * 0.5, InfillZ1),
+					TimberArris(0.05, P.GlassThickness), EHFSurfaceRole::Glass);
+				continue;
+			}
+
+			// BALUSTERS, AND THE COUNT IS THE SPHERE RULE. n bars leave n + 1 gaps, and the pitch is
+			// the bay divided by those gaps - so the bars are evenly spaced across the bay and the two
+			// end gaps are the same as the middle ones. A run laid out by repeated addition from one
+			// post leaves the remainder as a wide gap against the other, which is exactly the opening
+			// the rule exists to close.
+			const int32 Bars = P.BalustersPerBay();
+			const double Gap = P.BalusterClearGap();
+
+			for (int32 Bar = 0; Bar < Bars; ++Bar)
+			{
+				const double X0 = BayX0 + Gap * (Bar + 1) + P.BalusterSection * Bar;
+
+				AppendSoft(Out.Infill,
+					FVector3d(X0, -P.BalusterSection * 0.5, InfillZ0),
+					FVector3d(X0 + P.BalusterSection, P.BalusterSection * 0.5, InfillZ1),
+					TimberArris(P.SteelArris * 0.5, P.BalusterSection), EHFSurfaceRole::MetalHardware);
+			}
+		}
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Frame);
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Infill);
+
+	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.Frame);
+	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.Infill);
+
+	Out.bValid = Out.Shell.TriangleCount() > 0;
+	return Out;
+}
