@@ -21,7 +21,7 @@ using namespace UE::Geometry;
 // ---------------------------------------------------------------------------------------------
 //
 // The services group, on the bench: eight sockets, five switch plates, a consumer unit, three split
-// AC heads, two condensing units, a refrigerator and a washing machine.
+// AC heads, two condensing units, a refrigerator and a washing machine - twenty-one in all.
 //
 // Measured on volume, watertightness, bounds against the drawn box, roles, swept transforms and
 // visible apertures in centimetres - never on a triangle count. See .claude/rules/04-conventions.md.
@@ -461,6 +461,50 @@ bool FHFConsumerUnitFormTest::RunTest(const FString&)
 	TestEqual(TEXT("A door and one toggle per way"), Built.Parts.Num(), P.WayCount + 1);
 	TestTrue(TEXT("The door is there"),
 		FindPart(Built.Parts, FHFWallPlateKit::DoorPartId()) != nullptr);
+
+	// ------------------------------------------------- AND EVERY BREAKER IS BEHIND THE DOOR, SHUT AND OFF
+	//
+	// THE DEFECT THIS ASSERTION EXISTS FOR. The breaker bodies and the toggles standing out of them
+	// share the enclosure's depth with the door, and built to the interior depth with the tab added on
+	// top the toggles stood 2 mm PAST the drawn box - straight through the glazing, a row of metal
+	// tabs poking out of the front of the board.
+	//
+	// Nothing in a part's own measurements sees it: a toggle is correct, it throws the right way and
+	// the right distance, and it is the LEAF IN FRONT OF IT that it is wrong about. Only the whole
+	// assembly, measured against the box it is supposed to fit inside, says so. It was found in the
+	// built flat, by a fitting reporting 6.20 cm proud against a drawn 6.00.
+	for (const FHFMeshPart& Part : Built.Parts)
+	{
+		if (Part.PartId == FHFWallPlateKit::DoorPartId())
+		{
+			continue;
+		}
+
+		for (const double Amount : { 0.0, 1.0 })
+		{
+			const FBox Posed = PosedBounds(Part, Amount);
+
+			TestTrue(*FString::Printf(
+				TEXT("'%s' stays behind the door at %.0f%% thrown (front at %.2f, door at %.2f)"),
+				*Part.PartId.ToString(), Amount * 100.0, Posed.Min.Y,
+				-P.Depth * 0.5 + P.DoorThickness),
+				Posed.Min.Y >= -P.Depth * 0.5 + P.DoorThickness - 0.001);
+		}
+	}
+
+	// AND THE ENCLOSURE ITSELF STOPS WHERE THE DOOR BEGINS. The shell reaches the door's back face and
+	// no further; the drawn front of the box belongs to the leaf. A tray built to the full depth would
+	// leave the door hung in front of a box that already filled the fitting.
+	TestEqual(TEXT("The enclosure stops where its door begins"),
+		Bounds.Min.Y, -P.Depth * 0.5 + P.DoorThickness, 0.01);
+
+	// And the door takes it to exactly the drawn box, with nothing past it.
+	const FHFMeshPart* Door = FindPart(Built.Parts, FHFWallPlateKit::DoorPartId());
+	if (Door != nullptr)
+	{
+		TestEqual(TEXT("The shut door lands exactly on the drawn front"),
+			PosedBounds(*Door, 0.0).Min.Y, -P.Depth * 0.5, 0.01);
+	}
 
 	return true;
 }

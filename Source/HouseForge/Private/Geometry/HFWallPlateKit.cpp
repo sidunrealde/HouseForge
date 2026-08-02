@@ -537,9 +537,34 @@ FHFWallPlateBuild FHFWallPlateKit::BuildDistributionBoard(const FHFDistributionB
 
 	const double RailZ = CentreZ;
 	const double BreakerBackY = WallY - CaseWall;
-	const double BreakerDepth = FMath::Max(BreakerBackY - CaseFrontY - 0.3, 0.2);
-	const double BreakerFrontY = BreakerBackY - BreakerDepth;
 	const double BreakerHeight = FMath::Min(8.0, P.Height * 0.32);
+
+	// ------------------------------------------------------ THE TOGGLES HAVE TO FIT BEHIND THE DOOR
+	//
+	// The breaker's body and the toggle standing out of it share the enclosure's depth, and the whole
+	// lot has to end BEHIND the door - a toggle that reaches the door plane passes straight through
+	// the glazing, and the board comes out with a row of metal tabs poking out of its front.
+	//
+	// It did. Built to the interior depth with the tab added on top, the toggles stood 2 mm past the
+	// drawn box: nothing in the kit tests saw it, because a part is measured against the fitting and
+	// not against the leaf in front of it, and the flat reported the board standing 6.2 cm proud of a
+	// drawn 6.0. So the depth is DIVIDED rather than filled, and the tab gets its share first.
+	const double InteriorDepth = FMath::Max(BreakerBackY - CaseFrontY, 0.2);
+	const double TabLength = FMath::Min(1.1, InteriorDepth * 0.25);
+	const double TabHeight = FMath::Min(BreakerHeight * 0.30, 1.6);
+
+	// AND THE TOGGLE REACHES FURTHEST WHEN IT IS THROWN, not when it is upright. A tab rotating about
+	// its own root swings its far CORNER round on a radius, and the corner is further from the pivot
+	// than the face is: at 26 degrees a 11 x 16 mm tab reaches 2.4 mm further forward than its own
+	// length. Allowing for the length alone left the toggles poking through the door by exactly that,
+	// which is the second version of the same mistake. The radius covers it at any angle.
+	const double ToggleReach = FMath::Sqrt(TabLength * TabLength + TabHeight * TabHeight * 0.25);
+
+	// A shadow gap between the thrown toggle and the back of the door, so the two never touch.
+	const double DoorClearance = FMath::Min(0.2, InteriorDepth * 0.05);
+
+	const double BreakerDepth = FMath::Max(InteriorDepth - ToggleReach - DoorClearance, 0.2);
+	const double BreakerFrontY = BreakerBackY - BreakerDepth;
 
 	{
 		FDynamicMesh3 Rail;
@@ -581,9 +606,6 @@ FHFWallPlateBuild FHFWallPlateKit::BuildDistributionBoard(const FHFDistributionB
 		FHFMeshPart Toggle;
 		Toggle.PartId = BreakerPartId(Way);
 		FHFMeshOps::InitialiseMesh(Toggle.Mesh);
-
-		const double TabLength = FMath::Min(BreakerDepth * 0.5, 1.1);
-		const double TabHeight = FMath::Min(BreakerHeight * 0.30, 1.6);
 
 		// Drawn reaching FORWARD out of its own pivot, which is the axis it rocks about at the front
 		// face of the body it is screwed to.

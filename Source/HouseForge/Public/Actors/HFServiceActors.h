@@ -13,7 +13,7 @@
  * The services: what makes a flat work rather than what makes it furnished.
  *
  * Six actors in one pair of files, exactly as HFSanitaryActors.h holds a bathroom and
- * HFFittingActors.h a kitchen. Twenty-two instances between them and not one is individually
+ * HFFittingActors.h a kitchen. Twenty-one instances between them and not one is individually
  * important - which is the whole difficulty of the group. Sockets and switch plates are SMALL AND
  * NUMEROUS: there are thirteen of them at eye level in every room of the flat, so a wrong height or a
  * wrong stand-off is not one mistake, it is the same mistake thirteen times in the same still.
@@ -129,9 +129,10 @@ protected:
  *
  * ## What moves
  *
- * The discharge vane, and the ganged vertical deflectors behind it. Both are real controls on a real
- * unit; the vane is the one anybody sees, because it is the only thing that tells you whether the
- * machine is running.
+ * The discharge vane, and the vertical deflectors behind it - one part per blade, each on its own pin.
+ * Both are real controls on a real unit; the vane is the one anybody sees, because it is the only
+ * thing that tells you whether the machine is running. See FHFApplianceKit::DeflectorPartId for why a
+ * ganged set is still one part each.
  */
 UCLASS()
 class HOUSEFORGE_API AHFSplitACActor : public AHFArticulatedActor
