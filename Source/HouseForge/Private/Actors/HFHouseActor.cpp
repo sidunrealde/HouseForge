@@ -8,6 +8,7 @@
 #include "Actors/HFElementActors.h"
 #include "Actors/HFFittingActors.h"
 #include "Actors/HFFurnitureActors.h"
+#include "Actors/HFLooseFurnitureActors.h"
 #include "Actors/HFOpeningActor.h"
 #include "Actors/HFFanActor.h"
 #include "Actors/HFSanitaryActors.h"
@@ -480,6 +481,47 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	void SeedSofa(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFSofaActor& Actor = static_cast<AHFSofaActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// PLACED LIKE A BED AND NOT LIKE A TABLE, and for the same reason: a sofa has a front and a
+		// back, the back goes against the wall, and a drawing's yaw is a one-in-two chance of being
+		// the half turn that puts a wall of cushions facing the plaster. FHFFixturePlacement resolves
+		// it from the anchor wall.
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedTable(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFTableActor& Actor = static_cast<AHFTableActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// FREE-STANDING, and this is the one group in the catalogue where that is the right answer. A
+		// table has no back to put against anything: the drawn position IS where it sits, and pulling
+		// it to a wall face - the fix every bought wall fitting needed - would be inventing an
+		// intention the drawing never had. Origin at the centre of the footprint, for the same reason.
+		Actor.SetActorTransform(FHFFixturePlacement::FreeStanding(*C.Fixture, C.FloorZ()));
+	}
+
+	void SeedChair(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFChairActor& Actor = static_cast<AHFChairActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// A CHAIR'S YAW IS REAL INFORMATION, unlike a run of joinery's. Which side of the table it is
+		// on is exactly what the yaw says, and there is no wall to resolve it against - so it is
+		// honoured rather than re-derived. FreeStanding does precisely that.
+		Actor.SetActorTransform(FHFFixturePlacement::FreeStanding(*C.Fixture, C.FloorZ()));
+	}
+
 	void SeedCounter(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFCounterActor& Actor = static_cast<AHFCounterActor&>(Element);
@@ -737,6 +779,18 @@ namespace
 				TEXT("Bed"), &SeedBed },
 			{ EHFFixtureType::StudyTable, AHFDeskActor::StaticClass(),
 				TEXT("Desk"), &SeedDesk },
+
+			// THE LOOSE FURNITURE, and the only group in the table that is not fitted to anything. A
+			// sofa is placed against its wall like a bed; the two tables and the chairs are placed
+			// where they were drawn, because there is nothing for them to be scribed to.
+			{ EHFFixtureType::Sofa, AHFSofaActor::StaticClass(),
+				TEXT("Sofa"), &SeedSofa },
+			{ EHFFixtureType::DiningTable, AHFTableActor::StaticClass(),
+				TEXT("Table"), &SeedTable },
+			{ EHFFixtureType::CoffeeTable, AHFTableActor::StaticClass(),
+				TEXT("Table"), &SeedTable },
+			{ EHFFixtureType::Chair, AHFChairActor::StaticClass(),
+				TEXT("Chair"), &SeedChair },
 
 			{ EHFFixtureType::CounterTop, AHFCounterActor::StaticClass(),
 				TEXT("Counter"), &SeedCounter },

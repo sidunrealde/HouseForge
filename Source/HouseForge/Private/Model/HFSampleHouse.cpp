@@ -562,8 +562,25 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	{
 		// The seating faces the south wall, clear of both doorways: D_Foyer's leaf sweeps X 375..1425
 		// and D_Living's X 4950..5850, and the sofa sits between them.
+		//
+		// ------------------------------------------------- why this moved from Y 2900 to Y 3092.5
+		//
+		// SET OUT FROM THE WALL'S FACE, NOT ITS CENTRELINE - the same defect the two TV units and the
+		// shoe rack had, in the largest object in the flat. At 2900 the sofa's back landed on 3350
+		// with W_Mid_Lower's living-room face at 3542.5: a 192.5 mm slot behind a 2100 mm three-seater,
+		// in the room the front door opens onto. Nothing said so while a sofa was a row in the spec
+		// and nothing in the level.
+		//
+		// It reads worse than a gap of that size sounds, because a sofa standing off a wall by a
+		// fifth of its own depth does not look like a sofa placed there; it looks like a sofa somebody
+		// pulled out to sweep behind and forgot to push back.
+		//
+		// 3092.5 puts the back exactly on 3542.5. The sofa can go hard onto the plaster - unlike a
+		// desk, which has to stand clear of the skirting - because its base starts at 120 above the
+		// floor and the room's skirting is 100 tall: the board runs UNDER it, and the only thing below
+		// 120 is four legs 90 mm in from each corner.
 		FHFFixture& Sofa = B.AddFixture(TEXT("F_Sofa"), TEXT("R_Living"), EHFFixtureType::Sofa,
-			TEXT("3-seater sofa"), FVector2D(3800.0, 2900.0), FVector2D(2100.0, 900.0), 800.0, 180.0);
+			TEXT("3-seater sofa"), FVector2D(3800.0, 3092.5), FVector2D(2100.0, 900.0), 800.0, 180.0);
 		Sofa.AnchorWallId = TEXT("W_Mid_Lower");
 
 		B.AddFixture(TEXT("F_CoffeeTable"), TEXT("R_Living"), EHFFixtureType::CoffeeTable,
@@ -608,8 +625,63 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		TVUnit.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
 		TVUnit.Params.PlinthHeight = 80.0;
 
+		// ----------------------------------------------------------------------- the dining end
+		//
+		// THE TABLE MOVED FROM (5100, 1800) BECAUSE NOBODY COULD SIT AT IT, and that only became a
+		// question once there were chairs to declare.
+		//
+		// At Y 1800 the table stood at Y 1400..2200 with the sofa's front at 2450 - a 250 mm gap
+		// between the two, over a 450 mm stretch where their X ranges overlapped. So the north side of
+		// a four-seater was unusable, the pinch between the seating and the dining was too narrow to
+		// walk through, and the only side left with room was the one against the south wall, where a
+		// chair pulled out goes into the plaster. Every one of those is invisible in a plan that draws
+		// a table and takes its chairs as read, which is exactly what the drawing does.
+		//
+		// (5000, 1100) puts the table under Win_Living, clear of the seating group, with the four
+		// chairs on the north side and the two ends. The measured clearances, all in millimetres:
+		//
+		//     chair pulled out on the north  ->  sofa front            462
+		//     chair pulled out at the west   ->  coffee table            175
+		//     chair pulled out at the east   ->  W_Living_Bed2 face      162
+		//     table                          ->  D_Balcony (X 1200..3000) 1300
+		//     table                          ->  F_TVUnit_E                135
+		//
+		// See HouseForge.Living.DiningClearance, which measures all of them from the spec rather than
+		// trusting this comment.
 		B.AddFixture(TEXT("F_DiningTable"), TEXT("R_Living"), EHFFixtureType::DiningTable,
-			TEXT("4-seater dining"), FVector2D(5100.0, 1800.0), FVector2D(1400.0, 800.0), 750.0);
+			TEXT("4-seater dining"), FVector2D(5000.0, 1100.0), FVector2D(1400.0, 800.0), 750.0);
+
+		// THE CHAIRS THE TABLE IMPLIES, declared rather than taken as read.
+		//
+		// A plan marks a dining table and no chairs, which is normal - the table is the thing that has
+		// to fit. Built that way the flat gets a four-seater nobody can sit at, and the question the
+		// room actually has to answer has nothing in it to ask about.
+		//
+		// Two on the north side and one at each end, and NOT two per long side: the south side has
+		// only 585 mm to the wall face, which takes a tucked chair and nothing pulled out. That is a
+		// property of a 6.6 x 3.6 living-dining carrying a three-seater as well, not a fault in the
+		// table - see the clearances above.
+		//
+		// Local +Y runs BACK on a chair, so a chair at zero yaw has its back to +Y and faces the table
+		// to the south of it. 90 and 270 face the two ends inward.
+		{
+			constexpr double ChairW = 450.0;
+			constexpr double ChairD = 480.0;
+			constexpr double ChairH = 850.0;
+
+			auto AddChair = [&B](const FName& Id, const FVector2D& Position, double Yaw)
+			{
+				B.AddFixture(Id, TEXT("R_Living"), EHFFixtureType::Chair, TEXT("Dining chair"),
+					Position, FVector2D(ChairW, ChairD), ChairH, Yaw);
+			};
+
+			// Tucked 150 under the table's edge, which is what "tucked in" means and what makes the
+			// footprints overlap - see IsExpectedOverlap in the validator.
+			AddChair(TEXT("F_Chair_D1"), FVector2D(4670.0, 1590.0), 0.0);
+			AddChair(TEXT("F_Chair_D2"), FVector2D(5330.0, 1590.0), 0.0);
+			AddChair(TEXT("F_Chair_D3"), FVector2D(4210.0, 1100.0), 90.0);
+			AddChair(TEXT("F_Chair_D4"), FVector2D(5790.0, 1100.0), 270.0);
+		}
 
 		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_Living"), TEXT("R_Living"), EHFFixtureType::CeilingFan,
 			TEXT("Ceiling fan"), FVector2D(3300.0, 1800.0), FVector2D(1200.0, 1200.0), 300.0);

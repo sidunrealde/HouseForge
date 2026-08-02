@@ -1992,7 +1992,7 @@
 			"position":
 			{
 				"x": 3800,
-				"y": 2900
+				"y": 3092.5
 			},
 			"rotationDegrees": 180,
 			"footprint":
@@ -2143,8 +2143,8 @@
 			"label": "4-seater dining",
 			"position":
 			{
-				"x": 5100,
-				"y": 1800
+				"x": 5000,
+				"y": 1100
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2153,6 +2153,158 @@
 				"y": 800
 			},
 			"height": 750,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Chair_D1",
+			"roomId": "R_Living",
+			"type": "Chair",
+			"label": "Dining chair",
+			"position":
+			{
+				"x": 4670,
+				"y": 1590
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 450,
+				"y": 480
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Chair_D2",
+			"roomId": "R_Living",
+			"type": "Chair",
+			"label": "Dining chair",
+			"position":
+			{
+				"x": 5330,
+				"y": 1590
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 450,
+				"y": 480
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Chair_D3",
+			"roomId": "R_Living",
+			"type": "Chair",
+			"label": "Dining chair",
+			"position":
+			{
+				"x": 4210,
+				"y": 1100
+			},
+			"rotationDegrees": 90,
+			"footprint":
+			{
+				"x": 450,
+				"y": 480
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Chair_D4",
+			"roomId": "R_Living",
+			"type": "Chair",
+			"label": "Dining chair",
+			"position":
+			{
+				"x": 5790,
+				"y": 1100
+			},
+			"rotationDegrees": 270,
+			"footprint":
+			{
+				"x": 450,
+				"y": 480
+			},
+			"height": 850,
 			"baseZ": 0,
 			"anchorWallId": "None",
 			"params":

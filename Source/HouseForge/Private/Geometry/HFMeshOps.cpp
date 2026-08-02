@@ -991,6 +991,104 @@ bool FHFMeshOps::AppendExtrudedSection(FDynamicMesh3& Mesh, const TArray<FVector
 	return true;
 }
 
+bool FHFMeshOps::AppendSoftBox(FDynamicMesh3& Mesh, const FVector3d& Min, const FVector3d& Max,
+	const FHFSoftBoxParams& Params, EHFSurfaceRole Role)
+{
+	const FVector3d Size = Max - Min;
+	if (Size.X <= UE_KINDA_SMALL_NUMBER || Size.Y <= UE_KINDA_SMALL_NUMBER || Size.Z <= UE_KINDA_SMALL_NUMBER)
+	{
+		// Nothing, rather than a sliver. A zero-thickness cushion is a pair of coincident faces that
+		// carries through every volume and closedness measurement taken afterwards.
+		return false;
+	}
+
+	const int32 CornerSteps = FMath::Clamp(Params.CornerSteps, 0, 16);
+	const int32 RollSteps = FMath::Clamp(Params.RollSteps, 1, 12);
+
+	// THE LEAN COSTS DEPTH RATHER THAN ADDING IT. A ring is SlabY deep wherever it sits, and the box's
+	// declared depth is the envelope the whole lean sweeps - so a raked cushion stays inside the
+	// footprint it was drawn in instead of growing out of the back of the sofa.
+	const double Rake = FMath::Clamp(Params.RakeY, 0.0, Size.Y * 0.9);
+	const double SlabY = Size.Y - Rake;
+
+	// The two rolls share the height, and neither may eat more than half the plan section it is
+	// turning round - past that the "roll" has consumed the face it was rolling off and the solid
+	// pinches to a ridge.
+	double TopR = FMath::Max(Params.TopRadius, 0.0);
+	double BottomR = FMath::Max(Params.BottomRadius, 0.0);
+
+	if (TopR + BottomR > Size.Z)
+	{
+		const double Scale = Size.Z / (TopR + BottomR);
+		TopR *= Scale;
+		BottomR *= Scale;
+	}
+
+	const double MaxInset = FMath::Min(Size.X, SlabY) * 0.45;
+	TopR = FMath::Min(TopR, MaxInset);
+	BottomR = FMath::Min(BottomR, MaxInset);
+
+	// One ring per level, bottom-up: height and how far that level is drawn in from the declared box.
+	TArray<double> RingZ;
+	TArray<double> RingInset;
+
+	auto PushRing = [&RingZ, &RingInset](double Z, double Inset)
+	{
+		if (RingZ.Num() > 0 && Z <= RingZ.Last() + UE_KINDA_SMALL_NUMBER)
+		{
+			// Two rings at one height would loft into a zero-height band of degenerate triangles.
+			// Merged rather than dropped, and to the LARGER inset: a roll of zero radius produces
+			// RollSteps identical rings, and the level that survives has to be the drawn-in one or
+			// the roll would step back out at its own start.
+			RingInset.Last() = FMath::Max(RingInset.Last(), Inset);
+			return;
+		}
+		RingZ.Add(Z);
+		RingInset.Add(Inset);
+	};
+
+	for (int32 Step = 0; Step <= RollSteps; ++Step)
+	{
+		const double Theta = (static_cast<double>(Step) / RollSteps) * UE_DOUBLE_HALF_PI;
+		PushRing(Min.Z + BottomR * (1.0 - FMath::Cos(Theta)), BottomR * (1.0 - FMath::Sin(Theta)));
+	}
+
+	for (int32 Step = RollSteps; Step >= 0; --Step)
+	{
+		const double Theta = (static_cast<double>(Step) / RollSteps) * UE_DOUBLE_HALF_PI;
+		PushRing(Max.Z - TopR * (1.0 - FMath::Cos(Theta)), TopR * (1.0 - FMath::Sin(Theta)));
+	}
+
+	if (RingZ.Num() < 2)
+	{
+		return false;
+	}
+
+	TArray<TArray<FVector2D>> Sections;
+	Sections.Reserve(RingZ.Num());
+
+	const double MidX = (Min.X + Max.X) * 0.5;
+
+	for (int32 Index = 0; Index < RingZ.Num(); ++Index)
+	{
+		const double U = FMath::Clamp((RingZ[Index] - Min.Z) / Size.Z, 0.0, 1.0);
+		const double Inset = RingInset[Index];
+
+		const FVector2D Centre(MidX, Min.Y + Rake * U + SlabY * 0.5);
+		const FVector2D Half(
+			FMath::Max(Size.X * 0.5 - Inset, UE_KINDA_SMALL_NUMBER),
+			FMath::Max(SlabY * 0.5 - Inset, UE_KINDA_SMALL_NUMBER));
+
+		// Clamped per ring rather than once: the rolled levels are narrower than the middle, and a
+		// plan radius wider than what is left of them would pinch those rings to a lens.
+		const double Radius = FMath::Clamp(Params.CornerRadius, 0.0, FMath::Min(Half.X, Half.Y));
+
+		Sections.Add(RoundedRectangle(Centre, Half, Radius, CornerSteps));
+	}
+
+	return AppendLoft(Mesh, Sections, RingZ, /*bCapBottom*/ true, /*bCapTop*/ true, Role);
+}
+
 bool FHFMeshOps::AppendRevolvedProfile(FDynamicMesh3& Mesh, const TArray<FVector2D>& Profile,
 	const FVector3d& Origin, const FVector3d& Axis, int32 SideCount, EHFSurfaceRole Role)
 {
