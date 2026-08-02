@@ -78,6 +78,17 @@ public:
 	/** True for the fixture types this actor builds. */
 	static bool Builds(EHFFixtureType Type);
 
+	/**
+	 * True when every hole this counter was asked for was actually cut.
+	 *
+	 * A REFUSED CUTOUT IS INVISIBLE FROM ABOVE, which is the only angle anybody looks at a worktop
+	 * from, and the fitting set into it is placed at the counter's finished top whether or not the
+	 * hole opened. The reference flat spent this milestone with a hob standing in seven and a half
+	 * litres of solid granite for exactly that reason. Build logs a warning; this is the same answer
+	 * as a value, so a test can assert on it rather than scrape a log.
+	 */
+	bool EveryApertureWasCut() const;
+
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;
 };

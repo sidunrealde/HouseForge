@@ -294,6 +294,18 @@ namespace
 		/** The host's resolved yaw, by set-in fixture id. A hob set into a run turns WITH the run. */
 		TMap<FName, double> SurfaceYaw;
 
+		/**
+		 * Stretches of a floor run that must be left clear inside, by that RUN's id, in its own
+		 * local X.
+		 *
+		 * THE HOLE IN THE STONE IS NOT THE WHOLE STORY. A sink is cut into a counter, but what hangs
+		 * through the hole hangs into the CABINET, which is a third fixture that neither of the other
+		 * two has heard of. A double bowl 200 deep and its trap take most of a 720 carcass, and a
+		 * shelf across that bay is a shelf through the bowl - which is exactly what the reference
+		 * flat had, 10 mm under the bottom of its sink, for a whole milestone.
+		 */
+		TMap<FName, TArray<FVector2D>> ClearSpansByRun;
+
 		/** True when this fixture found a host to stand on at all. */
 		bool HasHost(const FName& Id) const { return SurfaceZ.Contains(Id) && SurfaceYaw.Contains(Id); }
 	};
@@ -443,6 +455,19 @@ namespace
 		// under a sink or a hob free for a cupboard - and the near end when the far one is blocked.
 		Actor.bBankAtRunStart = RunEndIsObstructed(C, /*bStartEnd*/ false)
 			&& !RunEndIsObstructed(C, /*bStartEnd*/ true);
+
+		// What is hanging into this run - a sink's bowls, a hob's burner box - so the bay it lands in
+		// is built empty. Resolved by the composing layer for the same reason the counter's holes
+		// are: neither the cabinet nor the appliance can see the other. Set before ApplyFixture,
+		// which is what reads it.
+		Actor.ClearSpans.Reset();
+		if (C.SetIn != nullptr)
+		{
+			if (const TArray<FVector2D>* Spans = C.SetIn->ClearSpansByRun.Find(C.Fixture->Id))
+			{
+				Actor.ClearSpans = *Spans;
+			}
+		}
 
 		Actor.ApplyFixture(*C.Fixture);
 
@@ -1213,6 +1238,50 @@ namespace
 				// And turned WITH the host. A hob set square to the drawing, in a run turned through a
 				// right angle, is a hob across the run.
 				Out.SurfaceYaw.Add(SetIn.Id, HostYaw);
+
+				// ------------------------------------------------- and what hangs through the hole
+				//
+				// The counter is cut; the CABINET UNDER IT has to be empty. Resolved by footprint
+				// exactly as the host was, because the cabinet is a third fixture that neither of the
+				// other two has heard of, and a generator may not go looking for it.
+				//
+				// Measured in the RUN's frame and not the counter's. In this flat the two happen to be
+				// set out identically, and relying on that would be a coincidence rather than a rule -
+				// a counter is free to be longer than the run beneath it, and routinely is where two
+				// runs meet in a corner.
+				if (CutsThroughItsHost(SetIn.Type))
+				{
+					for (const FHFFixture& Run : Fixtures)
+					{
+						if (!AHFCasedGoodsActor::Builds(Run.Type) || Run.Type == EHFFixtureType::Vanity
+							|| Run.RoomId != SetIn.RoomId || Run.BaseZ > 0.0
+							|| !FHFFixturePlacement::FootprintContains(Run, SetIn.Position))
+						{
+							continue;
+						}
+
+						const FHFWall* RunWall = Spec.FindWall(Run.AnchorWallId);
+						const double RunYaw = FHFFixturePlacement::FacingYaw(Run, RunWall);
+
+						const double RunRadians = FMath::DegreesToRadians(RunYaw);
+						const double RunCos = FMath::Cos(RunRadians);
+						const double RunSin = FMath::Sin(RunRadians);
+
+						const FVector2D RunDelta = SetIn.Position - Run.Position;
+						const double AlongRun = RunDelta.X * RunCos + RunDelta.Y * RunSin
+							+ Run.Footprint.X * 0.5;
+
+						// The appliance's own width along the run. Both of these are set out square to
+						// the run they drop into - a sink at an angle in a fitted kitchen is not a
+						// thing - so its footprint's X is its width along it.
+						const double Half = SetIn.Footprint.X * 0.5;
+
+						Out.ClearSpansByRun.FindOrAdd(Run.Id).Add(
+							FVector2D(AlongRun - Half, AlongRun + Half));
+						break;
+					}
+				}
+
 				break;
 			}
 		}

@@ -3,6 +3,7 @@
 #include "Actors/HFCounterActor.h"
 
 #include "Geometry/HFJoineryKit.h"
+#include "HouseForge.h"
 #include "Model/HFBuildDefaults.h"
 
 using namespace UE::Geometry;
@@ -94,5 +95,52 @@ double AHFCounterActor::BuiltTopZ(const FHFFixture& Fixture)
 
 FDynamicMesh3 AHFCounterActor::BuildMesh() const
 {
-	return FHFCounterKit::Build(Counter).Shell;
+	const FHFCounterBuild Build = FHFCounterKit::Build(Counter);
+
+	// ------------------------------------------------------ a hole that was not cut has to be said
+	//
+	// FHFCounterKit REFUSES a cutout that would leave less than 50 mm of stone anywhere round it,
+	// because granite cracks from the corner of one, and refusing is the right answer. What is not
+	// the right answer is refusing in silence.
+	//
+	// The reference flat's hob was drawn on its counter's centreline, which put the cut 10 mm too
+	// close to the upstand. The slab came back whole - flawless from above, which is the only angle
+	// anybody looks at a worktop from - and the composing layer went on to stand the hob at the
+	// counter's finished top exactly as though the hole were there. SEVEN AND A HALF LITRES OF
+	// APPLIANCE INSIDE SOLID STONE, and not one thing in the build said anything at all.
+	//
+	// Nothing downstream can find this. The counter is watertight, the right size and correctly
+	// wound; the hob is watertight, the right size and in the right place ON its counter. It is only
+	// wrong as a pair, and the pair is this layer's business.
+	for (const FHFCounterAperture& Asked : Counter.Apertures)
+	{
+		const bool bCut = Build.CutApertures.ContainsByPredicate(
+			[&Asked](const FHFCounterAperture& Made) { return Made.FixtureId == Asked.FixtureId; });
+
+		if (!bCut)
+		{
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("HouseForge counter '%s': the %.0f x %.0f cutout for '%s' at (%.1f, %.1f) was refused - it would leave less than %.0f cm of stone round it - so the slab is solid there and whatever is set into it is standing in granite. Move the fitting, or give the counter more depth."),
+				*ElementId.ToString(), Asked.Size.X, Asked.Size.Y, *Asked.FixtureId.ToString(),
+				Asked.Centre.X, Asked.Centre.Y, FHFCounterKit::MinApertureMargin);
+		}
+	}
+
+	return Build.Shell;
+}
+
+bool AHFCounterActor::EveryApertureWasCut() const
+{
+	const FHFCounterBuild Build = FHFCounterKit::Build(Counter);
+
+	for (const FHFCounterAperture& Asked : Counter.Apertures)
+	{
+		if (!Build.CutApertures.ContainsByPredicate(
+			[&Asked](const FHFCounterAperture& Made) { return Made.FixtureId == Asked.FixtureId; }))
+		{
+			return false;
+		}
+	}
+
+	return true;
 }

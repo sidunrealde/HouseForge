@@ -285,6 +285,22 @@ FHFApplianceBuild FHFApplianceKit::BuildHob(const FHFHobParams& Params)
 	// ONE PER BURNER, EACH TURNING ABOUT ITS OWN AXIS. On the front edge of the glass where a real
 	// hob's controls are, and each its own part - a hob whose knobs are moulded into the top is
 	// exactly what .claude/rules/04-conventions.md rules out.
+	//
+	// ## They stand ON the glass and turn about the vertical, and both of those are corrections
+	//
+	// They used to be discs on a vertical front face, turning about Y - which is a FREESTANDING
+	// COOKER's controls, and this is not one. A drop-in hob has no front face at all: it is a sheet
+	// of glass lying on the worktop with the burner box hanging through a hole in it, and there is
+	// nowhere below the glass line for anything to be except inside the stone. Built that way, each
+	// of the four knobs had 12 mm of itself inside the granite - 1.6 of knob radius against 0.4 of
+	// half-glass - permanently, in a place a camera at counter height looks straight at.
+	//
+	// Nothing on the hob could see it. The knobs were the right size, in the right place on the
+	// appliance, each with a real hinge, a real axis and a real sweep, and every one of them turned.
+	// It took comparing the hob with the counter it is cut into.
+	//
+	// So the profile is revolved about Z, standing up from the glass the way the knobs on every glass
+	// hob in this domain do, and turning the way a hand actually turns one.
 
 	if (P.KnobRadius > 0.0)
 	{
@@ -296,36 +312,46 @@ FHFApplianceBuild FHFApplianceKit::BuildHob(const FHFHobParams& Params)
 			Part.PartId = KnobPartId(Knob);
 			FHFMeshOps::InitialiseMesh(Part.Mesh);
 
-			// A domed disc with a flat indexing flag on it, so which way it is turned can be SEEN.
+			// A domed knob with a flat indexing flag on it, so which way it is turned can be SEEN.
 			// A plain cylinder rotates invisibly, which passes every assertion about motion and
 			// looks like nothing at all.
+			//
+			// The profile is (along the axis, radius) - the same convention every revolve in this
+			// plugin takes: a waisted body standing off the glass, swelling to its full width at the
+			// top where a hand takes it. Only the two ends may have zero radius, or the solid
+			// pinches.
+			const double KnobHeight = P.KnobRadius * 1.25;
+
 			const TArray<FVector2D> KnobProfile = {
 				FVector2D(0.0, 0.0),
-				FVector2D(0.0, P.KnobRadius),
-				FVector2D(P.KnobRadius * 0.75, P.KnobRadius),
-				FVector2D(P.KnobRadius * 1.1, P.KnobRadius * 0.6),
-				FVector2D(P.KnobRadius * 1.2, 0.0)
+				FVector2D(0.0, P.KnobRadius * 0.85),
+				FVector2D(KnobHeight * 0.55, P.KnobRadius * 0.72),
+				FVector2D(KnobHeight * 0.85, P.KnobRadius),
+				FVector2D(KnobHeight, P.KnobRadius * 0.9),
+				FVector2D(KnobHeight, 0.0)
 			};
 
-			// Turning about Y, which is the axis running back into the hob: the knob faces the room.
+			// Turning about Z, standing on the glass. Nothing of it is below the top of the stone.
 			FHFMeshOps::AppendRevolvedProfile(Part.Mesh, KnobProfile, FVector3d::ZeroVector,
-				-FVector3d::UnitY(), RevolveSides, EHFSurfaceRole::MetalHardware);
+				FVector3d::UnitZ(), RevolveSides, EHFSurfaceRole::MetalHardware);
 
-			// The pointer flag, off centre so a turn is legible.
+			// The pointer flag, running out to the knob's edge on one side only so a turn is legible.
 			FHFMeshOps::AppendBox(Part.Mesh,
-				FVector3d(0.0, -P.KnobRadius * 0.62, P.KnobRadius * 0.55),
-				FVector3d(P.KnobRadius * 0.16, P.KnobRadius * 0.62, P.KnobRadius * 0.45),
+				FVector3d(0.0, -P.KnobRadius * 0.5, KnobHeight),
+				FVector3d(P.KnobRadius * 0.14, P.KnobRadius * 0.5, P.KnobRadius * 0.1),
 				0.0, EHFSurfaceRole::MetalHardware);
 
 			FHFMeshOps::ApplyWorldScaleUVs(Part.Mesh);
 
+			// ON the glass, and far enough back from the front edge to be on it rather than over the
+			// arris: a knob centred on the very edge overhangs the cut and reads as loose.
 			Part.PivotTransform = FTransform(FVector(
 				-P.Width * 0.5 + Pitch * (Knob + 1),
-				-Half.Y - P.KnobRadius * 0.2,
-				P.GlassThickness * 0.5));
+				-Half.Y + P.KnobRadius * 1.4,
+				P.GlassThickness));
 
 			Part.Motion.Type = EHFMotionType::Hinge;
-			Part.Motion.Axis = FVector::YAxisVector;
+			Part.Motion.Axis = FVector::ZAxisVector;
 			Part.Motion.MaxAngleDegrees = -P.KnobSweepDegrees;
 			Part.DefaultOpenAmount = 0.0;
 

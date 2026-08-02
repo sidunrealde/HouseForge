@@ -371,12 +371,31 @@ bool FHFHobTest::RunTest(const FString& Parameters)
 			FMath::Abs(Knob.Motion.MaxAngleDegrees) > 180.0);
 	}
 
+	// A DROP-IN HOB'S KNOBS STAND ON THE GLASS AND TURN ABOUT THE VERTICAL. They used to be discs on
+	// a vertical front face turning about Y, which is a freestanding cooker's controls - and this hob
+	// is cut into stone, so there is nowhere below the glass line for anything to be except inside
+	// the granite. Each of the four had 12 mm of itself in there. Z = 0 is the worktop.
+	for (const FHFMeshPart& Knob : Built.Parts)
+	{
+		TestTrue(TEXT("A knob turns about the vertical"),
+			FMath::Abs(Knob.Motion.Axis.Z) > 0.99);
+
+		const FVector Base = Knob.PivotTransform.TransformPosition(
+			FVector(Knob.Mesh.GetBounds().Min.X, 0.0, Knob.Mesh.GetBounds().Min.Z));
+		TestTrue(*FString::Printf(TEXT("And stands on the stone rather than in it (%.2f cm)"), Base.Z),
+			Base.Z > -0.01);
+	}
+
 	// ASSERT THE SWEPT TRANSFORM. A knob is round, so a rotation about its own axis moves nothing
 	// measurable unless the thing that indexes the turn moves - which is exactly why it has a
 	// pointer flag. Measured on the flag rather than on the knob's bounds.
+	//
+	// OFF THE AXIS, which the vertical made matter: the old probe was the top centre of the knob, and
+	// the top centre of a knob turning about the vertical is the one point on it that does not move.
+	// A test that kept it would have gone green over a knob welded solid.
 	const FHFMeshPart& First = Built.Parts[0];
 	const FAxisAlignedBox3d KnobBox = First.Mesh.GetBounds();
-	const FVector Flag(KnobBox.Center().X, KnobBox.Center().Y, KnobBox.Max.Z);
+	const FVector Flag(KnobBox.Center().X, KnobBox.Min.Y, KnobBox.Max.Z);
 
 	const double Swept = (PosedPoint(First, Flag, 1.0) - PosedPoint(First, Flag, 0.0)).Size();
 	AddInfo(FString::Printf(TEXT("The knob's pointer sweeps %.2f cm."), Swept));

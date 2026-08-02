@@ -75,6 +75,42 @@ namespace
 	}
 
 	/**
+	 * Empties the interior of any bay a clear span reaches into.
+	 *
+	 * Bays divide the run's width equally - see FHFCasedGoodsKit's layout - so which bay a span falls
+	 * in is arithmetic rather than a guess.
+	 *
+	 * A WHOLE BAY, not a part of one. A shelf is a board spanning between the two partitions either
+	 * side of it, so there is no such thing as most of one: a sink over the join between two bays
+	 * empties both, which is also what a fitter does with the run in front of him.
+	 */
+	void ClearBaysUnder(FHFCaseUnit& Unit, double RunWidth, const TArray<FVector2D>& ClearSpans)
+	{
+		if (ClearSpans.IsEmpty() || Unit.Bays.IsEmpty() || RunWidth <= 0.0)
+		{
+			return;
+		}
+
+		const double BayWidth = RunWidth / static_cast<double>(Unit.Bays.Num());
+
+		for (int32 Index = 0; Index < Unit.Bays.Num(); ++Index)
+		{
+			const double From = Index * BayWidth;
+			const double To = From + BayWidth;
+
+			for (const FVector2D& Span : ClearSpans)
+			{
+				if (FMath::Min(To, Span.Y) - FMath::Max(From, Span.X) > 0.0)
+				{
+					Unit.Bays[Index].Interior = EHFCaseInterior::None;
+					Unit.Bays[Index].ShelfCount = 0;
+					break;
+				}
+			}
+		}
+	}
+
+	/**
 	 * A shoe rack: tilt-out flaps STACKED, one over another, with a shelf inside each.
 	 *
 	 * ## Why the flaps stack rather than standing side by side
@@ -136,7 +172,8 @@ namespace
 	}
 
 	/** Everything the drawing states about a run, and what its type makes of it. */
-	void ReadFixture(const FHFFixture& Fixture, FHFCasedGoodsParams& P, bool bBankAtStart)
+	void ReadFixture(const FHFFixture& Fixture, FHFCasedGoodsParams& P, bool bBankAtStart,
+		const TArray<FVector2D>& ClearSpans)
 	{
 		const FHFFixtureParams& Spec = Fixture.Params;
 
@@ -265,6 +302,10 @@ namespace
 			break;
 		}
 
+		// Last, and after every branch above has settled what the bays are: a bay that has a sink
+		// hanging in it is a bay with nothing in it, whatever the drawing asked for.
+		ClearBaysUnder(Unit, P.Width, ClearSpans);
+
 		P.Units.Reset();
 		P.Units.Add(MoveTemp(Unit));
 	}
@@ -303,14 +344,16 @@ void AHFCasedGoodsActor::ApplyProjectDefaults()
 
 void AHFCasedGoodsActor::ApplyFixture(const FHFFixture& Fixture)
 {
-	ReadFixture(Fixture, Case, bBankAtRunStart);
+	ReadFixture(Fixture, Case, bBankAtRunStart, ClearSpans);
 }
 
 FHFCasedGoodsParams AHFCasedGoodsActor::ParamsFor(const FHFFixture& Fixture)
 {
 	FHFCasedGoodsParams P;
 	P.Joinery = FHFBuildDefaults::FromProjectSettings().Joinery;
-	ReadFixture(Fixture, P, /*bBankAtStart*/ false);
+	// No clear spans: this answers how tall and how deep a run of this type comes out, which is
+	// what a ceiling fit needs, and an empty bay changes neither.
+	ReadFixture(Fixture, P, /*bBankAtStart*/ false, /*ClearSpans*/ {});
 
 	return FHFCasedGoodsKit::Sanitise(P);
 }

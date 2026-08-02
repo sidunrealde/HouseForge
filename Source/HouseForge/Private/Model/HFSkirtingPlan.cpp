@@ -471,10 +471,24 @@ FHFSkirtingPlan FHFSkirting::For(const FHFRoom& Room, const TArray<FHFWall>& Wal
 					continue;
 				}
 
+				// -------------------------------------------------------- and it is cut a hair wide
+				//
+				// THE SAME SLACK A DOORWAY GETS, FOR THE SAME REASON. Cut to the carcass exactly, the
+				// board's end grain finishes in precisely the plane of the unit's end panel: two
+				// solids sharing a face, permanently, at every end of every run of scribed joinery in
+				// the flat. In the reference flat that was seven such joints, and two of them came out
+				// of the build with the carcass a couple of millimetres INSIDE the board - the plan is
+				// exact but a carcass is not, because it is placed on the wall's finished face and
+				// its end panels are their own thickness.
+				//
+				// No carpenter scribes a skirting to a hairline against a cupboard either; the board
+				// is cut short and the joint is a shadow line. FHFSkirtingParams::JambClearance is
+				// already exactly this figure, said for a door frame, and there is no argument for
+				// the two being different numbers.
 				FHFSkirtingBreak Break;
 				Break.EdgeIndex = i;
-				Break.Start = FMath::Max(0.0, MinAlong);
-				Break.End = FMath::Min(Edge.Length, MaxAlong);
+				Break.Start = FMath::Max(0.0, MinAlong - Params.JambClearance);
+				Break.End = FMath::Min(Edge.Length, MaxAlong + Params.JambClearance);
 				Break.Cause = EHFSkirtingBreakCause::Joinery;
 				Break.SourceId = Fixture.Id;
 
@@ -507,6 +521,85 @@ FHFSkirtingPlan FHFSkirting::For(const FHFRoom& Room, const TArray<FHFWall>& Wal
 		}
 
 		Plan.Breaks.Append(EdgeBreaks);
+	}
+
+	// -------------------------------------------------------- returns behind joinery are not built
+	//
+	// A COLUMN IN A CORNER GETS ITS RETURN WHETHER OR NOT THERE IS A CUPBOARD OVER IT.
+	//
+	// Breaks stop the straight RUNS where scribed joinery stands, and that half has been right for a
+	// milestone. The returns round a column were left out of it, and there is a column in the corner
+	// of both the kitchen and the living room with a run of joinery scribed into that same corner -
+	// so in both rooms the board went out round the concrete, across its face and back, INSIDE the
+	// carcass standing over it.
+	//
+	// It measured as two and three millimetres of interpenetration and it was found by nothing at
+	// all: the plan was right about every run, the identity between boundary, covered length and
+	// break length still balanced - returns are not part of it, which is exactly why the gap was
+	// there - and both carcasses were flush on the plaster to a hundredth of a centimetre. A person
+	// standing in the kitchen would not have seen it either, because the thing it is wrong inside is
+	// opaque. It is wrong all the same, and it is the kind of thing that becomes visible the moment
+	// somebody opens a cupboard or takes a section.
+	//
+	// A carpenter scribes the carcass round the column and leaves the skirting out behind it, which
+	// is what this does.
+	//
+	// Judged along the WHOLE of each return and not at its middle, because a return does not stop at
+	// the plaster: the piece that runs across the column's face is deliberately extended past the
+	// column at both ends so its external corners are filled by the union rather than left as a
+	// notch, and one of those extensions goes into the masonry. Its midpoint is therefore inside the
+	// wall, not inside the room, and a midpoint test called it clear of a cupboard standing over it.
+	// A return with any of itself inside a carcass is a return that could not be fitted anyway.
+	if (Height > 0.0 && !Plan.Returns.IsEmpty())
+	{
+		// MARKED, NOT DELETED. See FHFSkirtingReturn::bCoveredByJoinery: a return that vanishes from
+		// the plan reads as a column nobody noticed, and that is a different and much worse claim.
+		for (FHFSkirtingReturn& Return : Plan.Returns)
+		{
+			Return.bCoveredByJoinery = [&Fixtures, &Room, BuiltFixtureIds, Height, &Return]()
+		{
+			const FVector2D Samples[3] = {
+				Return.Start,
+				(Return.Start + Return.End) * 0.5,
+				Return.End
+			};
+
+			for (const FHFFixture& Fixture : Fixtures)
+			{
+				if (Fixture.RoomId != Room.Id || !IsScribedJoinery(Fixture.Type)
+					|| Fixture.BaseZ >= Height)
+				{
+					continue;
+				}
+
+				// The same "and it has to actually be built" test the breaks take, for the same
+				// reason: a return deleted for a cupboard nobody models is a missing skirting.
+				if (BuiltFixtureIds != nullptr && !BuiltFixtureIds->Contains(Fixture.Id))
+				{
+					continue;
+				}
+
+				// In the fixture's own frame, which is what makes a run at any yaw answerable.
+				const double Radians = FMath::DegreesToRadians(Fixture.RotationDegrees);
+				const double C = FMath::Cos(Radians);
+				const double S = FMath::Sin(Radians);
+
+				for (const FVector2D& Sample : Samples)
+				{
+					const FVector2D D = Sample - Fixture.Position;
+					const FVector2D Local(D.X * C + D.Y * S, -D.X * S + D.Y * C);
+
+					if (FMath::Abs(Local.X) <= Fixture.Footprint.X * 0.5
+						&& FMath::Abs(Local.Y) <= Fixture.Footprint.Y * 0.5)
+					{
+						return true;
+					}
+				}
+			}
+
+			return false;
+			}();
+		}
 	}
 
 	return Plan;

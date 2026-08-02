@@ -59,16 +59,34 @@ struct HOUSEFORGE_API FHFClashScanParams
 	double DepthToleranceCm = 0.05;
 
 	/**
-	 * Pitch of the grid used to find crossings and to estimate volume, in centimetres.
+	 * Pitch of the grid used to estimate volume, in centimetres.
 	 *
-	 * Only the volume figure depends on it. Depth is measured at the vertices and at whichever grid
-	 * points land inside, and the deepest point of an interpenetration between two boxes is always a
-	 * vertex of one of them.
+	 * Only the volume figure depends on it, and only on the pairs that turn out to clash. Depth is
+	 * measured at the vertices, and the deepest inside point of an interpenetration between two
+	 * boxes is always a vertex of one of them.
 	 */
 	double SampleGridCm = 2.0;
 
-	/** Cap on grid points per pair. The pitch is coarsened to meet it rather than the box clipped. */
+	/** Cap on grid points per clashing pair. The pitch is coarsened to meet it, not the box clipped. */
 	int32 MaxSamplesPerPair = 20000;
+
+	/**
+	 * Cap on grid points spent looking for a crossing with no vertex of either solid inside the
+	 * other - two thin plates passing through each other.
+	 *
+	 * THIS NUMBER IS THE WHOLE COST OF THE SCAN AND IT IS SPENT ON EVERY PAIR THAT IS CLEAN.
+	 *
+	 * The pair that has a real interpenetration nearly always has a vertex inside, and finding it
+	 * costs a winding query per vertex in the shared box - a handful. The crossing with no vertex
+	 * inside has to be hunted for by sampling, and that hunt runs over every pair in the flat
+	 * whether or not there is anything to find. At the whole-flat scale the two differ by more than
+	 * two orders of magnitude: the same scan runs in seconds at 512 and in a quarter of an hour at
+	 * 20000, and the extra samples find nothing, because a crossing big enough to matter in a
+	 * building is far bigger than the cell a coarse net over the shared box gives it.
+	 *
+	 * So the net is coarse, and the fine grid above is spent only where the net caught something.
+	 */
+	int32 MaxCrossingProbesPerPair = 512;
 };
 
 /**

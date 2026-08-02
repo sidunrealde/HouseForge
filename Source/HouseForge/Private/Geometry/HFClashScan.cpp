@@ -175,73 +175,92 @@ namespace HouseForgeClash
 
 		// ----------------------------------------------------------------------------- the grid
 		//
-		// For the pair with no vertex of either inside the other: two thin plates crossing, a rail
-		// through a post, a shutter swung edge-on through a partition. It also gives the volume,
-		// which is what separates a corner clipping a reveal from a cupboard standing in a wall.
-		const double Longest = FMath::Max3(Shared.Width(), Shared.Height(), Shared.Depth());
-		double Pitch = FMath::Max(Params.SampleGridCm, KINDA_SMALL_NUMBER);
-
-		auto CellsFor = [&Shared](double P)
-		{
-			return FMath::Max(1, FMath::CeilToInt(Shared.Width() / P))
-				* static_cast<int64>(FMath::Max(1, FMath::CeilToInt(Shared.Height() / P)))
-				* static_cast<int64>(FMath::Max(1, FMath::CeilToInt(Shared.Depth() / P)));
-		};
-
-		// Coarsened until it fits the budget, rather than the box clipped: a scan that only looked at
-		// part of a big overlap would report the shallow end of it.
-		while (CellsFor(Pitch) > Params.MaxSamplesPerPair && Pitch < Longest)
-		{
-			Pitch *= 1.5;
-		}
-
-		const int32 NX = FMath::Max(1, FMath::CeilToInt(Shared.Width() / Pitch));
-		const int32 NY = FMath::Max(1, FMath::CeilToInt(Shared.Height() / Pitch));
-		const int32 NZ = FMath::Max(1, FMath::CeilToInt(Shared.Depth() / Pitch));
-
+		// Run TWICE, at two budgets, and the two runs are doing different jobs.
+		//
+		// The first is a net, over every pair in the flat whether or not there is anything in it, for
+		// the crossing with no vertex of either solid inside the other: two thin plates passing
+		// through each other, a rail through a post. It is deliberately coarse - see
+		// FHFClashScanParams::MaxCrossingProbesPerPair, where the cost of getting this wrong is set
+		// out. The second runs only where something has already been found, to put a volume on it.
+		double CellVolume = 0.0;
 		int64 Inside = 0;
 
-		for (int32 i = 0; i < NX; ++i)
+		auto RunGrid = [&](int32 Budget)
 		{
-			for (int32 j = 0; j < NY; ++j)
+			const double Longest = FMath::Max3(Shared.Width(), Shared.Height(), Shared.Depth());
+			double Pitch = FMath::Max(Params.SampleGridCm, KINDA_SMALL_NUMBER);
+
+			auto CellsFor = [&Shared](double P)
 			{
-				for (int32 k = 0; k < NZ; ++k)
+				return FMath::Max(1, FMath::CeilToInt(Shared.Width() / P))
+					* static_cast<int64>(FMath::Max(1, FMath::CeilToInt(Shared.Height() / P)))
+					* static_cast<int64>(FMath::Max(1, FMath::CeilToInt(Shared.Depth() / P)));
+			};
+
+			// Coarsened until it fits the budget, rather than the box clipped: a net that only looked
+			// at part of a big overlap would miss whatever was in the rest of it.
+			while (CellsFor(Pitch) > Budget && Pitch < Longest)
+			{
+				Pitch *= 1.5;
+			}
+
+			const int32 NX = FMath::Max(1, FMath::CeilToInt(Shared.Width() / Pitch));
+			const int32 NY = FMath::Max(1, FMath::CeilToInt(Shared.Height() / Pitch));
+			const int32 NZ = FMath::Max(1, FMath::CeilToInt(Shared.Depth() / Pitch));
+
+			Inside = 0;
+			CellVolume = (Shared.Width() / NX) * (Shared.Height() / NY) * (Shared.Depth() / NZ);
+
+			for (int32 i = 0; i < NX; ++i)
+			{
+				for (int32 j = 0; j < NY; ++j)
 				{
-					// Cell centres, so a sample never lands exactly on a shared face - where the
-					// winding number is a coin toss and both answers are defensible.
-					const FVector3d Point(
-						Shared.Min.X + (i + 0.5) * Shared.Width() / NX,
-						Shared.Min.Y + (j + 0.5) * Shared.Height() / NY,
-						Shared.Min.Z + (k + 0.5) * Shared.Depth() / NZ);
-
-					if (!A.Contains(Point) || !B.Contains(Point))
+					for (int32 k = 0; k < NZ; ++k)
 					{
-						continue;
-					}
+						// Cell centres, so a sample never lands exactly on a shared face - where the
+						// winding number is a coin toss and both answers are defensible.
+						const FVector3d Point(
+							Shared.Min.X + (i + 0.5) * Shared.Width() / NX,
+							Shared.Min.Y + (j + 0.5) * Shared.Height() / NY,
+							Shared.Min.Z + (k + 0.5) * Shared.Depth() / NZ);
 
-					++Inside;
+						if (!A.Contains(Point) || !B.Contains(Point))
+						{
+							continue;
+						}
 
-					const double Depth = FMath::Min(A.DistanceToSurface(Point), B.DistanceToSurface(Point));
-					if (Depth > Deepest)
-					{
-						Deepest = Depth;
-						DeepestAt = Point;
+						++Inside;
+
+						const double Depth =
+							FMath::Min(A.DistanceToSurface(Point), B.DistanceToSurface(Point));
+						if (Depth > Deepest)
+						{
+							Deepest = Depth;
+							DeepestAt = Point;
+						}
 					}
 				}
 			}
-		}
+		};
+
+		RunGrid(Params.MaxCrossingProbesPerPair);
 
 		if (Deepest <= Params.DepthToleranceCm)
 		{
 			return false;
 		}
 
+		// Something is there. NOW it is worth spending samples on how much of it.
+		if (Params.MaxSamplesPerPair > Params.MaxCrossingProbesPerPair)
+		{
+			RunGrid(Params.MaxSamplesPerPair);
+		}
+
 		Out.NameA = A.Surface->Name;
 		Out.NameB = B.Surface->Name;
 		Out.DepthCm = Deepest;
 		Out.Sample = DeepestAt;
-		Out.VolumeCm3 = static_cast<double>(Inside)
-			* (Shared.Width() / NX) * (Shared.Height() / NY) * (Shared.Depth() / NZ);
+		Out.VolumeCm3 = static_cast<double>(Inside) * CellVolume;
 
 		return true;
 	}

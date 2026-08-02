@@ -266,7 +266,16 @@ bool FHFSkirtingJoineryTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("And it is named as joinery"),
 			Plan.Breaks[0].Cause == EHFSkirtingBreakCause::Joinery);
 		TestEqual(TEXT("By its own id"), Plan.Breaks[0].SourceId, FName(TEXT("F_Wardrobe")));
-		TestNearlyEqual(TEXT("Over exactly its own width"), Plan.Breaks[0].Length(), 180.0, 0.01);
+
+		// ITS OWN WIDTH PLUS A JAMB CLEARANCE EACH SIDE, which is the same slack a doorway gets and
+		// is there for the same reason. Cut to the carcass exactly, the board's end grain finishes
+		// in precisely the plane of the unit's end panel - two solids sharing a face at every end of
+		// every run of scribed joinery in the flat, and in two places in the reference flat the
+		// carcass came out a couple of millimetres INSIDE the board. No carpenter scribes a skirting
+		// to a hairline against a cupboard either; the board is cut short and the joint is a shadow.
+		const FHFSkirtingParams Section;
+		TestNearlyEqual(TEXT("Over its own width and a scribe clearance each side"),
+			Plan.Breaks[0].Length(), 180.0 + 2.0 * Section.JambClearance, 0.01);
 	}
 
 	// SAME TYPE, LIFTED OFF THE FLOOR. A wardrobe whose underside clears the top of the skirting

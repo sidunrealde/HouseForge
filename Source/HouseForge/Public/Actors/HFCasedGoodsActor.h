@@ -61,6 +61,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	bool bBankAtRunStart = false;
 
+	/**
+	 * Stretches of the run, along its length, that must be left clear inside. Start and end in
+	 * run-local centimetres from the -X end.
+	 *
+	 * ## What this is for
+	 *
+	 * A SINK BASE UNIT HAS NO SHELF IN IT, and neither does the one under a hob. A double bowl 200
+	 * deep hangs most of the way down a 720 carcass and the trap and the waste hang below that; a
+	 * shelf across the bay is a shelf through the bowl. Every fitted kitchen in this domain gives the
+	 * sink bay an open carcass for exactly that reason.
+	 *
+	 * The reference flat had a shelf 10 mm under the bottom of its sink for a whole milestone. It
+	 * measured as 4 mm of interpenetration and it would have been the full shelf the moment anybody
+	 * changed the bowl depth or the shelf spacing - and nothing could see it, because the sink is
+	 * cut into the COUNTER and the counter is a different fixture from the cabinet under it.
+	 *
+	 * Neither a generator nor an actor may go looking for another fixture, so the composing layer
+	 * resolves which runs have something dropping into them and hands the answer down as plain
+	 * values - the same shape of answer as a counter's apertures and an extract's duct hole. Set
+	 * before ApplyFixture, which is what reads it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	TArray<FVector2D> ClearSpans;
+
 	/** Seeds the project's construction figures. Called by the composing layer, not by generation. */
 	void ApplyProjectDefaults();
 

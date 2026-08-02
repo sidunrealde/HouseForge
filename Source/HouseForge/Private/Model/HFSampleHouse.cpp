@@ -726,8 +726,23 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 			// Tucked 150 under the table's edge, which is what "tucked in" means and what makes the
 			// footprints overlap - see IsExpectedOverlap in the validator.
-			AddChair(TEXT("F_Chair_D1"), FVector2D(4670.0, 1590.0), 0.0);
-			AddChair(TEXT("F_Chair_D2"), FVector2D(5330.0, 1590.0), 0.0);
+			//
+			// 4710 AND 5290, NOT 4670 AND 5330: A CHAIR TUCKS IN BETWEEN THE LEGS, NOT INTO ONE.
+			//
+			// The table's legs are set 80 in from each end and are 70 square, so on a 1400 side they
+			// stand at 4380..4450 and 5550..5620 and the clear span between them is 1100. Two 450
+			// chairs need 900 of that, which leaves 200 to share out - and spread the way they were,
+			// each chair had 5 mm of itself inside the leg beside it. Five millimetres, at knee
+			// height, on the two chairs anybody sitting at that table actually uses.
+			//
+			// Nothing about either object could see it: the table's legs are where a table's legs go,
+			// the chairs are where four chairs go round a 4-seater, and both were measured against
+			// their own drawn box and passed. It took standing them next to each other.
+			//
+			// Centred in the clear span leaves 35 either side of each chair and 130 between them,
+			// which is what a set of four round a table this size actually looks like.
+			AddChair(TEXT("F_Chair_D1"), FVector2D(4710.0, 1590.0), 0.0);
+			AddChair(TEXT("F_Chair_D2"), FVector2D(5290.0, 1590.0), 0.0);
 			AddChair(TEXT("F_Chair_D3"), FVector2D(4210.0, 1100.0), 90.0);
 			AddChair(TEXT("F_Chair_D4"), FVector2D(5790.0, 1100.0), 270.0);
 		}
@@ -772,10 +787,57 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// run's slab and the west run's slab drove 5 mm into each other in the corner, which no
 		// coplanar scan catches because the two faces that met were perpendicular rather than
 		// co-planar. Measured off the built geometry rather than off the drawn footprint.
+		// ------------------------------------------------------- the north run is TWO units, not one
+		//
+		// A SINK NEEDS A CARCASS OF ITS OWN, and drawing the whole 2140 as one unit is what stopped it
+		// having one.
+		//
+		// A run is built as a carcass divided into equal bays, which is how a fitted run is actually
+		// made; the divisions are real 18 mm boards from the floor to the counter. Drawn as one unit
+		// with three doors and a drawer bank, this run came out as four bays of 535 - and the sink is
+		// 800 wide, sitting at 1400..2200, straight over the division at 1830. The bowl passed through
+		// the board. Four millimetres of it, because the bottom of the bowl happens to land near the
+		// board's edge, and the whole depth of the bowl the moment anybody changes either figure.
+		//
+		// NO BAY COUNT FIXES IT. Equal bays of 2140/N put a division inside the sink's 800 for every N
+		// greater than one, and N = 1 is a 2140 cupboard with two 1070 doors. The run cannot carry
+		// this sink, and no arrangement of it can.
+		//
+		// So it is three units, which is what the kitchen fitter delivers on the van: a 900 sink unit
+		// sized round the bowl it carries, and a cupboard each side of it. Three carcasses standing
+		// side by side, each with its own ends, exactly as the west run and this one already are.
+		//
+		// The 2140 is unchanged and so is every end of it - 760 to 2900, dying into W_Kitchen_Util at
+		// the east exactly as before. It is divided 570 / 900 / 670, and the middle one takes the whole
+		// opening under the window: the sink at 1400..2200 sits in a carcass at 1330..2230 with 70 of
+		// carcass either side of it and no division anywhere beneath it.
+		FHFFixture& BaseNorthWest = B.AddFixture(TEXT("F_Kitchen_BaseNW"), TEXT("R_Kitchen"),
+			EHFFixtureType::KitchenBaseCabinet, TEXT("Base unit, north run west of the sink"),
+			FVector2D(1045.0, 7985.0), FVector2D(570.0, 600.0), 850.0);
+		BaseNorthWest.AnchorWallId = TEXT("W_North");
+		BaseNorthWest.Params.ShutterCount = 1;
+		BaseNorthWest.Params.ShelfCount = 1;
+		BaseNorthWest.Params.PlinthHeight = 100.0;
+		BaseNorthWest.Params.HandleStyle = EHFHandleStyle::JProfile;
+
+		FHFFixture& BaseSink = B.AddFixture(TEXT("F_Kitchen_BaseSink"), TEXT("R_Kitchen"),
+			EHFFixtureType::KitchenBaseCabinet, TEXT("Sink base unit, north run"),
+			FVector2D(1780.0, 7985.0), FVector2D(900.0, 600.0), 850.0);
+		BaseSink.AnchorWallId = TEXT("W_North");
+
+		// ONE BAY, so there is no division anywhere under the bowl, and two leaves on it because a 900
+		// cupboard has two 450 doors. No drawers and no shelf: the trap and the waste live in here,
+		// and FHFSetInResolution empties this bay anyway once it sees what is dropping into it.
+		BaseSink.Params.ShutterCount = 1;
+		BaseSink.Params.DrawerCount = 0;
+		BaseSink.Params.PlinthHeight = 100.0;
+		BaseSink.Params.HandleStyle = EHFHandleStyle::JProfile;
+
 		FHFFixture& BaseNorth = B.AddFixture(TEXT("F_Kitchen_BaseN"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, north run"), FVector2D(1830.0, 7985.0), FVector2D(2140.0, 600.0), 850.0);
+			TEXT("Base units, north run east of the sink"), FVector2D(2565.0, 7985.0),
+			FVector2D(670.0, 600.0), 850.0);
 		BaseNorth.AnchorWallId = TEXT("W_North");
-		BaseNorth.Params.ShutterCount = 3;
+		BaseNorth.Params.ShutterCount = 0;
 		BaseNorth.Params.DrawerCount = 2;
 		BaseNorth.Params.PlinthHeight = 100.0;
 		BaseNorth.Params.HandleStyle = EHFHandleStyle::JProfile;
@@ -819,8 +881,27 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			TEXT("Double-bowl sink"), FVector2D(1800.0, 7985.0), FVector2D(800.0, 450.0), 200.0, 0.0, 690.0);
 
 		// Set into the west counter, so they turn with it.
+		//
+		// X 435, NOT 415: A HOB IS CENTRED ON THE STONE IT IS CUT INTO, NOT ON THE COUNTER'S BOX.
+		//
+		// Drawn on the counter's own centreline, the 560 x 480 cutout came within 40 mm of the back of
+		// the clear stone - the counter is 600 deep but 20 of that is the upstand standing on it, and
+		// stone under a splashback is not stone a hole may go through. FHFCounterKit refuses a cutout
+		// that leaves less than 50 mm anywhere round it, because granite cracks from the corner of one,
+		// and it was right to: the hole was 10 mm too far back.
+		//
+		// WHAT MADE IT A DEFECT RATHER THAN A REFUSAL is what happened next. The counter came back
+		// whole, perfectly convincing from above, and the hob was placed on top of it exactly as if the
+		// hole were there - 7.4 LITRES of appliance inside solid granite, with nothing anywhere saying
+		// the cut had not been made. AHFCounterActor now reports an uncut aperture; this is the other
+		// half, which is the hob being where it can actually be cut in.
+		//
+		// The clear stone runs from the front edge (25 of overhang in front of the drawn 600) to the
+		// upstand face at 580. Its centre is 277.5 back from the front of the slab, which is 22.5 in
+		// front of where the counter's own centreline is - hence 415 + 20, rounded to the 5 the rest of
+		// this drawing works in. The cutout then keeps 60 mm of stone behind it and 70 in front.
 		B.AddFixture(TEXT("F_Kitchen_Hob"), TEXT("R_Kitchen"), EHFFixtureType::Hob,
-			TEXT("4-burner hob"), FVector2D(415.0, 6300.0), FVector2D(580.0, 500.0), 60.0, 90.0, 850.0);
+			TEXT("4-burner hob"), FVector2D(435.0, 6300.0), FVector2D(580.0, 500.0), 60.0, 90.0, 850.0);
 
 		// X 365, NOT 415: A CHIMNEY'S BACK IS FLAT AGAINST THE WALL. Drawn on the same centre as the
 		// hob it hangs over, it stood 50 mm clear of the plaster for its whole 700 height with the
