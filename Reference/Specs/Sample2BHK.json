@@ -272,7 +272,7 @@
 				"y": 0
 			},
 			"thickness": 115,
-			"height": 450,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -290,7 +290,7 @@
 				"y": 0
 			},
 			"thickness": 115,
-			"height": 450,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -326,7 +326,7 @@
 				"y": 9900
 			},
 			"thickness": 115,
-			"height": 450,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -344,7 +344,7 @@
 				"y": 9900
 			},
 			"thickness": 115,
-			"height": 450,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -380,7 +380,7 @@
 				"y": 3600
 			},
 			"thickness": 115,
-			"height": 450,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -398,7 +398,7 @@
 				"y": 5400
 			},
 			"thickness": 115,
-			"height": 450,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"

@@ -792,12 +792,113 @@ namespace
 	// drawn positions are stale against the thing they attach to, in exactly the way a sink's drawn
 	// 690 is stale against the counter it is set into.
 
+	/**
+	 * How far a railing has to be cut back at each end to stop against the walls returning beside it.
+	 *
+	 * A BALUSTRADE SPANS A CLEAR OPENING; IT DOES NOT RUN THROUGH THE PIERS AT ITS ENDS. Every railing
+	 * in this flat is drawn the full CENTRELINE length of its parapet, so its ends reach half the
+	 * thickness of each return wall past that wall's inner face - and since the returns are built to
+	 * the same 1250 the guard reaches, the handrail's top face and the return's coping end up in one
+	 * plane. That is z-fighting on six corners of the flat, and it is what
+	 * HouseForge.SampleHouse.NoTwoSurfacesShareAPlane found the moment the returns went up.
+	 *
+	 * Resolved here rather than by editing three drawn footprints, for the reason every cross-element
+	 * question in this layer is: the railing cannot see the walls beside it, the walls' thickness is
+	 * a fact about the building, and three hand-computed lengths would be three numbers to get wrong
+	 * again the next time a parapet changes.
+	 *
+	 * @param Yaw The railing's resolved yaw, so +X is known to be along the run.
+	 */
+	void ReturnWallInsets(const FHFHouseSpec& Spec, const FHFFixture& Fixture, const FHFWall& Anchor,
+		double Yaw, double& OutStartInset, double& OutEndInset)
+	{
+		OutStartInset = 0.0;
+		OutEndInset = 0.0;
+
+		if (Fixture.Footprint.X <= 0.0)
+		{
+			return;
+		}
+
+		const double Radians = FMath::DegreesToRadians(Yaw);
+		const FVector2D Along(FMath::Cos(Radians), FMath::Sin(Radians));
+
+		const FVector2D StartEnd = Fixture.Position - Along * (Fixture.Footprint.X * 0.5);
+		const FVector2D PlusEnd = Fixture.Position + Along * (Fixture.Footprint.X * 0.5);
+
+		// How near a return's end has to be to the railing's end to be the thing it dies into. Wide
+		// enough to cover the half-thickness the drawn run overshoots by; narrow enough that a wall
+		// somewhere else along the parapet is not mistaken for one.
+		constexpr double MeetsWithin = 30.0;
+
+		for (const FHFWall& Wall : Spec.Walls)
+		{
+			if (Wall.Id == Anchor.Id)
+			{
+				continue;
+			}
+
+			const FVector2D Direction = (Wall.End - Wall.Start).GetSafeNormal();
+
+			// A wall carrying on in the same line is not a return; it is more of the same parapet.
+			if (FMath::Abs(FVector2D::DotProduct(Direction, Along)) > 0.9)
+			{
+				continue;
+			}
+
+			const FVector2D Ends[2] = { Wall.Start, Wall.End };
+			for (const FVector2D& Point : Ends)
+			{
+				if (FVector2D::Distance(Point, StartEnd) < MeetsWithin)
+				{
+					OutStartInset = FMath::Max(OutStartInset, Wall.Thickness * 0.5);
+				}
+				if (FVector2D::Distance(Point, PlusEnd) < MeetsWithin)
+				{
+					OutEndInset = FMath::Max(OutEndInset, Wall.Thickness * 0.5);
+				}
+			}
+		}
+
+		// Never so much that there is no run left. A railing between two piers 200 apart in a 230
+		// opening is a railing; one cut to nothing is a hole in a balcony.
+		const double Total = OutStartInset + OutEndInset;
+		if (Total >= Fixture.Footprint.X * 0.5)
+		{
+			OutStartInset = 0.0;
+			OutEndInset = 0.0;
+		}
+	}
+
 	void SeedRailing(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFRailingActor& Actor = static_cast<AHFRailingActor&>(Element);
 
+		FHFFixture Run = *C.Fixture;
+
+		// Cut back to the clear opening between the returns, before anything reads the width: the
+		// post count is derived from the run's length, so trimming afterwards would set a railing out
+		// for a span it no longer has.
+		if (C.AnchorWall != nullptr && C.Spec != nullptr)
+		{
+			const double Yaw = FHFFixturePlacement::FacingYaw(Run, C.AnchorWall);
+
+			double StartInset = 0.0;
+			double EndInset = 0.0;
+			ReturnWallInsets(*C.Spec, Run, *C.AnchorWall, Yaw, StartInset, EndInset);
+
+			if (StartInset > 0.0 || EndInset > 0.0)
+			{
+				const double Radians = FMath::DegreesToRadians(Yaw);
+				const FVector2D Along(FMath::Cos(Radians), FMath::Sin(Radians));
+
+				Run.Footprint.X -= StartInset + EndInset;
+				Run.Position += Along * ((StartInset - EndInset) * 0.5);
+			}
+		}
+
 		Actor.ApplyProjectDefaults();
-		Actor.ApplyFixture(*C.Fixture);
+		Actor.ApplyFixture(Run);
 
 		// THE PARAPET AS A DIMENSION. A code height is measured from the balcony floor, so the same
 		// 800 railing is a compliant guard on a 450 dwarf wall and a 800 mm hazard on nothing. A
@@ -805,7 +906,7 @@ namespace
 		// an extract's host wall thickness follows.
 		Actor.ApplyMount(C.AnchorWall != nullptr ? C.AnchorWall->Height : 0.0);
 
-		Actor.SetActorTransform(FHFFixturePlacement::OnWallTop(*C.Fixture, C.FloorZ(), C.AnchorWall));
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallTop(Run, C.FloorZ(), C.AnchorWall));
 	}
 
 	void SeedPelmet(const FHFFixtureContext& C, AHFElementActor& Element)

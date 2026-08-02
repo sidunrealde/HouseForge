@@ -372,6 +372,98 @@ bool FHFRailingsAreACodeGuardTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * NO LOW WALL ANYWHERE IN THE FLAT IS LEFT WITHOUT A GUARD ON IT.
+ *
+ * THIS IS THE TEST THAT WOULD HAVE CAUGHT WHAT LOWERING THE PARAPETS DID, and it was written after a
+ * render found it rather than before. Dropping every parapet from 1100 to 450 cured the 1900 mm cage
+ * over the living room's south window and, in the same edit, turned the two RETURN walls of each
+ * balcony into 450 mm kerbs with nothing on them - because the drawing marks one railing per balcony,
+ * on the open face, and the returns had been relying on being 1100 of masonry. Six edges of unguarded
+ * fall, introduced by a fix, invisible in the spec, and passed by every assertion in this file: each
+ * railing was still on its own parapet and still a code height above its own floor.
+ *
+ * So the question is asked of the BUILDING rather than of the railings. Every wall low enough to fall
+ * over has to reach 1050 above the floor beside it, and it may do that as masonry, or as masonry plus
+ * whatever is built standing on it. Nothing about which walls happen to carry railings is assumed.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFNoBalconyEdgeIsUnguardedTest,
+	"HouseForge.Trim.NoBalconyEdgeIsUnguarded", HF_TEST_FLAGS)
+
+bool FHFNoBalconyEdgeIsUnguardedTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeTrimActors;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ ClearHouseForgeActors(World); };
+
+	FHFHouseSpec Spec;
+	AHFHouseActor* House = BuildReferenceFlat(World, Spec);
+	if (!TestNotNull(TEXT("The reference flat builds"), House))
+	{
+		return false;
+	}
+
+	// Below eye level, so a person can go over it. A storey wall is not a guard question.
+	constexpr double FallableHeight = 190.0;
+
+	// NBC 2016 Part 4.
+	constexpr double MinGuardHeight = 105.0;
+
+	int32 Checked = 0;
+
+	for (const FHFWall& Wall : Spec.Walls)
+	{
+		if (Wall.Height >= FallableHeight)
+		{
+			continue;
+		}
+
+		++Checked;
+
+		// The highest thing built standing on this wall, measured off its mesh rather than off any
+		// figure - which is what makes "or as masonry plus what stands on it" a fact about the level.
+		double ReachZ = Wall.BaseZ + Wall.Height;
+		FString Guard = TEXT("masonry alone");
+
+		for (const FHFFixture& Fixture : Spec.Fixtures)
+		{
+			if (Fixture.AnchorWallId != Wall.Id)
+			{
+				continue;
+			}
+
+			AHFRailingActor* Railing = Cast<AHFRailingActor>(ElementFor(House, Fixture.Id));
+			if (Railing == nullptr)
+			{
+				continue;
+			}
+
+			const FBox Bounds = WorldBounds(*Railing);
+			if (Bounds.IsValid && Bounds.Max.Z > ReachZ)
+			{
+				ReachZ = Bounds.Max.Z;
+				Guard = FString::Printf(TEXT("with '%s' on it"), *Fixture.Id.ToString());
+			}
+		}
+
+		const double Above = ReachZ - Wall.BaseZ;
+
+		TestTrue(*FString::Printf(TEXT("'%s' is guarded to %.0f cm (%s)"),
+			*Wall.Id.ToString(), Above, *Guard), Above >= MinGuardHeight - 0.01);
+	}
+
+	// The whole flat has nine parapets. A test that silently checked none of them because the walls
+	// were renamed would pass in exactly the case it exists for.
+	TestEqual(TEXT("Every parapet in the flat was checked"), Checked, 9);
+
+	return true;
+}
+
 // =================================================================================== the pelmets
 
 /**

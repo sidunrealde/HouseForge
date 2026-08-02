@@ -79,9 +79,25 @@ namespace
 	// that matters, because a coping is a foothold and the usual requirement above one is 750. See
 	// FHFRailingParams::GuardHeightAboveFloor and HeightAboveFoothold, which assert both.
 	//
-	// Nothing else in the flat measures from this. The balconies have no ceilings, no openings in
+	// AND ONLY ON THE FACE THAT CARRIES A RAILING. Lowering every parapet to 450 was the first
+	// attempt, and rendering the balcony found what it had done: the drawing marks ONE railing per
+	// balcony, on the open face, so the two return walls of each one became 450 mm kerbs with
+	// nothing on them at all. Six edges of unguarded fall, introduced by the fix for the cage.
+	//
+	// That is also what a real balcony is, so it is not a compromise: the returns are solid masonry
+	// and only the open face is a balustrade. They are built to the same 1250 the guard reaches, so
+	// the balcony's edge is one unbroken line at one height, part solid and part railing.
+	//
+	// HouseForge.Trim.NoBalconyEdgeIsUnguarded asserts the whole rule - every low wall in the flat
+	// reaches 1050 above the floor, either as masonry or as masonry plus what stands on it - rather
+	// than trusting these two constants to stay paired with the fixture list.
+	//
+	// Nothing else in the flat measures from these. The balconies have no ceilings, no openings in
 	// their parapets and no skirting; the two condensing units stand on the floor beside them.
 	constexpr double ParapetHeight = 450.0;
+	constexpr double GuardHeight   = 1250.0;
+
+	static_assert(GuardHeight >= 1050.0, "NBC 2016 Part 4: a balcony guard clears 1050 above the floor.");
 
 	constexpr double DoorWidth     = 900.0;
 	constexpr double DoorHeight    = 2100.0;
@@ -116,14 +132,19 @@ namespace
 			Spec.Walls.Add(Wall);
 		}
 
-		void AddParapet(const FName& Id, const FVector2D& Start, const FVector2D& End)
+		/**
+		 * @param Height Full guard height for a return wall, or the dwarf-wall height for a face
+		 *        that carries a railing. There is no default: a parapet that got one silently would
+		 *        be the exact defect this parameter exists to prevent - see the two constants.
+		 */
+		void AddParapet(const FName& Id, const FVector2D& Start, const FVector2D& End, double Height)
 		{
 			FHFWall Wall;
 			Wall.Id = Id;
 			Wall.Start = Start;
 			Wall.End = End;
 			Wall.Thickness = ParapetThickness;
-			Wall.Height = ParapetHeight;
+			Wall.Height = Height;
 			Wall.bIsExternal = true;
 			Spec.Walls.Add(Wall);
 		}
@@ -331,17 +352,19 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Balcony parapets. Three balconies: living (south), master bedroom (north) and a service
 	// balcony off the master bathroom (east).
-	B.AddParapet(TEXT("W_Balc_South"), FVector2D(X0, YB), FVector2D(X2, YB));
-	B.AddParapet(TEXT("W_Balc_West"),  FVector2D(X0, YB), FVector2D(X0, Y0));
-	B.AddParapet(TEXT("W_Balc_East"),  FVector2D(X2, YB), FVector2D(X2, Y0));
+	// The OPEN FACE of each balcony is a dwarf wall carrying a railing; the two RETURNS beside it are
+	// solid to the same guard height. See the note on ParapetHeight.
+	B.AddParapet(TEXT("W_Balc_South"), FVector2D(X0, YB), FVector2D(X2, YB), ParapetHeight);
+	B.AddParapet(TEXT("W_Balc_West"),  FVector2D(X0, YB), FVector2D(X0, Y0), GuardHeight);
+	B.AddParapet(TEXT("W_Balc_East"),  FVector2D(X2, YB), FVector2D(X2, Y0), GuardHeight);
 
-	B.AddParapet(TEXT("W_BalcN_North"), FVector2D(X3, YN), FVector2D(X5, YN));
-	B.AddParapet(TEXT("W_BalcN_West"),  FVector2D(X3, Y3), FVector2D(X3, YN));
-	B.AddParapet(TEXT("W_BalcN_East"),  FVector2D(X5, Y3), FVector2D(X5, YN));
+	B.AddParapet(TEXT("W_BalcN_North"), FVector2D(X3, YN), FVector2D(X5, YN), ParapetHeight);
+	B.AddParapet(TEXT("W_BalcN_West"),  FVector2D(X3, Y3), FVector2D(X3, YN), GuardHeight);
+	B.AddParapet(TEXT("W_BalcN_East"),  FVector2D(X5, Y3), FVector2D(X5, YN), GuardHeight);
 
-	B.AddParapet(TEXT("W_BalcE_East"),  FVector2D(XE, Y1), FVector2D(XE, Y2));
-	B.AddParapet(TEXT("W_BalcE_South"), FVector2D(X5, Y1), FVector2D(XE, Y1));
-	B.AddParapet(TEXT("W_BalcE_North"), FVector2D(X5, Y2), FVector2D(XE, Y2));
+	B.AddParapet(TEXT("W_BalcE_East"),  FVector2D(XE, Y1), FVector2D(XE, Y2), ParapetHeight);
+	B.AddParapet(TEXT("W_BalcE_South"), FVector2D(X5, Y1), FVector2D(XE, Y1), GuardHeight);
+	B.AddParapet(TEXT("W_BalcE_North"), FVector2D(X5, Y2), FVector2D(XE, Y2), GuardHeight);
 
 	// ----------------------------------------------------------------- structure
 	// Every downstand beam follows a wall line, and the grid is the wall grid. Nothing here crosses
