@@ -217,9 +217,29 @@ FHFWallPlateBuild FHFWallPlateKit::BuildAccessoryPlate(const FHFAccessoryPlatePa
 	// separates a rocker from the plate it stands in.
 	const double ModuleFaceY = CoverFrontY + P.ModuleRecess;
 
-	const double ApertureW = P.ApertureWidth();
-	const double ApertureH = P.ApertureHeight();
+	const double ApertureH = FMath::Min(
+		P.ModuleHeight > 0.0 ? P.ModuleHeight : P.ApertureHeight(), P.ApertureHeight());
+	const double ModuleH = ApertureH;
+
 	const double CentreZ = P.Height * 0.5;
+
+	// ------------------------------------------------------- THE WINDOW IS THE SIZE OF THE MODULES
+	//
+	// Not the size of the plate less a border, which is what it was and what the first render of the
+	// flat showed to be wrong. A module is 45 mm tall; a plate is 120 or 150. Cutting the window to
+	// the whole inner face left a big recessed rectangle with a row of small rockers floating across
+	// the middle of it - four fifths of it blank grid, which is not what any plate looks like and is
+	// the first thing the eye reads on a fitting at eye level.
+	//
+	// A real cover has a window that hugs its modules and is solid everywhere else. So the window is
+	// derived from the bank rather than from the plate, and PlateBorder becomes the MINIMUM margin
+	// rather than the actual one.
+	const double ApertureW = FMath::Min(P.ApertureWidth(), P.Width - 2.0 * P.PlateBorder);
+
+	// The cover's window: the bank plus a hairline reveal all round.
+	const double WindowMargin = FMath::Min(0.25, P.PlateBorder * 0.25);
+	const double WindowW = FMath::Min(ApertureW + 2.0 * WindowMargin, P.Width - 2.0 * P.PlateBorder);
+	const double WindowH = FMath::Min(ModuleH + 2.0 * WindowMargin, P.Height - 2.0 * P.PlateBorder);
 
 	// ------------------------------------------------------------------------------- the grid plate
 	//
@@ -248,56 +268,36 @@ FHFWallPlateBuild FHFWallPlateKit::BuildAccessoryPlate(const FHFAccessoryPlatePa
 	const double CoverCentreY = (CoverBackY + CoverFrontY) * 0.5;
 	const double CoverHalfDepth = (CoverBackY - CoverFrontY) * 0.5;
 
-	if (CoverHalfDepth > 0.0 && P.PlateBorder > 0.0)
+	if (CoverHalfDepth > 0.0 && WindowW > 0.0 && WindowH > 0.0)
 	{
 		FDynamicMesh3 Cover;
 		FHFMeshOps::InitialiseMesh(Cover);
 
-		// Top and bottom rails run the full width; the sides fill only what is left between them, so
-		// the four meet at the corners rather than overlapping into a double thickness there.
-		FHFMeshOps::AppendBox(Cover,
-			FVector3d(0.0, CoverCentreY, P.Height - P.PlateBorder * 0.5),
-			FVector3d(P.Width * 0.5, CoverHalfDepth, P.PlateBorder * 0.5), 0.0,
-			EHFSurfaceRole::Appliance);
+		const double SideWidth = FMath::Max((P.Width - WindowW) * 0.5, 0.0);
+		const double CapHeight = FMath::Max((P.Height - WindowH) * 0.5, 0.0);
 
-		FHFMeshOps::AppendBox(Cover,
-			FVector3d(0.0, CoverCentreY, P.PlateBorder * 0.5),
-			FVector3d(P.Width * 0.5, CoverHalfDepth, P.PlateBorder * 0.5), 0.0,
-			EHFSurfaceRole::Appliance);
-
+		// Top and bottom caps run the full width; the sides fill only what is left between them, so
+		// the four meet at the window's corners rather than overlapping into a double thickness.
 		for (const double Side : { -1.0, 1.0 })
 		{
-			FHFMeshOps::AppendBox(Cover,
-				FVector3d(Side * (P.Width - P.PlateBorder) * 0.5, CoverCentreY, CentreZ),
-				FVector3d(P.PlateBorder * 0.5, CoverHalfDepth, ApertureH * 0.5), 0.0,
-				EHFSurfaceRole::Appliance);
+			if (CapHeight > 0.0)
+			{
+				FHFMeshOps::AppendBox(Cover,
+					FVector3d(0.0, CoverCentreY, CentreZ + Side * (P.Height - CapHeight) * 0.5),
+					FVector3d(P.Width * 0.5, CoverHalfDepth, CapHeight * 0.5), 0.0,
+					EHFSurfaceRole::Appliance);
+			}
+
+			if (SideWidth > 0.0)
+			{
+				FHFMeshOps::AppendBox(Cover,
+					FVector3d(Side * (P.Width - SideWidth) * 0.5, CoverCentreY, CentreZ),
+					FVector3d(SideWidth * 0.5, CoverHalfDepth, WindowH * 0.5), 0.0,
+					EHFSurfaceRole::Appliance);
+			}
 		}
 
 		FHFMeshOps::AppendPreservingRoles(Out.Shell, Cover);
-	}
-
-	// ------------------------------------------------------------------------------ the blanked grid
-	//
-	// A MODULE IS 45 MM TALL AND THIS PLATE IS 150, so most of the window is blanked off - which is
-	// what a real one looks like, and what stops a six gang plate coming out as six full-height
-	// paddles. Filled flush with the module faces, so the rockers stand proud of something rather
-	// than floating in a hole.
-
-	const double ModuleH = FMath::Min(P.ModuleHeight > 0.0 ? P.ModuleHeight : ApertureH, ApertureH);
-
-	if (GridFrontY > ModuleFaceY)
-	{
-		const double BlankDepth = GridFrontY - ModuleFaceY;
-
-		FDynamicMesh3 Blank;
-		FHFMeshOps::InitialiseMesh(Blank);
-
-		FHFMeshOps::AppendBox(Blank,
-			FVector3d(0.0, ModuleFaceY + BlankDepth * 0.5, CentreZ),
-			FVector3d(ApertureW * 0.5, BlankDepth * 0.5, ApertureH * 0.5), 0.0,
-			EHFSurfaceRole::Appliance);
-
-		FHFMeshOps::AppendPreservingRoles(Out.Shell, Blank);
 	}
 
 	// --------------------------------------------------------------------------------- the modules
@@ -344,6 +344,13 @@ FHFWallPlateBuild FHFWallPlateKit::BuildAccessoryPlate(const FHFAccessoryPlatePa
 			// perforated plate over a cavity is the only version that catches a shadow, and a socket
 			// with no shadow in it is the most obvious placeholder there is on a wall.
 			const double FaceThickness = FMath::Max(FMath::Min(0.35, P.RockerProud), 0.1);
+
+			// THE FACE IS SET INTO ITS OWN BEZEL, not flush with the rockers beside it. Flush, the
+			// outlet has no outline at all: it is a patch of the same plane as everything around it,
+			// and the pin holes are the only thing distinguishing it - which at 5 mm across is
+			// nothing. Held back a millimetre and a half, the rim round it catches a line and the
+			// module reads as a separate fitting from across the room, which is the whole job.
+			const double FaceSetIn = FMath::Min(0.15, P.RockerProud * 0.6);
 			const double PinRadius = FMath::Min(0.28, OutletWidth * 0.075);
 			const double EarthRadius = PinRadius * 1.25;
 			const double PinSpread = FMath::Min(OutletWidth * 0.24, ModuleH * 0.24);
@@ -360,16 +367,21 @@ FHFWallPlateBuild FHFWallPlateKit::BuildAccessoryPlate(const FHFAccessoryPlatePa
 				PlanRect(FVector2D::ZeroVector, FVector2D(OutletWidth * 0.5, ModuleH * 0.5)),
 				Holes, 0.0, FaceThickness, EHFSurfaceRole::Appliance))
 			{
-				StandOnWall(Face, OutletCentreX, ModuleFaceY - P.RockerProud + FaceThickness,
-					CentreZ);
+				StandOnWall(Face, OutletCentreX,
+					ModuleFaceY - P.RockerProud + FaceSetIn + FaceThickness, CentreZ);
 
 				FHFMeshOps::AppendPreservingRoles(Out.Shell, Face);
 			}
 
-			// The body behind it, as a RIM rather than a block, so the pin holes look into a cavity
-			// instead of onto a wall of plastic three millimetres behind them.
-			const double BodyBackY = ModuleFaceY;
-			const double BodyFrontY = ModuleFaceY - P.RockerProud + FaceThickness;
+			// THE BODY BEHIND IT IS A RIM AND IT RUNS ALL THE WAY BACK TO THE GRID, which is the
+			// difference between a socket and a picture of one. Built only as far as the module face,
+			// the rim was one millimetre deep and the blanking panel filled everything behind it - so
+			// the pin holes were real holes looking at a solid wall of plastic 1 mm away, with no
+			// shadow in them at all. Rendered, the outlet went out as three faint scratches on a flat
+			// face; the perforation test passed, because the holes were genuinely there.
+			// The rim runs from the rockers' own plane back to the grid, so the face sits INSIDE it.
+			const double BodyBackY = GridFrontY;
+			const double BodyFrontY = ModuleFaceY - P.RockerProud;
 
 			if (BodyBackY > BodyFrontY)
 			{
@@ -404,6 +416,33 @@ FHFWallPlateBuild FHFWallPlateKit::BuildAccessoryPlate(const FHFAccessoryPlatePa
 		if (RockerWidth <= 0.0 || ModuleH <= 0.0)
 		{
 			continue;
+		}
+
+		// The module the rocker is clipped into, running back to the grid. Without it the rocker hangs
+		// in the cover's window with daylight round it as soon as it is pressed.
+		//
+		// HELD IN FROM THE ROCKER ON EVERY SIDE, and that is not tidiness. Built to the same width the
+		// carrier's sides land exactly in the plane of the rocker's sides: two drawn faces sharing a
+		// plane, which the depth test resolves differently every frame, and eight rockers on the
+		// living room's plate strobing as the camera moves. It is what a real rocker does anyway - it
+		// overhangs the module below it, and the shadow round its edge is how you can see it is a
+		// separate part.
+		const double CarrierInset = FMath::Min(0.08, RockerWidth * 0.1);
+
+		if (GridFrontY > ModuleFaceY && RockerWidth > 2.0 * CarrierInset)
+		{
+			FDynamicMesh3 Carrier;
+			FHFMeshOps::InitialiseMesh(Carrier);
+
+			const double CarrierDepth = GridFrontY - ModuleFaceY;
+
+			FHFMeshOps::AppendBox(Carrier,
+				FVector3d(RockerCentreX, ModuleFaceY + CarrierDepth * 0.5, CentreZ),
+				FVector3d(RockerWidth * 0.5 - CarrierInset, CarrierDepth * 0.5,
+					ModuleH * 0.5 - CarrierInset), 0.0,
+				EHFSurfaceRole::Appliance);
+
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Carrier);
 		}
 
 		FHFMeshPart Rocker;

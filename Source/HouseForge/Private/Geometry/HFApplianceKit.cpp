@@ -11,6 +11,16 @@ namespace
 {
 	constexpr int32 RevolveSides = 20;
 
+	/**
+	 * Sides for a circle that somebody actually stands in front of.
+	 *
+	 * A WASHING MACHINE'S PORTHOLE IS THE ONE CIRCLE IN THIS FILE AT WAIST HEIGHT. Twenty sides is
+	 * plenty for a tap body or a pipe seen at two metres, and it is visibly a dodecagon on a 320 mm
+	 * door somebody is standing over - the render showed the bezel's facets before it showed anything
+	 * else about the machine. Forty costs nothing and is round.
+	 */
+	constexpr int32 CloseUpSides = 40;
+
 	/** Turns a mesh about an axis through its own origin, in degrees. */
 	void RotateAboutOrigin(FDynamicMesh3& Mesh, const FVector3d& Axis, double Degrees)
 	{
@@ -817,21 +827,27 @@ FHFApplianceBuild FHFApplianceKit::BuildSplitAC(const FHFSplitACParams& Params)
 	const double ChannelReach = ChannelBackY - ChannelFrontY;
 	const double ChannelMidY = (ChannelFrontY + ChannelBackY) * 0.5;
 
-	// --------------------------------------------------------------------------- the display strip
+	// NO DISPLAY STRIP, and it is worth saying why rather than leaving a gap. One was built, as a dark
+	// inset on the lower front - and the casing's front is a CURVE, so a box placed at a fixed offset
+	// sat entirely inside it at one height and stood proud of it at another. Rendered, it was simply
+	// not there. Chasing a flush 8 mm inset round a swept profile is work for a detail nobody can see
+	// at 2.2 m, and the render shows the front reads perfectly well without one.
+
+	// --------------------------------------------------------------------- what the vane will occupy
 	//
-	// A dark inset on the lower front, which is the one detail on a split head that is at eye height
-	// and always lit from inside. Cheap, and it is what stops the front reading as blank plastic.
+	// Worked out BEFORE the deflectors, because the deflectors have to sit clear of it. See below.
 
+	const double VaneThickness = FMath::Min(0.7, ChannelReach * 0.12);
+	const double VaneReach = ChannelReach * 0.94;
+	const double VaneRise = (ChannelFrontZ - ChannelHingeZ) * (VaneReach / ChannelReach);
+
+	// The top of the shut vane at a point along the channel. It lies ALONG the mouth rather than
+	// across it, so it is lowest at the hinge and highest at the lip.
+	auto ShutVaneTopZ = [&](double AtY)
 	{
-		FDynamicMesh3 Display;
-		FHFMeshOps::InitialiseMesh(Display);
-
-		FHFMeshOps::AppendBox(Display,
-			FVector3d(P.Length * 0.30, -HalfY * 0.88, H * 0.33),
-			FVector3d(P.Length * 0.10, HalfY * 0.06, H * 0.035), 0.0, EHFSurfaceRole::Glass);
-
-		FHFMeshOps::AppendPreservingRoles(Out.Shell, Display);
-	}
+		const double Fraction = FMath::Clamp((ChannelBackY - AtY) / FMath::Max(VaneReach, 0.01), 0.0, 1.0);
+		return ChannelHingeZ + VaneThickness + VaneRise * Fraction;
+	};
 
 	// ------------------------------------------------------------------------- the vertical deflectors
 	//
@@ -847,8 +863,24 @@ FHFApplianceBuild FHFApplianceKit::BuildSplitAC(const FHFSplitACParams& Params)
 	if (P.DeflectorCount > 0 && ChannelReach > 0.0)
 	{
 		const double FinPitch = P.Length * 0.86 / static_cast<double>(P.DeflectorCount);
-		const double FinHeight = FMath::Max(ChannelCeilingZ - ChannelHingeZ - 0.5, 0.2);
-		const double FinReach = ChannelReach * 0.7;
+
+		// ------------------------------------------------ THEY LIVE IN THE THROAT, ABOVE THE VANE
+		//
+		// Set out across the whole channel and started just above the hinge, the fins ran STRAIGHT
+		// THROUGH the shut vane along its entire length - the vane rises towards the lip and the fins
+		// did not, so the two crossed. In the rendered flat the deflector ticks showed through a
+		// closed louvre, which is a discharge you can see into with the machine off.
+		//
+		// Both halves of the fix come from where the parts actually are on a real unit: the vertical
+		// deflectors sit BACK in the throat, not at the mouth, and they hang ABOVE the horizontal
+		// vane rather than beside it. So the fins are pulled towards the hinge, where the vane is
+		// low, and their underside is measured off the vane's own shut position at their front edge.
+		const double FinReach = ChannelReach * 0.45;
+		const double FinCentreY = ChannelBackY - FinReach * 0.5 - ChannelReach * 0.05;
+		const double FinFrontY = FinCentreY - FinReach * 0.5;
+
+		const double FinBottomZ = ShutVaneTopZ(FinFrontY) + 0.25;
+		const double FinHeight = FMath::Max(ChannelCeilingZ - FinBottomZ - 0.3, 0.2);
 
 		for (int32 Fin = 0; Fin < P.DeflectorCount; ++Fin)
 		{
@@ -865,8 +897,7 @@ FHFApplianceBuild FHFApplianceKit::BuildSplitAC(const FHFSplitACParams& Params)
 
 			const double FinX = -P.Length * 0.43 + (static_cast<double>(Fin) + 0.5) * FinPitch;
 
-			Deflector.PivotTransform =
-				FTransform(FVector(FinX, ChannelMidY, ChannelHingeZ + 0.3));
+			Deflector.PivotTransform = FTransform(FVector(FinX, FinCentreY, FinBottomZ));
 
 			Deflector.Motion.Type = EHFMotionType::Hinge;
 			Deflector.Motion.Axis = FVector::ZAxisVector;
@@ -889,14 +920,12 @@ FHFApplianceBuild FHFApplianceKit::BuildSplitAC(const FHFSplitACParams& Params)
 		Louvre.PartId = LouvrePartId();
 		FHFMeshOps::InitialiseMesh(Louvre.Mesh);
 
-		const double VaneThickness = FMath::Min(0.7, ChannelReach * 0.12);
-		const double VaneReach = ChannelReach * 0.94;
-
-		// SHUT MEANS SHUT. The vane lies along the mouth line rather than horizontally, so its tip
-		// arrives AT the front lip: the channel's rear is at the hinge and its lip is higher and
-		// further forward, and a vane drawn flat leaves a 20 mm slot open at the front with the unit
-		// switched off. The rise is read off the section rather than chosen, so the two cannot drift.
-		const double VaneRise = (ChannelFrontZ - ChannelHingeZ) * (VaneReach / ChannelReach);
+		// SHUT MEANS SHUT. VaneRise, computed above, makes the vane lie ALONG the mouth line rather
+		// than horizontally across it, so its tip arrives AT the front lip: the channel's rear is at
+		// the hinge and its lip is higher and further forward, and a vane drawn flat leaves a 20 mm
+		// slot open at the front with the unit switched off. The rise is read off the section rather
+		// than chosen, so the two cannot drift - and the deflectors are set out against the same
+		// figure, which is what keeps them out of it.
 
 		// A shallow scoop rather than a flat plate: it catches a highlight along its length instead of
 		// going out as one dead grey band.
@@ -978,6 +1007,10 @@ FHFApplianceBuild FHFApplianceKit::BuildCondenser(const FHFCondenserParams& Para
 	const double CaseCentreZ = CaseBottomZ + CaseHeight * 0.5;
 	const double PanelThickness = FMath::Min(0.8, P.Depth * 0.05);
 
+	// How far the coil slats stand in front of the recessed end panels. Their whole reading is the
+	// shadow between them, so the recess has to be deeper than the slats are thick.
+	const double CoilSlatDepth = P.CoilSlats > 0 ? PanelThickness * 1.1 : 0.0;
+
 	const double FanRadius = P.FanRadius();
 	const FVector2D FanCentre(P.Width * 0.5, CaseBottomZ + CaseHeight * 0.55);
 
@@ -1028,11 +1061,19 @@ FHFApplianceBuild FHFApplianceKit::BuildCondenser(const FHFCondenserParams& Para
 			FVector3d(P.Width * 0.5, P.Depth * 0.5, PanelThickness * 0.5), 0.0,
 			EHFSurfaceRole::Appliance);
 
+		// THE ENDS ARE SET BACK BY THE DEPTH OF THE COIL SLATS IN FRONT OF THEM. Built flush with the
+		// drawn face they were the outermost thing on the unit, and the slats - which have to be
+		// inside the drawn width - ended up entirely BURIED in them. Eleven per side, invisible, in
+		// the rendered flat: the unit came out as a plain box with a fan in it, and nothing measured
+		// it because a buried solid is still closed, still positive, and still inside the box.
 		for (const double Side : { 0.0, 1.0 })
 		{
+			const double PanelCentreX = Side > 0.5
+				? P.Width - CoilSlatDepth - PanelThickness * 0.5
+				: CoilSlatDepth + PanelThickness * 0.5;
+
 			FHFMeshOps::AppendBox(Case,
-				FVector3d(Side * (P.Width - PanelThickness) + PanelThickness * 0.5, P.Depth * 0.5,
-					CaseCentreZ),
+				FVector3d(PanelCentreX, P.Depth * 0.5, CaseCentreZ),
 				FVector3d(PanelThickness * 0.5, P.Depth * 0.5, CaseHeight * 0.5), 0.0,
 				EHFSurfaceRole::Appliance);
 		}
@@ -1051,26 +1092,29 @@ FHFApplianceBuild FHFApplianceKit::BuildCondenser(const FHFCondenserParams& Para
 		FDynamicMesh3 Coil;
 		FHFMeshOps::InitialiseMesh(Coil);
 
-		const double SlatSpan = CaseHeight * 0.80;
+		// Nearly the whole height, so the louvre reads as the end of the unit rather than as a band
+		// across the middle of a blank panel.
+		const double SlatSpan = CaseHeight * 0.90;
 		const double SlatPitch = SlatSpan / static_cast<double>(P.CoilSlats);
-		const double SlatThickness = FMath::Min(SlatPitch * 0.45, 0.5);
+		const double SlatThickness = FMath::Min(SlatPitch * 0.55, 0.6);
 
 		for (int32 Slat = 0; Slat < P.CoilSlats; ++Slat)
 		{
-			const double SlatZ = CaseBottomZ + CaseHeight * 0.10
+			const double SlatZ = CaseBottomZ + CaseHeight * 0.05
 				+ (static_cast<double>(Slat) + 0.5) * SlatPitch;
 
 			for (const double Side : { 0.0, 1.0 })
 			{
-				// HELD FULLY INSIDE THE DRAWN WIDTH. Set out from the case's own face the slats
-				// overhung it by 0.4 mm at each end - nothing anybody would ever see, and enough to
-				// make the unit measure 80.08 wide against a drawing that says 80. A fixture whose
-				// geometry quietly leaves its declared box makes every clearance measured against it
-				// answer about something that is not there.
+				// FROM THE DRAWN FACE BACK TO THE RECESSED PANEL, and not a millimetre past either.
+				// The slats are what the eye sees of the end of the unit; the panel behind them is
+				// what makes each of them cast a line.
+				const double SlatCentreX = Side > 0.5
+					? P.Width - CoilSlatDepth * 0.5
+					: CoilSlatDepth * 0.5;
+
 				FHFMeshOps::AppendBox(Coil,
-					FVector3d(Side * (P.Width - PanelThickness * 0.9) + PanelThickness * 0.45,
-						P.Depth * 0.52, SlatZ),
-					FVector3d(PanelThickness * 0.45, P.Depth * 0.40, SlatThickness * 0.5), 0.0,
+					FVector3d(SlatCentreX, P.Depth * 0.52, SlatZ),
+					FVector3d(CoilSlatDepth * 0.5, P.Depth * 0.40, SlatThickness * 0.5), 0.0,
 					EHFSurfaceRole::MetalHardware);
 			}
 		}
@@ -1464,7 +1508,7 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 
 	{
 		TArray<TArray<FVector2D>> Holes;
-		Holes.Add(HoleRing(PortholeCentre, PortholeRadius, RevolveSides));
+		Holes.Add(HoleRing(PortholeCentre, PortholeRadius, CloseUpSides));
 
 		const TArray<FVector2D> Outer = {
 			FVector2D(0.0, 0.0),
@@ -1559,13 +1603,13 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 		const double BootThickness = FMath::Max(FrontThickness * 1.4, 0.6);
 
 		TArray<TArray<FVector2D>> Bore;
-		Bore.Add(HoleRing(PortholeCentre, PortholeRadius * 0.86, RevolveSides));
+		Bore.Add(HoleRing(PortholeCentre, PortholeRadius * 0.86, CloseUpSides));
 
 		FDynamicMesh3 Boot;
 		FHFMeshOps::InitialiseMesh(Boot);
 
 		if (FHFMeshOps::AppendPrismWithHoles(Boot,
-			HoleRing(PortholeCentre, PortholeRadius * 1.03, RevolveSides), Bore,
+			HoleRing(PortholeCentre, PortholeRadius * 1.03, CloseUpSides), Bore,
 			0.0, BootThickness, EHFSurfaceRole::MetalHardware))
 		{
 			StandPanelUp(Boot, BootThickness);
@@ -1591,7 +1635,7 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 
 		if (FHFMeshOps::AppendRevolvedProfile(Drum, Back,
 			FVector3d(PortholeCentre.X, FrontThickness, PortholeCentre.Y),
-			FVector3d::UnitY(), RevolveSides, EHFSurfaceRole::MetalHardware))
+			FVector3d::UnitY(), CloseUpSides, EHFSurfaceRole::MetalHardware))
 		{
 			FHFMeshOps::AppendPreservingRoles(Out.Shell, Drum);
 		}
@@ -1618,7 +1662,7 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 		// and would hide the glass it is supposed to frame, which is a failure that looks perfectly
 		// correct from behind and from every wireframe.
 		TArray<TArray<FVector2D>> Aperture;
-		Aperture.Add(HoleRing(LocalCentre, PortholeRadius * 0.80, RevolveSides));
+		Aperture.Add(HoleRing(LocalCentre, PortholeRadius * 0.80, CloseUpSides));
 
 		bool bRimBuilt = false;
 
@@ -1626,7 +1670,7 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 			FDynamicMesh3 Rim;
 			FHFMeshOps::InitialiseMesh(Rim);
 
-			if (FHFMeshOps::AppendPrismWithHoles(Rim, HoleRing(LocalCentre, RimRadius, RevolveSides),
+			if (FHFMeshOps::AppendPrismWithHoles(Rim, HoleRing(LocalCentre, RimRadius, CloseUpSides),
 				Aperture, 0.0, RimDepth, EHFSurfaceRole::Appliance))
 			{
 				StandPanelUp(Rim, RimDepth);
@@ -1655,7 +1699,7 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 			FHFMeshOps::InitialiseMesh(Pane);
 
 			if (FHFMeshOps::AppendRevolvedProfile(Pane, Glass,
-				FVector3d(LocalCentre.X, 0.0, 0.0), FVector3d::UnitY(), RevolveSides,
+				FVector3d(LocalCentre.X, 0.0, 0.0), FVector3d::UnitY(), CloseUpSides,
 				EHFSurfaceRole::Glass))
 			{
 				FHFMeshOps::AppendPreservingRoles(Porthole.Mesh, Pane);

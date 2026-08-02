@@ -761,6 +761,55 @@ bool FHFSplitACDeflectorTest::RunTest(const FString&)
 
 	TestEqual(TEXT("Every deflector is its own part"), Found, P.DeflectorCount);
 
+	// ------------------------------------------------- AND NONE OF THEM IS INSIDE THE SHUT VANE
+	//
+	// THE SECOND THING THE RENDER FOUND. The vane lies ALONG the mouth and rises towards the lip; the
+	// fins were set out from the hinge at a constant height and did not rise with it, so every one of
+	// them ran straight through the vane along its whole length. In the flat that is a closed louvre
+	// with the deflector ticks showing through it - a discharge you can see into with the machine off.
+	//
+	// Measured as a real clearance rather than as an intersection test: the lowest fin has to be above
+	// the highest point the shut vane reaches underneath it.
+	const FHFMeshPart* Louvre = FindPart(Built.Parts, FHFApplianceKit::LouvrePartId());
+
+	if (Louvre != nullptr)
+	{
+		const FBox VaneShut = PosedBounds(*Louvre, 0.0);
+
+		for (int32 Fin = 0; Fin < P.DeflectorCount; ++Fin)
+		{
+			const FHFMeshPart* Deflector =
+				FindPart(Built.Parts, FHFApplianceKit::DeflectorPartId(Fin));
+
+			if (Deflector == nullptr)
+			{
+				continue;
+			}
+
+			const FBox Blade = PosedBounds(*Deflector, 0.0);
+
+			// Only where they actually overlap in plan is there anything to clear.
+			const bool bOverlapsInY = Blade.Min.Y < VaneShut.Max.Y && Blade.Max.Y > VaneShut.Min.Y;
+
+			if (!bOverlapsInY)
+			{
+				continue;
+			}
+
+			// The vane's top at the fin's front edge, which is where the vane is highest under it.
+			const double Fraction = FMath::Clamp(
+				(VaneShut.Max.Y - Blade.Min.Y) / FMath::Max(VaneShut.Max.Y - VaneShut.Min.Y, 0.01),
+				0.0, 1.0);
+			const double VaneTopUnderFin =
+				FMath::Lerp(VaneShut.Min.Z, VaneShut.Max.Z, Fraction);
+
+			TestTrue(FString::Printf(
+				TEXT("Deflector %d hangs above the shut vane (blade at %.2f, vane top %.2f)"),
+				Fin, Blade.Min.Z, VaneTopUnderFin),
+				Blade.Min.Z >= VaneTopUnderFin - 0.01);
+		}
+	}
+
 	return true;
 }
 
