@@ -202,6 +202,267 @@ struct HOUSEFORGE_API FHFGeyserParams
 	bool IsValid() const { return Length > 0.0 && VesselDiameter() > 0.0; }
 };
 
+/**
+ * A split air conditioner's indoor unit: a moulded casing hung high on a wall.
+ *
+ * ## Frame
+ *
+ * Centimetres, origin at the CENTRE of the drawn footprint in plan, Z = 0 at the BOTTOM of the drawn
+ * box, +Y running BACK into the wall - the datum FHFFixturePlacement::OnWallFace places, and the same
+ * one the mirror, the geyser and the switch plates use.
+ *
+ * ## IT IS NOT A BOX, AND THAT IS THE WHOLE FITTING
+ *
+ * A split head is 900 x 220 x 300 of moulded plastic whose entire reading is its SECTION: a flat back
+ * on the plaster, a top that runs forward and domes over, a front that bulges and tucks under, and a
+ * discharge channel cut into the underside with a vane lying in it. Built as a rectangular box it is a
+ * shoebox screwed to a wall at head height in three rooms - the most conspicuous placeholder in the
+ * flat, because it is above the furniture line where nothing else interrupts it.
+ *
+ * So the casing is an EXTRUDED SECTION swept along the wall, which is exactly what the object is: a
+ * moulding of constant profile. The profile carries the discharge channel as a genuine concavity
+ * rather than as a painted line, because the vane has to lie IN something.
+ *
+ * ## No top intake grille, said out loud
+ *
+ * A real one has slotted intake across the top. It is not built, and the reason is that this unit
+ * hangs at 2200 and is seen from below by everybody in the room and by every camera: the top surface
+ * is never in shot. Modelling it would spend triangles on the one face of the fitting nobody can look
+ * at. What IS built is everything at and below the discharge, which is all that anybody sees.
+ *
+ * ## What moves
+ *
+ * The discharge vane, hinged on its rear axis so its tip drops down and back - which is the arc a real
+ * one traces, and the reason an open louvre appears to withdraw as it falls. And the vertical
+ * deflectors behind it, as ONE part, because a real set is ganged on a common linkage and swings
+ * together.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFSplitACParams
+{
+	GENERATED_BODY()
+
+	/** Along the wall. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Length = 90.0;
+
+	/** Out from the wall. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Depth = 22.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Height = 30.0;
+
+	/** How far the vane swings down from shut. 70 degrees is a split head's full sweep. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions",
+		meta = (ClampMin = "0.0", ClampMax = "90.0"))
+	double LouvreOpenDegrees = 70.0;
+
+	/** How far the ganged vertical deflectors swing each way. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions",
+		meta = (ClampMin = "0.0", ClampMax = "60.0"))
+	double DeflectorSwingDegrees = 30.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions",
+		meta = (ClampMin = "0", ClampMax = "24"))
+	int32 DeflectorCount = 7;
+
+	/**
+	 * Overall height of what is actually built, which for this fitting is the drawn box.
+	 *
+	 * Supplied anyway, and that is the point of it: the casing is built INSIDE the drawn envelope by
+	 * construction, and this is the statement of that fact in the one place FHFCeilingFit reads. A
+	 * fitting whose built height silently exceeded its drawn one would be fitted under a soffit with
+	 * the difference left inside the plasterboard - the exact defect the extract's bezel produced.
+	 */
+	double BuiltHeight() const { return Height; }
+
+	bool IsValid() const { return Length > 0.0 && Depth > 0.0 && Height > 0.0; }
+};
+
+/**
+ * A condensing unit: a louvred case on feet with a guarded axial fan.
+ *
+ * ## Frame
+ *
+ * Centimetres, origin at the FRONT-LEFT corner of the drawn footprint on the floor, +X along the run,
+ * +Y back towards the wall, +Z up - the corner-and-base datum FHFFixturePlacement::AgainstWall places
+ * and the one the chimney already uses. A condenser is pushed up near a wall rather than screwed to
+ * it, so it keeps the gap the drawing gave it: the coil on its back rejects heat, and every one of
+ * these ever installed has air behind it.
+ *
+ * ## What moves
+ *
+ * The fan, and it SPINS. Its collision is TraceOnly, exactly as a ceiling fan's rotor is, because
+ * collision geometry does not turn with the render - see EHFPartCollision::TraceOnly for the whole
+ * argument, which applies here word for word.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFCondenserParams
+{
+	GENERATED_BODY()
+
+	/** Along the wall. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Width = 80.0;
+
+	/** Out from the wall. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Depth = 35.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Height = 60.0;
+
+	/** Height of the feet the case stands on, off the balcony floor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double FootHeight = 4.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "2", ClampMax = "8"))
+	int32 BladeCount = 3;
+
+	/** Horizontal slats over the coil on each side. Zero builds bare sides. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0", ClampMax = "40"))
+	int32 CoilSlats = 11;
+
+	/** How fast the fan turns. 850 rpm is a domestic condensing unit on its plate. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions")
+	double FanRevolutionsPerMinute = 850.0;
+
+	/** Radius of the fan aperture in the front panel, derived so a case of any size gets a real one. */
+	double FanRadius() const
+	{
+		return FMath::Max(FMath::Min(Height - FootHeight, Width * 0.6) * 0.34, 0.0);
+	}
+
+	bool IsValid() const { return Width > 0.0 && Depth > 0.0 && Height > FootHeight; }
+};
+
+/**
+ * A refrigerator: a cabinet on a plinth grille with a freezer over a fresh food compartment.
+ *
+ * ## Frame
+ *
+ * As the condenser - front-left corner of the footprint on the floor, +Y back towards the wall.
+ * FHFFixturePlacement::AgainstWall.
+ *
+ * ## The setback is not optional
+ *
+ * A refrigerator is not scribed joinery, so the room's skirting board runs on BEHIND it, and the
+ * appliance therefore has to stand in front of that board. Resolved by the composing layer from the
+ * project's skirting depth and handed in - see FHFDeskParams::SupportSetback, which is the same figure
+ * for the same reason, and which was added after a desk was found permanently 18 mm inside one.
+ *
+ * ## What moves
+ *
+ * Both doors. Hung on the SAME side, because that is what a two-door refrigerator is: you do not open
+ * a freezer left-handed and a fridge right-handed on the same cabinet.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFRefrigeratorParams
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Width = 70.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Depth = 70.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Height = 180.0;
+
+	/** A foam-filled appliance door. 65 mm is what one is. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double DoorThickness = 6.5;
+
+	/** The vented plinth under the cabinet. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double PlinthHeight = 10.0;
+
+	/** How much of the cabinet's height above the plinth the freezer takes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	double FreezerFraction = 0.34;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions",
+		meta = (ClampMin = "0.0", ClampMax = "170.0"))
+	double DoorSwingDegrees = 110.0;
+
+	/**
+	 * How far short of the drawn back plane the cabinet stops, leaving the skirting to run behind.
+	 *
+	 * Resolved by the composing layer, never read from a settings object here.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double SkirtingSetback = 0.0;
+
+	/** How deep the cabinet actually is, once the skirting has had its share. */
+	double BuiltDepth() const { return FMath::Max(Depth - SkirtingSetback, 0.0); }
+
+	bool IsValid() const { return Width > 0.0 && BuiltDepth() > 0.0 && Height > PlinthHeight; }
+};
+
+/**
+ * A front-loading washing machine: a porthole, a detergent drawer and a programme dial.
+ *
+ * Frame and setback as FHFRefrigeratorParams, and for the same reasons.
+ *
+ * ## What moves
+ *
+ * The porthole, the detergent drawer and the dial. All three are things a person operates, and the
+ * dial is in the list because a programme selector turns - the same rule that gave the geyser its
+ * thermostat rather than a moulded bump. See .claude/rules/04-conventions.md.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFWashingMachineParams
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Width = 60.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Depth = 60.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double Height = 85.0;
+
+	/** Diameter of the glass door. 320 mm is a domestic front loader's. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double PortholeDiameter = 32.0;
+
+	/** Centre of the porthole above the machine's own base. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double PortholeCentreZ = 49.0;
+
+	/** Height of the fascia carrying the drawer and the dial, measured down from the top. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double FasciaHeight = 14.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions",
+		meta = (ClampMin = "0.0", ClampMax = "170.0"))
+	double DoorSwingDegrees = 160.0;
+
+	/** How far the detergent drawer pulls out. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double DrawerTravel = 13.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double DialRadius = 2.4;
+
+	/** How far the programme selector turns end to end. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double DialSweepDegrees = 300.0;
+
+	/** See FHFRefrigeratorParams::SkirtingSetback. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double SkirtingSetback = 0.0;
+
+	double BuiltDepth() const { return FMath::Max(Depth - SkirtingSetback, 0.0); }
+
+	bool IsValid() const { return Width > 0.0 && BuiltDepth() > 0.0 && Height > 0.0; }
+};
+
 /** A composed appliance. Plain data carrying meshes by value. */
 struct HOUSEFORGE_API FHFApplianceBuild
 {
@@ -222,6 +483,10 @@ public:
 	static FHFHobParams SanitiseHob(const FHFHobParams& Params);
 	static FHFChimneyParams SanitiseChimney(const FHFChimneyParams& Params);
 	static FHFGeyserParams SanitiseGeyser(const FHFGeyserParams& Params);
+	static FHFSplitACParams SanitiseSplitAC(const FHFSplitACParams& Params);
+	static FHFCondenserParams SanitiseCondenser(const FHFCondenserParams& Params);
+	static FHFRefrigeratorParams SanitiseRefrigerator(const FHFRefrigeratorParams& Params);
+	static FHFWashingMachineParams SanitiseWashingMachine(const FHFWashingMachineParams& Params);
 
 	/** Glass, burners, grates, body, and a part per knob. */
 	static FHFApplianceBuild BuildHob(const FHFHobParams& Params);
@@ -232,12 +497,51 @@ public:
 	/** Vessel, end caps, wall bracket, pipework, and the thermostat dial as its own part. */
 	static FHFApplianceBuild BuildGeyser(const FHFGeyserParams& Params);
 
+	/** Moulded casing, discharge channel, and the vane and deflectors that swing in it. */
+	static FHFApplianceBuild BuildSplitAC(const FHFSplitACParams& Params);
+
+	/** Louvred case, feet, fan guard, and the fan as its own spinning part. */
+	static FHFApplianceBuild BuildCondenser(const FHFCondenserParams& Params);
+
+	/** Cabinet, plinth grille, and a door per compartment. */
+	static FHFApplianceBuild BuildRefrigerator(const FHFRefrigeratorParams& Params);
+
+	/** Case, fascia, and the porthole, detergent drawer and dial as their own parts. */
+	static FHFApplianceBuild BuildWashingMachine(const FHFWashingMachineParams& Params);
+
 	/** Part id of a hob knob, left to right. */
 	static FName KnobPartId(int32 Index);
+
+	/** Part id of a refrigerator door: 0 is the freezer, 1 the fresh food compartment. */
+	static FName FridgeDoorPartId(int32 Index);
 
 	/** Part id of the chimney's baffle filter. */
 	static FName FilterPartId() { return TEXT("Filter"); }
 
 	/** Part id of the geyser's thermostat dial. */
 	static FName ThermostatPartId() { return TEXT("Thermostat"); }
+
+	/** Part id of the split AC's discharge vane. */
+	static FName LouvrePartId() { return TEXT("Louvre"); }
+
+	/**
+	 * Part id of one of the split AC's vertical deflectors, left to right.
+	 *
+	 * ONE PART EACH, even though the set is ganged. Ganged means they turn together, not that they
+	 * turn about a shared centre - a rigid rotation of the whole set swings the outer blades sideways
+	 * out of the casing instead of turning them. See FHFApplianceKit::BuildSplitAC.
+	 */
+	static FName DeflectorPartId(int32 Index);
+
+	/** Part id of the condensing unit's fan. */
+	static FName CondenserFanPartId() { return TEXT("CondenserFan"); }
+
+	/** Part id of the washing machine's porthole door. */
+	static FName PortholePartId() { return TEXT("Porthole"); }
+
+	/** Part id of the washing machine's detergent drawer. */
+	static FName DetergentDrawerPartId() { return TEXT("DetergentDrawer"); }
+
+	/** Part id of the washing machine's programme selector. */
+	static FName ProgrammeDialPartId() { return TEXT("ProgrammeDial"); }
 };

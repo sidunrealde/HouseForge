@@ -2,6 +2,7 @@
 
 #include "Geometry/HFApplianceKit.h"
 
+#include "DynamicMesh/MeshTransforms.h"
 #include "Geometry/HFMeshOps.h"
 
 using namespace UE::Geometry;
@@ -9,6 +10,15 @@ using namespace UE::Geometry;
 namespace
 {
 	constexpr int32 RevolveSides = 20;
+
+	/** Turns a mesh about an axis through its own origin, in degrees. */
+	void RotateAboutOrigin(FDynamicMesh3& Mesh, const FVector3d& Axis, double Degrees)
+	{
+		MeshTransforms::ApplyTransform(Mesh,
+			FTransformSRT3d(FQuaterniond(Axis, Degrees, /*bAngleIsDegrees*/ true),
+				FVector3d::Zero(), FVector3d::One()),
+			/*bReverseOrientationIfNeeded*/ true);
+	}
 
 	/** Height of a burner's cast crown over the glass. */
 	constexpr double BurnerCrownHeight = 1.6;
@@ -33,6 +43,75 @@ namespace
 	TArray<FVector2D> PlanRect(double X0, double Y0, double X1, double Y1)
 	{
 		return { FVector2D(X0, Y0), FVector2D(X1, Y0), FVector2D(X1, Y1), FVector2D(X0, Y1) };
+	}
+
+	/** A closed regular polygon, for a hole in a prism. Winding is normalised by the triangulator. */
+	TArray<FVector2D> HoleRing(const FVector2D& Centre, double Radius, int32 Sides)
+	{
+		TArray<FVector2D> Out;
+		Out.Reserve(Sides);
+
+		for (int32 Index = 0; Index < Sides; ++Index)
+		{
+			const double Angle = 2.0 * PI * static_cast<double>(Index) / static_cast<double>(Sides);
+			Out.Add(Centre + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius);
+		}
+
+		return Out;
+	}
+
+	/**
+	 * Stands a panel built in XY and extruded up +Z onto the front of an appliance.
+	 *
+	 * A quarter turn about +X takes (x, y, z) to (x, -z, y): the panel's own up axis becomes world up
+	 * and the EXTRUSION runs along -Y. Translating by the thickness puts the result at Y from 0 to
+	 * Thickness, which is a front panel with its face on the front plane and its body behind it.
+	 *
+	 * The other sign of that turn is the mistake worth naming: -90 maps the panel's up axis to -Z, so
+	 * the geometry comes out correct in every dimension and upside down. A rectangle with a circle in
+	 * the middle of it looks identical either way, which is exactly why it has to be reasoned about
+	 * once here rather than eyeballed at each call.
+	 */
+	void StandPanelUp(FDynamicMesh3& Mesh, double Thickness)
+	{
+		MeshTransforms::ApplyTransform(Mesh,
+			FTransformSRT3d(FQuaterniond(FVector3d::UnitX(), 90.0, /*bAngleIsDegrees*/ true),
+				FVector3d(0.0, Thickness, 0.0), FVector3d::One()),
+			/*bReverseOrientationIfNeeded*/ true);
+	}
+
+	/**
+	 * An annular sector, as a hole outline: out along one radius, round the outer arc, back in.
+	 *
+	 * What a PRESSED fan guard is made of, and the reason it is built this way rather than as wire
+	 * rings. FHFMeshOps::AppendRevolvedProfile cannot make a torus: a profile that never reaches the
+	 * axis is CAPPED at both ends with full discs, so a square-section ring comes out as a squat solid
+	 * cylinder with two coincident faces welded across its near end. Closed, positive volume, passes
+	 * every test - and renders as a plate where the guard should be. Perforating a disc is the version
+	 * of a grille the primitives here can actually make, and a pressed slotted guard is what half the
+	 * condensing units in the country wear anyway.
+	 */
+	TArray<FVector2D> AnnularSector(const FVector2D& Centre, double InnerRadius, double OuterRadius,
+		double StartDegrees, double SweepDegrees, int32 ArcSteps)
+	{
+		TArray<FVector2D> Out;
+		Out.Reserve(2 * (ArcSteps + 1));
+
+		for (int32 Step = 0; Step <= ArcSteps; ++Step)
+		{
+			const double Angle = FMath::DegreesToRadians(
+				StartDegrees + SweepDegrees * static_cast<double>(Step) / static_cast<double>(ArcSteps));
+			Out.Add(Centre + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * OuterRadius);
+		}
+
+		for (int32 Step = ArcSteps; Step >= 0; --Step)
+		{
+			const double Angle = FMath::DegreesToRadians(
+				StartDegrees + SweepDegrees * static_cast<double>(Step) / static_cast<double>(ArcSteps));
+			Out.Add(Centre + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * InnerRadius);
+		}
+
+		return Out;
 	}
 
 	/**
@@ -633,6 +712,1055 @@ FHFApplianceBuild FHFApplianceKit::BuildGeyser(const FHFGeyserParams& Params)
 			Dial.PivotTransform = FTransform(FVector(-P.Length * 0.5 + 0.6, AxisY, AxisZ));
 			Dial.Motion.Type = EHFMotionType::Hinge;
 			Dial.Motion.Axis = FVector::XAxisVector;
+			Dial.Motion.MaxAngleDegrees = P.DialSweepDegrees;
+			Dial.DefaultOpenAmount = 0.0;
+
+			Out.Parts.Add(MoveTemp(Dial));
+		}
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Shell);
+
+	Out.bValid = Out.Shell.TriangleCount() > 0;
+	return Out;
+}
+
+// =============================================================================================
+//
+// The split air conditioner's indoor unit.
+//
+// =============================================================================================
+
+FName FHFApplianceKit::DeflectorPartId(int32 Index)
+{
+	return FName(*FString::Printf(TEXT("Deflector%d"), FMath::Max(Index, 0)));
+}
+
+FHFSplitACParams FHFApplianceKit::SanitiseSplitAC(const FHFSplitACParams& Params)
+{
+	FHFSplitACParams P = Params;
+
+	P.Length = FMath::Max(P.Length, 0.0);
+	P.Depth = FMath::Max(P.Depth, 0.0);
+	P.Height = FMath::Max(P.Height, 0.0);
+
+	P.LouvreOpenDegrees = FMath::Clamp(P.LouvreOpenDegrees, 0.0, 90.0);
+	P.DeflectorSwingDegrees = FMath::Clamp(P.DeflectorSwingDegrees, 0.0, 60.0);
+	P.DeflectorCount = FMath::Clamp(P.DeflectorCount, 0, 24);
+
+	return P;
+}
+
+FHFApplianceBuild FHFApplianceKit::BuildSplitAC(const FHFSplitACParams& Params)
+{
+	FHFApplianceBuild Out;
+	FHFMeshOps::InitialiseMesh(Out.Shell);
+
+	const FHFSplitACParams P = SanitiseSplitAC(Params);
+
+	if (!P.IsValid())
+	{
+		return Out;
+	}
+
+	// Half depth: the wall face is at +HalfY and the frontmost point of the casing at -HalfY.
+	const double HalfY = P.Depth * 0.5;
+	const double H = P.Height;
+
+	// ------------------------------------------------------------------------------- the casing
+	//
+	// THE SECTION IS THE OBJECT. Every point below is a fraction of the drawn box, so a unit of any
+	// size comes out the same shape - a flat back on the plaster, a top that runs forward and domes,
+	// a front that bulges and tucks under, and the discharge channel cut up into the underside.
+	//
+	// The channel is a genuine CONCAVITY in the polygon rather than a line drawn on a box: the vane
+	// has to lie in something, and a louvre stuck onto a flat soffit reads as a strip of tape.
+
+	const TArray<FVector2D> Section = {
+		FVector2D(HalfY, 0.0),				// back bottom, on the plaster
+		FVector2D(HalfY, H),				// back top
+
+		FVector2D(HalfY * 0.55, H * 0.995),	// the top, running forward and doming over
+		FVector2D(HalfY * 0.05, H * 0.965),
+		FVector2D(-HalfY * 0.40, H * 0.905),
+		FVector2D(-HalfY * 0.72, H * 0.815),
+		FVector2D(-HalfY * 0.94, H * 0.700),
+
+		FVector2D(-HalfY, H * 0.530),		// the front, at its furthest out
+		FVector2D(-HalfY * 0.965, H * 0.330),
+		FVector2D(-HalfY * 0.820, H * 0.200),
+		FVector2D(-HalfY * 0.680, H * 0.140),	// the front lip of the discharge
+
+		FVector2D(-HalfY * 0.600, H * 0.250),	// up into the channel
+		FVector2D(-HalfY * 0.140, H * 0.235),	// along its ceiling
+		FVector2D(-HalfY * 0.090, H * 0.067),	// and down its back wall
+
+		FVector2D(HalfY * 0.36, H * 0.017)	// the bottom pan, running back to the wall
+	};
+
+	// u is +Y and the sweep is +X, so the derived v axis is X cross Y = +Z: the section stands up and
+	// the casing extrudes along the wall, which is exactly what a constant-profile moulding is.
+	if (!FHFMeshOps::AppendExtrudedSection(Out.Shell, Section,
+		FVector3d(-P.Length * 0.5, 0.0, 0.0), FVector3d::UnitY(), FVector3d::UnitX(),
+		P.Length, EHFSurfaceRole::Appliance))
+	{
+		return Out;
+	}
+
+	// The geometry of the channel, read back off the section so the vane and the deflectors cannot
+	// drift from the hole they live in.
+	const double ChannelFrontY = -HalfY * 0.680;
+	const double ChannelFrontZ = H * 0.140;
+	const double ChannelBackY = -HalfY * 0.090;
+	const double ChannelCeilingZ = H * 0.235;
+	const double ChannelHingeZ = H * 0.085;
+	const double ChannelReach = ChannelBackY - ChannelFrontY;
+	const double ChannelMidY = (ChannelFrontY + ChannelBackY) * 0.5;
+
+	// --------------------------------------------------------------------------- the display strip
+	//
+	// A dark inset on the lower front, which is the one detail on a split head that is at eye height
+	// and always lit from inside. Cheap, and it is what stops the front reading as blank plastic.
+
+	{
+		FDynamicMesh3 Display;
+		FHFMeshOps::InitialiseMesh(Display);
+
+		FHFMeshOps::AppendBox(Display,
+			FVector3d(P.Length * 0.30, -HalfY * 0.88, H * 0.33),
+			FVector3d(P.Length * 0.10, HalfY * 0.06, H * 0.035), 0.0, EHFSurfaceRole::Glass);
+
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Display);
+	}
+
+	// ------------------------------------------------------------------------- the vertical deflectors
+	//
+	// ONE PART PER FIN, AND EACH ON ITS OWN AXIS - which is what cost a rewrite and is worth stating.
+	// A real set is ganged, so it is tempting to emit one part carrying all seven and turn it; but a
+	// rigid rotation of the whole set about one axis SWINGS the outer fins sideways instead of turning
+	// them, and at 30 degrees the end fin would leave the casing entirely. Ganged means they turn
+	// TOGETHER, not that they turn about a shared centre. Each fin therefore pivots where its own pin
+	// is, which is the only arrangement that stays inside a 65 mm channel.
+	//
+	// Every one of them still answers to one master open amount, which is the gang.
+
+	if (P.DeflectorCount > 0 && ChannelReach > 0.0)
+	{
+		const double FinPitch = P.Length * 0.86 / static_cast<double>(P.DeflectorCount);
+		const double FinHeight = FMath::Max(ChannelCeilingZ - ChannelHingeZ - 0.5, 0.2);
+		const double FinReach = ChannelReach * 0.7;
+
+		for (int32 Fin = 0; Fin < P.DeflectorCount; ++Fin)
+		{
+			FHFMeshPart Deflector;
+			Deflector.PartId = DeflectorPartId(Fin);
+			FHFMeshOps::InitialiseMesh(Deflector.Mesh);
+
+			// Drawn about its own pin, which is the vertical through the middle of the blade.
+			FHFMeshOps::AppendBox(Deflector.Mesh,
+				FVector3d(0.0, 0.0, FinHeight * 0.5),
+				FVector3d(0.12, FinReach * 0.5, FinHeight * 0.5), 0.0, EHFSurfaceRole::Appliance);
+
+			FHFMeshOps::ApplyWorldScaleUVs(Deflector.Mesh);
+
+			const double FinX = -P.Length * 0.43 + (static_cast<double>(Fin) + 0.5) * FinPitch;
+
+			Deflector.PivotTransform =
+				FTransform(FVector(FinX, ChannelMidY, ChannelHingeZ + 0.3));
+
+			Deflector.Motion.Type = EHFMotionType::Hinge;
+			Deflector.Motion.Axis = FVector::ZAxisVector;
+			Deflector.Motion.MaxAngleDegrees = P.DeflectorSwingDegrees;
+			Deflector.DefaultOpenAmount = 0.0;
+
+			Out.Parts.Add(MoveTemp(Deflector));
+		}
+	}
+
+	// ---------------------------------------------------------------------------- the discharge vane
+	//
+	// Hinged on its REAR axis, so its tip swings down AND BACK - which is the arc a real one traces
+	// and the reason an opening louvre appears to withdraw as it falls. Hinging it at the front lip
+	// instead would throw the tip forwards out of the casing, past the drawn box, and into the room.
+
+	if (ChannelReach > 0.0 && P.LouvreOpenDegrees > 0.0)
+	{
+		FHFMeshPart Louvre;
+		Louvre.PartId = LouvrePartId();
+		FHFMeshOps::InitialiseMesh(Louvre.Mesh);
+
+		const double VaneThickness = FMath::Min(0.7, ChannelReach * 0.12);
+		const double VaneReach = ChannelReach * 0.94;
+
+		// SHUT MEANS SHUT. The vane lies along the mouth line rather than horizontally, so its tip
+		// arrives AT the front lip: the channel's rear is at the hinge and its lip is higher and
+		// further forward, and a vane drawn flat leaves a 20 mm slot open at the front with the unit
+		// switched off. The rise is read off the section rather than chosen, so the two cannot drift.
+		const double VaneRise = (ChannelFrontZ - ChannelHingeZ) * (VaneReach / ChannelReach);
+
+		// A shallow scoop rather than a flat plate: it catches a highlight along its length instead of
+		// going out as one dead grey band.
+		const double Scoop = VaneReach * 0.05;
+
+		const TArray<FVector2D> VaneSection = {
+			FVector2D(0.0, 0.0),
+			FVector2D(-VaneReach * 0.5, VaneRise * 0.5 - Scoop),
+			FVector2D(-VaneReach, VaneRise),
+			FVector2D(-VaneReach, VaneRise + VaneThickness),
+			FVector2D(-VaneReach * 0.5, VaneRise * 0.5 - Scoop + VaneThickness),
+			FVector2D(0.0, VaneThickness)
+		};
+
+		if (FHFMeshOps::AppendExtrudedSection(Louvre.Mesh, VaneSection,
+			FVector3d(-P.Length * 0.46, 0.0, 0.0), FVector3d::UnitY(), FVector3d::UnitX(),
+			P.Length * 0.92, EHFSurfaceRole::Appliance))
+		{
+			FHFMeshOps::ApplyWorldScaleUVs(Louvre.Mesh);
+
+			Louvre.PivotTransform = FTransform(FVector(0.0, ChannelBackY, ChannelHingeZ));
+
+			Louvre.Motion.Type = EHFMotionType::Hinge;
+			Louvre.Motion.Axis = FVector::XAxisVector;
+
+			// POSITIVE, SO THE TIP DROPS. A rotation about +X carries the vane's forward-reaching tip
+			// downwards; the other sign lifts it up into the channel's own ceiling, which measures as
+			// motion and is a vane closing harder than shut.
+			Louvre.Motion.MaxAngleDegrees = P.LouvreOpenDegrees;
+			Louvre.DefaultOpenAmount = 0.0;
+
+			Out.Parts.Add(MoveTemp(Louvre));
+		}
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Shell);
+
+	Out.bValid = Out.Shell.TriangleCount() > 0;
+	return Out;
+}
+
+// =============================================================================================
+//
+// The condensing unit.
+//
+// =============================================================================================
+
+FHFCondenserParams FHFApplianceKit::SanitiseCondenser(const FHFCondenserParams& Params)
+{
+	FHFCondenserParams P = Params;
+
+	P.Width = FMath::Max(P.Width, 0.0);
+	P.Depth = FMath::Max(P.Depth, 0.0);
+	P.Height = FMath::Max(P.Height, 0.0);
+
+	P.FootHeight = FMath::Clamp(P.FootHeight, 0.0, P.Height * 0.25);
+	P.BladeCount = FMath::Clamp(P.BladeCount, 2, 8);
+	P.CoilSlats = FMath::Clamp(P.CoilSlats, 0, 40);
+
+	return P;
+}
+
+FHFApplianceBuild FHFApplianceKit::BuildCondenser(const FHFCondenserParams& Params)
+{
+	FHFApplianceBuild Out;
+	FHFMeshOps::InitialiseMesh(Out.Shell);
+
+	const FHFCondenserParams P = SanitiseCondenser(Params);
+
+	if (!P.IsValid())
+	{
+		return Out;
+	}
+
+	// Front-left corner of the footprint on the floor: X runs 0..Width along the wall, Y runs 0 at
+	// the front to Depth at the wall, Z up from the floor.
+	const double CaseBottomZ = P.FootHeight;
+	const double CaseHeight = P.Height - P.FootHeight;
+	const double CaseCentreZ = CaseBottomZ + CaseHeight * 0.5;
+	const double PanelThickness = FMath::Min(0.8, P.Depth * 0.05);
+
+	const double FanRadius = P.FanRadius();
+	const FVector2D FanCentre(P.Width * 0.5, CaseBottomZ + CaseHeight * 0.55);
+
+	// ------------------------------------------------------------------------------ the front panel
+	//
+	// A REAL HOLE FOR THE FAN, triangulated with the panel rather than cut out of it. The aperture is
+	// the whole front of the object: a condenser is a box with a big circle in it, and a fan guard
+	// stuck onto a solid panel is a wheel painted on a crate.
+
+	{
+		TArray<TArray<FVector2D>> Holes;
+		Holes.Add(HoleRing(FanCentre, FanRadius, RevolveSides));
+
+		FDynamicMesh3 Front;
+		FHFMeshOps::InitialiseMesh(Front);
+
+		const TArray<FVector2D> Outer = {
+			FVector2D(0.0, CaseBottomZ),
+			FVector2D(P.Width, CaseBottomZ),
+			FVector2D(P.Width, P.Height),
+			FVector2D(0.0, P.Height)
+		};
+
+		if (FHFMeshOps::AppendPrismWithHoles(Front, Outer, Holes, 0.0, PanelThickness,
+			EHFSurfaceRole::Appliance))
+		{
+			StandPanelUp(Front, PanelThickness);
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Front);
+		}
+	}
+
+	// --------------------------------------------------------------------- the case round the panel
+	//
+	// Back, two ends and a lid, leaving the front open where the panel already is. Hollow, because the
+	// fan turns INSIDE it and a solid block would leave the aperture looking at plastic.
+
+	{
+		FDynamicMesh3 Case;
+		FHFMeshOps::InitialiseMesh(Case);
+
+		FHFMeshOps::AppendBox(Case,
+			FVector3d(P.Width * 0.5, P.Depth - PanelThickness * 0.5, CaseCentreZ),
+			FVector3d(P.Width * 0.5, PanelThickness * 0.5, CaseHeight * 0.5), 0.0,
+			EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::AppendBox(Case,
+			FVector3d(P.Width * 0.5, P.Depth * 0.5, P.Height - PanelThickness * 0.5),
+			FVector3d(P.Width * 0.5, P.Depth * 0.5, PanelThickness * 0.5), 0.0,
+			EHFSurfaceRole::Appliance);
+
+		for (const double Side : { 0.0, 1.0 })
+		{
+			FHFMeshOps::AppendBox(Case,
+				FVector3d(Side * (P.Width - PanelThickness) + PanelThickness * 0.5, P.Depth * 0.5,
+					CaseCentreZ),
+				FVector3d(PanelThickness * 0.5, P.Depth * 0.5, CaseHeight * 0.5), 0.0,
+				EHFSurfaceRole::Appliance);
+		}
+
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Case);
+	}
+
+	// ---------------------------------------------------------------------------------- the coil
+	//
+	// Horizontal slats over each end, which is where the coil actually shows on a domestic unit. The
+	// back is not slatted: it faces the parapet and nothing ever sees it, and fifty boxes nobody can
+	// look at is a triangle budget spent on nothing.
+
+	if (P.CoilSlats > 0)
+	{
+		FDynamicMesh3 Coil;
+		FHFMeshOps::InitialiseMesh(Coil);
+
+		const double SlatSpan = CaseHeight * 0.80;
+		const double SlatPitch = SlatSpan / static_cast<double>(P.CoilSlats);
+		const double SlatThickness = FMath::Min(SlatPitch * 0.45, 0.5);
+
+		for (int32 Slat = 0; Slat < P.CoilSlats; ++Slat)
+		{
+			const double SlatZ = CaseBottomZ + CaseHeight * 0.10
+				+ (static_cast<double>(Slat) + 0.5) * SlatPitch;
+
+			for (const double Side : { 0.0, 1.0 })
+			{
+				// HELD FULLY INSIDE THE DRAWN WIDTH. Set out from the case's own face the slats
+				// overhung it by 0.4 mm at each end - nothing anybody would ever see, and enough to
+				// make the unit measure 80.08 wide against a drawing that says 80. A fixture whose
+				// geometry quietly leaves its declared box makes every clearance measured against it
+				// answer about something that is not there.
+				FHFMeshOps::AppendBox(Coil,
+					FVector3d(Side * (P.Width - PanelThickness * 0.9) + PanelThickness * 0.45,
+						P.Depth * 0.52, SlatZ),
+					FVector3d(PanelThickness * 0.45, P.Depth * 0.40, SlatThickness * 0.5), 0.0,
+					EHFSurfaceRole::MetalHardware);
+			}
+		}
+
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Coil);
+	}
+
+	// ----------------------------------------------------------------------------------- the feet
+	//
+	// Two rails under the case. A condenser standing dead on the floor slab reads as a box that fell
+	// off a lorry; the gap under it is what says it was bolted down.
+
+	if (P.FootHeight > 0.0)
+	{
+		FDynamicMesh3 Feet;
+		FHFMeshOps::InitialiseMesh(Feet);
+
+		for (const double Along : { 0.22, 0.78 })
+		{
+			FHFMeshOps::AppendBox(Feet,
+				FVector3d(P.Width * Along, P.Depth * 0.5, P.FootHeight * 0.5),
+				FVector3d(P.Width * 0.09, P.Depth * 0.42, P.FootHeight * 0.5), 0.0,
+				EHFSurfaceRole::MetalHardware);
+		}
+
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Feet);
+	}
+
+	// ------------------------------------------------------------------------------ the fan guard
+	//
+	// Concentric rings and radial spokes over the aperture. It is what a person actually sees of the
+	// fan - the blades are behind it and half in shadow - and it is the single detail that separates a
+	// condensing unit from a grey box.
+
+	if (FanRadius > 0.0)
+	{
+		const double GuardRadius = FanRadius * 1.06;
+		const double GuardThickness = FMath::Max(PanelThickness * 0.45, 0.2);
+
+		// Two bands of slots with a rib between them and between each pair, which is what a pressed
+		// guard is: mostly open, with just enough metal to keep a hand out.
+		TArray<TArray<FVector2D>> Slots;
+
+		const FVector2D Origin2D(FanCentre.X, FanCentre.Y);
+
+		for (int32 Slot = 0; Slot < 10; ++Slot)
+		{
+			Slots.Add(AnnularSector(Origin2D, FanRadius * 0.60, FanRadius * 0.93,
+				36.0 * static_cast<double>(Slot) + 4.0, 28.0, 5));
+		}
+
+		for (int32 Slot = 0; Slot < 6; ++Slot)
+		{
+			Slots.Add(AnnularSector(Origin2D, FanRadius * 0.22, FanRadius * 0.52,
+				60.0 * static_cast<double>(Slot) + 7.0, 46.0, 5));
+		}
+
+		FDynamicMesh3 Guard;
+		FHFMeshOps::InitialiseMesh(Guard);
+
+		if (FHFMeshOps::AppendPrismWithHoles(Guard, HoleRing(Origin2D, GuardRadius, RevolveSides * 2),
+			Slots, 0.0, GuardThickness, EHFSurfaceRole::MetalHardware))
+		{
+			StandPanelUp(Guard, GuardThickness);
+
+			// Proud of the front panel, so the guard casts a shadow into the slots rather than lying
+			// in the same plane as the sheet behind it.
+			MeshTransforms::Translate(Guard, FVector3d(0.0, -GuardThickness * 0.6, 0.0));
+
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Guard);
+		}
+	}
+
+	// ------------------------------------------------------------------------------------ the fan
+	//
+	// ITS OWN PART, AND IT SPINS. EHFMotionType::Spin and EHFPartCollision::TraceOnly, exactly as a
+	// ceiling fan's rotor: collision geometry does not turn with the render, so a blocking rotor is a
+	// blade frozen at whatever azimuth the level was saved at.
+
+	if (FanRadius > 0.0)
+	{
+		FHFMeshPart Fan;
+		Fan.PartId = CondenserFanPartId();
+		FHFMeshOps::InitialiseMesh(Fan.Mesh);
+
+		const double HubRadius = FanRadius * 0.20;
+		const double BladeRoot = HubRadius * 0.85;
+		const double BladeSpan = FanRadius * 0.90 - BladeRoot;
+
+		const TArray<FVector2D> Hub = {
+			FVector2D(0.0, 0.0),
+			FVector2D(0.0, HubRadius),
+			FVector2D(HubRadius * 0.8, HubRadius * 0.75),
+			FVector2D(HubRadius * 0.9, 0.0)
+		};
+
+		FHFMeshOps::AppendRevolvedProfile(Fan.Mesh, Hub, FVector3d::Zero(), -FVector3d::UnitY(),
+			RevolveSides, EHFSurfaceRole::MetalHardware);
+
+		if (BladeSpan > 0.0)
+		{
+			for (int32 Blade = 0; Blade < P.BladeCount; ++Blade)
+			{
+				FDynamicMesh3 Vane;
+				FHFMeshOps::InitialiseMesh(Vane);
+
+				FHFMeshOps::AppendBox(Vane,
+					FVector3d(BladeRoot + BladeSpan * 0.5, 0.0, 0.0),
+					FVector3d(BladeSpan * 0.5, 0.12, FanRadius * 0.30), 0.0,
+					EHFSurfaceRole::Appliance);
+
+				// PITCHED ABOUT ITS OWN RADIUS FIRST, then swung to its station. A flat blade is a
+				// paddle: it moves air in neither direction and reads as one the moment it is lit.
+				RotateAboutOrigin(Vane, FVector3d::UnitX(), 28.0);
+				RotateAboutOrigin(Vane, FVector3d::UnitY(),
+					360.0 * static_cast<double>(Blade) / static_cast<double>(P.BladeCount));
+
+				FHFMeshOps::AppendPreservingRoles(Fan.Mesh, Vane);
+			}
+		}
+
+		FHFMeshOps::ApplyWorldScaleUVs(Fan.Mesh);
+
+		Fan.PivotTransform = FTransform(
+			FVector(FanCentre.X, PanelThickness + FanRadius * 0.34, FanCentre.Y));
+
+		Fan.Motion.Type = EHFMotionType::Spin;
+		Fan.Motion.Axis = FVector::YAxisVector;
+		Fan.Motion.RevolutionsPerMinute = P.FanRevolutionsPerMinute;
+		Fan.Collision = EHFPartCollision::TraceOnly;
+
+		// A quarter turn of offset so two units side by side are not the same object twice.
+		Fan.DefaultSpinTurns = 0.17;
+
+		Out.Parts.Add(MoveTemp(Fan));
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Shell);
+
+	Out.bValid = Out.Shell.TriangleCount() > 0;
+	return Out;
+}
+
+// =============================================================================================
+//
+// The refrigerator.
+//
+// =============================================================================================
+
+FName FHFApplianceKit::FridgeDoorPartId(int32 Index)
+{
+	return FName(*FString::Printf(TEXT("Door%d"), FMath::Max(Index, 0)));
+}
+
+FHFRefrigeratorParams FHFApplianceKit::SanitiseRefrigerator(const FHFRefrigeratorParams& Params)
+{
+	FHFRefrigeratorParams P = Params;
+
+	P.Width = FMath::Max(P.Width, 0.0);
+	P.Depth = FMath::Max(P.Depth, 0.0);
+	P.Height = FMath::Max(P.Height, 0.0);
+
+	P.SkirtingSetback = FMath::Clamp(P.SkirtingSetback, 0.0, P.Depth * 0.25);
+	P.DoorThickness = FMath::Clamp(P.DoorThickness, 0.0, P.BuiltDepth() * 0.35);
+	P.PlinthHeight = FMath::Clamp(P.PlinthHeight, 0.0, P.Height * 0.25);
+	P.FreezerFraction = FMath::Clamp(P.FreezerFraction, 0.1, 0.9);
+	P.DoorSwingDegrees = FMath::Clamp(P.DoorSwingDegrees, 0.0, 170.0);
+
+	return P;
+}
+
+FHFApplianceBuild FHFApplianceKit::BuildRefrigerator(const FHFRefrigeratorParams& Params)
+{
+	FHFApplianceBuild Out;
+	FHFMeshOps::InitialiseMesh(Out.Shell);
+
+	const FHFRefrigeratorParams P = SanitiseRefrigerator(Params);
+
+	if (!P.IsValid())
+	{
+		return Out;
+	}
+
+	const double BodyDepth = P.BuiltDepth();
+
+	// The carcass stops where the doors begin: a cabinet built to the full depth with doors hung on
+	// the front of it is 65 mm deeper than the drawn box in every direction anybody can measure.
+	const double CarcassFrontY = P.DoorThickness;
+	const double CarcassDepth = FMath::Max(BodyDepth - P.DoorThickness, 0.01);
+
+	const double CabinetBottomZ = P.PlinthHeight;
+	const double CabinetHeight = P.Height - P.PlinthHeight;
+	const double FreezerHeight = CabinetHeight * P.FreezerFraction;
+
+	// -------------------------------------------------------------------------------- the carcass
+
+	{
+		FDynamicMesh3 Carcass;
+		FHFMeshOps::InitialiseMesh(Carcass);
+
+		FHFMeshOps::AppendBox(Carcass,
+			FVector3d(P.Width * 0.5, CarcassFrontY + CarcassDepth * 0.5,
+				CabinetBottomZ + CabinetHeight * 0.5),
+			FVector3d(P.Width * 0.5, CarcassDepth * 0.5, CabinetHeight * 0.5), 0.0,
+			EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Carcass);
+	}
+
+	// --------------------------------------------------------------------------- the plinth grille
+	//
+	// Held in on all sides so the cabinet appears to stand on a recessed base, and slatted, because
+	// that is what the condenser behind it breathes through. A solid block would be a fridge sitting
+	// on the floor, which is the one thing no refrigerator does.
+
+	if (P.PlinthHeight > 0.0)
+	{
+		FDynamicMesh3 Plinth;
+		FHFMeshOps::InitialiseMesh(Plinth);
+
+		const double Recess = FMath::Min(2.0, P.PlinthHeight * 0.3);
+
+		FHFMeshOps::AppendBox(Plinth,
+			FVector3d(P.Width * 0.5, CarcassFrontY + Recess + (BodyDepth - CarcassFrontY - Recess) * 0.5,
+				P.PlinthHeight * 0.5),
+			FVector3d(P.Width * 0.5 - Recess * 0.5,
+				FMath::Max((BodyDepth - CarcassFrontY - Recess) * 0.5, 0.01), P.PlinthHeight * 0.5),
+			0.0, EHFSurfaceRole::MetalHardware);
+
+		// The vented fascia, standing in front of the recess so the shadow gap still reads.
+		FHFMeshOps::AppendBox(Plinth,
+			FVector3d(P.Width * 0.5, CarcassFrontY + Recess * 0.5, P.PlinthHeight * 0.5),
+			FVector3d(P.Width * 0.5 - Recess * 0.5, Recess * 0.5, P.PlinthHeight * 0.35), 0.0,
+			EHFSurfaceRole::MetalHardware);
+
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Plinth);
+	}
+
+	// ---------------------------------------------------------------------------------- the doors
+	//
+	// BOTH HUNG ON THE SAME SIDE, which is what a two-door refrigerator is: nobody opens a freezer
+	// left-handed and the compartment under it right-handed. Hung on the RIGHT stile, so the free edge
+	// is on the left and both leaves swing the same way.
+
+	const double Shadow = FMath::Min(0.4, CabinetHeight * 0.004);
+
+	struct FDoorPlan
+	{
+		double BottomZ = 0.0;
+		double Height = 0.0;
+	};
+
+	const FDoorPlan Doors[2] = {
+		{ CabinetBottomZ + CabinetHeight - FreezerHeight, FreezerHeight - Shadow },
+		{ CabinetBottomZ, CabinetHeight - FreezerHeight - Shadow }
+	};
+
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		const FDoorPlan& Plan = Doors[Index];
+
+		if (Plan.Height <= 0.0 || P.DoorThickness <= 0.0)
+		{
+			continue;
+		}
+
+		FHFMeshPart Door;
+		Door.PartId = FridgeDoorPartId(Index);
+		FHFMeshOps::InitialiseMesh(Door.Mesh);
+
+		// Drawn from its own hinge, which is the RIGHT stile: local X runs 0 back to -Width, so a
+		// positive rotation about +Z carries the free edge out of the cabinet and into the room.
+		FHFMeshOps::AppendBox(Door.Mesh,
+			FVector3d(-P.Width * 0.5, P.DoorThickness * 0.5, Plan.Height * 0.5),
+			FVector3d(P.Width * 0.5, P.DoorThickness * 0.5, Plan.Height * 0.5), 0.0,
+			EHFSurfaceRole::Appliance);
+
+		// A vertical bar handle on the free edge. It is the only thing on the front of a refrigerator
+		// that is not flat, and without it the appliance is a white slab.
+		const double HandleRadius = FMath::Min(1.0, P.DoorThickness * 0.22);
+		const double HandleStand = HandleRadius * 2.6;
+		const double HandleLength = FMath::Min(Plan.Height * 0.62, 60.0);
+
+		{
+			FDynamicMesh3 Handle;
+			FHFMeshOps::InitialiseMesh(Handle);
+
+			const TArray<FVector2D> Bar = {
+				FVector2D(0.0, 0.0),
+				FVector2D(0.0, HandleRadius),
+				FVector2D(HandleLength, HandleRadius),
+				FVector2D(HandleLength, 0.0)
+			};
+
+			FHFMeshOps::AppendRevolvedProfile(Handle, Bar,
+				FVector3d(-P.Width + HandleStand * 1.4, -HandleStand,
+					Plan.Height * 0.5 - HandleLength * 0.5),
+				FVector3d::UnitZ(), RevolveSides, EHFSurfaceRole::MetalHardware);
+
+			// Two stub brackets back to the leaf, so the bar stands off it rather than lying on it.
+			for (const double End : { 0.18, 0.82 })
+			{
+				FHFMeshOps::AppendBox(Handle,
+					FVector3d(-P.Width + HandleStand * 1.4, -HandleStand * 0.5,
+						Plan.Height * 0.5 - HandleLength * 0.5 + HandleLength * End),
+					FVector3d(HandleRadius * 0.8, HandleStand * 0.5, HandleRadius * 0.8), 0.0,
+					EHFSurfaceRole::MetalHardware);
+			}
+
+			FHFMeshOps::AppendPreservingRoles(Door.Mesh, Handle);
+		}
+
+		FHFMeshOps::ApplyWorldScaleUVs(Door.Mesh);
+
+		Door.PivotTransform = FTransform(FVector(P.Width, 0.0, Plan.BottomZ));
+
+		Door.Motion.Type = EHFMotionType::Hinge;
+		Door.Motion.Axis = FVector::ZAxisVector;
+
+		// POSITIVE, SO THE FREE EDGE COMES FORWARD OUT OF THE ROOM SIDE. The leaf is drawn along -X
+		// from its hinge, and a rotation about +Z carries -X towards -Y, which is out of the cabinet
+		// and into the kitchen. The other sign swings both doors straight into the wall behind them,
+		// which is a swept transform that travels exactly as far and opens nothing - so the sign is
+		// checked as a swept point rather than reasoned about. See the tests.
+		Door.Motion.MaxAngleDegrees = P.DoorSwingDegrees;
+		Door.DefaultOpenAmount = 0.0;
+
+		Out.Parts.Add(MoveTemp(Door));
+	}
+
+	FHFMeshOps::ApplyWorldScaleUVs(Out.Shell);
+
+	Out.bValid = Out.Shell.TriangleCount() > 0;
+	return Out;
+}
+
+// =============================================================================================
+//
+// The washing machine.
+//
+// =============================================================================================
+
+FHFWashingMachineParams FHFApplianceKit::SanitiseWashingMachine(const FHFWashingMachineParams& Params)
+{
+	FHFWashingMachineParams P = Params;
+
+	P.Width = FMath::Max(P.Width, 0.0);
+	P.Depth = FMath::Max(P.Depth, 0.0);
+	P.Height = FMath::Max(P.Height, 0.0);
+
+	P.SkirtingSetback = FMath::Clamp(P.SkirtingSetback, 0.0, P.Depth * 0.25);
+	P.FasciaHeight = FMath::Clamp(P.FasciaHeight, 0.0, P.Height * 0.35);
+
+	// The porthole has to fit between the fascia and the bottom of the case, with its own rim.
+	const double Below = FMath::Max(P.Height - P.FasciaHeight, 0.0);
+	P.PortholeDiameter = FMath::Clamp(P.PortholeDiameter, 0.0,
+		FMath::Min(P.Width * 0.72, Below * 0.82));
+	P.PortholeCentreZ = FMath::Clamp(P.PortholeCentreZ, P.PortholeDiameter * 0.6,
+		FMath::Max(Below - P.PortholeDiameter * 0.6, P.PortholeDiameter * 0.6));
+
+	P.DoorSwingDegrees = FMath::Clamp(P.DoorSwingDegrees, 0.0, 170.0);
+	P.DrawerTravel = FMath::Clamp(P.DrawerTravel, 0.0, P.BuiltDepth() * 0.45);
+	P.DialRadius = FMath::Clamp(P.DialRadius, 0.0, FMath::Max(P.FasciaHeight * 0.42, 0.0));
+	P.DialSweepDegrees = FMath::Clamp(P.DialSweepDegrees, 0.0, 350.0);
+
+	return P;
+}
+
+FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachineParams& Params)
+{
+	FHFApplianceBuild Out;
+	FHFMeshOps::InitialiseMesh(Out.Shell);
+
+	const FHFWashingMachineParams P = SanitiseWashingMachine(Params);
+
+	if (!P.IsValid())
+	{
+		return Out;
+	}
+
+	const double BodyDepth = P.BuiltDepth();
+	const double FrontThickness = FMath::Min(1.2, BodyDepth * 0.06);
+	const double PortholeRadius = P.PortholeDiameter * 0.5;
+
+	const FVector2D PortholeCentre(P.Width * 0.5, P.PortholeCentreZ);
+
+	// ----------------------------------------------------------------------------- the front panel
+	//
+	// A REAL HOLE FOR THE PORTHOLE, triangulated with the panel. The drum opening is the whole face of
+	// a front loader; a glass disc laid on a flat panel has no depth behind it and reads as a sticker.
+
+	{
+		TArray<TArray<FVector2D>> Holes;
+		Holes.Add(HoleRing(PortholeCentre, PortholeRadius, RevolveSides));
+
+		const TArray<FVector2D> Outer = {
+			FVector2D(0.0, 0.0),
+			FVector2D(P.Width, 0.0),
+			FVector2D(P.Width, P.Height),
+			FVector2D(0.0, P.Height)
+		};
+
+		FDynamicMesh3 Front;
+		FHFMeshOps::InitialiseMesh(Front);
+
+		if (FHFMeshOps::AppendPrismWithHoles(Front, Outer, Holes, 0.0, FrontThickness,
+			EHFSurfaceRole::Appliance))
+		{
+			StandPanelUp(Front, FrontThickness);
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Front);
+		}
+	}
+
+	// ---------------------------------------------------------------------------------- the case
+
+	{
+		FDynamicMesh3 Case;
+		FHFMeshOps::InitialiseMesh(Case);
+
+		FHFMeshOps::AppendBox(Case,
+			FVector3d(P.Width * 0.5, FrontThickness + (BodyDepth - FrontThickness) * 0.5, P.Height * 0.5),
+			FVector3d(P.Width * 0.5, FMath::Max((BodyDepth - FrontThickness) * 0.5, 0.01),
+				P.Height * 0.5), 0.0, EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Case);
+	}
+
+	// --------------------------------------------------------------------------------- the fascia
+	//
+	// The control panel, held proud of the front so it reads as a separate pressing, with the drawer
+	// aperture in one end of it and the dial in the other.
+
+	const double FasciaBottomZ = P.Height - P.FasciaHeight;
+	const double FasciaStand = FMath::Min(0.8, FrontThickness);
+	const double DrawerWidth = FMath::Min(P.Width * 0.34, 22.0);
+	const double DrawerHeight = FMath::Max(P.FasciaHeight * 0.62, 0.1);
+	const double DrawerCentreX = DrawerWidth * 0.5 + P.Width * 0.05;
+	const double DrawerCentreZ = FasciaBottomZ + P.FasciaHeight * 0.5;
+
+	{
+		FDynamicMesh3 Fascia;
+		FHFMeshOps::InitialiseMesh(Fascia);
+
+		// Built as a frame round the drawer aperture, so the drawer runs INTO something.
+		const double ApertureLeft = DrawerCentreX - DrawerWidth * 0.5;
+		const double ApertureRight = DrawerCentreX + DrawerWidth * 0.5;
+		const double ApertureBottom = DrawerCentreZ - DrawerHeight * 0.5;
+		const double ApertureTop = DrawerCentreZ + DrawerHeight * 0.5;
+
+		FHFMeshOps::AppendBox(Fascia,
+			FVector3d((ApertureRight + P.Width) * 0.5, -FasciaStand * 0.5,
+				FasciaBottomZ + P.FasciaHeight * 0.5),
+			FVector3d(FMath::Max((P.Width - ApertureRight) * 0.5, 0.01), FasciaStand * 0.5,
+				P.FasciaHeight * 0.5), 0.0, EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::AppendBox(Fascia,
+			FVector3d(ApertureLeft * 0.5, -FasciaStand * 0.5, FasciaBottomZ + P.FasciaHeight * 0.5),
+			FVector3d(FMath::Max(ApertureLeft * 0.5, 0.01), FasciaStand * 0.5, P.FasciaHeight * 0.5),
+			0.0, EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::AppendBox(Fascia,
+			FVector3d(DrawerCentreX, -FasciaStand * 0.5, (ApertureTop + P.Height) * 0.5),
+			FVector3d(DrawerWidth * 0.5, FasciaStand * 0.5,
+				FMath::Max((P.Height - ApertureTop) * 0.5, 0.01)), 0.0, EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::AppendBox(Fascia,
+			FVector3d(DrawerCentreX, -FasciaStand * 0.5, (ApertureBottom + FasciaBottomZ) * 0.5),
+			FVector3d(DrawerWidth * 0.5, FasciaStand * 0.5,
+				FMath::Max((ApertureBottom - FasciaBottomZ) * 0.5, 0.01)), 0.0,
+			EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::AppendPreservingRoles(Out.Shell, Fascia);
+	}
+
+	// ----------------------------------------------------------------------------- the door seal
+	//
+	// The rubber boot round the opening and the drum behind it. Without them the porthole is a hole
+	// through to nothing - which is exactly what a hole in a panel is, and it reads as a missing part
+	// rather than as a machine.
+	//
+	// The boot is an ANNULUS built by perforating a disc, not by revolving a ring: see AnnularSector
+	// for why a profile that never touches the axis cannot make one.
+
+	if (PortholeRadius > 0.0)
+	{
+		const double BootThickness = FMath::Max(FrontThickness * 1.4, 0.6);
+
+		TArray<TArray<FVector2D>> Bore;
+		Bore.Add(HoleRing(PortholeCentre, PortholeRadius * 0.86, RevolveSides));
+
+		FDynamicMesh3 Boot;
+		FHFMeshOps::InitialiseMesh(Boot);
+
+		if (FHFMeshOps::AppendPrismWithHoles(Boot,
+			HoleRing(PortholeCentre, PortholeRadius * 1.03, RevolveSides), Bore,
+			0.0, BootThickness, EHFSurfaceRole::MetalHardware))
+		{
+			StandPanelUp(Boot, BootThickness);
+			MeshTransforms::Translate(Boot, FVector3d(0.0, FrontThickness * 0.8, 0.0));
+
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Boot);
+		}
+
+		// The back of the drum, a hand's depth in. Solid, because both ends of its profile reach the
+		// axis - which is the shape this primitive is for, and the reason it works here and not for
+		// the boot.
+		const double DrumDepth = FMath::Min(BodyDepth * 0.35, 22.0);
+
+		FDynamicMesh3 Drum;
+		FHFMeshOps::InitialiseMesh(Drum);
+
+		const TArray<FVector2D> Back = {
+			FVector2D(DrumDepth, 0.0),
+			FVector2D(DrumDepth, PortholeRadius * 0.88),
+			FVector2D(DrumDepth + 3.0, PortholeRadius * 0.88),
+			FVector2D(DrumDepth + 3.0, 0.0)
+		};
+
+		if (FHFMeshOps::AppendRevolvedProfile(Drum, Back,
+			FVector3d(PortholeCentre.X, FrontThickness, PortholeCentre.Y),
+			FVector3d::UnitY(), RevolveSides, EHFSurfaceRole::MetalHardware))
+		{
+			FHFMeshOps::AppendPreservingRoles(Out.Shell, Drum);
+		}
+	}
+
+	// -------------------------------------------------------------------------------- the porthole
+	//
+	// Hinged on the LEFT, which is where a front loader's door hangs, and glazed - the drum behind the
+	// glass is the only interesting thing on the face of the machine.
+
+	if (PortholeRadius > 0.0 && P.DoorSwingDegrees > 0.0)
+	{
+		FHFMeshPart Porthole;
+		Porthole.PartId = PortholePartId();
+		FHFMeshOps::InitialiseMesh(Porthole.Mesh);
+
+		const double RimRadius = PortholeRadius * 1.14;
+		const double RimDepth = FMath::Max(FrontThickness * 1.6, 0.6);
+
+		// Drawn about its own hinge on the left of the aperture: the door's centre is out at +X.
+		const FVector2D LocalCentre(RimRadius, 0.0);
+
+		// The bezel, as an ANNULUS - see AnnularSector. A revolved ring would come out a solid disc
+		// and would hide the glass it is supposed to frame, which is a failure that looks perfectly
+		// correct from behind and from every wireframe.
+		TArray<TArray<FVector2D>> Aperture;
+		Aperture.Add(HoleRing(LocalCentre, PortholeRadius * 0.80, RevolveSides));
+
+		bool bRimBuilt = false;
+
+		{
+			FDynamicMesh3 Rim;
+			FHFMeshOps::InitialiseMesh(Rim);
+
+			if (FHFMeshOps::AppendPrismWithHoles(Rim, HoleRing(LocalCentre, RimRadius, RevolveSides),
+				Aperture, 0.0, RimDepth, EHFSurfaceRole::Appliance))
+			{
+				StandPanelUp(Rim, RimDepth);
+				MeshTransforms::Translate(Rim, FVector3d(0.0, -RimDepth, 0.0));
+
+				FHFMeshOps::AppendPreservingRoles(Porthole.Mesh, Rim);
+				bRimBuilt = true;
+			}
+		}
+
+		if (bRimBuilt)
+		{
+			// The glass, DISHED rather than flat. A front loader's door bulges into the drum, and that
+			// curve is the only thing on the whole machine giving a specular highlight worth having.
+			// Both ends of the profile reach the axis, so this one really is a solid of revolution.
+			const TArray<FVector2D> Glass = {
+				FVector2D(-RimDepth, 0.0),
+				FVector2D(-RimDepth, PortholeRadius * 0.84),
+				FVector2D(0.0, PortholeRadius * 0.84),
+				FVector2D(RimDepth * 1.4, PortholeRadius * 0.62),
+				FVector2D(RimDepth * 2.4, PortholeRadius * 0.30),
+				FVector2D(RimDepth * 2.8, 0.0)
+			};
+
+			FDynamicMesh3 Pane;
+			FHFMeshOps::InitialiseMesh(Pane);
+
+			if (FHFMeshOps::AppendRevolvedProfile(Pane, Glass,
+				FVector3d(LocalCentre.X, 0.0, 0.0), FVector3d::UnitY(), RevolveSides,
+				EHFSurfaceRole::Glass))
+			{
+				FHFMeshOps::AppendPreservingRoles(Porthole.Mesh, Pane);
+			}
+
+			FHFMeshOps::ApplyWorldScaleUVs(Porthole.Mesh);
+
+			Porthole.PivotTransform = FTransform(
+				FVector(PortholeCentre.X - RimRadius, 0.0, PortholeCentre.Y));
+
+			Porthole.Motion.Type = EHFMotionType::Hinge;
+			Porthole.Motion.Axis = FVector::ZAxisVector;
+
+			// NEGATIVE, SO THE FREE EDGE COMES OUT AND ROUND TO THE LEFT. The leaf is drawn along +X
+			// from its hinge, and a rotation about +Z carries +X towards +Y - which is INTO the drum.
+			// The sign is checked as a swept transform rather than reasoned about; see the tests.
+			Porthole.Motion.MaxAngleDegrees = -P.DoorSwingDegrees;
+			Porthole.DefaultOpenAmount = 0.0;
+
+			Out.Parts.Add(MoveTemp(Porthole));
+		}
+	}
+
+	// ------------------------------------------------------------------------ the detergent drawer
+
+	if (P.DrawerTravel > 0.0 && DrawerHeight > 0.0)
+	{
+		FHFMeshPart Drawer;
+		Drawer.PartId = DetergentDrawerPartId();
+		FHFMeshOps::InitialiseMesh(Drawer.Mesh);
+
+		const double DrawerDepth = FMath::Max(P.DrawerTravel * 1.15, 0.1);
+
+		// A tray with a front on it, drawn about its own closed position: the front sits in the
+		// fascia's aperture and the tray runs back into the machine behind it.
+		FHFMeshOps::AppendBox(Drawer.Mesh,
+			FVector3d(0.0, -FasciaStand * 0.5, 0.0),
+			FVector3d(DrawerWidth * 0.5 - 0.15, FasciaStand * 0.5, DrawerHeight * 0.5 - 0.15), 0.0,
+			EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::AppendBox(Drawer.Mesh,
+			FVector3d(0.0, DrawerDepth * 0.5, -DrawerHeight * 0.28),
+			FVector3d(DrawerWidth * 0.42, DrawerDepth * 0.5, DrawerHeight * 0.2), 0.0,
+			EHFSurfaceRole::Appliance);
+
+		FHFMeshOps::ApplyWorldScaleUVs(Drawer.Mesh);
+
+		Drawer.PivotTransform = FTransform(FVector(DrawerCentreX, 0.0, DrawerCentreZ));
+
+		Drawer.Motion.Type = EHFMotionType::Slide;
+
+		// OUT OF THE MACHINE, which is -Y. A drawer that travelled +Y would report its whole declared
+		// distance and would have gone further into the cabinet.
+		Drawer.Motion.Axis = -FVector::YAxisVector;
+		Drawer.Motion.MaxTravelCm = P.DrawerTravel;
+		Drawer.DefaultOpenAmount = 0.0;
+
+		Out.Parts.Add(MoveTemp(Drawer));
+	}
+
+	// ------------------------------------------------------------------------- the programme dial
+	//
+	// A control a person turns, so it turns. The same rule that gave the geyser a thermostat instead
+	// of a moulded bump - see .claude/rules/04-conventions.md.
+
+	if (P.DialRadius > 0.0 && P.DialSweepDegrees > 0.0)
+	{
+		FHFMeshPart Dial;
+		Dial.PartId = ProgrammeDialPartId();
+		FHFMeshOps::InitialiseMesh(Dial.Mesh);
+
+		// STARTED INSIDE THE FASCIA, not on its face. A dial whose back disc lands exactly on the
+		// panel behind it puts two drawn faces in one plane: the depth test picks a different winner
+		// each frame and a 17.8 cm2 disc strobes on the front of the machine as the camera moves. The
+		// same rule the geyser's pipework follows - the difference between a joint and two coincident
+		// surfaces - and HouseForge.SampleHouse.NoTwoSurfacesShareAPlane is what found it.
+		const double DialSink = FMath::Max(FasciaStand * 0.5, 0.2);
+
+		const TArray<FVector2D> Body = {
+			FVector2D(DialSink, 0.0),
+			FVector2D(DialSink, P.DialRadius),
+			FVector2D(-1.0, P.DialRadius * 0.94),
+			FVector2D(-1.3, P.DialRadius * 0.70),
+			FVector2D(-1.3, 0.0)
+		};
+
+		if (FHFMeshOps::AppendRevolvedProfile(Dial.Mesh, Body, FVector3d::Zero(),
+			FVector3d::UnitY(), RevolveSides, EHFSurfaceRole::MetalHardware))
+		{
+			// The index mark, without which a turning knob turns invisibly.
+			FDynamicMesh3 Pointer;
+			FHFMeshOps::InitialiseMesh(Pointer);
+
+			FHFMeshOps::AppendBox(Pointer, FVector3d(0.0, -1.35, P.DialRadius * 0.45),
+				FVector3d(P.DialRadius * 0.14, 0.25, P.DialRadius * 0.45), 0.0,
+				EHFSurfaceRole::MetalHardware);
+
+			FHFMeshOps::AppendPreservingRoles(Dial.Mesh, Pointer);
+			FHFMeshOps::ApplyWorldScaleUVs(Dial.Mesh);
+
+			Dial.PivotTransform = FTransform(
+				FVector(P.Width - FMath::Max(P.DialRadius * 1.8, 3.0), -FasciaStand, DrawerCentreZ));
+
+			Dial.Motion.Type = EHFMotionType::Hinge;
+			Dial.Motion.Axis = FVector::YAxisVector;
 			Dial.Motion.MaxAngleDegrees = P.DialSweepDegrees;
 			Dial.DefaultOpenAmount = 0.0;
 

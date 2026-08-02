@@ -12,6 +12,7 @@
 #include "Actors/HFOpeningActor.h"
 #include "Actors/HFFanActor.h"
 #include "Actors/HFSanitaryActors.h"
+#include "Actors/HFServiceActors.h"
 #include "Actors/HFWardrobeActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
@@ -705,6 +706,83 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	// ------------------------------------------------------------------------------- the services
+	//
+	// TWO PLACEMENT RULES, AND THE SPLIT IS NOT ALPHABETICAL. Everything bolted to plaster - the
+	// sockets, the switch plates, the consumer unit, the split AC heads - goes on the finished FACE, by
+	// FHFFixturePlacement::OnWallFace, exactly as the bathroom fittings do. Everything standing on the
+	// floor - the refrigerator, the washing machine, the two condensing units - keeps the gap the
+	// drawing gave it, by AgainstWall.
+	//
+	// That second rule is deliberate rather than a leftover. An appliance is pushed up near a wall, not
+	// screwed to it, and all four of these need air behind them: pulling a condensing unit flush to a
+	// parapet would bury the coil it rejects heat through, and the two in this flat are drawn 267 and
+	// 367 mm clear for exactly that reason.
+
+	void SeedAccessoryPlate(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFAccessoryPlateActor& Actor = static_cast<AHFAccessoryPlateActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedDistributionBoard(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFDistributionBoardActor& Actor = static_cast<AHFDistributionBoardActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedSplitAC(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFSplitACActor& Actor = static_cast<AHFSplitACActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		// NOTHING ABOUT THE CEILING IS DONE HERE, and that is the point rather than an omission. A
+		// split head answers to the soffit over it by FHFCeilingFit::RuleFor returning Lowers, which
+		// runs on the SPEC before the fixture reaches this function at all - so the BaseZ arriving here
+		// is already the fitted one. Adjusting it a second time would drop the unit by the soffit
+		// twice, which is precisely the cumulative fault AHFFanActor::ApplyCeilingAbove is documented
+		// against.
+		Actor.SetActorTransform(FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedCondenser(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFCondenserActor& Actor = static_cast<AHFCondenserActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedRefrigerator(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFRefrigeratorActor& Actor = static_cast<AHFRefrigeratorActor&>(Element);
+
+		// The project's figures FIRST: ApplyFixture reads the drawn box and the skirting setback this
+		// resolves is subtracted from it, so re-seeding in the other order would leave the cabinet
+		// standing inside the board.
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
+	void SeedWashingMachine(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFWashingMachineActor& Actor = static_cast<AHFWashingMachineActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+	}
+
 	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFFanActor& Actor = static_cast<AHFFanActor&>(Element);
@@ -814,6 +892,26 @@ namespace
 				TEXT("Mirror"), &SeedMirror },
 			{ EHFFixtureType::TowelRail, AHFTowelRailActor::StaticClass(),
 				TEXT("TowelRail"), &SeedTowelRail },
+
+			// THE SERVICES. Two actors carry six of the seven types, and both splits are the cased
+			// goods argument again: a socket and a switch plate are one construction with two
+			// fillings, and the four remaining appliances differ in what is inside the box.
+			{ EHFFixtureType::PowerSocket, AHFAccessoryPlateActor::StaticClass(),
+				TEXT("Plate"), &SeedAccessoryPlate },
+			{ EHFFixtureType::SwitchPlate, AHFAccessoryPlateActor::StaticClass(),
+				TEXT("Plate"), &SeedAccessoryPlate },
+			{ EHFFixtureType::DistributionBoard, AHFDistributionBoardActor::StaticClass(),
+				TEXT("DB"), &SeedDistributionBoard },
+
+			{ EHFFixtureType::ACIndoorUnit, AHFSplitACActor::StaticClass(),
+				TEXT("ACIndoor"), &SeedSplitAC },
+			{ EHFFixtureType::ACOutdoorUnit, AHFCondenserActor::StaticClass(),
+				TEXT("ACOutdoor"), &SeedCondenser },
+
+			{ EHFFixtureType::Refrigerator, AHFRefrigeratorActor::StaticClass(),
+				TEXT("Fridge"), &SeedRefrigerator },
+			{ EHFFixtureType::WashingMachine, AHFWashingMachineActor::StaticClass(),
+				TEXT("Washer"), &SeedWashingMachine },
 
 			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
 				TEXT("Fan"), &SeedCeilingFan },
@@ -1686,6 +1784,16 @@ TArray<FHFFixture> AHFHouseActor::ResolveFixtures(TArray<FString>* OutMoved) con
 			// the bed, nothing in this flat has a ceiling low enough for it to matter, and that is
 			// exactly why it is supplied: the answer must not depend on the room happening to be tall.
 			BuiltHeights.Add(Fixture.Id, AHFWCActor::ParamsFor(Fixture).BuiltHeight());
+		}
+		else if (AHFSplitACActor::Builds(Fixture.Type))
+		{
+			// A SPLIT HEAD COMES OUT EXACTLY ITS DRAWN HEIGHT, and it is supplied anyway. The casing
+			// is an extruded section built strictly inside the drawn envelope, so this is a no-op
+			// today - and that is the reason to state it here rather than to leave the type out. It is
+			// the one fitting in this catalogue that hangs at 2200 in three rooms with a false ceiling
+			// over it, so the day somebody gives the moulding a top grille standing 20 mm proud, the
+			// ceiling fit finds out from this line instead of from a render.
+			BuiltHeights.Add(Fixture.Id, AHFSplitACActor::ParamsFor(Fixture).BuiltHeight());
 		}
 		else if (AHFCasedGoodsActor::Builds(Fixture.Type))
 		{
