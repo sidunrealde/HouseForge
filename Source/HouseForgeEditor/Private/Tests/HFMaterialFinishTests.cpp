@@ -514,4 +514,118 @@ bool FHFReMaterialisingKeepsGeometryTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * THE SAME PROMISE, THROUGH THE MECHANISM THAT WILL ACTUALLY BE USED.
+ *
+ * The test above proves a component's slot table cannot reach a vertex. This proves the LIBRARY
+ * cannot either, which is a different claim and now the load-bearing one: from this milestone on,
+ * changing a finish means editing UHFMaterialLibrary and pushing it, not swapping a material on a
+ * component. A push writes a shared asset that 155 components already point at - so it is exactly
+ * the operation that touches everything at once, and exactly the one worth proving touches no
+ * geometry at all.
+ *
+ * THE POLYGROUPS ARE ASSERTED EXPLICITLY, not merely covered by the fingerprint. Every triangle
+ * carries a surface-role polygroup and the material panel targets faces by role; a material pass
+ * that renumbered them would silently undo the thing it exists to serve, and it would look like a
+ * success - the flat would still render, in the wrong finishes, with no way left to fix it. So the
+ * group set is compared as a set of role ids rather than as an opaque array.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFinishPushKeepsArtistEditsTest,
+	"HouseForge.Materials.ChangingAFinishLeavesArtistEditsAlone", HF_TEST_FLAGS)
+
+bool FHFFinishPushKeepsArtistEditsTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = EditorWorld();
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFRoomActor* Room = SpawnFloor(World);
+	if (!TestNotNull(TEXT("A room spawns"), Room))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(Room)) { Room->Destroy(); } };
+
+	UDynamicMeshComponent* Component = Room->GetMeshComponent();
+	if (!TestNotNull(TEXT("The room has a mesh component"), Component))
+	{
+		return false;
+	}
+
+	// Hand-edited, and made to differ from generator output so a regeneration would be visible
+	// rather than idempotent.
+	Room->bArtistEdited = true;
+	Component->EditMesh([](FDynamicMesh3& Mesh)
+	{
+		for (const int32 Vid : Mesh.VertexIndicesItr())
+		{
+			Mesh.SetVertex(Vid, Mesh.GetVertex(Vid) + FVector3d(0.0, 0.0, 0.211));
+			break;
+		}
+	});
+
+	const FMeshFingerprint Before = Fingerprint(Component);
+	if (!TestTrue(TEXT("There is a mesh to protect"), Before.Triangles > 0))
+	{
+		return false;
+	}
+
+	// The roles this element is made of, as ids, before anything is re-materialled.
+	TSet<int32> RolesBefore(Before.Groups);
+	TestTrue(TEXT("The element carries surface-role polygroups to begin with"), RolesBefore.Num() > 0);
+
+	const int32 SlotsBefore = Component->GetNumMaterials();
+
+	// ---- a library edit, pushed --------------------------------------------------------------
+	//
+	// A library of this test's own, so nothing outside it sees the edit; and every role pushed, not
+	// only the floor, because the failure being guarded against would not be selective.
+	UHFMaterialLibrary* Edited = NewObject<UHFMaterialLibrary>();
+	for (int32 Index = 0; Index < FHFMeshOps::NumSurfaceRoles(); ++Index)
+	{
+		FHFSurfaceFinish& Finish = Edited->Finishes.FindOrAdd(static_cast<EHFSurfaceRole>(Index));
+		Finish.BaseColor = FLinearColor(0.9f, 0.1f, 0.4f, 1.0f);
+		Finish.Roughness = 0.19f;
+		Finish.TilingMM = 137.0f;
+		Finish.GroutWidthMM = 9.0f;
+	}
+
+	ON_SCOPE_EXIT
+	{
+		// The instances are shared assets, so put the shipped finishes back before leaving.
+		UHFMaterialLibrary* Pristine = NewObject<UHFMaterialLibrary>();
+		Pristine->PushAllFinishes(EHFMaterialPush::Commit);
+	};
+
+	Edited->PushAllFinishes(EHFMaterialPush::Interactive);
+	TestTrue(TEXT("A dragged finish leaves the mesh exactly as it was"),
+		Fingerprint(Component) == Before);
+
+	Edited->PushAllFinishes(EHFMaterialPush::Commit);
+	TestTrue(TEXT("A committed finish leaves the mesh exactly as it was"),
+		Fingerprint(Component) == Before);
+
+	Edited->ApplyTo(Component);
+	TestTrue(TEXT("Re-assigning the whole set leaves the mesh exactly as it was"),
+		Fingerprint(Component) == Before);
+
+	// ---- and specifically: the roles are still the roles ---------------------------------------
+	const TSet<int32> RolesAfter(Fingerprint(Component).Groups);
+	TestTrue(TEXT("Every surface-role polygroup survived the material pass, with its own id"),
+		RolesBefore.Difference(RolesAfter).IsEmpty() && RolesAfter.Difference(RolesBefore).IsEmpty());
+
+	TestEqual(TEXT("The slot table is still one slot per role"),
+		Component->GetNumMaterials(), SlotsBefore);
+	TestEqual(TEXT("...which is one slot per role"), SlotsBefore, FHFMeshOps::NumSurfaceRoles());
+
+	// ---- and the hand edit is untouched ---------------------------------------------------------
+	TestTrue(TEXT("The element is still flagged as hand-edited"), Room->bArtistEdited);
+	TestTrue(TEXT("A re-finished element still opts out of regeneration"),
+		Room->ShouldPreserveOnRebuild());
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
