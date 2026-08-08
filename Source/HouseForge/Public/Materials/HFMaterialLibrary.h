@@ -20,7 +20,7 @@ class UMaterialInterface;
  * With 155 element actors and 217,826 triangles in the reference flat, paying that on every
  * mouse-move of a roughness slider is a hitch per frame of the drag.
  */
-UENUM()
+UENUM(BlueprintType)
 enum class EHFMaterialPush : uint8
 {
 	/**
@@ -117,13 +117,23 @@ public:
 	/** Object path of the material instance for a role, derived from the enumerator's own name. */
 	static FString AssetPathForRole(EHFSurfaceRole Role);
 
+	/** Object path of the library the plugin ships: the starting point every project gets. */
+	static FString ShippedAssetPath();
+
 	/**
-	 * The library this project builds with.
+	 * The library this project builds with. Three places, in order, and never null.
 	 *
-	 * The asset named by UHFSettings::MaterialLibrary when there is one, and the class default
-	 * object otherwise. THE FALLBACK IS THE POINT: the CDO carries the full default table, compiled
-	 * in, so a freshly generated flat looks like a flat before anyone has opened a panel or created
-	 * an asset. Never null.
+	 *   1. THE ASSET NAMED BY UHFSettings::MaterialLibrary. A job's own finishes, in the job's own
+	 *      project, saved and versioned with it. This is what "the library is an asset" buys: a
+	 *      change survives a restart and is there for the next house generated from that project.
+	 *   2. THE SHIPPED ASSET, found by path the same way the MI_HF_* instances are. Discoverable in
+	 *      the Content Browser, so making a library of your own is a duplicate rather than knowing
+	 *      to create a Data Asset of a particular class.
+	 *   3. THE CLASS DEFAULT OBJECT, which carries the whole table compiled in.
+	 *
+	 * Step 3 is not a formality. It is what makes the plugin work with no content at all, and it is
+	 * what HouseForge.Materials.TheShippedLibraryIsItsCompiledDefaults measures step 2 against - so
+	 * the asset cannot quietly become something the code does not say it is.
 	 */
 	static UHFMaterialLibrary* Get();
 
@@ -171,9 +181,17 @@ public:
 	 *
 	 * @return true when there was an instance to write to.
 	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Materials")
 	bool PushFinish(EHFSurfaceRole Role, EHFMaterialPush Mode) const;
 
-	/** Every role, in enum order. @return how many instances were written. */
+	/**
+	 * Every role, in enum order. @return how many instances were written.
+	 *
+	 * Callable from Blueprint and Python because this is how the shipped instances are authored:
+	 * Scripts/gen_materials.py builds the graphs, and this writes the numbers into them. Two ways of
+	 * writing a parameter would be two ways of getting it wrong.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Materials")
 	int32 PushAllFinishes(EHFMaterialPush Mode) const;
 
 	/** Editing a finish in the details panel pushes it. Interactive while dragging, full on release. */

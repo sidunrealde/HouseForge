@@ -27,6 +27,9 @@ namespace
 	/** Roles already warned about, so a missing asset logs once rather than once per element. */
 	TSet<EHFSurfaceRole> GWarnedRoles;
 
+	/** The shipped library, once found. Cached for the same reason the instances are. */
+	TStrongObjectPtr<UHFMaterialLibrary> GShippedLibrary;
+
 	// =========================================================================================
 	//
 	// THE DEFAULT TABLE: what each of the eighteen surfaces of an Indian residential flat IS.
@@ -257,6 +260,11 @@ FString UHFMaterialLibrary::AssetPathForRole(EHFSurfaceRole Role)
 	return FString::Printf(TEXT("%s/MI_HF_%s.MI_HF_%s"), MaterialFolder(), *RoleName, *RoleName);
 }
 
+FString UHFMaterialLibrary::ShippedAssetPath()
+{
+	return FString::Printf(TEXT("%s/DA_HF_MaterialLibrary.DA_HF_MaterialLibrary"), MaterialFolder());
+}
+
 UHFMaterialLibrary* UHFMaterialLibrary::Get()
 {
 	if (const UHFSettings* Settings = GetDefault<UHFSettings>())
@@ -270,17 +278,32 @@ UHFMaterialLibrary* UHFMaterialLibrary::Get()
 
 			// Named and missing is worth saying out loud. Falling through silently would look
 			// identical to never having configured one.
-			static bool bWarned = false;
-			if (!bWarned)
+			static bool bWarnedAboutSetting = false;
+			if (!bWarnedAboutSetting)
 			{
-				bWarned = true;
+				bWarnedAboutSetting = true;
 				UE_LOG(LogHouseForge, Warning,
-					TEXT("HouseForge material library '%s' could not be loaded; using the compiled-in defaults."),
+					TEXT("HouseForge material library '%s' could not be loaded; falling back."),
 					*Settings->MaterialLibrary.ToString());
 			}
 		}
 	}
 
+	// The shipped asset, cached like the role instances are and for the same reason: this is asked
+	// for once per element per generation, and a garbage collect between two houses would otherwise
+	// make every element re-load it.
+	if (GShippedLibrary.IsValid())
+	{
+		return GShippedLibrary.Get();
+	}
+
+	if (UHFMaterialLibrary* Shipped = LoadObject<UHFMaterialLibrary>(nullptr, *ShippedAssetPath()))
+	{
+		GShippedLibrary = TStrongObjectPtr<UHFMaterialLibrary>(Shipped);
+		return Shipped;
+	}
+
+	// No content at all. Still a working library, because the table is compiled in.
 	return GetMutableDefault<UHFMaterialLibrary>();
 }
 
@@ -381,6 +404,7 @@ void UHFMaterialLibrary::InvalidateCache()
 {
 	GRoleMaterials.Reset();
 	GWarnedRoles.Reset();
+	GShippedLibrary.Reset();
 }
 
 #if WITH_EDITOR

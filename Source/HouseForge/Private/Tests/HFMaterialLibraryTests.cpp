@@ -115,6 +115,74 @@ bool FHFEveryRoleHasALibraryFinishTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * THE SHIPPED LIBRARY IS AN ASSET, AND IT IS WHAT THE CODE SAYS IT IS.
+ *
+ * Two separate claims, and both matter.
+ *
+ * THAT IT IS AN ASSET is the persistence half of this milestone. A compiled-in table cannot be
+ * edited, cannot be saved, and cannot travel with a job; a UDataAsset can. Shipping one also makes
+ * the feature discoverable - a user duplicates the asset they can see rather than knowing to create
+ * a Data Asset of a particular class - and it is the thing UHFSettings::MaterialLibrary is pointed
+ * at when a project wants its own.
+ *
+ * THAT IT MATCHES THE COMPILED DEFAULTS is the guard on shipping one at all. A binary asset is a
+ * place values can quietly become something Source does not say, and it would render perfectly
+ * while every test measuring the C++ table reported the old numbers. So the asset is not allowed to
+ * be an independent opinion: it is generated from the defaults, and this measures that it still is.
+ *
+ * A project's OWN library is under no such obligation, and should not be. This is about the one the
+ * plugin ships.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFShippedLibraryTest,
+	"HouseForge.Materials.TheShippedLibraryIsItsCompiledDefaults", HF_TEST_FLAGS)
+
+bool FHFShippedLibraryTest::RunTest(const FString& Parameters)
+{
+	UHFMaterialLibrary* Shipped = LoadObject<UHFMaterialLibrary>(nullptr, *UHFMaterialLibrary::ShippedAssetPath());
+	if (!TestNotNull(*FString::Printf(TEXT("The plugin ships a library at '%s'"),
+		*UHFMaterialLibrary::ShippedAssetPath()), Shipped))
+	{
+		return false;
+	}
+
+	// Resolution finds it without anything having been configured. This is what a fresh project gets.
+	TestEqual(TEXT("An unconfigured project resolves to the shipped library, not to the class default"),
+		UHFMaterialLibrary::Get(), Shipped);
+
+	TestEqual(TEXT("It carries a finish for every role"),
+		Shipped->Finishes.Num(), FHFMeshOps::NumSurfaceRoles());
+
+	for (const EHFSurfaceRole Role : EveryRole())
+	{
+		const FString Name = LibraryRoleName(Role);
+		const FHFSurfaceFinish& Asset = Shipped->FinishForRole(Role);
+		const FHFSurfaceFinish& Code = UHFMaterialLibrary::DefaultFinishForRole(Role);
+
+		TestEqual(*FString::Printf(TEXT("'%s' in the asset says what the code says it is"), *Name),
+			Asset.Description, Code.Description);
+
+		TestTrue(*FString::Printf(TEXT("'%s' has the compiled colour"), *Name),
+			Asset.BaseColor.Equals(Code.BaseColor, 1e-6f));
+		TestEqual(*FString::Printf(TEXT("'%s' has the compiled roughness"), *Name),
+			Asset.Roughness, Code.Roughness, 1e-6f);
+		TestEqual(*FString::Printf(TEXT("'%s' has the compiled metallic"), *Name),
+			Asset.Metallic, Code.Metallic, 1e-6f);
+		TestEqual(*FString::Printf(TEXT("'%s' has the compiled tile module"), *Name),
+			Asset.TilingMM, Code.TilingMM, 1e-6f);
+		TestEqual(*FString::Printf(TEXT("'%s' has the compiled coat weight"), *Name),
+			Asset.CoatWeight, Code.CoatWeight, 1e-6f);
+		TestEqual(*FString::Printf(TEXT("'%s' has the compiled emissive strength"), *Name),
+			Asset.EmissiveStrength, Code.EmissiveStrength, 1e-6f);
+		TestEqual(*FString::Printf(TEXT("'%s' has the compiled shading model"), *Name),
+			Asset.Shading, Code.Shading);
+		TestEqual(*FString::Printf(TEXT("'%s' agrees about the procedural bump"), *Name),
+			Asset.bUseProceduralBump, Code.bUseProceduralBump);
+	}
+
+	return true;
+}
+
+/**
  * CHANGING THE TILE SIZE CHANGES THE UV SCALE, PROPORTIONALLY AND IN THE RIGHT DIRECTION.
  *
  * Tiling can only be stated in millimetres because UV0 is world-scale: FHFMeshOps::ApplyWorldScaleUVs
