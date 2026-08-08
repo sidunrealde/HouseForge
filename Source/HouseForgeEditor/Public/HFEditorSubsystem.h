@@ -4,10 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "EditorSubsystem.h"
+#include "Materials/HFMaterialLibrary.h"
+#include "Materials/HFSurfaceFinish.h"
 #include "Model/HFTypes.h"
 #include "HFEditorSubsystem.generated.h"
 
 class AHFHouseActor;
+class UHFMaterialLibrary;
 
 /** Outcome of an operation, shaped so it reads well when handed back through an MCP tool. */
 USTRUCT(BlueprintType)
@@ -24,6 +27,56 @@ struct HOUSEFORGEEDITOR_API FHFOperationResult
 
 	static FHFOperationResult Ok(const FString& InMessage);
 	static FHFOperationResult Fail(const FString& InMessage);
+};
+
+/**
+ * HOW MUCH OF THE OPEN LEVEL ONE SURFACE ROLE ACTUALLY COVERS.
+ *
+ * The answer to "will changing this do anything I can see", which is the first question anyone
+ * has in front of a list of eighteen finishes and the one a list of eighteen names cannot answer.
+ * Measured off the built meshes rather than off the spec, because the material slot a triangle
+ * renders through is a property of the mesh: a hand-edited element that had its polygroups
+ * re-cut counts for what it now is, not for what it was generated as.
+ *
+ * Every role is reported, including the ones covering nothing. A role absent from the level is a
+ * fact worth showing - it is why a finish edit looks inert - and dropping the row would make the
+ * list change length as houses come and go.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGEEDITOR_API FHFSurfaceUsage
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	EHFSurfaceRole Role = EHFSurfaceRole::WallPaint;
+
+	/** Element actors with at least one triangle rendering through this role. */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	int32 ElementCount = 0;
+
+	/** Triangles rendering through this role, across every element. */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	int32 TriangleCount = 0;
+
+	/**
+	 * Surface area carrying this role, in square metres.
+	 *
+	 * The figure that actually says how much of a render a finish decides. A triangle count says a
+	 * knob has more of them than a wall does; 244 m2 of wall paint against 0.4 m2 of knob chrome
+	 * says which one is worth ten minutes.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	double AreaSquareMetres = 0.0;
+
+	/**
+	 * How many of those elements are hand-edited.
+	 *
+	 * Shown rather than warned about, because the honest answer is reassuring: re-materialling is
+	 * entirely component-side and asset-side, so a hand-edited element takes a finish change like
+	 * any other and keeps its modelling. The count is there so nobody has to take that on trust.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	int32 ArtistEditedElementCount = 0;
 };
 
 /**
@@ -177,6 +230,86 @@ public:
 
 	/** The house actor in the current level, or nullptr. */
 	AHFHouseActor* FindHouseActor() const;
+
+	// ------------------------------------------------------------------------------ surfaces
+	//
+	// The read and write halves of "what every surface role is made of". The material panel is a
+	// view onto these and holds no logic of its own, so the panel and the MCP surface cannot come
+	// to different conclusions about what changing a finish means - which is the whole reason the
+	// panel was not allowed to reach into UHFMaterialLibrary directly.
+	//
+	// NOTHING HERE CAN REACH A VERTEX. Every write below lands on a material instance or on the
+	// library asset. No mesh is read, no Regenerate is called, and bArtistEdited is never
+	// consulted or set, so re-materialling cannot destroy a hand edit and cannot renumber the
+	// surface-role polygroups the entire assignment mechanism is built on. Asserted by
+	// HouseForge.Editor.Surfaces.SettingAFinishDoesNotTouchGeometry.
+
+	/**
+	 * The library this project is building with. Never null - see UHFMaterialLibrary::Get.
+	 *
+	 * May be the class default object when the plugin's content is missing. That one is readable
+	 * and renders correctly but cannot be edited or saved, which is why the write path asks for
+	 * an editable library separately rather than letting an edit land on the CDO and vanish.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
+	UHFMaterialLibrary* GetMaterialLibrary() const;
+
+	/**
+	 * The library, refused when it is the compiled-in defaults rather than an asset.
+	 *
+	 * A separate call because "you can look at this" and "you can change this" are different
+	 * answers here, and the failure message names the asset that is missing. Editing the CDO
+	 * would appear to work, render correctly for the session, and be gone on restart with
+	 * nothing having said so.
+	 */
+	FHFOperationResult GetEditableMaterialLibrary(UHFMaterialLibrary*& OutLibrary) const;
+
+	/** The finish for one role: this library's entry, or the shipped default where it has none. */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
+	FHFOperationResult GetSurfaceFinish(EHFSurfaceRole Role, FHFSurfaceFinish& OutFinish) const;
+
+	/**
+	 * Writes one role's finish into the library and pushes it to the renderer.
+	 *
+	 * Interactive is the mid-gesture tier: numeric values only, straight to the render thread, no
+	 * transaction and no dirty package. Commit is the decision: the whole finish including texture
+	 * slots and static switches, inside a transaction so it undoes, with the library asset marked
+	 * dirty so it is savable. Both tiers write the same finish into the library, so a drag
+	 * abandoned by clicking elsewhere still leaves the library saying what the viewport shows.
+	 *
+	 * Every element using the role updates at once and none of them is visited: the material
+	 * instance is a shared asset, so one write re-renders all 155 elements of the reference flat.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
+	FHFOperationResult SetSurfaceFinish(EHFSurfaceRole Role, const FHFSurfaceFinish& Finish,
+		EHFMaterialPush Mode);
+
+	/** Puts one role back to the finish the plugin ships, and pushes it. Undoable. */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
+	FHFOperationResult ResetSurfaceFinish(EHFSurfaceRole Role);
+
+	/**
+	 * How much of the open level each role covers, one entry per role, in enum order.
+	 *
+	 * Empty of counts rather than empty of rows when there is no house: a level with nothing in it
+	 * still has eighteen roles and every finish is still editable, because finishes are assets and
+	 * not level state.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
+	TArray<FHFSurfaceUsage> GetSurfaceUsage() const;
+
+	/**
+	 * Re-fills every HouseForge component's material slots from the library.
+	 *
+	 * The recovery path, not part of an edit. Slot assignment already happens at generation, so
+	 * this is for the cases where it could not have: a library swapped under a level that was
+	 * built with another one, or an element hand-edited into carrying a role it did not before.
+	 * Component-side only - ConfigureMaterialSet sets slots and never touches FDynamicMesh3.
+	 *
+	 * @param OutComponents  How many components were re-filled.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
+	FHFOperationResult ReapplyMaterialsToLevel(int32& OutComponents);
 
 	// ------------------------------------------------------------------------------ settings
 
