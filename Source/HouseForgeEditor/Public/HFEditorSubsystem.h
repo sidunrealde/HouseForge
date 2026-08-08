@@ -311,6 +311,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
 	FHFOperationResult ReapplyMaterialsToLevel(int32& OutComponents);
 
+	/**
+	 * Writes the library and the material instances it has pushed to, so the change survives a restart.
+	 *
+	 * TWO SETS OF PACKAGES, not one. The library asset is the record and the MI_HF_* instances are
+	 * that record compiled for the renderer, and they are separate assets - saving only the library
+	 * would come back from a restart looking correct in the details panel and rendering the old
+	 * finish, which is the most confusing possible half-failure.
+	 *
+	 * @param OutPackagesSaved  How many packages were written. Zero when nothing was unsaved.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
+	FHFOperationResult SaveSurfaceLibrary(int32& OutPackagesSaved);
+
+	/** Whether anything in the library or its instances is unsaved. Drives the panel's Save button. */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Surfaces")
+	bool HasUnsavedSurfaceChanges() const;
+
 	// ------------------------------------------------------------------------------ settings
 
 	/**

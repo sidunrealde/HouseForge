@@ -3,6 +3,7 @@
 #include "UI/SHFHousePanel.h"
 
 #include "UI/HFPanelIds.h"
+#include "UI/SHFMaterialPanel.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -13,12 +14,32 @@
 TArray<FHFPanelSection> SHFHousePanel::BuildSections()
 {
 	TArray<FHFPanelSection> Sections;
+
+	FHFPanelSection& Surfaces = Sections.AddDefaulted_GetRef();
+	Surfaces.Id = HFPanelSectionIds::Surfaces();
+	Surfaces.Title = LOCTEXT("SurfacesSection", "SURFACES");
+	Surfaces.bExpandedByDefault = true;
+
+	// It holds a details view, so it has to be given the tab's remaining height - see
+	// FHFPanelSection::bFillsRemainingSpace for what happens otherwise.
+	Surfaces.bFillsRemainingSpace = true;
+
+	// Always present, with or without a house. Finishes are assets rather than level state, so an
+	// empty level does not make this section inert - it makes the usage figures inside it read
+	// "not in this level", which is a fact worth showing rather than a reason to hide the controls.
+	Surfaces.IsRelevant = []() { return true; };
+	Surfaces.Build = []() -> TSharedRef<SWidget> { return SNew(SHFMaterialPanel); };
+
 	return Sections;
 }
 
 void SHFHousePanel::Construct(const FArguments& InArgs)
 {
-	TSharedRef<SScrollBox> Stack = SNew(SScrollBox);
+	// A vertical box rather than a scroll box. A scroll box hands its content unbounded height,
+	// which silently defeats FillHeight - and a section holding a details view has to be given fill
+	// height all the way down from the tab or the property list collapses to a few rows. Sections
+	// that scroll do it inside themselves.
+	TSharedRef<SVerticalBox> Stack = SNew(SVerticalBox);
 
 	int32 Shown = 0;
 	for (FHFPanelSection& Section : BuildSections())
@@ -33,17 +54,26 @@ void SHFHousePanel::Construct(const FArguments& InArgs)
 		}
 
 		++Shown;
-		Stack->AddSlot()
-			.Padding(4.0f, 2.0f)
+
+		// SExpandableArea already slots its body with FillHeight (SExpandableArea.cpp:71), so the
+		// only link in the chain this has to supply is the outer slot.
+		const TSharedRef<SWidget> Area =
+			SNew(SExpandableArea)
+			.InitiallyCollapsed(!Section.bExpandedByDefault)
+			.AreaTitle(Section.Title)
+			.BodyContent()
 			[
-				SNew(SExpandableArea)
-				.InitiallyCollapsed(!Section.bExpandedByDefault)
-				.AreaTitle(Section.Title)
-				.BodyContent()
-				[
-					Section.Build()
-				]
+				Section.Build()
 			];
+
+		if (Section.bFillsRemainingSpace)
+		{
+			Stack->AddSlot().FillHeight(1.0f).Padding(4.0f, 2.0f)[Area];
+		}
+		else
+		{
+			Stack->AddSlot().AutoHeight().Padding(4.0f, 2.0f)[Area];
+		}
 	}
 
 	if (Shown == 0)
@@ -52,6 +82,7 @@ void SHFHousePanel::Construct(const FArguments& InArgs)
 		// load, and the reason it is empty here is a fact about the plugin rather than about the
 		// level - so it names the thing that is missing instead of suggesting something to try.
 		Stack->AddSlot()
+			.AutoHeight()
 			.Padding(12.0f)
 			[
 				SNew(STextBlock)

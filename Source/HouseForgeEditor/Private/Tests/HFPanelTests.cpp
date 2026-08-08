@@ -7,8 +7,13 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
 #include "Misc/AutomationTest.h"
+#include "Geometry/HFMeshOps.h"
+#include "Materials/HFMaterialLibrary.h"
+#include "Materials/MaterialInterface.h"
+#include "Misc/ScopeExit.h"
 #include "UI/HFPanelIds.h"
 #include "UI/SHFHousePanel.h"
+#include "UI/SHFMaterialPanel.h"
 #include "Widgets/Docking/SDockTab.h"
 
 #define HF_TEST_FLAGS (EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -88,6 +93,175 @@ bool FHFPanelSectionsTest::RunTest(const FString& Parameters)
 		TestFalse(FString::Printf(TEXT("Section id '%s' is used once"), *Section.Id.ToString()),
 			bAlreadyThere);
 	}
+
+	return true;
+}
+
+/**
+ * THE SURFACES SECTION IS IN THE STACK, AND IS THERE WITH NO HOUSE IN THE LEVEL.
+ *
+ * Finishes are assets rather than level state, so an empty level must not make the section vanish
+ * or grey out - the panel is most likely to be opened before a house exists, and a library edit
+ * made then is what the next generated house picks up.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFPanelSurfacesSectionTest,
+	"HouseForge.Editor.Panel.SurfacesSectionIsAlwaysPresent", HF_TEST_FLAGS)
+
+bool FHFPanelSurfacesSectionTest::RunTest(const FString& Parameters)
+{
+	const TArray<FHFPanelSection> Sections = SHFHousePanel::BuildSections();
+
+	const FHFPanelSection* Surfaces = Sections.FindByPredicate(
+		[](const FHFPanelSection& Section) { return Section.Id == HFPanelSectionIds::Surfaces(); });
+
+	if (!TestNotNull(TEXT("The panel has a SURFACES section"), Surfaces))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("SURFACES is relevant whether or not there is a house in the level"),
+		!Surfaces->IsRelevant || Surfaces->IsRelevant());
+	TestTrue(TEXT("SURFACES starts expanded"), Surfaces->bExpandedByDefault);
+
+	return true;
+}
+
+/**
+ * THE PANEL LISTS EVERY SURFACE ROLE, COUNTED FROM THE ENUM AND NOT FROM A LITERAL.
+ *
+ * The role count has been 16, 17 and now 18 - LightSource and Mirror were each argued for and added
+ * a milestone apart. A panel holding its own list of roles drops whichever were added last, and it
+ * drops them silently: the surface still renders, and the only control for changing it is missing
+ * from a list nobody has counted. Asserted against FHFMeshOps::NumSurfaceRoles, which is the same
+ * source the material slots and the polygroup ids come from.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFPanelListsEveryRoleTest,
+	"HouseForge.Editor.Panel.SurfacesListsEveryRole", HF_TEST_FLAGS)
+
+bool FHFPanelListsEveryRoleTest::RunTest(const FString& Parameters)
+{
+	const TArray<TSharedPtr<FHFSurfaceRoleRow>> Rows = SHFMaterialPanel::BuildRoleRows();
+
+	TestEqual(TEXT("The panel lists one row per surface role"),
+		Rows.Num(), FHFMeshOps::NumSurfaceRoles());
+
+	for (int32 Index = 0; Index < Rows.Num(); ++Index)
+	{
+		if (!TestTrue(FString::Printf(TEXT("Row %d exists"), Index), Rows[Index].IsValid()))
+		{
+			continue;
+		}
+
+		TestEqual(FString::Printf(TEXT("Row %d is the role at that index"), Index),
+			static_cast<int32>(Rows[Index]->Role), Index);
+
+		// A row with no name is a row nobody can pick. It happens when a role is added to the enum
+		// without a display name, which is exactly the case this file exists to catch.
+		TestFalse(FString::Printf(TEXT("Row %d has a name to show"), Index),
+			Rows[Index]->Name.IsEmpty());
+	}
+
+	return true;
+}
+
+/**
+ * A CHANGE MADE IN THE PANEL REACHES THE LIBRARY AND THE RENDERER, AND MOVES NO GEOMETRY.
+ *
+ * The panel's OWN wiring, not the subsystem's. Writing into the struct the details view holds and
+ * then calling NotifyPostChange is precisely what a user dragging a slider does, so this exercises
+ * the path that would otherwise only ever be tested by hand: the notify hook, the tier the change
+ * type selects, and the write through to UHFEditorSubsystem.
+ *
+ * Both tiers are driven. The interactive one matters most here, because the reason the panel uses a
+ * notify hook at all is that OnFinishedChangingProperties stays silent while the mouse is down - a
+ * panel wired to that delegate passes every test that only checks the released value, and drags
+ * with no visible change in the viewport.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFPanelEditReachesTheRendererTest,
+	"HouseForge.Editor.Panel.SurfacesEditReachesTheRenderer", HF_TEST_FLAGS)
+
+bool FHFPanelEditReachesTheRendererTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddInfo(TEXT("Slate is not initialised in this run, so the panel was not constructed."));
+		return true;
+	}
+
+	UHFMaterialLibrary* Library = UHFMaterialLibrary::Get();
+	if (!TestNotNull(TEXT("There is a material library"), Library))
+	{
+		return false;
+	}
+
+	// The panel writes the real shipped asset, because a panel test that wrote to a copy would
+	// prove nothing about the panel. Put back afterwards, values and instances both.
+	const TMap<EHFSurfaceRole, FHFSurfaceFinish> Saved = Library->Finishes;
+	ON_SCOPE_EXIT
+	{
+		Library->Finishes = Saved;
+		Library->PushAllFinishes(EHFMaterialPush::Commit);
+	};
+
+	const TSharedRef<SHFMaterialPanel> Panel = SNew(SHFMaterialPanel);
+
+	constexpr EHFSurfaceRole Role = EHFSurfaceRole::FloorFinish;
+	Panel->SelectRole(Role);
+	TestEqual(TEXT("The panel is showing the role it was asked for"),
+		static_cast<int32>(Panel->GetSelectedRole()), static_cast<int32>(Role));
+
+	FHFSurfaceFinish* Edited = Panel->EditedFinish();
+	if (!TestNotNull(TEXT("The panel has a finish loaded to edit"), Edited))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("The loaded finish is the library's, not a blank struct"),
+		Edited->Description, Library->FinishForRole(Role).Description);
+
+	FProperty* Roughness = FHFSurfaceFinish::StaticStruct()->FindPropertyByName(
+		GET_MEMBER_NAME_CHECKED(FHFSurfaceFinish, Roughness));
+	if (!TestNotNull(TEXT("FHFSurfaceFinish has a Roughness property to change"), Roughness))
+	{
+		return false;
+	}
+
+	UMaterialInterface* Material = Library->ResolveMaterial(Role);
+	if (!TestNotNull(TEXT("The floor finish role resolves to a material"), Material))
+	{
+		return false;
+	}
+
+	// ---- mid-drag
+	Edited->Roughness = 0.271f;
+	{
+		FPropertyChangedEvent Event(Roughness, EPropertyChangeType::Interactive);
+		Panel->NotifyPostChange(Event, Roughness);
+	}
+
+	float Rendered = -1.0f;
+	Material->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Roughness")), Rendered);
+	TestEqual(TEXT("A mid-drag change is already on the material the surface renders through"),
+		Rendered, 0.271f);
+
+	// ---- released
+	Edited->Roughness = 0.618f;
+	{
+		FPropertyChangedEvent Event(Roughness, EPropertyChangeType::ValueSet);
+		Panel->NotifyPostChange(Event, Roughness);
+	}
+
+	Rendered = -1.0f;
+	Material->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Roughness")), Rendered);
+	TestEqual(TEXT("The released value is on the material"), Rendered, 0.618f);
+	TestEqual(TEXT("The released value is in the library, which is the record"),
+		Library->FinishForRole(Role).Roughness, 0.618f);
+
+	// Selecting another role and coming back shows what was committed rather than a stale copy.
+	Panel->SelectRole(EHFSurfaceRole::WallPaint);
+	Panel->SelectRole(Role);
+	TestEqual(TEXT("Re-selecting the role shows the committed value"),
+		Panel->EditedFinish()->Roughness, 0.618f);
 
 	return true;
 }

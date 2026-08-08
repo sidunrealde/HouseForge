@@ -6,6 +6,8 @@
 #include "Editor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "FileHelpers.h"
+#include "Materials/MaterialInterface.h"
 #include "Geometry/HFMeshOps.h"
 #include "HFEditorSubsystem.h"
 #include "HouseForgeEditor.h"
@@ -31,6 +33,44 @@ namespace
 		if (IsValid(Actor))
 		{
 			Actor->GetComponents<UDynamicMeshComponent>(Out);
+		}
+	}
+
+	/**
+	 * Every package a finish change can land in: the library, and the instance for each role.
+	 *
+	 * Both halves, always, because they are separate assets holding the same decision. Saving the
+	 * library alone restores from a restart looking right in the details panel and rendering the
+	 * old finish - a half-failure far harder to diagnose than either whole one.
+	 */
+	void GatherSurfacePackages(TArray<UPackage*>& Out)
+	{
+		Out.Reset();
+
+		UHFMaterialLibrary* Library = UHFMaterialLibrary::Get();
+		if (Library == nullptr || Library->HasAnyFlags(RF_ClassDefaultObject))
+		{
+			return;
+		}
+
+		if (UPackage* Package = Library->GetOutermost())
+		{
+			Out.AddUnique(Package);
+		}
+
+		for (int32 Index = 0; Index < FHFMeshOps::NumSurfaceRoles(); ++Index)
+		{
+			const UMaterialInterface* Material =
+				Library->ResolveMaterial(static_cast<EHFSurfaceRole>(Index));
+			if (Material == nullptr)
+			{
+				continue;
+			}
+
+			if (UPackage* Package = Material->GetOutermost())
+			{
+				Out.AddUnique(Package);
+			}
 		}
 	}
 }
@@ -286,6 +326,72 @@ FHFOperationResult UHFEditorSubsystem::ReapplyMaterialsToLevel(int32& OutCompone
 	return FHFOperationResult::Ok(FString::Printf(
 		TEXT("Re-applied the material set to %d component(s) across %d element(s)."),
 		OutComponents, Elements));
+}
+
+bool UHFEditorSubsystem::HasUnsavedSurfaceChanges() const
+{
+	TArray<UPackage*> Packages;
+	GatherSurfacePackages(Packages);
+
+	for (const UPackage* Package : Packages)
+	{
+		if (Package != nullptr && Package->IsDirty())
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+FHFOperationResult UHFEditorSubsystem::SaveSurfaceLibrary(int32& OutPackagesSaved)
+{
+	OutPackagesSaved = 0;
+
+	UHFMaterialLibrary* Library = nullptr;
+	const FHFOperationResult Editable = GetEditableMaterialLibrary(Library);
+	if (!Editable.bSuccess)
+	{
+		return Editable;
+	}
+
+	TArray<UPackage*> Packages;
+	GatherSurfacePackages(Packages);
+
+	TArray<UPackage*> Dirty;
+	for (UPackage* Package : Packages)
+	{
+		if (Package != nullptr && Package->IsDirty())
+		{
+			Dirty.Add(Package);
+		}
+	}
+
+	if (Dirty.IsEmpty())
+	{
+		return FHFOperationResult::Ok(TEXT("There is nothing unsaved in the material library."));
+	}
+
+	// bPromptToSave false: the user pressed Save, so asking them again which of nineteen packages
+	// they meant is a dialog that only ever gets one answer. Check-out prompting stays on, because
+	// these are files that may be under source control and silently failing to write them would
+	// look exactly like the change not having been made.
+	TArray<UPackage*> Failed;
+	const FEditorFileUtils::EPromptReturnCode Outcome = FEditorFileUtils::PromptForCheckoutAndSave(
+		Dirty, /*bCheckDirty*/ true, /*bPromptToSave*/ false, &Failed);
+
+	OutPackagesSaved = Dirty.Num() - Failed.Num();
+
+	if (Outcome != FEditorFileUtils::PR_Success || !Failed.IsEmpty())
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("Saved %d of %d material package(s). %d could not be written - they may be read-only "
+				 "or checked out by somebody else."),
+			OutPackagesSaved, Dirty.Num(), Failed.Num()));
+	}
+
+	return FHFOperationResult::Ok(FString::Printf(TEXT("Saved %d material package(s)."),
+		OutPackagesSaved));
 }
 
 #undef LOCTEXT_NAMESPACE

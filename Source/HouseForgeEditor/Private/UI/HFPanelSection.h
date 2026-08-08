@@ -43,4 +43,16 @@ struct FHFPanelSection
 
 	/** Whether the section starts open. */
 	bool bExpandedByDefault = true;
+
+	/**
+	 * Whether this section takes the tab's remaining height and scrolls inside itself.
+	 *
+	 * NOT A COSMETIC CHOICE. A details view puts its tree in a FillHeight slot
+	 * (SDetailsView.cpp:437), so in an auto-height parent it collapses to the tree's desired size -
+	 * which is a few rows, not the property list. Every widget between the tab and such a view has
+	 * to pass fill height down, and this flag is how the stack knows to.
+	 *
+	 * Most sections are short and true to their content, and leave this false.
+	 */
+	bool bFillsRemainingSpace = false;
 };
