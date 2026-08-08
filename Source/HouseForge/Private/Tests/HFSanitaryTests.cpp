@@ -1092,7 +1092,12 @@ bool FHFMirrorTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("It is closed"), FHFMeshOps::IsClosed(Built.Shell));
 	TestTrue(TEXT("It has positive volume"), Volume(Built.Shell) > 0.0);
 	TestTrue(TEXT("Every triangle carries a surface role"), EveryTriangleHasARole(Built.Shell));
-	TestTrue(TEXT("And the plate itself is glass"),
+	// Mirror rather than Glass, and the distinction is not pedantry: the two roles now resolve to
+	// materials that are opposites - one reflects, one transmits with an index of refraction - so a
+	// plate tagged Glass renders as a hole through the wall it is hung on.
+	TestTrue(TEXT("And the plate itself is a mirror, not glazing"),
+		FHFMeshOps::RolesPresent(Built.Shell).Contains(EHFSurfaceRole::Mirror));
+	TestFalse(TEXT("Nothing in a mirror is transmissive glazing"),
 		FHFMeshOps::RolesPresent(Built.Shell).Contains(EHFSurfaceRole::Glass));
 
 	const FAxisAlignedBox3d Bounds = Built.Shell.GetBounds();

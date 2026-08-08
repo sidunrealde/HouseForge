@@ -118,7 +118,7 @@ public:
 	static EHFSurfaceRole RoleForMaterialId(int32 MaterialId);
 
 	/** Number of material slots a fully-dressed HouseForge component carries: one per role. */
-	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::LightSource) + 1; }
+	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::Mirror) + 1; }
 
 	/**
 	 * Writes each triangle's material id from the surface role its polygroup already carries.

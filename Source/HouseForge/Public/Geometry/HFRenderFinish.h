@@ -108,7 +108,11 @@ struct HOUSEFORGE_API FHFBevelParams
 		case EHFSurfaceRole::LightSource:
 			return MetalWidth;
 
+		// A mirror plate is cut and bevelled exactly as a pane is, and its bevel is the only part of
+		// it that catches light directly - so it takes the glass arris, not the metal one, however
+		// metallic the silvering behind it makes the shading.
 		case EHFSurfaceRole::Glass:
+		case EHFSurfaceRole::Mirror:
 			return GlassWidth;
 
 		case EHFSurfaceRole::Fabric:

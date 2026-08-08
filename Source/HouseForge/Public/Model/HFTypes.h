@@ -316,7 +316,25 @@ enum class EHFSurfaceRole : uint8
 	 * different. The material panel gets one place to set that, and AHFCeilingActor puts real lights
 	 * at the same coordinates so the wash is light and not just a bright texel.
 	 */
-	LightSource
+	LightSource,
+
+	/**
+	 * SILVERED GLASS: a bathroom or wardrobe mirror plate.
+	 *
+	 * Split out from Glass because the two are opposites optically and were only ever compatible by
+	 * accident. While Glass was a flat translucent blue-grey film, a mirror tagged Glass looked like
+	 * frosted glass - wrong, but not obviously so. The moment Glass gained real transmission and an
+	 * index of refraction, the same tag turned every mirror in the flat into a hole through the wall.
+	 *
+	 * A mirror is a front-surface reflector: opaque, metallic, almost perfectly smooth. The only part
+	 * of it that catches light directly is its bevel, and that bevel is geometry, which
+	 * FHFWallPlateKit::BuildMirror already lofts.
+	 *
+	 * Appended after LightSource rather than inserted next to Glass on purpose. Material ids are role
+	 * indices and a component's material slots are indexed by them, so inserting mid-enum would
+	 * renumber every role above it and silently re-materialise every saved level.
+	 */
+	Mirror
 };
 
 /**

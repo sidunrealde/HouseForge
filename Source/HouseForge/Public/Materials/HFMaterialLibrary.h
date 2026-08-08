@@ -9,18 +9,26 @@ class UDynamicMeshComponent;
 class UMaterialInterface;
 
 /**
- * The placeholder material for each surface role, and the wiring that puts it on a component.
+ * The material for each surface role, and the wiring that puts it on a component.
  *
- * This is a default look, not the material library. It exists so a generated flat can be read at
- * all: without it every surface renders as Unreal's default checkerboard and a screenshot of a
- * room is unusable for judging whether the room is right. Per-role texture maps, tiling in
- * millimetres and a panel to edit any of it are milestone 10 and are deliberately absent here -
- * anything added now would have to be designed around later.
+ * WHAT THESE MATERIALS ARE HAS CHANGED; HOW THEY ARE ASSIGNED HAS NOT. Each role resolves to a
+ * UMaterialInstanceConstant under MaterialFolder(), authored by Scripts/gen_materials.py, and the
+ * slot index is the role index on every component uniformly. Those instances used to be flat
+ * colours that sampled nothing; they now sample texture maps when a user assigns any, carry
+ * procedural detail when a user has none, and express tiling in millimetres against the world-scale
+ * UV0 that FHFMeshOps::ApplyWorldScaleUVs unwraps. None of that is visible from here, and that is
+ * the point: this file resolves roles to materials, and a material's own graph is the material's
+ * business.
  *
- * The composing layer, not a generator. Resolving a role to a UMaterialInterface loads an asset,
+ * THE COMPOSING LAYER, NOT A GENERATOR. Resolving a role to a UMaterialInterface loads an asset,
  * which a generator is not allowed to do (see .claude/rules/04-conventions.md): generators emit
- * surface-role polygroups and nothing else, FHFMeshOps::AssignMaterialIdsFromRoles turns those
- * into material ids, and this turns material ids into materials on a component.
+ * surface-role polygroups and nothing else, FHFMeshOps::AssignMaterialIdsFromRoles turns those into
+ * material ids, and this turns material ids into materials on a component.
+ *
+ * NOTHING HERE TOUCHES A MESH. Re-materialling is entirely component-side - ConfigureMaterialSet
+ * sets slots on a UDynamicMeshComponent and never writes a vertex - which is what makes changing a
+ * finish incapable of regenerating geometry or discarding a hand edit. See
+ * HouseForge.Materials.ReMaterialisingDoesNotTouchGeometry.
  */
 class HOUSEFORGE_API FHFMaterialLibrary
 {
