@@ -195,17 +195,33 @@ return Grout;
 HF_BUMP_HLSL = r"""
 // A tangent-space normal from three noise samples taken in UV space - so the gradient really is in
 // the tangent frame the shader will light it in, rather than a world-space slope reinterpreted as
-// one. Amplitude stays tiny by design: at a 1-3 mm feature size seen from three metres this only
-// perturbs the specular lobe, and anything stronger reads as shrink-wrap.
-if (BumpStrength <= 1e-5)
+// one.
+//
+// BUMPSTRENGTH IS A SURFACE SLOPE, and giving it that meaning is what makes it safe. The samples sit
+// HF_BUMP_STEP apart in noise space, so dividing the difference by that step turns it into a real
+// gradient; multiplying by BumpStrength then makes the number the tangent of the steepest slope the
+// surface ever reaches. 0.03 is about 1.7 degrees.
+//
+// It used to be an arbitrary factor of sixteen on an undivided difference, which is dimensionless,
+// unrelated to the feature size, and roughly a hundred times too strong. At a 2 mm feature size that
+// still read as a fine tooth and looked fine; at the 30-60 mm of powder-coat orange peel and ceiling
+// trowel it turned into centimetre-wide dents, and every gloss surface in the flat came back looking
+// like hammered metal. Real orange peel is tens of MICRONS deep over tens of millimetres - a slope of
+// well under a thousandth - so the honest values here are far smaller than they look.
+if (BumpStrength <= 1e-6)
 {
     return float3(0.0, 0.0, 1.0);
 }
 
-float Dx = (NoiseX - NoiseC) * BumpStrength * 16.0;
-float Dy = (NoiseY - NoiseC) * BumpStrength * 16.0;
+float Dx = ((NoiseX - NoiseC) / HF_BUMP_STEP) * BumpStrength;
+float Dy = ((NoiseY - NoiseC) / HF_BUMP_STEP) * BumpStrength;
 return normalize(float3(-Dx, -Dy, 1.0));
 """
+
+# How far apart, in noise units, the two offset samples sit from the centre one. Small enough that
+# the difference is a local gradient rather than a chord across a whole feature, large enough that
+# the value noise has actually changed between them.
+HF_BUMP_STEP = 0.25
 
 
 # =================================================================================================
@@ -245,7 +261,7 @@ ROLES = [
     # THE LARGEST SURFACE BY AREA IN THE RENDER, so it is where uniform roughness is most visible and
     # where the cheapest fix pays most. Macro drift is turned up here above every other role.
     role("WallPaint", (0.902, 0.886, 0.859), 0.85,
-         macro_rough=0.045, macro_albedo=0.012, macro_mm=1200.0, bump=0.020, bump_mm=2.0),
+         macro_rough=0.045, macro_albedo=0.012, macro_mm=1200.0, bump=0.022, bump_mm=2.0),
 
     # Double-charge / GVT vitrified tile - Kajaria, Somany, Johnson - 600x600, glossy polished, laid
     # with 2 mm spacers. The highest-gloss large surface in the flat and THE priority role.
@@ -255,7 +271,7 @@ ROLES = [
     # more strongly than the colour contrast, which is why the grout roughness is double the field.
     # Under Lumen the surface cache reads this albedo, so the floor tone colours every bounce.
     role("FloorFinish", (0.847, 0.824, 0.784), 0.35, spec=0.55,
-         tiling_mm=600.0, coat=1.0, coat_rough=0.05,
+         tiling_mm=600.0, coat=0.6, coat_rough=0.08,
          grout_mm=2.0, grout_colour=(0.722, 0.698, 0.659), grout_rough=0.70,
          macro_rough=0.020, macro_albedo=0.006, tile_shade=0.020),
 
@@ -264,7 +280,7 @@ ROLES = [
     # shadow, not texture, so little instruction budget is spent here. High albedo matters because
     # this is the surface that returns the uplight.
     role("CeilingSoffit", (0.941, 0.933, 0.918), 0.90,
-         macro_rough=0.025, macro_albedo=0.008, macro_mm=700.0, bump=0.012, bump_mm=60.0),
+         macro_rough=0.025, macro_albedo=0.008, macro_mm=700.0, bump=0.004, bump_mm=40.0),
 
     # The inside face of the cove pocket: the surface an LED strip washes and the surface Lumen
     # bounces that wash off. A lighting decision wearing a material's clothes.
@@ -280,29 +296,29 @@ ROLES = [
     # a joint only where the floor's own joint runs into it, and drawing one on the band itself is
     # the tell that it was authored as a separate object.
     role("Skirting", (0.847, 0.824, 0.784), 0.35, spec=0.55,
-         tiling_mm=600.0, coat=1.0, coat_rough=0.05,
+         tiling_mm=600.0, coat=0.6, coat_rough=0.08,
          macro_rough=0.020, macro_albedo=0.006),
 
     # Pre-laminated particle board / BWR ply carcass, matt to satin. Seen mostly as the inside of a
     # wardrobe and the sides of a base unit, lit indirectly, so its job is to be a believable warm
     # neutral rather than to be looked at.
     role("JoineryCarcass", (0.788, 0.729, 0.635), 0.62,
-         tiling_mm=1200.0, macro_rough=0.025, bump=0.010, bump_mm=8.0),
+         tiling_mm=1200.0, macro_rough=0.025, bump=0.004, bump_mm=10.0),
 
     # High-gloss acrylic / post-laminated shutter fronts. THE COAT IS THE POINT: a gloss shutter is a
     # pigmented base under a thick clear layer, and that is a coat, not a low roughness number. With
     # roughness alone it reads as painted metal.
     role("ShutterLaminate", (0.310, 0.396, 0.388), 0.42, spec=0.55,
-         tiling_mm=1200.0, coat=1.0, coat_rough=0.035,
-         macro_rough=0.015, macro_albedo=0.005, bump=0.008, bump_mm=30.0),
+         tiling_mm=1200.0, coat=0.5, coat_rough=0.10,
+         macro_rough=0.015, macro_albedo=0.005, bump=0.0015, bump_mm=30.0),
 
     # Speckled granite - Black Galaxy / Steel Grey - rather than a veined marble, and that is a
     # deliberate refusal. Statuario veining from noise is camouflage every time; a speckle IS
     # statistical, so noise at the right scale is the correct model rather than a stand-in for one.
     # Polished but not mirror: the coat carries the polish, the base carries the stone.
     role("CounterStone", (0.161, 0.161, 0.176), 0.30, spec=0.60,
-         tiling_mm=400.0, coat=1.0, coat_rough=0.06,
-         macro_rough=0.020, macro_albedo=0.030, macro_mm=250.0, bump=0.006, bump_mm=1.5),
+         tiling_mm=400.0, coat=0.5, coat_rough=0.09,
+         macro_rough=0.050, macro_albedo=0.110, macro_mm=15.0, bump=0.010, bump_mm=1.5),
 
     # THE ONE TRANSMISSIVE ROLE. A window drawn as an opaque pane reads as a boarded-up hole; a
     # window drawn as flat translucency reads as a plastic film. See build_glazed_master.
@@ -314,28 +330,28 @@ ROLES = [
     # reflects nothing and reads as a grey blob.
     role("MetalHardware", (0.706, 0.714, 0.722), 0.24, metal=1.0,
          tiling_mm=200.0, macro_rough=0.030, macro_albedo=0.0, macro_mm=120.0,
-         bump=0.006, bump_mm=1.0),
+         bump=0.008, bump_mm=1.0),
 
     # Flush door, membrane or veneered, semi-gloss PU. FLAT TONE AND CORRECT GLOSS, WITH A FAINT PORE
     # BUMP AND NOTHING ELSE - see the header's refusal. Procedural wood grain from stretched noise is
     # the uncanny middle: it reads worse than an honest brown at the right sheen, because real veneer
     # figure is authored structure that noise cannot produce.
     role("DoorLeaf", (0.478, 0.325, 0.216), 0.45, spec=0.5,
-         tiling_mm=900.0, coat=0.35, coat_rough=0.12,
-         macro_rough=0.030, macro_albedo=0.020, macro_mm=800.0, bump=0.012, bump_mm=3.0),
+         tiling_mm=900.0, coat=0.3, coat_rough=0.14,
+         macro_rough=0.030, macro_albedo=0.020, macro_mm=800.0, bump=0.015, bump_mm=3.0),
 
     # Powder-coated aluminium sliding window sections. ORANGE PEEL AT 20-40 MM is the entire visual
     # signature of powder coat and exactly the kind of statistical micro-relief noise is right for.
     # Metallic under the coat, which is what makes a section read as aluminium rather than grey
     # plastic.
     role("WindowFrame", (0.290, 0.298, 0.310), 0.38, metal=1.0,
-         tiling_mm=300.0, macro_rough=0.020, bump=0.018, bump_mm=30.0),
+         tiling_mm=300.0, macro_rough=0.020, bump=0.0015, bump_mm=30.0),
 
     # Vitreous china: WC, basin, cistern. A glaze over a body - one slab, two lobes, physically what
     # the object is. The most obviously wrong surface in the old set, because sanitaryware with no
     # coat reads as painted plaster.
     role("Sanitary", (0.965, 0.965, 0.957), 0.30, spec=0.5,
-         tiling_mm=600.0, coat=1.0, coat_rough=0.02,
+         tiling_mm=600.0, coat=0.7, coat_rough=0.05,
          macro_rough=0.008, macro_albedo=0.004),
 
     # Upholstery, curtains, mattress ticking, bedding. Very rough, with a weave bump at 0.5-1.5 mm,
@@ -343,17 +359,17 @@ ROLES = [
     # real signature. NO PRINT: a motif is authored, not statistical.
     role("Fabric", (0.522, 0.463, 0.408), 0.95, spec=0.2,
          tiling_mm=150.0, macro_rough=0.020, macro_albedo=0.025, macro_mm=400.0,
-         bump=0.030, bump_mm=1.2),
+         bump=0.045, bump_mm=1.2),
 
     # Fridge, hob, chimney, washing machine: painted steel and brushed stainless panels.
     role("Appliance", (0.741, 0.749, 0.757), 0.26, metal=1.0,
-         tiling_mm=400.0, coat=0.4, coat_rough=0.08,
-         macro_rough=0.018, bump=0.008, bump_mm=25.0),
+         tiling_mm=400.0, coat=0.3, coat_rough=0.10,
+         macro_rough=0.018, bump=0.0015, bump_mm=25.0),
 
     # Exposed structure - beams and columns - in plastered RCC. Reads as the walls do, one shade
     # cooler and greyer so a dropped beam is legible as structure rather than as a fold in the wall.
     role("Structure", (0.678, 0.671, 0.655), 0.88,
-         macro_rough=0.040, macro_albedo=0.012, macro_mm=1500.0, bump=0.018, bump_mm=2.5),
+         macro_rough=0.040, macro_albedo=0.012, macro_mm=1500.0, bump=0.014, bump_mm=2.5),
 
     # THE ONE ROLE THAT EMITS. A cove hides its strip from every camera in the flat by construction,
     # so with nothing emissive and no light in the trough there was, correctly, nothing to see. Warm
@@ -841,8 +857,10 @@ def build_detail(g, frame, tri):
     bump_width = g.mul(frame["raw_width"], bump_repeats, -2000, 1300)
 
     zero = g.const(0.0, -2000, 1420)
-    step = g.const3(0.25, 0.0, 0.0, -2000, 1500)
-    step_y = g.const3(0.0, 0.25, 0.0, -2000, 1580)
+    # The same step the HLSL divides by, so the finite difference really is a gradient. Both come
+    # from HF_BUMP_STEP; there is no second place to change one and forget the other.
+    step = g.const3(HF_BUMP_STEP, 0.0, 0.0, -2000, 1500)
+    step_y = g.const3(0.0, HF_BUMP_STEP, 0.0, -2000, 1580)
 
     bump_pos = g.append(bump_uv, zero, -1800, 1180)
     bump_pos_x = g.add(bump_pos, step, -1600, 1300)
@@ -892,6 +910,12 @@ def build_detail(g, frame, tri):
     bump = g.node(unreal.MaterialExpressionCustom, -1000, 1500)
     bump.set_editor_property("code", HF_BUMP_HLSL)
     bump.set_editor_property("description", "HFDetailNormal")
+
+    step_define = unreal.CustomDefine()
+    step_define.set_editor_property("define_name", "HF_BUMP_STEP")
+    step_define.set_editor_property("define_value", repr(HF_BUMP_STEP))
+    bump.set_editor_property("additional_defines", [step_define])
+
     bump.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
     bump.set_editor_property("inputs",
                              [cin("NoiseC"), cin("NoiseX"), cin("NoiseY"), cin("BumpStrength")])
@@ -1099,7 +1123,14 @@ def build_glazed_master(name):
     # a grey film, and the highlight is most of what says "pane" rather than "gap".
     material.set_editor_property("translucency_lighting_mode",
                                  unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
-    material.set_editor_property("two_sided", True)
+
+    # SINGLE SIDED, AND THAT IS A CONSEQUENCE OF THE GEOMETRY BEING RIGHT. Two-sided is what a glass
+    # material wants when the pane is a plane and there is no back face to draw. HouseForge's panes
+    # are closed solids with real thickness - .claude/rules/04-conventions.md requires it - so the
+    # back face exists, and drawing it means refracting the same background a second time. Rendered,
+    # that came back as a smeared turquoise marbling across every window in the flat rather than as
+    # glass. Backface culling on a closed solid discards nothing that should have been visible.
+    material.set_editor_property("two_sided", False)
     material.set_editor_property("refraction_method", unreal.RefractionMode.RM_INDEX_OF_REFRACTION)
 
     g = Graph(material)
