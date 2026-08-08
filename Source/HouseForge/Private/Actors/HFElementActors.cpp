@@ -140,7 +140,7 @@ void AHFElementActor::CommitMesh(FDynamicMesh3&& Generated)
 	FHFMeshOps::AssignMaterialIdsFromRoles(Generated);
 
 	Mesh->SetMesh(MoveTemp(Generated));
-	FHFMaterialLibrary::ApplyPlaceholders(Mesh);
+	UHFMaterialLibrary::Get()->ApplyTo(Mesh);
 	Mesh->NotifyMeshUpdated();
 	Mesh->UpdateCollision(false);
 }

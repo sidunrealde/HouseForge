@@ -133,7 +133,7 @@ namespace
 		TArray<TPair<FString, UMaterial*>> Found;
 		for (const EHFSurfaceRole Role : { EHFSurfaceRole::WallPaint, EHFSurfaceRole::Glass })
 		{
-			UMaterialInterface* Instance = FHFMaterialLibrary::GetPlaceholder(Role);
+			UMaterialInterface* Instance = UHFMaterialLibrary::Get()->ResolveMaterial(Role);
 			UMaterial* Master = Instance ? Instance->GetMaterial() : nullptr;
 			if (Master != nullptr)
 			{
@@ -182,9 +182,9 @@ bool FHFEveryRoleResolvesTest::RunTest(const FString& Parameters)
 
 	for (const EHFSurfaceRole Role : AllRoles())
 	{
-		UMaterialInterface* Material = FHFMaterialLibrary::GetPlaceholder(Role);
+		UMaterialInterface* Material = UHFMaterialLibrary::Get()->ResolveMaterial(Role);
 		TestNotNull(*FString::Printf(TEXT("Surface role '%s' resolves to a material (expected at '%s')"),
-			*RoleName(Role), *FHFMaterialLibrary::AssetPathForRole(Role)), Material);
+			*RoleName(Role), *UHFMaterialLibrary::AssetPathForRole(Role)), Material);
 	}
 
 	return true;
@@ -207,7 +207,7 @@ bool FHFRolesLookDifferentTest::RunTest(const FString& Parameters)
 
 	for (const EHFSurfaceRole Role : AllRoles())
 	{
-		UMaterialInterface* Material = FHFMaterialLibrary::GetPlaceholder(Role);
+		UMaterialInterface* Material = UHFMaterialLibrary::Get()->ResolveMaterial(Role);
 		if (Material == nullptr)
 		{
 			continue;
@@ -264,8 +264,8 @@ bool FHFRolesLookDifferentTest::RunTest(const FString& Parameters)
 	// what stops the allowlist becoming a place to hide a copy-paste.
 	for (const TPair<EHFSurfaceRole, EHFSurfaceRole>& Pair : SameFinishByDesign)
 	{
-		UMaterialInterface* A = FHFMaterialLibrary::GetPlaceholder(Pair.Key);
-		UMaterialInterface* B = FHFMaterialLibrary::GetPlaceholder(Pair.Value);
+		UMaterialInterface* A = UHFMaterialLibrary::Get()->ResolveMaterial(Pair.Key);
+		UMaterialInterface* B = UHFMaterialLibrary::Get()->ResolveMaterial(Pair.Value);
 		if (A == nullptr || B == nullptr)
 		{
 			continue;
@@ -310,7 +310,7 @@ bool FHFGlassIsTranslucentTest::RunTest(const FString& Parameters)
 {
 	for (const EHFSurfaceRole Role : AllRoles())
 	{
-		UMaterialInterface* Material = FHFMaterialLibrary::GetPlaceholder(Role);
+		UMaterialInterface* Material = UHFMaterialLibrary::Get()->ResolveMaterial(Role);
 		if (Material == nullptr)
 		{
 			continue;
@@ -692,7 +692,7 @@ bool FHFEveryRoleIsTunedTest::RunTest(const FString& Parameters)
 {
 	for (const EHFSurfaceRole Role : AllRoles())
 	{
-		UMaterialInterface* Material = FHFMaterialLibrary::GetPlaceholder(Role);
+		UMaterialInterface* Material = UHFMaterialLibrary::Get()->ResolveMaterial(Role);
 		if (Material == nullptr)
 		{
 			continue;
@@ -758,8 +758,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFGlassAndMirrorTest,
 
 bool FHFGlassAndMirrorTest::RunTest(const FString& Parameters)
 {
-	UMaterialInterface* Glass = FHFMaterialLibrary::GetPlaceholder(EHFSurfaceRole::Glass);
-	UMaterialInterface* Mirror = FHFMaterialLibrary::GetPlaceholder(EHFSurfaceRole::Mirror);
+	UMaterialInterface* Glass = UHFMaterialLibrary::Get()->ResolveMaterial(EHFSurfaceRole::Glass);
+	UMaterialInterface* Mirror = UHFMaterialLibrary::Get()->ResolveMaterial(EHFSurfaceRole::Mirror);
 
 	if (!TestNotNull(TEXT("Glass resolves"), Glass) || !TestNotNull(TEXT("Mirror resolves"), Mirror))
 	{

@@ -512,6 +512,24 @@ public:
 		meta = (ShowOnlyInnerProperties))
 	FHFRenderFinish Render;
 
+	// ================================================================================= materials
+
+	/**
+	 * The finish library this project builds with: what every surface role is made of.
+	 *
+	 * OPTIONAL, AND EMPTY MEANS THE SHIPPED DEFAULTS rather than nothing. UHFMaterialLibrary's class
+	 * default object carries the full table - emulsion, vitrified tile, POP, laminate, granite,
+	 * powder-coated aluminium - so a project that never sets this generates a flat that already looks
+	 * like a flat. Point it at an asset of your own to keep a job's finishes with the job, and to have
+	 * them survive a restart and travel to the next house generated from the same project.
+	 *
+	 * A SOFT reference on purpose: a hard one would drag the library, its materials and their textures
+	 * into memory whenever these settings are read, which is on every generation.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Materials",
+		meta = (AllowedClasses = "/Script/HouseForge.HFMaterialLibrary"))
+	TSoftObjectPtr<class UHFMaterialLibrary> MaterialLibrary;
+
 	// ================================================================================ resolving
 
 	/**

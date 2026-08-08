@@ -77,7 +77,7 @@ namespace
 	 */
 	UMaterialInstanceDynamic* MakeMeasurableTile(UObject* Outer, double TilingMM)
 	{
-		UMaterialInterface* Shipped = FHFMaterialLibrary::GetPlaceholder(EHFSurfaceRole::FloorFinish);
+		UMaterialInterface* Shipped = UHFMaterialLibrary::Get()->ResolveMaterial(EHFSurfaceRole::FloorFinish);
 		UMaterial* Master = Shipped ? Shipped->GetMaterial() : nullptr;
 		if (Master == nullptr)
 		{
@@ -431,7 +431,7 @@ bool FHFTilingIsInMillimetresTest::RunTest(const FString& Parameters)
  *
  * Changing a colour must not destroy a hand edit, and the reason it cannot is structural rather
  * than careful: every path from a material to a surface goes through the COMPONENT's slot table, and
- * nothing in FHFMaterialLibrary or in a material instance can reach a vertex. This asserts that
+ * nothing in UHFMaterialLibrary or in a material instance can reach a vertex. This asserts that
  * structure holds, on the case where getting it wrong is unrecoverable - an element an artist has
  * modelled on top of.
  *
@@ -483,7 +483,7 @@ bool FHFReMaterialisingKeepsGeometryTest::RunTest(const FString& Parameters)
 	}
 
 	// ---- 1: assigning the role materials again ---------------------------------------------------
-	FHFMaterialLibrary::ApplyPlaceholders(Component);
+	UHFMaterialLibrary::Get()->ApplyTo(Component);
 	TestTrue(TEXT("Assigning role materials leaves the mesh exactly as it was"),
 		Fingerprint(Component) == Before);
 

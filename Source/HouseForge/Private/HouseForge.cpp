@@ -15,9 +15,9 @@ void FHouseForgeModule::StartupModule()
 
 void FHouseForgeModule::ShutdownModule()
 {
-	// The placeholder cache holds strong references to material assets. Dropped here rather than
+	// The resolved-material cache holds strong references to material assets. Dropped here rather than
 	// left to a static destructor, which runs after the UObject system has already been torn down.
-	FHFMaterialLibrary::InvalidateCache();
+	UHFMaterialLibrary::InvalidateCache();
 
 	UE_LOG(LogHouseForge, Log, TEXT("HouseForge runtime module shut down."));
 }

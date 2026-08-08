@@ -152,9 +152,9 @@ TArray<AActor*> FHFPlanSection::Build(UWorld* World, const AHFHouseActor* House,
 			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			Component->SetMesh(MoveTemp(Section));
 
-			// The same placeholder materials the real geometry wears, so the plan is drawn in the
+			// The same role materials the real geometry wears, so the plan is drawn in the
 			// same colours as the model and a wall reads differently from the floor it stands on.
-			FHFMaterialLibrary::ApplyPlaceholders(Component);
+			UHFMaterialLibrary::Get()->ApplyTo(Component);
 
 			Component->RegisterComponent();
 			Component->SetWorldTransform(FTransform::Identity);
