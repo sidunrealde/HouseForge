@@ -626,7 +626,12 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// to 100, and a foyer whose four flaps swung to 100 would have them lying flat out across the
 	// walkway. The same split, and the same reason, as the extract's blade pitch against the ceiling
 	// fan's.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 146);
+	// 147 rather than 146: MaterialLibrary, which names the UHFMaterialLibrary asset this project's
+	// finishes come from. NOT marked inert, and that is the assertion worth making rather than the
+	// count - it reaches every surface in the flat the moment it is set, because
+	// UHFMaterialLibrary::Get consults it before the shipped asset and before the compiled defaults.
+	// Left empty it is not inert either; it means "the shipped library", which is a real answer.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 147);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
 	return true;

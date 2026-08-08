@@ -8,6 +8,7 @@
 #include "Geometry/HFRenderFinish.h"
 #include "Materials/HFMaterialLibrary.h"
 #include "Materials/HFSurfaceFinish.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
@@ -480,6 +481,33 @@ bool FHFFinishReachesTheInstanceTest::RunTest(const FString& Parameters)
 		ReadScalar(TEXT("TilingMM")), 250.0f, 1e-3f);
 	TestTrue(TEXT("A dragged colour reaches the shared instance too"),
 		ReadColour(TEXT("BaseColor")).Equals(FLinearColor(0.60f, 0.15f, 0.05f, 1.0f), 1e-4f));
+
+	// ---- a commit CLEARS what the library does not name ------------------------------------------
+	//
+	// The instance is not a place values accumulate. A push writes the whole finish with
+	// EMaterialInstanceClearParameterFlag::All, so an override nobody can explain from the library -
+	// left by an experiment in the Material Instance Editor, or by a version of the table that has
+	// since changed - goes back to the master's default instead of surviving invisibly.
+	//
+	// UVWorldSizeCm is the parameter chosen to prove it, on purpose. It is the one the millimetre
+	// contract rests on: it must equal FHFRenderFinish::TexelSizeCm, and an instance quietly
+	// overriding it makes EVERY tiling figure in that role wrong by a constant ratio while each
+	// individual value still reads as reasonable. This project converts mm to cm exactly once and
+	// has been bitten at that boundary; a stale override here is that bite wearing a new hat.
+	if (UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(Floor))
+	{
+		const float ShippedUVWorldSize = ReadScalar(TEXT("UVWorldSizeCm"));
+		TestEqual(TEXT("A UV unit is a metre of world before anyone interferes"),
+			ShippedUVWorldSize, static_cast<float>(FHFRenderFinish().TexelSizeCm), 1e-3f);
+
+		Instance->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(TEXT("UVWorldSizeCm")), 42.0f);
+		Instance->PostEditChange();
+		TestEqual(TEXT("...and an override really does take"), ReadScalar(TEXT("UVWorldSizeCm")), 42.0f, 1e-3f);
+
+		Edited->PushFinish(EHFSurfaceRole::FloorFinish, EHFMaterialPush::Commit);
+		TestEqual(TEXT("A commit clears an override the library never named"),
+			ReadScalar(TEXT("UVWorldSizeCm")), ShippedUVWorldSize, 1e-3f);
+	}
 
 	// ---- every role pushes, not only the one this test chose -------------------------------------
 	//

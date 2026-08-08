@@ -114,7 +114,19 @@ public:
 	/** Package path the role instances live in. */
 	static const TCHAR* MaterialFolder() { return TEXT("/HouseForge/Materials"); }
 
+	/**
+	 * Asset name of the material instance for a role: "MI_HF_WallPaint".
+	 *
+	 * Callable from Python because Scripts/gen_materials.py creates these assets and this resolves
+	 * them. One naming rule, in one place - reconstructing it on the other side of the boundary from
+	 * an enumerator name is a second place to get it wrong, and it would fail as a missing asset in
+	 * a level rather than as an error at author time.
+	 */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Materials")
+	static FString InstanceNameForRole(EHFSurfaceRole Role);
+
 	/** Object path of the material instance for a role, derived from the enumerator's own name. */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Materials")
 	static FString AssetPathForRole(EHFSurfaceRole Role);
 
 	/** Object path of the library the plugin ships: the starting point every project gets. */
@@ -198,10 +210,17 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
+	/**
+	 * Puts the compiled-in table back, discarding every edit.
+	 *
+	 * Called by the constructor, which is what makes the class default object a working library and
+	 * a new asset a full one. Public and callable because it is also the honest form of "start
+	 * again": re-authoring the shipped asset in place keeps its identity, so every project already
+	 * pointing at it goes on doing so, where deleting and recreating would break those references.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Materials")
+	void ResetToCompiledDefaults();
+
 	/** Drops the resolved-material cache. For tests that reload or re-author the assets underneath it. */
 	static void InvalidateCache();
-
-private:
-	/** Fills Finishes with the compiled-in table. Called by the constructor, so the CDO carries it. */
-	void ResetToDefaults();
 };

@@ -51,14 +51,24 @@ def main():
         unreal.EditorAssetLibrary.make_directory(FOLDER)
 
     path = "{}/{}".format(FOLDER, LIBRARY_NAME)
-    if unreal.EditorAssetLibrary.does_asset_exist(path):
-        unreal.EditorAssetLibrary.delete_asset(path)
 
-    factory = unreal.DataAssetFactory()
-    factory.set_editor_property("data_asset_class", unreal.HFMaterialLibrary)
+    # IN PLACE RATHER THAN DELETE-AND-RECREATE, and load_asset rather than does_asset_exist, for the
+    # reason gen_materials.py's replace_asset records: under -run=pythonscript the registry has not
+    # finished scanning, so does_asset_exist answers False for a .uasset sitting right there, the
+    # delete is skipped, and create_asset then refuses with "already exists in package". load_asset
+    # does not consult the registry - it loads the package by path - so that is what decides.
+    #
+    # Re-authoring in place is the better behaviour anyway: the asset keeps its identity, so a
+    # project pointing UHFSettings::MaterialLibrary at it goes on pointing at it.
+    library = unreal.EditorAssetLibrary.load_asset(path)
 
-    library = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-        LIBRARY_NAME, FOLDER, unreal.HFMaterialLibrary, factory)
+    if library is None:
+        factory = unreal.DataAssetFactory()
+        factory.set_editor_property("data_asset_class", unreal.HFMaterialLibrary)
+        library = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+            LIBRARY_NAME, FOLDER, unreal.HFMaterialLibrary, factory)
+    else:
+        library.reset_to_compiled_defaults()
 
     if library is None:
         raise RuntimeError("HouseForge: could not create {}".format(path))
@@ -82,7 +92,9 @@ def main():
     # The library, and every instance the push dirtied. By directory rather than by name: the push
     # decides which instances it touched, and reconstructing eighteen asset names from enumerator
     # names here would be a second place to get the naming rule wrong.
-    unreal.EditorAssetLibrary.save_loaded_asset(library)
+    # only_if_is_dirty=False: reset_to_compiled_defaults writes properties without marking the
+    # package, so a re-run that changed values would otherwise decide there was nothing to save.
+    unreal.EditorAssetLibrary.save_loaded_asset(library, only_if_is_dirty=False)
     unreal.EditorAssetLibrary.save_directory(FOLDER, only_if_is_dirty=True, recursive=False)
 
     unreal.log("HouseForge: {} written to {}".format(LIBRARY_NAME, FOLDER))

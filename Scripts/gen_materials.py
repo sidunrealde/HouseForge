@@ -1,17 +1,28 @@
-"""Authors the HouseForge material library: two master materials and one instance per surface role.
+"""Authors the HouseForge master materials, and one empty instance per surface role.
 
-Run in the editor to (re)create the assets under /HouseForge/Materials. They are then committed and
-loaded at runtime by FHFMaterialLibrary; nothing calls this at generation time.
+Run in the editor to (re)create the assets under /HouseForge/Materials, then run
+gen_material_library.py to write the finishes into them. They are committed and loaded at runtime by
+UHFMaterialLibrary; nothing calls either script at generation time.
 
     UnrealEditor-Cmd.exe HouseBuilder.uproject ^
         -run=pythonscript -script="Plugins/HouseForge/Scripts/gen_materials.py" ^
         -unattended -nopause -nosplash -stdout
 
-Why a script rather than assets authored by hand: the set has to stay in step with EHFSurfaceRole,
-and the only way to see at a glance that it does is to have the roles, their colours and their
-finishes written down in one readable list. Re-running is idempotent - each asset is overwritten in
-place, so material instances that a level already references keep their identity and no level needs
-re-saving.
+    UnrealEditor-Cmd.exe HouseBuilder.uproject ^
+        -run=pythonscript -script="Plugins/HouseForge/Scripts/gen_material_library.py" ^
+        -unattended -nopause -nosplash -stdout
+
+TWO SCRIPTS, AND THE SPLIT IS THE INTERESTING PART. This one builds material GRAPHS, which is work
+only the editor's Python API can do: there is no C++ entry point that wires a Custom HLSL node to a
+MakeMaterialAttributes. The other writes VALUES, which is work only C++ should do, because a value
+is what a user changes and UHFMaterialLibrary::PushFinish is the path they change it through.
+Authoring the shipped assets by a second route would let a parameter be right at author time and
+wrong at edit time with nothing to catch it.
+
+Why a script rather than assets authored by hand: the graph is a hundred and fifty nodes of
+arithmetic, and a diff of it has to be readable. Re-running is idempotent - each asset is overwritten
+in place, so material instances that a level already references keep their identity and no level
+needs re-saving.
 
 
 WHAT THIS REPLACED, AND WHY
@@ -228,171 +239,46 @@ HF_BUMP_STEP = 0.25
 #
 # The roles.
 #
-# In EHFSurfaceRole order. The name must match the enumerator exactly: FHFMaterialLibrary builds the
-# asset path from StaticEnum's name string, so a mismatch shows up as a role that renders in the
-# default checkerboard.
+# THERE IS NO TABLE HERE ANY MORE, AND THAT IS THE POINT.
 #
-# Colours are sRGB, the space they were picked in, and converted to linear below. Entering them
-# straight as linear is the classic way to end up with a flat that is uniformly too dark and too
-# saturated while every individual number looks reasonable in the diff.
+# What every surface role IS - its colour, roughness, metallic, coat, tiling, grout and detail - is
+# UHFMaterialLibrary's, in Source/HouseForge/Private/Materials/HFMaterialLibrary.cpp. This script
+# builds the GRAPHS; the library writes the NUMBERS, through UHFMaterialLibrary::PushFinish, which is
+# the same code path a slider drag in the panel takes.
 #
-# Chosen as a plausible mid-range Indian flat rather than as a colour key: acrylic emulsion over
-# gypsum putty, double-charge vitrified tile, POP false ceiling, pre-laminated ply carcasses, dark
-# speckled granite counters, powder-coated aluminium windows.
+# It used to be the other way round: eighteen finishes lived in this file and the plugin held none,
+# so the values a level rendered with existed only inside .uasset binaries and nothing in Source
+# could read, test or change them. Leaving the table here after moving it would be worse than
+# duplicating it - it would be dead code that looks authoritative, and an edit to it would have no
+# effect on anything.
+#
+# So all this needs from the library is which master each role instances. Run
+# Scripts/gen_material_library.py afterwards to fill the instances in.
 #
 # =================================================================================================
 
-def role(name, colour, rough, metal=0.0, spec=0.5, opacity=None,
-         tiling_mm=1000.0, coat=0.0, coat_rough=0.06,
-         grout_mm=0.0, grout_colour=None, grout_rough=0.7,
-         macro_rough=0.03, macro_albedo=0.010, macro_mm=1500.0,
-         bump=0.0, bump_mm=2.0, tile_shade=0.0, emissive=0.0):
-    return dict(name=name, colour=colour, rough=rough, metal=metal, spec=spec, opacity=opacity,
-                tiling_mm=tiling_mm, coat=coat, coat_rough=coat_rough,
-                grout_mm=grout_mm, grout_colour=grout_colour, grout_rough=grout_rough,
-                macro_rough=macro_rough, macro_albedo=macro_albedo, macro_mm=macro_mm,
-                bump=bump, bump_mm=bump_mm, tile_shade=tile_shade, emissive=emissive)
+def role_instances():
+    """(asset name, parent-choosing shading) per surface role, in enum order, from the C++ table."""
+    library = unreal.get_default_object(unreal.HFMaterialLibrary)
+    finishes = library.get_editor_property("finishes")
+
+    rows = []
+    for role in unreal.HFSurfaceRole:
+        finish = finishes.get(role)
+        if finish is None:
+            raise RuntimeError(
+                "HouseForge: no finish for surface role {} - the C++ default table is incomplete"
+                .format(role))
+
+        # The asset name comes from C++ too. Rebuilding "MI_HF_WallPaint" from an enumerator name
+        # here would be a second place to get the naming rule wrong, and it would surface as a role
+        # rendering in checkerboard rather than as an error at author time.
+        rows.append((unreal.HFMaterialLibrary.instance_name_for_role(role),
+                     finish.get_editor_property("shading")))
+
+    return rows
 
 
-ROLES = [
-    # Acrylic emulsion over gypsum putty on POP - Asian Paints Tractor/Royale class, matt. Warm
-    # ivory, never pure white: a real emulsion sits around 0.72-0.78 linear albedo.
-    #
-    # THE LARGEST SURFACE BY AREA IN THE RENDER, so it is where uniform roughness is most visible and
-    # where the cheapest fix pays most. Macro drift is turned up here above every other role.
-    role("WallPaint", (0.902, 0.886, 0.859), 0.85,
-         macro_rough=0.045, macro_albedo=0.012, macro_mm=1200.0, bump=0.022, bump_mm=2.0),
-
-    # Double-charge / GVT vitrified tile - Kajaria, Somany, Johnson - 600x600, glossy polished, laid
-    # with 2 mm spacers. The highest-gloss large surface in the flat and THE priority role.
-    #
-    # The coat is the physics: a glazed body really is a rough-ish ceramic under a thin smooth glaze,
-    # and one slab with two lobes is what that is. The ROUGHNESS contrast across the joint reads far
-    # more strongly than the colour contrast, which is why the grout roughness is double the field.
-    # Under Lumen the surface cache reads this albedo, so the floor tone colours every bounce.
-    role("FloorFinish", (0.847, 0.824, 0.784), 0.35, spec=0.55,
-         tiling_mm=600.0, coat=0.6, coat_rough=0.08,
-         grout_mm=2.0, grout_colour=(0.722, 0.698, 0.659), grout_rough=0.70,
-         macro_rough=0.020, macro_albedo=0.006, tile_shade=0.020),
-
-    # POP / gypsum board, trowelled and painted matt white distemper. Matter than the walls - POP
-    # takes paint flatter than putty. What sells a false ceiling is the AO in its step and the cove
-    # shadow, not texture, so little instruction budget is spent here. High albedo matters because
-    # this is the surface that returns the uplight.
-    role("CeilingSoffit", (0.941, 0.933, 0.918), 0.90,
-         macro_rough=0.025, macro_albedo=0.008, macro_mm=700.0, bump=0.004, bump_mm=40.0),
-
-    # The inside face of the cove pocket: the surface an LED strip washes and the surface Lumen
-    # bounces that wash off. A lighting decision wearing a material's clothes.
-    #
-    # DELIBERATELY THE BRIGHTEST ALBEDO AND THE MATTEST SURFACE IN THE SET, with no bump at all. Any
-    # gloss here produces a hot streak reflection of the strip instead of a soft wash, and any albedo
-    # drop kills the cove's throw.
-    role("CoveInterior", (0.957, 0.949, 0.933), 0.92, spec=0.35,
-         macro_rough=0.010, macro_albedo=0.004, bump=0.0),
-
-    # Almost always the floor tile cut down to a 75-100 mm band, not a separate material - so it
-    # matches FloorFinish exactly, coat included. No grid: a 100 mm band cut from a 600 mm tile shows
-    # a joint only where the floor's own joint runs into it, and drawing one on the band itself is
-    # the tell that it was authored as a separate object.
-    role("Skirting", (0.847, 0.824, 0.784), 0.35, spec=0.55,
-         tiling_mm=600.0, coat=0.6, coat_rough=0.08,
-         macro_rough=0.020, macro_albedo=0.006),
-
-    # Pre-laminated particle board / BWR ply carcass, matt to satin. Seen mostly as the inside of a
-    # wardrobe and the sides of a base unit, lit indirectly, so its job is to be a believable warm
-    # neutral rather than to be looked at.
-    role("JoineryCarcass", (0.788, 0.729, 0.635), 0.62,
-         tiling_mm=1200.0, macro_rough=0.025, bump=0.004, bump_mm=10.0),
-
-    # High-gloss acrylic / post-laminated shutter fronts. THE COAT IS THE POINT: a gloss shutter is a
-    # pigmented base under a thick clear layer, and that is a coat, not a low roughness number. With
-    # roughness alone it reads as painted metal.
-    role("ShutterLaminate", (0.310, 0.396, 0.388), 0.42, spec=0.55,
-         tiling_mm=1200.0, coat=0.5, coat_rough=0.10,
-         macro_rough=0.015, macro_albedo=0.005, bump=0.0015, bump_mm=30.0),
-
-    # Speckled granite - Black Galaxy / Steel Grey - rather than a veined marble, and that is a
-    # deliberate refusal. Statuario veining from noise is camouflage every time; a speckle IS
-    # statistical, so noise at the right scale is the correct model rather than a stand-in for one.
-    # Polished but not mirror: the coat carries the polish, the base carries the stone.
-    role("CounterStone", (0.161, 0.161, 0.176), 0.30, spec=0.60,
-         tiling_mm=400.0, coat=0.5, coat_rough=0.09,
-         macro_rough=0.050, macro_albedo=0.110, macro_mm=15.0, bump=0.010, bump_mm=1.5),
-
-    # THE ONE TRANSMISSIVE ROLE. A window drawn as an opaque pane reads as a boarded-up hole; a
-    # window drawn as flat translucency reads as a plastic film. See build_glazed_master.
-    role("Glass", (0.925, 0.965, 0.949), 0.02, spec=1.0, opacity=0.06,
-         macro_rough=0.0, macro_albedo=0.0, bump=0.0),
-
-    # Chrome-plated brass and satin stainless: handles, hinges, taps, rails. Metallic, and rough
-    # enough to be satin rather than a mirror, because a mirror-finish handle in an untextured room
-    # reflects nothing and reads as a grey blob.
-    role("MetalHardware", (0.706, 0.714, 0.722), 0.24, metal=1.0,
-         tiling_mm=200.0, macro_rough=0.030, macro_albedo=0.0, macro_mm=120.0,
-         bump=0.008, bump_mm=1.0),
-
-    # Flush door, membrane or veneered, semi-gloss PU. FLAT TONE AND CORRECT GLOSS, WITH A FAINT PORE
-    # BUMP AND NOTHING ELSE - see the header's refusal. Procedural wood grain from stretched noise is
-    # the uncanny middle: it reads worse than an honest brown at the right sheen, because real veneer
-    # figure is authored structure that noise cannot produce.
-    role("DoorLeaf", (0.478, 0.325, 0.216), 0.45, spec=0.5,
-         tiling_mm=900.0, coat=0.3, coat_rough=0.14,
-         macro_rough=0.030, macro_albedo=0.020, macro_mm=800.0, bump=0.015, bump_mm=3.0),
-
-    # Powder-coated aluminium sliding window sections. ORANGE PEEL AT 20-40 MM is the entire visual
-    # signature of powder coat and exactly the kind of statistical micro-relief noise is right for.
-    # Metallic under the coat, which is what makes a section read as aluminium rather than grey
-    # plastic.
-    role("WindowFrame", (0.290, 0.298, 0.310), 0.38, metal=1.0,
-         tiling_mm=300.0, macro_rough=0.020, bump=0.0015, bump_mm=30.0),
-
-    # Vitreous china: WC, basin, cistern. A glaze over a body - one slab, two lobes, physically what
-    # the object is. The most obviously wrong surface in the old set, because sanitaryware with no
-    # coat reads as painted plaster.
-    role("Sanitary", (0.965, 0.965, 0.957), 0.30, spec=0.5,
-         tiling_mm=600.0, coat=0.7, coat_rough=0.05,
-         macro_rough=0.008, macro_albedo=0.004),
-
-    # Upholstery, curtains, mattress ticking, bedding. Very rough, with a weave bump at 0.5-1.5 mm,
-    # which is the closest a non-cloth shading model gets to the grazing-angle sheen that is cloth's
-    # real signature. NO PRINT: a motif is authored, not statistical.
-    role("Fabric", (0.522, 0.463, 0.408), 0.95, spec=0.2,
-         tiling_mm=150.0, macro_rough=0.020, macro_albedo=0.025, macro_mm=400.0,
-         bump=0.045, bump_mm=1.2),
-
-    # Fridge, hob, chimney, washing machine: painted steel and brushed stainless panels.
-    role("Appliance", (0.741, 0.749, 0.757), 0.26, metal=1.0,
-         tiling_mm=400.0, coat=0.3, coat_rough=0.10,
-         macro_rough=0.018, bump=0.0015, bump_mm=25.0),
-
-    # Exposed structure - beams and columns - in plastered RCC. Reads as the walls do, one shade
-    # cooler and greyer so a dropped beam is legible as structure rather than as a fold in the wall.
-    role("Structure", (0.678, 0.671, 0.655), 0.88,
-         macro_rough=0.040, macro_albedo=0.012, macro_mm=1500.0, bump=0.014, bump_mm=2.5),
-
-    # THE ONE ROLE THAT EMITS. A cove hides its strip from every camera in the flat by construction,
-    # so with nothing emissive and no light in the trough there was, correctly, nothing to see. Warm
-    # white at 3000 K, which is what these flats are lit with, and the intensity is a stop below where
-    # the bloom takes over the frame, because the wash on the slab is the subject and not the strip.
-    role("LightSource", (1.0, 0.894, 0.769), 0.35,
-         macro_rough=0.0, macro_albedo=0.0, bump=0.0, emissive=12.0),
-
-    # SILVERED GLASS, NOT GLAZING. A mirror and a window pane were both tagged Glass, which was
-    # invisible while Glass was a flat translucent blue-grey and becomes very visible the moment Glass
-    # gains real transmission: every mirror in the flat would turn into a hole through the wall.
-    #
-    # A mirror is a front-surface reflector - metallic, almost perfectly smooth, very slightly warm
-    # because silver is - and it is opaque. Its bevel is the only part that catches light directly,
-    # and that bevel is geometry, which FHFWallPlateKit::BuildMirror already lofts.
-    role("Mirror", (0.972, 0.960, 0.915), 0.02, metal=1.0, spec=1.0,
-         macro_rough=0.004, macro_albedo=0.0, bump=0.0),
-]
-
-# Roles whose procedural bump is compiled out entirely rather than merely set to zero strength.
-# UseProceduralBump is a STATIC switch, so this removes three noise evaluations from the shader
-# instead of multiplying their result by nothing.
-NO_BUMP = {"CoveInterior", "Glass", "LightSource", "Mirror"}
 
 
 # =================================================================================================
@@ -402,18 +288,6 @@ NO_BUMP = {"CoveInterior", "Glass", "LightSource", "Mirror"}
 # =================================================================================================
 
 MEL = unreal.MaterialEditingLibrary
-
-
-def srgb_to_linear(c):
-    """The sRGB transfer function. Unreal's vector parameters are linear."""
-    if c <= 0.04045:
-        return c / 12.92
-    return ((c + 0.055) / 1.055) ** 2.4
-
-
-def linear_colour(srgb, alpha=1.0):
-    r, g, b = srgb
-    return unreal.LinearColor(srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), alpha)
 
 
 def empty_material(material, name):
@@ -1011,7 +885,8 @@ def build_common_surface(g):
     flat_normal = g.const3(0.0, 0.0, 1.0, 1600, 1720)
     scaled_normal = g.lerp(flat_normal, normal_map, normal_strength, 1800, 1660)
 
-    # Compiled out for roles that want no bump at all - see NO_BUMP - rather than left multiplying
+    # Compiled out for roles that want no bump at all - the library decides which - rather than left
+    # multiplying
     # three noise evaluations by a zero.
     procedural_normal = g.pick("UseProceduralBump", detail["detail_normal"], flat_normal,
                                2000, 1820, GROUP_DETAIL, 6, default=True)
@@ -1157,51 +1032,18 @@ def build_glazed_master(name):
 #
 # =================================================================================================
 
-def build_instance(spec, opaque, glazed):
-    name = "MI_HF_{}".format(spec["name"])
+def build_instance(name, shading, opaque, glazed):
+    """Creates the instance and gives it its parent. Nothing else - see role_instances.
+
+    The parent is the one decision that cannot wait for the push: a material instance has to know
+    which master it instances before any parameter on it means anything, and which master a role
+    wants IS its shading model.
+    """
     instance = replace_asset(name, unreal.MaterialInstanceConstant,
                              unreal.MaterialInstanceConstantFactoryNew())
 
-    parent = glazed if spec["opacity"] is not None else opaque
+    parent = glazed if shading == unreal.HFFinishShading.GLAZED else opaque
     MEL.set_material_instance_parent(instance, parent)
-
-    def vec(param, colour):
-        MEL.set_material_instance_vector_parameter_value(instance, param, colour)
-
-    def num(param, value):
-        MEL.set_material_instance_scalar_parameter_value(instance, param, float(value))
-
-    vec("BaseColor", linear_colour(spec["colour"]))
-    num("Roughness", spec["rough"])
-    num("Metallic", spec["metal"])
-    num("Specular", spec["spec"])
-
-    num("TilingMM", spec["tiling_mm"])
-    num("MacroRoughnessAmount", spec["macro_rough"])
-    num("MacroAlbedoAmount", spec["macro_albedo"])
-    num("MacroVariationMM", spec["macro_mm"])
-    num("DetailBumpStrength", spec["bump"])
-    num("DetailBumpMM", spec["bump_mm"])
-    num("TileShadeVariation", spec["tile_shade"])
-
-    num("GroutWidthMM", spec["grout_mm"])
-    if spec["grout_colour"] is not None:
-        vec("GroutColor", linear_colour(spec["grout_colour"]))
-    num("GroutRoughness", spec["grout_rough"])
-
-    if spec["opacity"] is not None:
-        num("Opacity", spec["opacity"])
-    else:
-        num("CoatWeight", spec["coat"])
-        num("CoatRoughness", spec["coat_rough"])
-
-    if spec["emissive"] > 0.0:
-        vec("EmissiveColor", linear_colour(spec["colour"]))
-        num("EmissiveStrength", spec["emissive"])
-
-    if spec["name"] in NO_BUMP:
-        MEL.set_material_instance_static_switch_parameter_value(
-            instance, "UseProceduralBump", False)
 
     MEL.update_material_instance(instance)
     unreal.EditorAssetLibrary.save_loaded_asset(instance)
@@ -1228,11 +1070,13 @@ def main():
     glazed = build_glazed_master(GLAZED_PARENT)
     unreal.log("HouseForge: authored {}".format(GLAZED_PARENT))
 
-    for spec in ROLES:
-        build_instance(spec, opaque, glazed)
-        unreal.log("HouseForge: authored MI_HF_{}".format(spec["name"]))
+    rows = role_instances()
+    for name, shading in rows:
+        build_instance(name, shading, opaque, glazed)
+        unreal.log("HouseForge: authored {}".format(name))
 
-    unreal.log("HouseForge: {} role materials written to {}".format(len(ROLES), FOLDER))
+    unreal.log("HouseForge: {} role materials written to {}".format(len(rows), FOLDER))
+    unreal.log("HouseForge: run gen_material_library.py to write their finishes")
 
 
 main()

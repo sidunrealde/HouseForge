@@ -236,10 +236,10 @@ namespace
 
 UHFMaterialLibrary::UHFMaterialLibrary()
 {
-	ResetToDefaults();
+	ResetToCompiledDefaults();
 }
 
-void UHFMaterialLibrary::ResetToDefaults()
+void UHFMaterialLibrary::ResetToCompiledDefaults()
 {
 	const TArray<FHFSurfaceFinish>& Table = DefaultFinishes();
 
@@ -251,13 +251,19 @@ void UHFMaterialLibrary::ResetToDefaults()
 	}
 }
 
-FString UHFMaterialLibrary::AssetPathForRole(EHFSurfaceRole Role)
+FString UHFMaterialLibrary::InstanceNameForRole(EHFSurfaceRole Role)
 {
 	// The enumerator's own name, so the asset set and the enum cannot drift apart silently. Adding
 	// a role without authoring its material makes HouseForge.Materials.EveryRoleResolvesToAMaterial
 	// fail by name, which is a far better signal than a room that renders one surface in checkerboard.
-	const FString RoleName = StaticEnum<EHFSurfaceRole>()->GetNameStringByValue(static_cast<int64>(Role));
-	return FString::Printf(TEXT("%s/MI_HF_%s.MI_HF_%s"), MaterialFolder(), *RoleName, *RoleName);
+	return FString::Printf(TEXT("MI_HF_%s"),
+		*StaticEnum<EHFSurfaceRole>()->GetNameStringByValue(static_cast<int64>(Role)));
+}
+
+FString UHFMaterialLibrary::AssetPathForRole(EHFSurfaceRole Role)
+{
+	const FString Name = InstanceNameForRole(Role);
+	return FString::Printf(TEXT("%s/%s.%s"), MaterialFolder(), *Name, *Name);
 }
 
 FString UHFMaterialLibrary::ShippedAssetPath()
