@@ -75,7 +75,8 @@ Two other states, same stack:
 | SELECTED | â‰¥1 HouseForge actor selected | visible, 1 line. `3 elements selected` for multi. Greys in place on empty selection; does not collapse |
 | BAKE | house exists | expanded |
 | Footer | always | 1 line: setup status + last MCP tool name and time |
-| SURFACES / ASSETS / LIGHT | never, this milestone | not built, not stubbed. Section registry is the reservation (Â§3) |
+| SURFACES | always, house or no house | **BUILT.** Expanded, and it takes the tab's remaining height. Present with an empty level on purpose: finishes are assets rather than level state, so every control works and the usage figures read "not in this level" |
+| ASSETS / LIGHT | never, this milestone | not built, not stubbed. The section array is the reservation (Â§3) |
 
 ---
 
@@ -83,11 +84,17 @@ Two other states, same stack:
 
 | Path | What it does |
 |---|---|
-| `Private/UI/HFPanelIds.h` | `HFPanelTabIds::HouseForgePanel` FName, shared by spawner, layout extender and the Tools menu entry |
+**BUILT ALREADY, in the materials milestone.** The rows marked (built) exist in `Source/` today, so
+milestone 13 appends to a real tab rather than creating one. What is still missing is the house bar,
+ISSUES, ROOMS, FIND, SELECTED, the readiness band and BAKE.
+
+| `Private/UI/HFPanelIds.h` | (built) `HFPanelTabIds::HouseForgePanel()` and `HFPanelSectionIds::Surfaces()`. Functions rather than namespace-scope `FName` constants: an `FName` built during static initialisation runs before the name table is guaranteed to exist |
+| `Private/UI/HFPanelSection.h` | (built) `struct FHFPanelSection { FName Id; FText Title; TFunction<bool()> IsRelevant; TFunction<TSharedRef<SWidget>()> Build; bool bExpandedByDefault; bool bFillsRemainingSpace; }`. Named without the `F` on the FILE, matching the engine's own convention for a header holding one struct. The predicate takes no argument because `FHFPanelState` does not exist yet; it gains one when it does |
+| `Private/UI/SHFMaterialPanel.h/.cpp` | (built) The SURFACES section. Role list with live colour swatches and per-role usage, over an `IStructureDetailsView` on `FHFSurfaceFinish`. See the note on `bFillsRemainingSpace` below, and on `FNotifyHook` in the class comment |
 | `Private/UI/FHFPanelSection.h` | `struct FHFPanelSection { FName Id; TFunction<bool(const FHFPanelState&)> IsRelevant; TFunction<TSharedRef<SWidget>()> Build; }`. `SHFHousePanel::Construct` builds from a `TArray` of these â€” the seam materials/lighting/assets append to later |
 | `Private/UI/FHFPanelState.h/.cpp` | Non-widget controller and the only read path. Caches: house weak ptr, spec snapshot, `FHFValidationResult`, flattened `TArray<TSharedPtr<FHFElementRow>>`, room chips, bake tallies, setup status, MCP heartbeat. `FSimpleMulticastDelegate OnChanged`. Refreshes on `FEditorDelegates::MapChange`, `OnLevelActorAdded/Deleted`, `FCoreUObjectDelegates::OnObjectPropertyChanged` (filtered to `AHF*`), `USelection::SelectionChangedEvent`, plus `RequestRefresh()`; all debounced through one `FTSTicker`. Testable headlessly â€” this is where the panel's logic lives |
 | `Private/UI/HFElementRow.h` | `FHFElementRow { FName Id; FName Category; TWeakObjectPtr<AHFElementActor> Actor; FString Summary; bool bArtistEdited; EHFRenderMode RenderMode; bool bStale; EHFValidationSeverity WorstIssue; TArray<FName> Rooms; }` and `FHFRoomChip { FName RoomId; FString Label; EHFRoomType Type; TArray<TWeakObjectPtr<AHFElementActor>> Members; }` |
-| `Private/UI/SHFHousePanel.h/.cpp` | Tab root. Owns `FHFPanelState`, the section array, `FUICommandList` |
+| `Private/UI/SHFHousePanel.h/.cpp` | (built, to extend) Tab root. Iterates `BuildSections()`, which is `static` so a test can ask what the panel is made of with no tab, window or Slate application. Gains `FHFPanelState` and `FUICommandList` in milestone 13 |
 | `Private/UI/SHFReadinessBand.h/.cpp` | Three probe rows, one fix button each, plus the MCP auto-start checkbox |
 | `Private/UI/SHFHouseBar.h/.cpp` | Name / element count / units badge / provenance hyperlink / issue badge / action row / `[...]` menu |
 | `Private/UI/SHFIssuesList.h/.cpp` | `SListView<TSharedPtr<FHFValidationIssue>>`. Row = severity glyph, `Code`, `ElementId`, then `Message` verbatim on line 2. Click selects the offending actor through the same path the find list uses; nothing else |
@@ -123,6 +130,34 @@ Extender.ExtendLayout(FTabId("LevelEditorSelectionDetails"), ELayoutExtensionPos
 ```
 
 Plus `Tools > HouseForge > HouseForge Panel`, invoking the same tab id. Two doors, one tab.
+
+**Built as described, with two corrections.** The spawner is registered directly in
+`StartupModule` rather than inside the `UToolMenus::RegisterStartupCallback` handler, so it exists
+in a headless run and `HouseForge.Editor.Panel.TabSpawnerIsRegistered` can assert it - that test is
+the only thing standing between a renamed tab id and a menu entry that silently opens nothing. The
+layout extension is not wired yet; the two doors are the Tools menu and the level editor's Window
+menu, both through `TryInvokeTab`, which brings an already-open panel forward rather than opening a
+second empty one.
+
+### 3a. Two things the SURFACES section learned, that the rest of the panel will need
+
+**Fill height has to run unbroken from the tab to any details view.** `SDetailsView` slots its
+detail tree with `FillHeight` (SDetailsView.cpp:437), so in an auto-height parent it collapses to
+the tree's desired size - a few rows, not the property list. `SExpandableArea` already slots its
+body with `FillHeight` (SExpandableArea.cpp:71), so the link that has to be supplied is the outer
+slot, which is what `FHFPanelSection::bFillsRemainingSpace` selects. The stack is therefore an
+`SVerticalBox` and **not** an `SScrollBox`: a scroll box hands its content unbounded height and
+defeats `FillHeight` silently, with no error and no log line. Sections that need to scroll scroll
+inside themselves.
+
+**`OnFinishedChangingProperties` is useless for a live-drag control.**
+`FPropertyValueImpl::ImportText` only calls `NotifyFinishedChangingProperties` when
+`!bInteractiveChangeInProgress` (PropertyHandleImpl.cpp:697), so the delegate stays silent for the
+whole of a slider drag and fires once on release. A panel wired to it passes every test that checks
+the released value and drags with nothing happening in the viewport. Use `FDetailsViewArgs::NotifyHook`
+instead: `FPropertyNode::NotifyPostChange` calls the hook on every change, and the
+`FPropertyChangedEvent::ChangeType` is what selects the tier. Any future section with a live control -
+lighting intensity is the obvious one - wants the same.
 
 **Selection model.** The panel owns no selection. Viewport â†’ panel: subscribe to `USelection::SelectionChangedEvent`, filter to `AHFElementActor`/`AHFHouseActor`, ignore anything else rather than blanking. Panel â†’ viewport: resolve rows to actors by `(UClass, ElementId)` â€” the same key `BuildGeometry`'s `Preserved` map already uses â€” then `BeginBatchSelectOperation` / `SelectNone(false,true)` / `SelectActor` per actor / `EndBatchSelectOperation` / `NoteSelectionChange`, inside one transaction. **Single click never moves the camera**; double-click / Enter / context-menu Frame does.
 
@@ -243,6 +278,11 @@ FHFSetupStatus     GetSetupStatus() const;
 
 Each step ships something usable alone.
 
+0. **DONE, in the materials milestone: the tab, the section seam, and SURFACES.** A dockable panel
+   reachable from Tools and Window, holding one section that lists all eighteen surface roles with
+   how much of the level each covers, and edits the selected one live. Step 1 below is now an
+   extension of a working tab rather than a new one.
+
 1. **Tab shell + `FHFPanelState` + house bar + action row + footer.** A dockable panel naming the house, its element count, its declared units, its source drawing, with Re-validate / Rebuild all / Capture top-down. This alone makes *building and checking a house* reachable from the editor for the first time, and it establishes the state/refresh plumbing everything hangs off.
 2. **ISSUES list.** 49 validator rule sites currently exist only as a text blob inside an MCP result. Click-to-select the offending actor. Highest value per line in the spec.
 3. **FIND list + filter chips + SELECTED strip.** Read-only rows plus Select / Frame / Revert / Delete (routed to the cascading `DeleteElement`, never actor deletion). The panel is now the correction loop.
@@ -260,7 +300,7 @@ Steps 1â€“4 are the useful panel. 5â€“7 are the user's other request. 
 
 | Deferred | Why |
 |---|---|
-| ~~SURFACES~~ / ASSETS / LIGHT sections | **SURFACES no longer qualifies.** `UHFMaterialLibrary` landed in milestone 10: a `UDataAsset` mapping every `EHFSurfaceRole` to an `FHFSurfaceFinish`, with `PushFinish(Role, EHFMaterialPush)` as the live-update path — `Interactive` for a drag (`RecacheUniformExpressions`, no render-state recreate), `Commit` on release. So SURFACES has something real to surface and should be built against that API rather than reserved. Asset override and lighting still do not exist in `Source/`; three greyed "planned" rows are fake UI, and the `FHFPanelSection` array remains the reservation for those two. Reserving a code seam is honest, reserving pixels is not |
+| ~~SURFACES~~ / ASSETS / LIGHT sections | **SURFACES IS BUILT, and is no longer deferred at all.** `UHFMaterialLibrary` landed in milestone 10: a `UDataAsset` mapping every `EHFSurfaceRole` to an `FHFSurfaceFinish`, with `PushFinish(Role, EHFMaterialPush)` as the live-update path — `Interactive` for a drag (`RecacheUniformExpressions`, no render-state recreate), `Commit` on release. So SURFACES has something real to surface and should be built against that API rather than reserved. Asset override and lighting still do not exist in `Source/`; three greyed "planned" rows are fake UI, and the `FHFPanelSection` array remains the reservation for those two. Reserving a code seam is honest, reserving pixels is not |
 | Per-property editing in the panel | The Details panel already does it better â€” `ShowOnlyInnerProperties`, `ClampMin`, `CallInEditor`, undo, multi-object edit. The panel gets a `[Details]` button, not a reimplementation that must be kept in sync with `FHFWall` forever |
 | A spec JSON text editor | Rule 04: the spec is the import/export format, not a live second source of truth. `Copy spec JSON` in `[...]` is the whole surface |
 | Element creation (Add Wall / Room / Fixture) | Houses come from drawings; `SampleIsNotOnTheBuildPath` enforces it. A creation UI is a plan editor â€” a different product, and it becomes the path everyone uses instead of reading the drawing |
@@ -300,7 +340,25 @@ All named `HouseForge.*` so `hf-validate.ps1` catches them.
 * `LoadSpecFromFileRoundTrips` â€” finally exercises `FHFSpecSerializer::LoadFromFile`.
 * `LoadSpecFromFileIsNotAnMcpTool` â€” reflection assert that no `AICallable` function on `UHFToolset` builds from a file path.
 
-**`HouseForge.Editor.Panel.*`** (headless-safe; no Slate harness):
+**`HouseForge.Editor.Panel.*`** and **`HouseForge.Editor.Surfaces.*`** - THESE EXIST, 13 of them, and
+they are the pattern the rest should follow. Slate turns out to be initialised under `-nullrhi`, so
+`TabSpawns` and `SurfacesEditReachesTheRenderer` construct the real widget rather than skipping:
+
+* `TabSpawnerIsRegistered`, `TabSpawns`, `SectionsAreWellFormed` (every section has an id, a title, a
+  Build, and no duplicate ids), `SurfacesSectionIsAlwaysPresent`, `SurfacesListsEveryRole` (counted
+  from `FHFMeshOps::NumSurfaceRoles`, never a literal - the count has been 16, 17 and now 18).
+* `SurfacesEditReachesTheRenderer` writes into the struct the details view holds and calls
+  `NotifyPostChange`, which is exactly what a user dragging a slider does. It asserts the **mid-drag**
+  value is already on the material, which is the assertion a panel built on
+  `OnFinishedChangingProperties` would fail.
+* `HouseForge.Editor.Surfaces.SettingAFinishDoesNotTouchGeometry` is the load-bearing one: all
+  eighteen roles through both tiers with a hand-edited element in the flat, then a whole-level
+  fingerprint - with the surface-role polygroups compared **as a set** beside the position hash
+  rather than inside it, because renumbering them while leaving every vertex in place passes a
+  position-only comparison and leaves the flat rendering the wrong finishes with the mechanism for
+  fixing it gone.
+
+Still to write, for the sections milestone 13 adds:
 * `PanelStateDerivesRowsFromSpec` â€” build the sample house in a temp world, construct `FHFPanelState`, assert per-category row counts and summaries.
 * `PanelStateFlagsIssuesOnRows` â€” an element with a validation error carries `WorstIssue == Error`.
 * `PanelStateTracksBakeTallies` â€” `N / M baked` and the stale count match actor state.
