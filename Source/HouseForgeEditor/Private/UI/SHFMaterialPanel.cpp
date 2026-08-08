@@ -17,6 +17,7 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSpacer.h"
+#include "Widgets/Layout/SSplitter.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
@@ -155,11 +156,18 @@ void SHFMaterialPanel::Construct(const FArguments& InArgs)
 			.ColorAndOpacity(this, &SHFMaterialPanel::GetLibraryLineColour)
 		]
 
-		// ---------------------------------------------------------------------- the role list
-		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f)
+		// -------------------------------------------- the list of surfaces, over the one selected
+		//
+		// A splitter rather than a fixed-height list. The panel is normally docked as a tall narrow
+		// sidebar, where a fixed list shows half the roles beside a parameter set with space to
+		// spare, and it is sometimes floated wide, where the same figure is wrong the other way.
+		// Which of the two matters more is the user's business, and a splitter needs no explaining.
+		+ SVerticalBox::Slot().FillHeight(1.0f).Padding(4.0f, 4.0f)
 		[
-			SNew(SBox)
-			.HeightOverride(190.0f)
+			SNew(SSplitter)
+			.Orientation(Orient_Vertical)
+
+			+ SSplitter::Slot().Value(0.38f)
 			[
 				SAssignNew(RoleList, SListView<TSharedPtr<FHFSurfaceRoleRow>>)
 				.ListItemsSource(&Rows)
@@ -167,41 +175,41 @@ void SHFMaterialPanel::Construct(const FArguments& InArgs)
 				.OnGenerateRow(this, &SHFMaterialPanel::MakeRoleRow)
 				.OnSelectionChanged(this, &SHFMaterialPanel::OnRoleSelected)
 			]
-		]
 
-		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 2.0f)
-		[
-			SNew(SSeparator)
-		]
-
-		// ------------------------------------------------------------ the selected role's name
-		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 0.0f)
-		[
-			SNew(SHorizontalBox)
-
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			+ SSplitter::Slot().Value(0.62f)
 			[
-				SNew(STextBlock)
-				.Font(FAppStyle::GetFontStyle("DetailsView.CategoryFontStyle"))
-				.Text(this, &SHFMaterialPanel::GetSelectedRoleName)
-			]
+				SNew(SVerticalBox)
 
-			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("Reset", "Reset"))
-				.ToolTipText(LOCTEXT("ResetTooltip",
-					"Put this surface back to the finish HouseForge ships. Undoable."))
-				.OnClicked(this, &SHFMaterialPanel::OnResetClicked)
-			]
-		]
+				// ------------------------------------------------ the selected role's name
+				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.0f, 4.0f, 2.0f)
+				[
+					SNew(SHorizontalBox)
 
-		// ---------------------------------------------------------------- the whole parameter set
-		+ SVerticalBox::Slot().FillHeight(1.0f).Padding(4.0f, 4.0f)
-		[
-			FinishView.IsValid() && FinishView->GetWidget().IsValid()
-				? FinishView->GetWidget().ToSharedRef()
-				: StaticCastSharedRef<SWidget>(SNew(SSpacer))
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Font(FAppStyle::GetFontStyle("DetailsView.CategoryFontStyle"))
+						.Text(this, &SHFMaterialPanel::GetSelectedRoleName)
+					]
+
+					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("Reset", "Reset"))
+						.ToolTipText(LOCTEXT("ResetTooltip",
+							"Put this surface back to the finish HouseForge ships. Undoable."))
+						.OnClicked(this, &SHFMaterialPanel::OnResetClicked)
+					]
+				]
+
+				// -------------------------------------------------- the whole parameter set
+				+ SVerticalBox::Slot().FillHeight(1.0f)
+				[
+					FinishView.IsValid() && FinishView->GetWidget().IsValid()
+						? FinishView->GetWidget().ToSharedRef()
+						: StaticCastSharedRef<SWidget>(SNew(SSpacer))
+				]
+			]
 		]
 
 		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 2.0f)

@@ -4,6 +4,7 @@
 
 #include "DesktopPlatformModule.h"
 #include "Editor.h"
+#include "HAL/IConsoleManager.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HFEditorSubsystem.h"
 #include "IDesktopPlatform.h"
@@ -107,6 +108,17 @@ namespace
 	{
 		FGlobalTabmanager::Get()->TryInvokeTab(HFPanelTabIds::HouseForgePanel());
 	}
+
+	/**
+	 * The same thing from the console, so the panel can be opened without a mouse.
+	 *
+	 * Worth having beyond convenience: it is how a startup argument or a script gets the panel on
+	 * screen, and it is the only way to look at the panel from a headless-launched editor.
+	 */
+	FAutoConsoleCommand GOpenPanelCommand(
+		TEXT("HouseForge.OpenPanel"),
+		TEXT("Open the HouseForge panel."),
+		FConsoleCommandDelegate::CreateStatic(&OpenHousePanel));
 
 	void RegisterMenus()
 	{
