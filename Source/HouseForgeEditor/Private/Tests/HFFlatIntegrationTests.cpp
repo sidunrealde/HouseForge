@@ -1420,7 +1420,13 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 		// is a door nobody can use.
 		static constexpr double Across[5] = { -0.34, -0.17, 0.0, 0.17, 0.34 };
 
-		FString Stopped;
+		// EVERY BLOCKER, NOT THE LAST ONE THE LOOP HAPPENED TO SEE. The overlap loop below used to
+		// overwrite a single name on each hit and report whichever came last, so the warning named an
+		// arbitrary actor - and whoever read it attributed D_Foyer's blockage to the D_Foyer leaf,
+		// when what actually lies across that doorway at all five offsets is Opening_D_Main, the open
+		// front door. A diagnostic that names the wrong thing is worse than one that names nothing:
+		// it gets believed, and the note written from it goes into the record.
+		TSet<FString> Blockers;
 		bool bPassable = false;
 
 		for (const double Fraction : Across)
@@ -1453,11 +1459,11 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 						bLineClear = false;
 						if (const AHFElementActor* Element = Cast<AHFElementActor>(Actor))
 						{
-							Stopped = Element->ElementId.ToString();
+							Blockers.Add(Element->ElementId.ToString());
 						}
 						else
 						{
-							Stopped = Actor->GetName();
+							Blockers.Add(Actor->GetName());
 						}
 					}
 				}
@@ -1483,20 +1489,37 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 		// SetAllPartsOpenAmount opens BOTH leaves, which for a sliding run just exchanges tracks and
 		// leaves the elevation exactly as covered as it was - the cancelling-pair failure this plugin
 		// already knows about, and the reason AHFArticulatedActor::OpenRunFrom exists. Both balcony
-		// doors are reported blocked for that reason and both are wide open in the level.
+		// doors are reported blocked for that reason and both are wide open in the level. Those two
+		// are the only ones the probe now names ONLY the doorway itself for, which is the shape a
+		// cancelling pair makes and is worth reading as a signature.
 		//
-		// The rest name a ROOM actor as what stops the body, which is a floor slab and a skirting, and
-		// a skirting is 18 mm proud of plaster the probe stands 300 mm clear of. Something is wrong in
-		// the probe or in the room's collision and it is not yet known which.
+		// The other three name a list, and the list is the useful part. It used to be a single name,
+		// overwritten on every hit, so whichever actor the overlap query happened to return last was
+		// reported as the cause - and D_Foyer's blockage was written up as the D_Foyer leaf when what
+		// actually lies across it is D_Main, the open front door, at all five offsets. What the three
+		// now say:
+		//
+		//   D_Foyer   - D_Main's leaf swings across it. A real circulation conflict in a 1.8 x 1.8 m
+		//               foyer, made tighter by F_ShoeRack, and not the probe's fault.
+		//   D_Kitchen - F_ShoeRack and the foyer's switch plate, both a stride out on the foyer side.
+		//   D_Utility - F_Util_Sink, a stride out on the utility side.
+		//
+		// Every one of them also names its own room actor, which is a floor slab and a skirting that
+		// the 300 mm-clear body should not be touching - so the probe still has something wrong with
+		// it, and how far "a stride out" should reach into a small room is still an open question.
+		// That is why this is a warning: the naming is now trustworthy, the threshold is not.
 		//
 		// So it is warned rather than asserted. An assertion nobody can explain is worse than none:
 		// it gets muted, and then it is not there when it matters. What IS asserted here is the floor
 		// below, which is measured the same way and behaves.
 		if (!bPassable)
 		{
+			TArray<FString> Named = Blockers.Array();
+			Named.Sort();
+
 			AddWarning(FString::Printf(
-				TEXT("UNVERIFIED: every line across '%s' (%.0f cm wide) probes blocked, the last by '%s'. See the note above - this probe is not yet trusted."),
-				*Opening.Id.ToString(), Opening.Width, *Stopped));
+				TEXT("UNVERIFIED: every line across '%s' (%.0f cm wide) probes blocked, by: %s. See the note above - this probe is not yet trusted."),
+				*Opening.Id.ToString(), Opening.Width, *FString::Join(Named, TEXT(", "))));
 		}
 	}
 
