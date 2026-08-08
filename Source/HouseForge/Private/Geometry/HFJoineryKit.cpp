@@ -2511,8 +2511,16 @@ FDynamicMesh3 FHFJoineryKit::GenerateCarcass(const FHFCarcassParams& Params)
 	// same boards in the same places.
 	const double TopFace = P.TopFaceZ();
 
-	AppendRail(Mesh, FVector3d(0.0, 0.0, 0.0), FVector3d(T, D, H), Carc);
-	AppendRail(Mesh, FVector3d(W - T, 0.0, 0.0), FVector3d(W, D, H), Carc);
+	// The two gables, in the role each one actually is. A gable dying into a wall or into the next run
+	// is bare board; one standing in the room is a finished end, laminated to match the fronts. See
+	// FHFCarcassParams::bLeftEndFinished - left as carcass, an exposed end renders as a bare cream
+	// slab beside a wall of shutters, which is how the TV column, both nightstands, the wall cabinet
+	// and the vanity all came out.
+	const EHFSurfaceRole LeftRole = P.bLeftEndFinished ? EHFSurfaceRole::ShutterLaminate : Carc;
+	const EHFSurfaceRole RightRole = P.bRightEndFinished ? EHFSurfaceRole::ShutterLaminate : Carc;
+
+	AppendRail(Mesh, FVector3d(0.0, 0.0, 0.0), FVector3d(T, D, H), LeftRole);
+	AppendRail(Mesh, FVector3d(W - T, 0.0, 0.0), FVector3d(W, D, H), RightRole);
 	AppendRail(Mesh, FVector3d(T, 0.0, 0.0), FVector3d(W - T, D, T), Carc);
 
 	// A BASE UNIT UNDER A COUNTER HAS NO TOP BOARD - the granite is its top, and a bowl 200 deep has

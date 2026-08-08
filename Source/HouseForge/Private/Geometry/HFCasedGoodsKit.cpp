@@ -334,6 +334,13 @@ FHFCasedGoodsBuild FHFCasedGoodsKit::Build(const FHFCasedGoodsParams& Params)
 		Carcass.BayCount = Unit.BayCount;
 		Carcass.bHasBack = Unit.bHasBack;
 		Carcass.bHasTop = Unit.bHasTop;
+
+		// AN EXPOSED END IS A FINISHED END. The flags were already here and were only reaching the
+		// plinth, so every end of every cased good in the flat rendered as raw carcass board standing
+		// beside its own shutters - see FHFCarcassParams::bLeftEndFinished.
+		Carcass.bLeftEndFinished = P.bLeftEndExposed;
+		Carcass.bRightEndFinished = P.bRightEndExposed;
+
 		Carcass = FHFJoineryKit::SanitiseCarcass(Carcass);
 
 		Out.UnitParams.Add(Carcass);

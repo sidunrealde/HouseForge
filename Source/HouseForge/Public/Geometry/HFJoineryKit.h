@@ -1054,6 +1054,26 @@ struct HOUSEFORGE_API FHFCarcassParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	bool bHasTop = true;
 
+	/**
+	 * Whether the -X gable is a finished end rather than a concealed one.
+	 *
+	 * A gable that dies into a wall or into the next run is bare carcass board and nobody ever sees
+	 * it. One standing in the room is a FINISHED END: the same board, laminated, matching the fronts.
+	 * Left as carcass it renders as a bare cream slab beside a wall of green shutters, which is what
+	 * the reference flat's TV column, both nightstands, the wall cabinet and the vanity all showed -
+	 * finished furniture with unfinished chipboard sides.
+	 *
+	 * A role choice on faces the kit already distinguishes, not new geometry. Set from
+	 * FHFCasedGoodsParams::bLeftEndExposed, which already carried the information and was only being
+	 * used to decide where the plinth returned.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	bool bLeftEndFinished = false;
+
+	/** As bLeftEndFinished, for the +X gable. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	bool bRightEndFinished = false;
+
 	/** Bays, never less than one: a carcass with no bay is a carcass with one. */
 	int32 Bays() const { return FMath::Max(1, BayCount); }
 

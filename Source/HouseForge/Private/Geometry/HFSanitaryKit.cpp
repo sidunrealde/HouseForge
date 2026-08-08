@@ -314,8 +314,27 @@ FHFSinkParams FHFSanitaryKit::SanitiseSink(const FHFSinkParams& Params)
 	P.Tap.BodyHeight = FMath::Max(P.Tap.BodyHeight, 0.0);
 	P.Tap.BodyRadius = FMath::Max(P.Tap.BodyRadius, 0.0);
 	P.Tap.SpoutRadius = FMath::Clamp(P.Tap.SpoutRadius, 0.0, FMath::Max(P.Tap.BodyRadius, 0.0));
-	P.Tap.SpoutReach = FMath::Max(P.Tap.SpoutReach, 0.0);
-	P.Tap.LeverLength = FMath::Max(P.Tap.LeverLength, 0.0);
+	// THE SPOUT HAS TO REACH THE BOWL AND STOP THERE. Measured from the tap hole on the back rim to
+	// the middle of the bowl in front of it, which is where a spout is aimed; anything past that is
+	// pouring onto the front rim.
+	P.Tap.SpoutReach = FMath::Clamp(P.Tap.SpoutReach, 0.0,
+		FMath::Max(P.Depth - P.RimWidth * 1.5, 0.0));
+
+	// AND THE LEVER IS A LEVER, NOT A SECOND SPOUT.
+	//
+	// A monobloc's lever runs BACKWARDS from the top of its body, and nothing here clamped it - only
+	// the basin's did, where the wall behind made the overhang obvious. On a sink it went unclamped at
+	// the full declared 90 mm, so the utility sink came out with two long arms projecting from
+	// opposite sides of one body at nearly the same height: one over the bowl and one reaching the
+	// same distance the other way, out over the washing machine, ending in mid-air. It reads as a
+	// cross-bar rather than as a tap, and it is a moving part, so it sweeps that arc too.
+	//
+	// The kitchen sink hid it: its lever overhangs into the upstand behind it, where nobody can see.
+	// Held to the rim it is mounted on, so the free end stays within the drawn box and a rim's width -
+	// and always shorter than the spout, so the two can never read as a pair.
+	P.Tap.LeverLength = FMath::Clamp(P.Tap.LeverLength, 0.0,
+		FMath::Min(FMath::Max(P.RimWidth * 1.5, 3.0), P.Tap.SpoutReach * 0.5));
+
 	P.Tap.LeverLiftDegrees = FMath::Clamp(P.Tap.LeverLiftDegrees, 0.0, 90.0);
 	P.Tap.SpoutSwivelDegrees = FMath::Clamp(P.Tap.SpoutSwivelDegrees, 0.0, 180.0);
 
