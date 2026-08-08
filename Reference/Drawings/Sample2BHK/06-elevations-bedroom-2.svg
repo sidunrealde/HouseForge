@@ -22,9 +22,9 @@
 <line x1="441.88" y1="344.31" x2="948.12" y2="344.31" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
 <text x="956.12" y="344.31" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2800</text>
 <polygon points="441.88,669.75 948.12,669.75 948.12,681.80 441.88,681.80" fill="#ebebeb" stroke="#787878" stroke-width="1.00"/>
-<polygon points="556.39,609.48 737.19,609.48 737.19,681.80 556.39,681.80" fill="none" stroke="#464646" stroke-width="1.40"/>
-<polygon points="567.23,569.70 726.34,569.70 726.34,609.48 567.23,609.48" fill="none" stroke="#464646" stroke-width="1.20"/>
-<line x1="556.39" y1="634.79" x2="737.19" y2="634.79" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="592.55,609.48 773.35,609.48 773.35,681.80 592.55,681.80" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="603.39,569.70 762.50,569.70 762.50,609.48 603.39,609.48" fill="none" stroke="#464646" stroke-width="1.20"/>
+<line x1="592.55" y1="634.79" x2="773.35" y2="634.79" stroke="#b9b9b9" stroke-width="1.00" stroke-linecap="round"/>
 <polygon points="454.92,680.59 513.21,680.59 513.21,681.80 454.92,681.80" fill="#eeeeee" stroke="#787878" stroke-width="1.00"/>
 <polygon points="450.92,591.40 517.21,591.40 517.21,680.59 450.92,680.59" fill="none" stroke="#464646" stroke-width="1.60"/>
 <polygon points="453.92,650.48 514.21,650.48 514.21,662.54 453.92,662.54" fill="none" stroke="#464646" stroke-width="1.00"/>

@@ -19,8 +19,8 @@
 <polygon points="532.28,320.20 857.72,320.20 857.72,681.80 532.28,681.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
 <line x1="498.28" y1="681.80" x2="891.72" y2="681.80" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
 <line x1="512.28" y1="320.20" x2="877.72" y2="320.20" stroke="#787878" stroke-width="1.40" stroke-linecap="round"/>
-<line x1="532.28" y1="368.41" x2="857.72" y2="368.41" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
-<text x="865.72" y="368.41" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2600</text>
+<line x1="532.28" y1="350.33" x2="857.72" y2="350.33" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="865.72" y="350.33" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2750</text>
 <polygon points="539.51,428.68 647.99,428.68 647.99,681.80 539.51,681.80" fill="none" stroke="#b9b9b9" stroke-width="1.00" stroke-dasharray="5 5"/>
 <circle cx="593.75" cy="442.68" r="9.00" fill="none" stroke="#464646" stroke-width="1.20"/>
 <circle cx="837.83" cy="389.51" r="5.42" fill="#ffffff" stroke="#005aaa" stroke-width="1.30"/>
@@ -36,10 +36,10 @@
 <circle cx="618.60" cy="624.41" r="3.60" fill="#464646" stroke="#464646" stroke-width="1.00"/>
 <polygon points="574.47,563.68 634.73,563.68 634.73,585.37 574.47,585.37" fill="none" stroke="#464646" stroke-width="1.30"/>
 <line x1="574.47" y1="574.53" x2="634.73" y2="574.53" stroke="#b9b9b9" stroke-width="0.90" stroke-linecap="round"/>
-<polygon points="568.44,464.84 640.76,464.84 640.76,561.27 568.44,561.27" fill="#e8f0f5" stroke="#464646" stroke-width="1.30"/>
-<line x1="572.90" y1="561.27" x2="592.90" y2="464.84" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
-<line x1="594.60" y1="561.27" x2="614.60" y2="464.84" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
-<line x1="616.30" y1="561.27" x2="636.30" y2="464.84" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<polygon points="568.44,440.73 640.76,440.73 640.76,537.16 568.44,537.16" fill="#e8f0f5" stroke="#464646" stroke-width="1.30"/>
+<line x1="572.90" y1="537.16" x2="592.90" y2="440.73" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<line x1="594.60" y1="537.16" x2="614.60" y2="440.73" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<line x1="616.30" y1="537.16" x2="636.30" y2="440.73" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
 <line x1="725.13" y1="533.54" x2="785.40" y2="533.54" stroke="#464646" stroke-width="2.20" stroke-linecap="round"/>
 <line x1="725.13" y1="529.93" x2="725.13" y2="537.16" stroke="#464646" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="785.40" y1="529.93" x2="785.40" y2="537.16" stroke="#464646" stroke-width="1.20" stroke-linecap="round"/>
@@ -54,13 +54,15 @@
 <polygon points="1676.52,320.20 1893.48,320.20 1893.48,681.80 1676.52,681.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
 <line x1="1642.52" y1="681.80" x2="1927.48" y2="681.80" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
 <line x1="1656.52" y1="320.20" x2="1913.48" y2="320.20" stroke="#787878" stroke-width="1.40" stroke-linecap="round"/>
-<line x1="1676.52" y1="368.41" x2="1893.48" y2="368.41" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
-<text x="1901.48" y="368.41" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2600</text>
+<line x1="1676.52" y1="350.33" x2="1893.48" y2="350.33" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="1901.48" y="350.33" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2750</text>
 <polygon points="1698.22,633.59 1741.61,633.59 1741.61,681.80 1698.22,681.80" fill="none" stroke="#464646" stroke-width="1.30"/>
 <polygon points="1683.75,590.19 1756.07,590.19 1756.07,633.59 1683.75,633.59" fill="none" stroke="#787878" stroke-width="1.00"/>
 <line x1="1686.16" y1="533.54" x2="1690.98" y2="533.54" stroke="#464646" stroke-width="2.20" stroke-linecap="round"/>
 <line x1="1686.16" y1="529.93" x2="1686.16" y2="537.16" stroke="#464646" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1690.98" y1="529.93" x2="1690.98" y2="537.16" stroke="#464646" stroke-width="1.20" stroke-linecap="round"/>
+<polygon points="1851.29,374.44 1893.48,374.44 1893.48,428.68 1851.29,428.68" fill="none" stroke="#464646" stroke-width="1.40"/>
+<text x="1872.39" y="401.56" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#464646" text-anchor="middle" dominant-baseline="central" font-weight="bold">G</text>
 <circle cx="1785.00" cy="389.51" r="13.56" fill="#ffffff" stroke="#005aaa" stroke-width="1.30"/>
 <polygon points="1730.76,428.68 1839.24,428.68 1839.24,681.80 1730.76,681.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="1737.76,435.68 1832.24,435.68 1832.24,674.80 1737.76,674.80" fill="none" stroke="#787878" stroke-width="1.00"/>
@@ -77,13 +79,13 @@
 <polygon points="532.28,942.20 857.72,942.20 857.72,1303.80 532.28,1303.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
 <line x1="498.28" y1="1303.80" x2="891.72" y2="1303.80" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
 <line x1="512.28" y1="942.20" x2="877.72" y2="942.20" stroke="#787878" stroke-width="1.40" stroke-linecap="round"/>
-<line x1="532.28" y1="990.41" x2="857.72" y2="990.41" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
-<text x="865.72" y="990.41" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2600</text>
+<line x1="532.28" y1="972.33" x2="857.72" y2="972.33" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="865.72" y="972.33" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2750</text>
 <circle cx="552.17" cy="1011.51" r="5.42" fill="#ffffff" stroke="#005aaa" stroke-width="1.30"/>
 <polygon points="742.01,1050.68 850.49,1050.68 850.49,1303.80 742.01,1303.80" fill="none" stroke="#b9b9b9" stroke-width="1.00" stroke-dasharray="5 5"/>
 <circle cx="796.25" cy="1064.68" r="9.00" fill="none" stroke="#464646" stroke-width="1.20"/>
-<polygon points="769.13,996.44 823.37,996.44 823.37,1050.68 769.13,1050.68" fill="none" stroke="#464646" stroke-width="1.40"/>
-<text x="796.25" y="1023.56" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#464646" text-anchor="middle" dominant-baseline="central" font-weight="bold">G</text>
+<polygon points="565.43,996.44 619.67,996.44 619.67,1050.68 565.43,1050.68" fill="none" stroke="#464646" stroke-width="1.40"/>
+<text x="592.55" y="1023.56" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#464646" text-anchor="middle" dominant-baseline="central" font-weight="bold">G</text>
 <polygon points="634.73,1050.68 725.13,1050.68 725.13,1303.80 634.73,1303.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
 <polygon points="641.73,1057.68 718.13,1057.68 718.13,1296.80 641.73,1296.80" fill="none" stroke="#787878" stroke-width="1.00"/>
 <circle cx="707.13" cy="1177.24" r="3.40" fill="#464646" stroke="#464646" stroke-width="1.00"/>
@@ -99,8 +101,8 @@
 <polygon points="1676.52,942.20 1893.48,942.20 1893.48,1303.80 1676.52,1303.80" fill="#fafafa" stroke="#000000" stroke-width="1.60"/>
 <line x1="1642.52" y1="1303.80" x2="1927.48" y2="1303.80" stroke="#000000" stroke-width="3.00" stroke-linecap="round"/>
 <line x1="1656.52" y1="942.20" x2="1913.48" y2="942.20" stroke="#787878" stroke-width="1.40" stroke-linecap="round"/>
-<line x1="1676.52" y1="990.41" x2="1893.48" y2="990.41" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
-<text x="1901.48" y="990.41" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2600</text>
+<line x1="1676.52" y1="972.33" x2="1893.48" y2="972.33" stroke="#8c2882" stroke-width="1.80" stroke-dasharray="16 8" stroke-linecap="round"/>
+<text x="1901.48" y="972.33" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#8c2882" text-anchor="start" dominant-baseline="central">FC 2750</text>
 <polygon points="1829.98,1302.59 1882.25,1302.59 1882.25,1303.80 1829.98,1303.80" fill="#eeeeee" stroke="#787878" stroke-width="1.00"/>
 <polygon points="1825.98,1207.37 1886.25,1207.37 1886.25,1302.59 1825.98,1302.59" fill="none" stroke="#464646" stroke-width="1.60"/>
 <polygon points="1828.98,1287.45 1883.25,1287.45 1883.25,1300.59 1828.98,1300.59" fill="none" stroke="#464646" stroke-width="1.00"/>
@@ -111,14 +113,12 @@
 <circle cx="1870.11" cy="1246.41" r="3.60" fill="#464646" stroke="#464646" stroke-width="1.00"/>
 <polygon points="1832.01,1185.68 1880.22,1185.68 1880.22,1207.37 1832.01,1207.37" fill="none" stroke="#464646" stroke-width="1.30"/>
 <line x1="1832.01" y1="1196.53" x2="1880.22" y2="1196.53" stroke="#b9b9b9" stroke-width="0.90" stroke-linecap="round"/>
-<polygon points="1877.21,1086.84 1880.82,1086.84 1880.82,1183.27 1877.21,1183.27" fill="#e8f0f5" stroke="#464646" stroke-width="1.30"/>
-<line x1="1867.93" y1="1183.27" x2="1887.93" y2="1086.84" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
-<line x1="1869.02" y1="1183.27" x2="1889.02" y2="1086.84" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
-<line x1="1870.10" y1="1183.27" x2="1890.10" y2="1086.84" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<polygon points="1877.21,1062.73 1880.82,1062.73 1880.82,1159.16 1877.21,1159.16" fill="#e8f0f5" stroke="#464646" stroke-width="1.30"/>
+<line x1="1867.93" y1="1159.16" x2="1887.93" y2="1062.73" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<line x1="1869.02" y1="1159.16" x2="1889.02" y2="1062.73" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
+<line x1="1870.10" y1="1159.16" x2="1890.10" y2="1062.73" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
 <polygon points="1683.75,1050.68 1792.23,1050.68 1792.23,1303.80 1683.75,1303.80" fill="none" stroke="#b9b9b9" stroke-width="1.00" stroke-dasharray="5 5"/>
 <circle cx="1737.99" cy="1064.68" r="9.00" fill="none" stroke="#464646" stroke-width="1.20"/>
-<polygon points="1676.52,996.44 1718.71,996.44 1718.71,1050.68 1676.52,1050.68" fill="none" stroke="#464646" stroke-width="1.40"/>
-<text x="1697.61" y="1023.56" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#464646" text-anchor="middle" dominant-baseline="central" font-weight="bold">G</text>
 <line x1="1676.52" y1="1343.80" x2="1893.48" y2="1343.80" stroke="#5a5a5a" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1676.52" y1="1303.80" x2="1676.52" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>
 <line x1="1893.48" y1="1303.80" x2="1893.48" y2="1351.80" stroke="#b9b9b9" stroke-width="0.80" stroke-linecap="round"/>

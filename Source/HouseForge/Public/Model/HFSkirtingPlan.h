@@ -141,6 +141,23 @@ struct HOUSEFORGE_API FHFSkirtingReturn
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
 	FName SourceId;
 
+	/**
+	 * True when scribed joinery stands over this length, so it is resolved but not built.
+	 *
+	 * RECORDED RATHER THAN DELETED, because the two say different things and only one of them is
+	 * true. A return that is absent from the plan reads as a column the resolver never noticed; this
+	 * one was noticed, turned round correctly, and then covered by a cupboard - which is what a
+	 * carpenter does with it, and what the reference flat's kitchen and living room both need in the
+	 * corner where a column and a run of base units meet.
+	 *
+	 * Built as skirting the board went out round the concrete, across its face and back, INSIDE the
+	 * carcass standing over it. Nothing could see that: the plan was right about every straight run,
+	 * the identity between boundary, covered length and break length still balanced - returns are not
+	 * part of it - and both carcasses were flush on the plaster to a hundredth of a centimetre.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	bool bCoveredByJoinery = false;
+
 	double Length() const { return FVector2D::Distance(Start, End); }
 };
 

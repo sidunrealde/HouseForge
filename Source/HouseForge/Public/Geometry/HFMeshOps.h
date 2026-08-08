@@ -17,6 +17,72 @@
  * Every triangle emitted carries a polygroup identifying its surface role. That is load-bearing:
  * the material panel targets faces by role, so untagged geometry cannot be re-materialled later.
  */
+/**
+ * How a box is softened into something upholstered.
+ *
+ * ## THE ONE THING THE CHAMFER CANNOT DO
+ *
+ * FHFBevelParams gives Fabric a chamfer width of ZERO, deliberately and correctly: "a cushion has no
+ * arris to catch light, and chamfering one would spend triangles making soft goods look machined."
+ * That is right, and it leaves loose furniture with nothing at all. A sofa arm is a 60-80 mm radius
+ * and a seat cushion is a 40 mm one; a 1 mm chamfer would not read from across the room and a sharp
+ * arris reads as a cardboard box from anywhere. Neither is a sofa.
+ *
+ * So the softness is BUILT rather than applied afterwards. The rings are lofted at a true radius, the
+ * facets come out below FHFBevelParams::MinAngleDegrees, and ComputeShadingNormals therefore welds
+ * them smooth - which means a soft box costs nothing at the bevel pass and needs nothing from it.
+ *
+ * A multi-pass chamfer at decreasing widths was the other candidate and it is the worse answer: it
+ * would need BevelConvexEdges' "never re-bevel a facet an earlier pass created" guard relaxed, which
+ * is the guard that stops the chamfer eating this plugin's 3 mm shadow gaps everywhere else.
+ *
+ * ## Bounds are exactly the box asked for
+ *
+ * Every radius is measured INWARD from the declared box, so a soft box never grows past its drawn
+ * footprint. That is what lets a fixture's bounds still be asserted against the drawing after it has
+ * been rounded - see the sofa and the chair, whose footprints are checked to the centimetre.
+ *
+ * Rake is the exception in Y, and only by the amount it leans: a raked box's widest ring is at the
+ * lean's own fraction of the height rather than at the top, so its Y bounds fall INSIDE the declared
+ * box rather than outside it. Never outside.
+ */
+struct FHFSoftBoxParams
+{
+	/**
+	 * Radius on the four vertical arrises, in plan. A cushion's corner; an arm's roll seen from above.
+	 *
+	 * KEEP THIS AT OR ABOVE BOTH ROLLS. The plan radius closes as a roll turns, so that the three
+	 * radii meet in one surface and the corner becomes a sphere octant rather than a flat lozenge with
+	 * its own highlight - see AppendSoftBox. A plan radius smaller than the roll runs out before the
+	 * roll finishes and the blend is only partly there.
+	 */
+	double CornerRadius = 0.0;
+
+	/** Radius on the top horizontal arris, all the way round. The one that catches light on a cushion. */
+	double TopRadius = 0.0;
+
+	/** Radius on the bottom horizontal arris. Usually smaller: a cushion is compressed where it sits. */
+	double BottomRadius = 0.0;
+
+	/**
+	 * How far the top of the box leans back in +Y over its own height, staying inside the declared box.
+	 *
+	 * What makes a back cushion a back cushion. Upright, a back cushion is a slab standing on a seat and
+	 * the sofa reads as three boxes in a row; leaned back four centimetres it reads as somewhere to sit.
+	 * Expressed as a shear rather than a rotation so the result is still an axis-aligned box's worth of
+	 * space and its bounds are still answerable without building it.
+	 */
+	double RakeY = 0.0;
+
+	/** Segments each quarter-turn of the plan corner is drawn in. */
+	int32 CornerSteps = 4;
+
+	/** Segments each roll is drawn in. Three is enough to weld smooth; more is for a close-up. */
+	int32 RollSteps = 3;
+
+	bool IsSoft() const { return CornerRadius > 0.0 || TopRadius > 0.0 || BottomRadius > 0.0; }
+};
+
 class HOUSEFORGE_API FHFMeshOps
 {
 public:
@@ -140,6 +206,68 @@ public:
 	static bool AppendExtrudedSection(UE::Geometry::FDynamicMesh3& Mesh, const TArray<FVector2D>& Section,
 		const FVector3d& Origin, const FVector3d& SectionU, const FVector3d& SweepDir,
 		double SweepLength, EHFSurfaceRole Role);
+
+	/**
+	 * Skins a stack of horizontal sections into a solid: a loft.
+	 *
+	 * THE PRIMITIVE SANITARYWARE NEEDS AND NOTHING ELSE IN THE KIT COULD GIVE IT. A prism is one
+	 * section swept, which is a box; a revolve is one profile turned, which is round about an axis. A
+	 * WC pan and a wash basin are neither: they are a rounded rectangle at the rim drawing in, and
+	 * usually also FORWARD, to a smaller one at the foot, and there is no axis anything is symmetric
+	 * about. Built as a prism a pan is a bucket, and built as a revolve it is a bowl on a bollard;
+	 * both read as a placeholder at any distance a person actually stands from a WC.
+	 *
+	 * Sections are joined by INDEX, so all of them must carry the same number of points and each
+	 * point must be the same feature of the outline in every one - which is easy to hold to when the
+	 * outlines come from one generator at different sizes, and is why this takes rings rather than a
+	 * profile and a rule. Winding is normalised on the first section and the SAME reversal is applied
+	 * to all of them, because reversing one alone would twist the skin into a bow tie whose volume is
+	 * still positive and whose silhouette is still right from one side.
+	 *
+	 * @param Sections  Two or more closed loops, bottom-up, all of the same length.
+	 * @param SectionZ  Height of each section. Must be non-decreasing, one per section.
+	 * @param bCapBottom Close the bottom. Off for a form that another solid closes.
+	 * @param bCapTop    Close the top.
+	 * @return false if the sections do not describe a loftable solid, with nothing appended.
+	 */
+	static bool AppendLoft(UE::Geometry::FDynamicMesh3& Mesh, const TArray<TArray<FVector2D>>& Sections,
+		const TArray<double>& SectionZ, bool bCapBottom, bool bCapTop, EHFSurfaceRole Role);
+
+	/**
+	 * A closed rounded rectangle in plan, counter-clockwise, at a fixed vertex count.
+	 *
+	 * Public because a loft's sections have to correspond point for point, and the only reliable way
+	 * to guarantee that is for every ring to come out of one function at one step count. Sanitaryware
+	 * is the caller: a pressed or cast ceramic form has no square corners anywhere, because neither
+	 * pressing nor slip casting can make one, and the corner radius is the first thing the eye picks
+	 * up when light runs round the inside of a bowl.
+	 *
+	 * The radius is clamped to what the half-extents can carry, and a zero radius still emits the same
+	 * number of points - repeated at the corner - so a ring with square corners can be lofted to a
+	 * rounded one without the correspondence breaking.
+	 *
+	 * @param CornerSteps Segments each quarter-turn is drawn in. The ring is 4 * (CornerSteps + 1) long.
+	 */
+	static TArray<FVector2D> RoundedRectangle(const FVector2D& Centre, const FVector2D& HalfExtents,
+		double CornerRadius, int32 CornerSteps = 4);
+
+	/**
+	 * A box with real radii on its arrises: the primitive upholstery and loose furniture are built from.
+	 *
+	 * Lofted from rounded-rectangle rings rather than chamfered, for the reasons on FHFSoftBoxParams -
+	 * the short version being that Fabric's chamfer width is zero by design, so a cushion that relied on
+	 * BevelConvexEdges would come out with perfectly sharp arrises and read as a crate.
+	 *
+	 * Degenerate boxes append nothing rather than a sliver, like every other primitive here. A radius
+	 * larger than the box can carry is clamped rather than refused: a drawing that asked for an 80 mm
+	 * roll on a 60 mm cushion has made an arithmetic mistake, and the honest answer to that is the
+	 * roundest cushion that fits.
+	 *
+	 * @param Min, Max Opposite corners of the box the soft form is inscribed in. The result never
+	 *        exceeds them - see FHFSoftBoxParams.
+	 */
+	static bool AppendSoftBox(UE::Geometry::FDynamicMesh3& Mesh, const FVector3d& Min, const FVector3d& Max,
+		const FHFSoftBoxParams& Params, EHFSurfaceRole Role);
 
 	/**
 	 * Revolves a profile about an axis and appends the resulting solid.

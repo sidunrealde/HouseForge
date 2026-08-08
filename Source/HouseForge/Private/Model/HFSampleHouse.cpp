@@ -55,7 +55,49 @@ namespace
 	constexpr double ParapetThickness  = 115.0;
 
 	constexpr double WallHeight    = 3000.0;
-	constexpr double ParapetHeight = 1100.0;
+
+	// ------------------------------------------------------------- why the parapet is a DWARF wall
+	//
+	// IT WAS 1100, AND THE RAILING DRAWN ON TOP OF IT MADE A 1900 mm BARRIER.
+	//
+	// Both figures are in the drawing and both are individually sensible. A 1100 masonry parapet is a
+	// compliant guard on its own - NBC 2016 Part 4 asks 1050 - and an 800 MS railing is a normal
+	// balustrade. Stacked, they are 1900 above the balcony floor, and that is not a balcony; it is a
+	// cage. Standing eye level is about 1600, so you cannot see out of any of the three, and from the
+	// living room the south window - sill 900, head 2100 - looks straight into a grille over its whole
+	// lower half. Nothing in the spec says so and every test passed on it, which is how it survived
+	// three milestones.
+	//
+	// The two readings that make one object out of the two numbers are: a full parapet with a HANDRAIL
+	// on it, or a dwarf wall with a GUARD on it. The drawing settles which - it marks 800 of MS
+	// railing, and posts, a top rail, a bottom rail and infill are a guard rather than a rail on a
+	// coping. So the masonry is the dwarf wall.
+	//
+	// 450 is the standard kerb an Indian balcony railing bolts to, and it puts the guard at
+	// 450 + 800 = 1250 above the finished balcony floor. That clears the 1050 minimum and the 1200
+	// some bye-laws ask above 15 m, and it leaves 800 above the coping - which is the OTHER height
+	// that matters, because a coping is a foothold and the usual requirement above one is 750. See
+	// FHFRailingParams::GuardHeightAboveFloor and HeightAboveFoothold, which assert both.
+	//
+	// AND ONLY ON THE FACE THAT CARRIES A RAILING. Lowering every parapet to 450 was the first
+	// attempt, and rendering the balcony found what it had done: the drawing marks ONE railing per
+	// balcony, on the open face, so the two return walls of each one became 450 mm kerbs with
+	// nothing on them at all. Six edges of unguarded fall, introduced by the fix for the cage.
+	//
+	// That is also what a real balcony is, so it is not a compromise: the returns are solid masonry
+	// and only the open face is a balustrade. They are built to the same 1250 the guard reaches, so
+	// the balcony's edge is one unbroken line at one height, part solid and part railing.
+	//
+	// HouseForge.Trim.NoBalconyEdgeIsUnguarded asserts the whole rule - every low wall in the flat
+	// reaches 1050 above the floor, either as masonry or as masonry plus what stands on it - rather
+	// than trusting these two constants to stay paired with the fixture list.
+	//
+	// Nothing else in the flat measures from these. The balconies have no ceilings, no openings in
+	// their parapets and no skirting; the two condensing units stand on the floor beside them.
+	constexpr double ParapetHeight = 450.0;
+	constexpr double GuardHeight   = 1250.0;
+
+	static_assert(GuardHeight >= 1050.0, "NBC 2016 Part 4: a balcony guard clears 1050 above the floor.");
 
 	constexpr double DoorWidth     = 900.0;
 	constexpr double DoorHeight    = 2100.0;
@@ -90,14 +132,19 @@ namespace
 			Spec.Walls.Add(Wall);
 		}
 
-		void AddParapet(const FName& Id, const FVector2D& Start, const FVector2D& End)
+		/**
+		 * @param Height Full guard height for a return wall, or the dwarf-wall height for a face
+		 *        that carries a railing. There is no default: a parapet that got one silently would
+		 *        be the exact defect this parameter exists to prevent - see the two constants.
+		 */
+		void AddParapet(const FName& Id, const FVector2D& Start, const FVector2D& End, double Height)
 		{
 			FHFWall Wall;
 			Wall.Id = Id;
 			Wall.Start = Start;
 			Wall.End = End;
 			Wall.Thickness = ParapetThickness;
-			Wall.Height = ParapetHeight;
+			Wall.Height = Height;
 			Wall.bIsExternal = true;
 			Spec.Walls.Add(Wall);
 		}
@@ -305,17 +352,19 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Balcony parapets. Three balconies: living (south), master bedroom (north) and a service
 	// balcony off the master bathroom (east).
-	B.AddParapet(TEXT("W_Balc_South"), FVector2D(X0, YB), FVector2D(X2, YB));
-	B.AddParapet(TEXT("W_Balc_West"),  FVector2D(X0, YB), FVector2D(X0, Y0));
-	B.AddParapet(TEXT("W_Balc_East"),  FVector2D(X2, YB), FVector2D(X2, Y0));
+	// The OPEN FACE of each balcony is a dwarf wall carrying a railing; the two RETURNS beside it are
+	// solid to the same guard height. See the note on ParapetHeight.
+	B.AddParapet(TEXT("W_Balc_South"), FVector2D(X0, YB), FVector2D(X2, YB), ParapetHeight);
+	B.AddParapet(TEXT("W_Balc_West"),  FVector2D(X0, YB), FVector2D(X0, Y0), GuardHeight);
+	B.AddParapet(TEXT("W_Balc_East"),  FVector2D(X2, YB), FVector2D(X2, Y0), GuardHeight);
 
-	B.AddParapet(TEXT("W_BalcN_North"), FVector2D(X3, YN), FVector2D(X5, YN));
-	B.AddParapet(TEXT("W_BalcN_West"),  FVector2D(X3, Y3), FVector2D(X3, YN));
-	B.AddParapet(TEXT("W_BalcN_East"),  FVector2D(X5, Y3), FVector2D(X5, YN));
+	B.AddParapet(TEXT("W_BalcN_North"), FVector2D(X3, YN), FVector2D(X5, YN), ParapetHeight);
+	B.AddParapet(TEXT("W_BalcN_West"),  FVector2D(X3, Y3), FVector2D(X3, YN), GuardHeight);
+	B.AddParapet(TEXT("W_BalcN_East"),  FVector2D(X5, Y3), FVector2D(X5, YN), GuardHeight);
 
-	B.AddParapet(TEXT("W_BalcE_East"),  FVector2D(XE, Y1), FVector2D(XE, Y2));
-	B.AddParapet(TEXT("W_BalcE_South"), FVector2D(X5, Y1), FVector2D(XE, Y1));
-	B.AddParapet(TEXT("W_BalcE_North"), FVector2D(X5, Y2), FVector2D(XE, Y2));
+	B.AddParapet(TEXT("W_BalcE_East"),  FVector2D(XE, Y1), FVector2D(XE, Y2), ParapetHeight);
+	B.AddParapet(TEXT("W_BalcE_South"), FVector2D(X5, Y1), FVector2D(XE, Y1), GuardHeight);
+	B.AddParapet(TEXT("W_BalcE_North"), FVector2D(X5, Y2), FVector2D(XE, Y2), GuardHeight);
 
 	// ----------------------------------------------------------------- structure
 	// Every downstand beam follows a wall line, and the grid is the wall grid. Nothing here crosses
@@ -562,12 +611,29 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	{
 		// The seating faces the south wall, clear of both doorways: D_Foyer's leaf sweeps X 375..1425
 		// and D_Living's X 4950..5850, and the sofa sits between them.
+		//
+		// ------------------------------------------------- why this moved from Y 2900 to Y 3092.5
+		//
+		// SET OUT FROM THE WALL'S FACE, NOT ITS CENTRELINE - the same defect the two TV units and the
+		// shoe rack had, in the largest object in the flat. At 2900 the sofa's back landed on 3350
+		// with W_Mid_Lower's living-room face at 3542.5: a 192.5 mm slot behind a 2100 mm three-seater,
+		// in the room the front door opens onto. Nothing said so while a sofa was a row in the spec
+		// and nothing in the level.
+		//
+		// It reads worse than a gap of that size sounds, because a sofa standing off a wall by a
+		// fifth of its own depth does not look like a sofa placed there; it looks like a sofa somebody
+		// pulled out to sweep behind and forgot to push back.
+		//
+		// 3092.5 puts the back exactly on 3542.5. The sofa can go hard onto the plaster - unlike a
+		// desk, which has to stand clear of the skirting - because its base starts at 120 above the
+		// floor and the room's skirting is 100 tall: the board runs UNDER it, and the only thing below
+		// 120 is four legs 90 mm in from each corner.
 		FHFFixture& Sofa = B.AddFixture(TEXT("F_Sofa"), TEXT("R_Living"), EHFFixtureType::Sofa,
-			TEXT("3-seater sofa"), FVector2D(3800.0, 2900.0), FVector2D(2100.0, 900.0), 800.0, 180.0);
+			TEXT("3-seater sofa"), FVector2D(3800.0, 3092.5), FVector2D(2100.0, 900.0), 800.0, 180.0);
 		Sofa.AnchorWallId = TEXT("W_Mid_Lower");
 
 		B.AddFixture(TEXT("F_CoffeeTable"), TEXT("R_Living"), EHFFixtureType::CoffeeTable,
-			TEXT("Coffee table"), FVector2D(3800.0, 1800.0), FVector2D(1100.0, 600.0), 400.0);
+			TEXT("Coffee table"), FVector2D(3800.0, 1850.0), FVector2D(1100.0, 600.0), 400.0);
 
 		// The TV run, built around the balcony door rather than beside it.
 		//
@@ -578,9 +644,22 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// the 1650 pier between the door's east jamb at 3000 and Win_Living's west jamb at 4650.
 		// That is how the kitchen's wall units already deal with the window over the sink, and it is
 		// what the joinery in front of a balcony door actually is.
+		// ------------------------------------------------------- why both of these moved to Y = 340
+		//
+		// SET OUT FROM THE WALL'S FACE, NOT ITS CENTRELINE. Both units stood at Y 400, which put their
+		// backs at 175 with W_South's inner face at 115 - a 60 mm slot behind 2100 mm of fitted
+		// joinery. Nothing said so while a TV unit was a row in the spec and nothing in the level.
+		//
+		// It is worse than an ordinary gap, because a TV unit is scribed joinery: the skirting is CUT
+		// OUT for its full width - see FHFSkirting::IsScribedJoinery - so the slot behind it has no
+		// skirting in it either. Bare plaster meeting bare floor, 60 mm wide and 2100 long, in the one
+		// place in the living room the eye is aimed at all evening.
+		//
+		// 340 puts the back on 115. Both wardrobes in the flat were already set out this way and were
+		// the check: F_MBed_Wardrobe's back lands on W_East's face at 10685 exactly.
 		FHFFixture& TallUnit = B.AddFixture(TEXT("F_TVUnit_W"), TEXT("R_Living"), EHFFixtureType::TVUnit,
 			TEXT("TV wall unit, tall storage west of the balcony door"),
-			FVector2D(690.0, 400.0), FVector2D(900.0, 450.0), 1800.0);
+			FVector2D(690.0, 340.0), FVector2D(900.0, 450.0), 1800.0);
 		TallUnit.AnchorWallId = TEXT("W_South");
 		TallUnit.Params.ShutterCount = 2;
 		TallUnit.Params.ShelfCount = 4;
@@ -589,14 +668,115 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		FHFFixture& TVUnit = B.AddFixture(TEXT("F_TVUnit_E"), TEXT("R_Living"), EHFFixtureType::TVUnit,
 			TEXT("TV console with drawers, east of the balcony door"),
-			FVector2D(3800.0, 400.0), FVector2D(1200.0, 450.0), 600.0);
+			FVector2D(3800.0, 340.0), FVector2D(1200.0, 450.0), 600.0);
 		TVUnit.AnchorWallId = TEXT("W_South");
 		TVUnit.Params.DrawerCount = 3;
 		TVUnit.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
 		TVUnit.Params.PlinthHeight = 80.0;
 
+		// ----------------------------------------------------------------------- the dining end
+		//
+		// THE TABLE MOVED FROM (5100, 1800) BECAUSE NOBODY COULD SIT AT IT, and that only became a
+		// question once there were chairs to declare.
+		//
+		// At Y 1800 the table stood at Y 1400..2200 with the sofa's front at 2450 - a 250 mm gap
+		// between the two, over a 450 mm stretch where their X ranges overlapped. So the north side of
+		// a four-seater was unusable, the pinch between the seating and the dining was too narrow to
+		// walk through, and the only side left with room was the one against the south wall, where a
+		// chair pulled out goes into the plaster. Every one of those is invisible in a plan that draws
+		// a table and takes its chairs as read, which is exactly what the drawing does.
+		//
+		// (5000, 1100) puts the table under Win_Living, clear of the seating group, with the four
+		// chairs on the north side and the two ends. The measured clearances, all in millimetres:
+		//
+		//     chair pulled out on the north  ->  sofa front            462
+		//     chair pulled out at the west   ->  coffee table            175
+		//     chair pulled out at the east   ->  W_Living_Bed2 face      162
+		//     table                          ->  D_Balcony (X 1200..3000) 1300
+		//     table                          ->  F_TVUnit_E                135
+		//
+		// See HouseForge.Living.DiningClearance, which measures all of them from the spec rather than
+		// trusting this comment.
+		// X 5400, NOT 5000: THE TABLE WAS STANDING WHERE THE TV CONSOLE'S DRAWERS COME OUT.
+		//
+		// F_TVUnit_E runs from 3200 to 4400 on the south wall and its three drawers pull out to Y 795.
+		// The table was drawn at 4300..5700 by 700..1500 - overlapping the console in plan by 100 mm
+		// and standing 95 mm inside the line its drawers travel to. Every drawer in the console drove
+		// into the table's top rail, and the west end chair with it.
+		//
+		// Nothing about either object could see it: the console is where a TV console goes, its
+		// drawers are the right size on the right runners with the right travel, and the table is a
+		// 4-seater in a living-dining. It is only wrong as a pair, and only once the drawers are open.
+		//
+		// East AND a little north, and the two are set by three limits that meet at one place.
+		//
+		// East of the console's drawers, which reach X 4400: the table starts at 4500.
+		// North of where those drawers reach in the other direction, which is Y 917, so the west end
+		// chair sits clear of them at 1025 rather than across them.
+		// And not so far east that the EAST end chair cannot be pulled out: at 6100 it had 480 of
+		// chair and 350 of pulling to do in the 442 left before W_Living_Bed2's plaster, and it drove
+		// 115 mm into it. 5200 leaves 62.
+		//
+		// North further is the coffee table, which has itself gone 50 north to 1550..2150 to keep 125
+		// between it and the west end chair PULLED OUT - a chair that cannot be got out of is the same
+		// fault as one that cannot be got into.
+		//
+		// Four constraints and about 60 mm of slack at the tightest of them, which is what a
+		// living-dining of this size actually is once everything in it is solid.
 		B.AddFixture(TEXT("F_DiningTable"), TEXT("R_Living"), EHFFixtureType::DiningTable,
-			TEXT("4-seater dining"), FVector2D(5100.0, 1800.0), FVector2D(1400.0, 800.0), 750.0);
+			TEXT("4-seater dining"), FVector2D(5200.0, 1200.0), FVector2D(1400.0, 800.0), 750.0);
+
+		// THE CHAIRS THE TABLE IMPLIES, declared rather than taken as read.
+		//
+		// A plan marks a dining table and no chairs, which is normal - the table is the thing that has
+		// to fit. Built that way the flat gets a four-seater nobody can sit at, and the question the
+		// room actually has to answer has nothing in it to ask about.
+		//
+		// Two on the north side and one at each end, and NOT two per long side: the south side has
+		// only 585 mm to the wall face, which takes a tucked chair and nothing pulled out. That is a
+		// property of a 6.6 x 3.6 living-dining carrying a three-seater as well, not a fault in the
+		// table - see the clearances above.
+		//
+		// Local +Y runs BACK on a chair, so a chair at zero yaw has its back to +Y and faces the table
+		// to the south of it. 90 and 270 face the two ends inward.
+		{
+			constexpr double ChairW = 450.0;
+			constexpr double ChairD = 480.0;
+			constexpr double ChairH = 850.0;
+
+			auto AddChair = [&B](const FName& Id, const FVector2D& Position, double Yaw)
+			{
+				B.AddFixture(Id, TEXT("R_Living"), EHFFixtureType::Chair, TEXT("Dining chair"),
+					Position, FVector2D(ChairW, ChairD), ChairH, Yaw);
+			};
+
+			// Tucked 150 under the table's edge, which is what "tucked in" means and what makes the
+			// footprints overlap - see IsExpectedOverlap in the validator.
+			//
+			// 4710 AND 5290, NOT 4670 AND 5330: A CHAIR TUCKS IN BETWEEN THE LEGS, NOT INTO ONE.
+			//
+			// The table's legs are set 80 in from each end and are 70 square, so on a 1400 side they
+			// stand at 4380..4450 and 5550..5620 and the clear span between them is 1100. Two 450
+			// chairs need 900 of that, which leaves 200 to share out - and spread the way they were,
+			// each chair had 5 mm of itself inside the leg beside it. Five millimetres, at knee
+			// height, on the two chairs anybody sitting at that table actually uses.
+			//
+			// Nothing about either object could see it: the table's legs are where a table's legs go,
+			// the chairs are where four chairs go round a 4-seater, and both were measured against
+			// their own drawn box and passed. It took standing them next to each other.
+			//
+			// Centred in the clear span leaves 35 either side of each chair and 130 between them,
+			// which is what a set of four round a table this size actually looks like.
+			AddChair(TEXT("F_Chair_D1"), FVector2D(4910.0, 1690.0), 0.0);
+			AddChair(TEXT("F_Chair_D2"), FVector2D(5490.0, 1690.0), 0.0);
+			// THE TWO END CHAIRS TUCK 250 RATHER THAN 150, and the reason is at the west end: at 150
+			// the west chair's back stood 30 mm inside the line F_TVUnit_E's drawers travel to, so the
+			// top drawer of the console met it on the way out. Tucking further is what a chair at the
+			// end of a table does anyway - the ends are where somebody pushes a chair right in - and
+			// it moves both of them off the traffic round the table.
+			AddChair(TEXT("F_Chair_D3"), FVector2D(4510.0, 1200.0), 90.0);
+			AddChair(TEXT("F_Chair_D4"), FVector2D(5890.0, 1200.0), 270.0);
+		}
 
 		FHFFixture& Fan = B.AddFixture(TEXT("F_Fan_Living"), TEXT("R_Living"), EHFFixtureType::CeilingFan,
 			TEXT("Ceiling fan"), FVector2D(3300.0, 1800.0), FVector2D(1200.0, 1200.0), 300.0);
@@ -605,33 +785,108 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Kitchen: an L-shaped modular run along the west and north walls.
 	{
+		// THE CORNER, SET OUT SO THE TWO RUNS DO NOT STAND IN EACH OTHER.
+		//
+		// An L-shaped kitchen has one run going hard into the corner and the other butting against
+		// its side. Drawn as two rectangles that each ran the full length of their wall, these two
+		// overlapped by 115 x 415 in the north-west corner - 477 cm2 of one carcass inside the other,
+		// with the west run ALSO stopping 185 short of the north wall, so the corner was simultaneously
+		// double-occupied and open. Neither was visible until the cabinets were first built, because
+		// nothing in the spec looks at two fixtures at once; the coplanar scan found it the moment
+		// there was geometry to scan.
+		//
+		// West runs into the corner: back on the west wall's inner face at X 115, front at X 715,
+		// north end hard against the north wall's inner face at Y 8285.
+		// North starts clear of it at X 750, which leaves the west counter's overhang somewhere to be.
+		//
 		// footprint.x is always the run length and .y the depth; rotation orients it. A 90 degree
 		// yaw therefore puts a 2400 long, 600 deep run against the west wall.
 		FHFFixture& BaseWest = B.AddFixture(TEXT("F_Kitchen_BaseW"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, west run"), FVector2D(415.0, 6900.0), FVector2D(2400.0, 600.0), 850.0, 90.0);
+			TEXT("Base units, west run"), FVector2D(415.0, 7085.0), FVector2D(2400.0, 600.0), 850.0, 90.0);
 		BaseWest.AnchorWallId = TEXT("W_West");
 		BaseWest.Params.ShutterCount = 2;
 		BaseWest.Params.DrawerCount = 3;
 		BaseWest.Params.PlinthHeight = 100.0;
 		BaseWest.Params.HandleStyle = EHFHandleStyle::JProfile;
 
-		// 2300, not 3000: the north run now dies into W_Kitchen_Util, whose west face is at 2942.5.
+		// X 760..2900: clear of the west run's corner at one end, and dying into W_Kitchen_Util,
+		// whose west face is at 2942.5, at the other.
+		//
+		// 760 AND NOT 715, BECAUSE THE STONE OVERSAILS THE DOORS. The west run's carcass front is at
+		// 715 and its doors hang 20 in front of that, and the granite over them oversails the doors by
+		// another 20 - so the west counter's front edge is at 755, not 715. Started at 715 the north
+		// run's slab and the west run's slab drove 5 mm into each other in the corner, which no
+		// coplanar scan catches because the two faces that met were perpendicular rather than
+		// co-planar. Measured off the built geometry rather than off the drawn footprint.
+		// ------------------------------------------------------- the north run is TWO units, not one
+		//
+		// A SINK NEEDS A CARCASS OF ITS OWN, and drawing the whole 2140 as one unit is what stopped it
+		// having one.
+		//
+		// A run is built as a carcass divided into equal bays, which is how a fitted run is actually
+		// made; the divisions are real 18 mm boards from the floor to the counter. Drawn as one unit
+		// with three doors and a drawer bank, this run came out as four bays of 535 - and the sink is
+		// 800 wide, sitting at 1400..2200, straight over the division at 1830. The bowl passed through
+		// the board. Four millimetres of it, because the bottom of the bowl happens to land near the
+		// board's edge, and the whole depth of the bowl the moment anybody changes either figure.
+		//
+		// NO BAY COUNT FIXES IT. Equal bays of 2140/N put a division inside the sink's 800 for every N
+		// greater than one, and N = 1 is a 2140 cupboard with two 1070 doors. The run cannot carry
+		// this sink, and no arrangement of it can.
+		//
+		// So it is three units, which is what the kitchen fitter delivers on the van: a 900 sink unit
+		// sized round the bowl it carries, and a cupboard each side of it. Three carcasses standing
+		// side by side, each with its own ends, exactly as the west run and this one already are.
+		//
+		// The 2140 is unchanged and so is every end of it - 760 to 2900, dying into W_Kitchen_Util at
+		// the east exactly as before. It is divided 570 / 900 / 670, and the middle one takes the whole
+		// opening under the window: the sink at 1400..2200 sits in a carcass at 1330..2230 with 70 of
+		// carcass either side of it and no division anywhere beneath it.
+		FHFFixture& BaseNorthWest = B.AddFixture(TEXT("F_Kitchen_BaseNW"), TEXT("R_Kitchen"),
+			EHFFixtureType::KitchenBaseCabinet, TEXT("Base unit, north run west of the sink"),
+			FVector2D(1045.0, 7985.0), FVector2D(570.0, 600.0), 850.0);
+		BaseNorthWest.AnchorWallId = TEXT("W_North");
+		BaseNorthWest.Params.ShutterCount = 1;
+		BaseNorthWest.Params.ShelfCount = 1;
+		BaseNorthWest.Params.PlinthHeight = 100.0;
+		BaseNorthWest.Params.HandleStyle = EHFHandleStyle::JProfile;
+
+		FHFFixture& BaseSink = B.AddFixture(TEXT("F_Kitchen_BaseSink"), TEXT("R_Kitchen"),
+			EHFFixtureType::KitchenBaseCabinet, TEXT("Sink base unit, north run"),
+			FVector2D(1780.0, 7985.0), FVector2D(900.0, 600.0), 850.0);
+		BaseSink.AnchorWallId = TEXT("W_North");
+
+		// ONE BAY, so there is no division anywhere under the bowl, and two leaves on it because a 900
+		// cupboard has two 450 doors. No drawers and no shelf: the trap and the waste live in here,
+		// and FHFSetInResolution empties this bay anyway once it sees what is dropping into it.
+		BaseSink.Params.ShutterCount = 1;
+		BaseSink.Params.DrawerCount = 0;
+		BaseSink.Params.PlinthHeight = 100.0;
+		BaseSink.Params.HandleStyle = EHFHandleStyle::JProfile;
+
 		FHFFixture& BaseNorth = B.AddFixture(TEXT("F_Kitchen_BaseN"), TEXT("R_Kitchen"), EHFFixtureType::KitchenBaseCabinet,
-			TEXT("Base units, north run"), FVector2D(1750.0, 7985.0), FVector2D(2300.0, 600.0), 850.0);
+			TEXT("Base units, north run east of the sink"), FVector2D(2565.0, 7985.0),
+			FVector2D(670.0, 600.0), 850.0);
 		BaseNorth.AnchorWallId = TEXT("W_North");
-		BaseNorth.Params.ShutterCount = 3;
+		BaseNorth.Params.ShutterCount = 0;
 		BaseNorth.Params.DrawerCount = 2;
 		BaseNorth.Params.PlinthHeight = 100.0;
 		BaseNorth.Params.HandleStyle = EHFHandleStyle::JProfile;
 
-		// Counters run along their walls, so they anchor to them like the cabinets beneath.
+		// Counters run along their walls, so they anchor to them like the cabinets beneath, and they
+		// take the same corner set-out: two slabs meeting in an L, not two slabs sharing a corner.
 		FHFFixture& CounterW = B.AddFixture(TEXT("F_Kitchen_CounterW"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, west"), FVector2D(415.0, 6900.0), FVector2D(2400.0, 600.0), 40.0, 90.0, 850.0);
+			TEXT("Granite counter, west"), FVector2D(415.0, 7085.0), FVector2D(2400.0, 600.0), 40.0, 90.0, 850.0);
 		CounterW.AnchorWallId = TEXT("W_West");
 		CounterW.Params.UpstandHeight = 100.0;
 
+		// X 1827.5 and 2145 long, NOT 1830 and 2140: the north run now starts at 755, which is exactly
+		// where the west run's slab ends, rather than at 760. Five millimetres of open joint straight
+		// through the worktop at the one place a fitter mitres tight - visible as a dark line across
+		// the corner in any render taken from the kitchen door, and reported by nothing, because a
+		// clash scan finds solids INSIDE one another and two slabs 5 mm apart are not inside anything.
 		FHFFixture& CounterN = B.AddFixture(TEXT("F_Kitchen_CounterN"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, north"), FVector2D(1750.0, 7985.0), FVector2D(2300.0, 600.0), 40.0, 0.0, 850.0);
+			TEXT("Granite counter, north"), FVector2D(1827.5, 7985.0), FVector2D(2145.0, 600.0), 40.0, 0.0, 850.0);
 		CounterN.AnchorWallId = TEXT("W_North");
 		CounterN.Params.UpstandHeight = 100.0;
 
@@ -662,11 +917,44 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			TEXT("Double-bowl sink"), FVector2D(1800.0, 7985.0), FVector2D(800.0, 450.0), 200.0, 0.0, 690.0);
 
 		// Set into the west counter, so they turn with it.
+		//
+		// X 435, NOT 415: A HOB IS CENTRED ON THE STONE IT IS CUT INTO, NOT ON THE COUNTER'S BOX.
+		//
+		// Drawn on the counter's own centreline, the 560 x 480 cutout came within 40 mm of the back of
+		// the clear stone - the counter is 600 deep but 20 of that is the upstand standing on it, and
+		// stone under a splashback is not stone a hole may go through. FHFCounterKit refuses a cutout
+		// that leaves less than 50 mm anywhere round it, because granite cracks from the corner of one,
+		// and it was right to: the hole was 10 mm too far back.
+		//
+		// WHAT MADE IT A DEFECT RATHER THAN A REFUSAL is what happened next. The counter came back
+		// whole, perfectly convincing from above, and the hob was placed on top of it exactly as if the
+		// hole were there - 7.4 LITRES of appliance inside solid granite, with nothing anywhere saying
+		// the cut had not been made. AHFCounterActor now reports an uncut aperture; this is the other
+		// half, which is the hob being where it can actually be cut in.
+		//
+		// The clear stone runs from the front edge (25 of overhang in front of the drawn 600) to the
+		// upstand face at 580. Its centre is 277.5 back from the front of the slab, which is 22.5 in
+		// front of where the counter's own centreline is - hence 415 + 20, rounded to the 5 the rest of
+		// this drawing works in. The cutout then keeps 60 mm of stone behind it and 70 in front.
 		B.AddFixture(TEXT("F_Kitchen_Hob"), TEXT("R_Kitchen"), EHFFixtureType::Hob,
-			TEXT("4-burner hob"), FVector2D(415.0, 6300.0), FVector2D(580.0, 500.0), 60.0, 90.0, 850.0);
+			TEXT("4-burner hob"), FVector2D(435.0, 6300.0), FVector2D(580.0, 500.0), 60.0, 90.0, 850.0);
 
+		// X 365, NOT 415: A CHIMNEY'S BACK IS FLAT AGAINST THE WALL. Drawn on the same centre as the
+		// hob it hangs over, it stood 50 mm clear of the plaster for its whole 700 height with the
+		// wall visible behind it - which is exactly what it looked like in the first render of this
+		// room, and what no assertion about the spec would ever have said. The hob is centred on the
+		// COUNTER because that is where a hob goes; the chimney is set against the WALL because that
+		// is where a chimney goes, and the two are not the same line.
+		//
+		// 115 (the west wall's inner face) + 250 (half its depth) + 10 = 375.
+		//
+		// THE 10 IS NOT SLACK. Set hard against the plaster, the canopy's back panel landed in exactly
+		// the plane of the wall's finished face and 1617 cm2 of the two z-fought - both surfaces drawn,
+		// the depth test picking a different winner each frame, the whole back of the hood strobing as
+		// the camera moves. A real chimney hangs on a bracket with a gap behind it for the same
+		// practical reason it is easier to fit that way.
 		FHFFixture& Chimney = B.AddFixture(TEXT("F_Kitchen_Chimney"), TEXT("R_Kitchen"), EHFFixtureType::Chimney,
-			TEXT("Chimney"), FVector2D(415.0, 6300.0), FVector2D(600.0, 500.0), 700.0, 90.0, 1500.0);
+			TEXT("Chimney"), FVector2D(375.0, 6300.0), FVector2D(600.0, 500.0), 700.0, 90.0, 1500.0);
 		Chimney.AnchorWallId = TEXT("W_West");
 
 		// On the kitchen's south wall, not in the corner by the utility.
@@ -697,10 +985,42 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Bed.AnchorWallId = TEXT("W_North");
 
 		// Clear of the bed's 5400..7200 span so they sit beside it, not clipping into it.
-		B.AddFixture(TEXT("F_MBed_Night1"), TEXT("R_MBed"), EHFFixtureType::Nightstand,
-			TEXT("Nightstand"), FVector2D(5100.0, 8000.0), FVector2D(450.0, 400.0), 550.0);
-		B.AddFixture(TEXT("F_MBed_Night2"), TEXT("R_MBed"), EHFFixtureType::Nightstand,
-			TEXT("Nightstand"), FVector2D(7500.0, 8000.0), FVector2D(450.0, 400.0), 550.0);
+		//
+		// Both state their plinth in MILLIMETRES, which is the units this spec is written in, and they
+		// have to: FHFFixtureParams defaults PlinthHeight to 10, and that 10 is a CENTIMETRE figure
+		// sitting on a struct whose lengths are converted from whatever the spec declares. Left unsaid
+		// it arrives as a 10 mm plinth - a bedside unit standing on a 1 cm rebate, which is not a toe
+		// kick, it is a manufacturing tolerance. Exactly the trap F_Bed2_Wardrobe's LoftHeight fell
+		// into, and it is worth two lines here rather than a second bug report.
+		auto AddNightstand = [&B](const FName& Id, const FVector2D& Position) -> FHFFixture&
+		{
+			FHFFixture& Night = B.AddFixture(Id, TEXT("R_MBed"), EHFFixtureType::Nightstand,
+				TEXT("Nightstand"), Position, FVector2D(450.0, 400.0), 550.0);
+			Night.Params.DrawerCount = 2;
+			Night.Params.PlinthHeight = 80.0;
+			Night.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
+
+			// DELIBERATELY NOT ANCHORED, and this is the one place in the flat where the 85 mm the
+			// render reviews complained about is doing a job.
+			//
+			// Anchoring it makes FHFFixturePlacement::AgainstWall put its drawn back on the plaster,
+			// which is right for a wardrobe and wrong for this. A nightstand is not scribed joinery,
+			// so the skirting runs on behind it and its plinth lands 6 mm inside the board; and
+			// F_Soc_MBed_1 and F_Soc_MBed_2 are at 300 above the floor directly behind these two
+			// units, so the carcass closes on the socket plate and both rockers end up inside it
+			// through their whole travel. Measured: eight solids sharing space and twenty-four part
+			// positions fouling, none of which exist at the drawn position.
+			//
+			// The answer is not a placement rule. Either the sockets move up over the units - which is
+			// where a bedside socket belongs and is a change to the drawing, not to the code - or the
+			// unit carries the skirting setback the desk, the bed and the refrigerator all carry. Both
+			// are real; neither is a review pass's decision to take. Stated here so the gap is a
+			// recorded choice rather than the oversight the beds turned out to be.
+			return Night;
+		};
+
+		AddNightstand(TEXT("F_MBed_Night1"), FVector2D(5100.0, 8000.0));
+		AddNightstand(TEXT("F_MBed_Night2"), FVector2D(7500.0, 8000.0));
 
 		// 2400 long run, 600 deep, turned to stand against the east wall at X=10800.
 		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_MBed_Wardrobe"), TEXT("R_MBed"), EHFFixtureType::Wardrobe,
@@ -746,8 +1066,27 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// Bedroom 2
 	{
+		// 1200, not 1300. The headboard is built at the back of the drawn footprint - the drawn box is
+		// the object, so a bed cannot grow through the wall behind it - which put this one's head at
+		// Y 300 with W_South's face at 115: a 185 mm gap behind a queen bed, wide enough to read from
+		// the doorway as a bed that has been pulled away from the wall. 1200 leaves 85, which is what
+		// F_MBed_Bed already has and is a bed standing against a wall with its skirting behind it.
+		// X 8600, NOT 8300: THE STUDY'S DRAWERS HAD NOWHERE TO COME OUT TO.
+		//
+		// F_Bed2_Study stands on the west wall with its 550 depth running east, so its two pedestal
+		// drawers pull east into the room - 550 of full-extension travel, out to X 7775. The bed's
+		// west side was at 7550. Both drawers drove into the mattress, the lower one by 45 mm, and
+		// neither could be opened past about two fifths.
+		//
+		// A desk drawer that cannot be pulled out is the same defect as the kitchen's corner drawer
+		// with 25 mm of travel: real motion, real axis, full declared travel, and a fixture nobody can
+		// use. It is only visible with the drawer open and the bed built, which is a pair of
+		// conditions no test in the bedroom group put together.
+		//
+		// 8600 leaves 75 mm between the open drawer and the bed, and still leaves 735 between the
+		// bed's foot and F_Bed2_Wardrobe at 10085 - which is the walking room down that side.
 		FHFFixture& Bed = B.AddFixture(TEXT("F_Bed2_Bed"), TEXT("R_Bed2"), EHFFixtureType::Bed,
-			TEXT("Queen bed"), FVector2D(8300.0, 1300.0), FVector2D(1500.0, 2000.0), 600.0);
+			TEXT("Queen bed"), FVector2D(8600.0, 1200.0), FVector2D(1500.0, 2000.0), 600.0);
 		Bed.AnchorWallId = TEXT("W_South");
 
 		FHFFixture& Wardrobe = B.AddFixture(TEXT("F_Bed2_Wardrobe"), TEXT("R_Bed2"), EHFFixtureType::Wardrobe,
@@ -801,16 +1140,36 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// mirrored about its own door when the band was re-cut - the WC that used to sit at the far
 		// end from the doorway ended up beside the hinge without moving relative to the room.
 		//
-		// 2900 puts it 360 clear of the arc, with the basin 235 west of it and the shower north.
-		B.AddFixture(TEXT("F_CBath_WC"), TEXT("R_CBath"), EHFFixtureType::WC,
+		// --------------------------------------------------- why every fitting in here names a wall
+		//
+		// NONE OF THEM DID, and all of them are bolted to one. A WC's soil connection, a shower's
+		// riser, a basin's brackets and a geyser's straps are all in a particular wall, and until each
+		// of these said which, the geometry had nothing to orient against: a WC placed off its drawn
+		// yaw alone is a one-in-two chance of facing the wall, and there is no half turn to resolve
+		// without an anchor. The anchor also drives FHFFixturePlacement::OnWallFace, which is what
+		// puts each fitting's back on the finished face instead of on the centreline the plan drew it
+		// against - see the geysers below, which are drawn 107.5 mm inside the masonry.
+		//
+		// It moves nothing in plan along the wall and it changes no room area.
+		FHFFixture& CBathWC = B.AddFixture(TEXT("F_CBath_WC"), TEXT("R_CBath"), EHFFixtureType::WC,
 			TEXT("Wall-hung WC"), FVector2D(2900.0, 3960.0), FVector2D(380.0, 600.0), 400.0);
-		B.AddFixture(TEXT("F_CBath_Basin"), TEXT("R_CBath"), EHFFixtureType::Basin,
-			TEXT("Counter basin"), FVector2D(2200.0, 3900.0), FVector2D(550.0, 450.0), 200.0, 0.0, 800.0);
+		CBathWC.AnchorWallId = TEXT("W_Mid_Lower");
+
+		// NO VANITY IN THIS ROOM, which is what makes this one a wall-hung basin where the master's is
+		// a vessel on a counter - same drawn box, two different fittings. The composing layer works
+		// that out from what is standing under it; see AHFBasinActor.
+		FHFFixture& CBathBasin = B.AddFixture(TEXT("F_CBath_Basin"), TEXT("R_CBath"),
+			EHFFixtureType::Basin, TEXT("Counter basin"), FVector2D(2200.0, 3900.0),
+			FVector2D(550.0, 450.0), 200.0, 0.0, 800.0);
+		CBathBasin.AnchorWallId = TEXT("W_Mid_Lower");
+
 		// The service band runs Y 3600..5400, so a 900-deep shower must centre at 4900 to keep
 		// its far edge at 5350 rather than pushing through the partition. 2900 rather than the
 		// room's centre at 3000 leaves 100 clear of D_CBath's leaf tip at 3450.
-		B.AddFixture(TEXT("F_CBath_Shower"), TEXT("R_CBath"), EHFFixtureType::Shower,
-			TEXT("Shower area"), FVector2D(2900.0, 4900.0), FVector2D(900.0, 900.0), 2100.0);
+		FHFFixture& CBathShower = B.AddFixture(TEXT("F_CBath_Shower"), TEXT("R_CBath"),
+			EHFFixtureType::Shower, TEXT("Shower area"), FVector2D(2900.0, 4900.0),
+			FVector2D(900.0, 900.0), 2100.0);
+		CBathShower.AnchorWallId = TEXT("W_Mid_Upper");
 
 		// Master bath, X 8100..10800 clear 8157.5..10685, Y 3600..5400 clear 3657.5..5342.5. Two
 		// doors: D_MBath in the north wall at X 9200..9950, and D_BalcE in the east wall at
@@ -824,8 +1183,10 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		//
 		// So the shower goes to the WEST end, which moving D_MBath east has now freed, and the two
 		// doors face each other across an open floor instead of fighting over one corner.
-		B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"), EHFFixtureType::Shower,
-			TEXT("Shower area"), FVector2D(8610.0, 4890.0), FVector2D(900.0, 900.0), 2100.0);
+		FHFFixture& MBathShower = B.AddFixture(TEXT("F_MBath_Shower"), TEXT("R_MBath"),
+			EHFFixtureType::Shower, TEXT("Shower area"), FVector2D(8610.0, 4890.0),
+			FVector2D(900.0, 900.0), 2100.0);
+		MBathShower.AnchorWallId = TEXT("W_Mid_Upper");
 
 		FHFFixture& Vanity = B.AddFixture(TEXT("F_MBath_Vanity"), TEXT("R_MBath"), EHFFixtureType::Vanity,
 			TEXT("Vanity unit"), FVector2D(8700.0, 3910.0), FVector2D(900.0, 500.0), 800.0);
@@ -834,13 +1195,20 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		Vanity.Params.DrawerCount = 1;
 		Vanity.Params.HandleStyle = EHFHandleStyle::Knob;
 
-		B.AddFixture(TEXT("F_MBath_Basin"), TEXT("R_MBath"), EHFFixtureType::Basin,
-			TEXT("Counter basin"), FVector2D(8700.0, 3910.0), FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
+		// AT EXACTLY THE VANITY'S OWN CENTRE, which is what makes this one a vessel basin standing on
+		// the vanity's stone rather than a wall-hung one: BaseZ 800 is the vanity's top and the 180 is
+		// how far the bowl stands above it. The composing layer matches the two by footprint, the same
+		// way it matches a sink to the counter it is cut into.
+		FHFFixture& MBathBasin = B.AddFixture(TEXT("F_MBath_Basin"), TEXT("R_MBath"),
+			EHFFixtureType::Basin, TEXT("Counter basin"), FVector2D(8700.0, 3910.0),
+			FVector2D(500.0, 400.0), 180.0, 0.0, 800.0);
+		MBathBasin.AnchorWallId = TEXT("W_Mid_Lower");
 
 		// On the south wall between the vanity and the balcony door's approach, 350 clear of the one
 		// and 55 clear of the other.
-		B.AddFixture(TEXT("F_MBath_WC"), TEXT("R_MBath"), EHFFixtureType::WC,
+		FHFFixture& MBathWC = B.AddFixture(TEXT("F_MBath_WC"), TEXT("R_MBath"), EHFFixtureType::WC,
 			TEXT("Wall-hung WC"), FVector2D(9690.0, 3960.0), FVector2D(380.0, 600.0), 400.0);
+		MBathWC.AnchorWallId = TEXT("W_Mid_Lower");
 	}
 
 	// Utility, off the kitchen, with the machine under its own window and against the outside wall
@@ -880,8 +1248,21 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		// Turned onto the foyer's east wall. The foyer's north wall is now the kitchen doorway, and
 		// it was against that; the east wall is 1800 of blank partition with the DB high up on it.
+		// --------------------------------------------------- why this moved from (1600, 4300)
+		//
+		// IT WAS INSIDE THE WALL. Turned onto the east wall, a 350-deep rack centred at X 1600 has its
+		// back at 1775; W_Foyer_CBath is 115 thick on the X1 = 1800 line, so its foyer face is at
+		// 1742.5. The rack stood 32.5 mm inside the masonry down its whole 1200 length. Set out from
+		// the wall's centreline instead of its face - the same slip as the two TV units, and equally
+		// invisible until something was actually built there. 1567.5 puts the back on 1742.5.
+		//
+		// And it moved north at the same time, because pulling it 32.5 west walked its near end into
+		// D_Foyer's swing: the doorway occupies X 375..1425 of W_Mid_Lower and the leaf sweeps a
+		// 1050 quarter-circle out of it. At Y 4000 the leaf has come round to 3919 at worst, so
+		// centring the rack at 4600 clears the arc by 81 mm and still leaves 142 to the north wall,
+		// with F_DB passing overhead at 1800.
 		FHFFixture& Shoes = B.AddFixture(TEXT("F_ShoeRack"), TEXT("R_Foyer"), EHFFixtureType::ShoeRack,
-			TEXT("Shoe rack"), FVector2D(1600.0, 4300.0), FVector2D(1200.0, 350.0), 900.0, 90.0);
+			TEXT("Shoe rack"), FVector2D(1567.5, 4600.0), FVector2D(1200.0, 350.0), 900.0, 90.0);
 		Shoes.AnchorWallId = TEXT("W_Foyer_CBath");
 		Shoes.Params.ShutterCount = 2;
 		Shoes.Params.ShelfCount = 3;
@@ -894,10 +1275,10 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	// own layer, and they are what makes a generated flat usable rather than merely furnished.
 	{
 		auto AddSocket = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
-			const FName& AnchorWall, double Rotation = 0.0)
+			const FName& AnchorWall, double Rotation = 0.0, double BaseZ = 300.0)
 		{
 			FHFFixture& Socket = B.AddFixture(Id, RoomId, EHFFixtureType::PowerSocket,
-				TEXT("Power socket"), Position, FVector2D(160.0, 20.0), 120.0, Rotation, 300.0);
+				TEXT("Power socket"), Position, FVector2D(160.0, 20.0), 120.0, Rotation, BaseZ);
 			Socket.AnchorWallId = AnchorWall;
 			Socket.Params.GangCount = 2;
 			return &Socket;
@@ -925,7 +1306,16 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 		// Living / dining. The switch plate sits beside D_Living's handle jamb at X 5850, and the
 		// TV point follows the console it feeds.
-		AddSocket(TEXT("F_Soc_Living_TV"), TEXT("R_Living"), FVector2D(3800.0, 120.0), TEXT("W_South"));
+		// The TV point is at 1100, not at the general-purpose 300 the rest of the flat's sockets are.
+		//
+		// It is the one socket in the flat with a fixed height, and the height is the television's:
+		// the set hangs on the wall over the console with its centre at 1000-1100, and the point goes
+		// behind it so no flex shows. At 300 it was behind the CONSOLE instead - literally, once the
+		// console was set out on the wall face rather than 60 mm off it, the validator reported the
+		// two overlapping by 75% of the smaller footprint and sharing a height range. A socket buried
+		// in the back of a cabinet is not a socket; nothing can be plugged into it.
+		AddSocket(TEXT("F_Soc_Living_TV"), TEXT("R_Living"), FVector2D(3800.0, 120.0), TEXT("W_South"),
+			0.0, 1100.0);
 		AddSocket(TEXT("F_Soc_Living_1"),  TEXT("R_Living"), FVector2D(5900.0, 1800.0), TEXT("W_Living_Bed2"), 90.0);
 		AddSwitchPlate(TEXT("F_Sw_Living"), TEXT("R_Living"), FVector2D(6060.0, 3480.0), TEXT("W_Mid_Lower"), 8);
 		AddSplitAC(TEXT("F_AC_Living"), TEXT("R_Living"), FVector2D(3300.0, 3480.0), TEXT("W_Mid_Lower"));
@@ -972,17 +1362,45 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// The extract is NOT in here. It was, on NorthWall, and that is what put both of them in the
 		// wrong wall: see below.
 		auto FitOutBathroom = [&B](const FName& Prefix, const FName& RoomId,
-			double ShowerX, double BasinX, double TowelX,
+			double GeyserX, double BasinX, double TowelX,
 			const FName& NorthWall, const FName& SouthWall)
 		{
+			// ------------------------------------------------- why the geyser is not over the shower
+			//
+			// IT WAS, AND IT DOES NOT FIT THERE. Both geysers were set out at the shower's own centre
+			// line, which is where a plan puts one and where the hot water is wanted. The ceiling is
+			// what makes it impossible: the wet rooms have a 250 flat soffit at 2600, a geyser drawn
+			// 2100..2550 needs clearance under it, and FHFCeilingFit correctly LOWERS it to 2060. The
+			// shower's arm is at 2100. So the vessel's underside came down through the arm, and the
+			// rose ended up hanging directly out of the bottom of a 25-litre pressure vessel.
+			//
+			// It is 7 mm of interpenetration and it is entirely visible: the two are the only things
+			// in the top of the room and they are touching. Nothing but a clash check in the built
+			// flat finds it, because both fittings are correct and the ceiling fit that moved them
+			// together is correct too.
+			//
+			// Moving it along the wall is also what a plumber does. A geyser's inlet and outlet drop
+			// out of its underside, and a geyser over the rose puts both of them in the spray.
 			FHFFixture& Geyser = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Geyser"))), RoomId,
 				EHFFixtureType::Geyser, TEXT("Storage water heater"),
-				FVector2D(ShowerX, 5250.0), FVector2D(450.0, 400.0), 450.0, 0.0, 2100.0);
+				FVector2D(GeyserX, 5250.0), FVector2D(450.0, 400.0), 450.0, 0.0, 2100.0);
 			Geyser.AnchorWallId = NorthWall;
 
+			// ------------------------------------------------- why the mirror is not at 1000 any more
+			//
+			// IT WAS SITTING ON THE BASIN. The common bath's basin is drawn 800..1000 and the mirror
+			// was drawn from 1000, so the mirror's bottom edge and the basin's rim were the same plane
+			// - two elements, thirty millimetres of build-up, six hundred wide, in exact contact. That
+			// is the coplanar case this plugin has been bitten by before, and it is wrong before it is
+			// a rendering problem: a mirror goes ABOVE the splashback, not resting on the china.
+			//
+			// It also has to clear the tap. A basin mixer on a ledge at 1000 stands to about 1150, so
+			// anything below 1200 is a mirror with a tap in front of it. 1200..2000 is where a
+			// bathroom mirror actually goes, and it leaves the towel rail at the same height
+			// undisturbed - the two are 700 apart along the wall.
 			FHFFixture& Mirror = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Mirror"))), RoomId,
 				EHFFixtureType::Mirror, TEXT("Mirror"),
-				FVector2D(BasinX, 3720.0), FVector2D(600.0, 30.0), 800.0, 0.0, 1000.0);
+				FVector2D(BasinX, 3720.0), FVector2D(600.0, 30.0), 800.0, 0.0, 1200.0);
 			Mirror.AnchorWallId = SouthWall;
 
 			FHFFixture& Towel = B.AddFixture(FName(*(Prefix.ToString() + TEXT("_Towel"))), RoomId,
@@ -991,9 +1409,19 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			Towel.AnchorWallId = SouthWall;
 		};
 
-		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 2900.0, 2200.0, 3500.0,
+		// The common bath's geyser goes EAST of its shower. The shower occupies X 2450..3350 and the
+		// room's clear width runs to 4142.5, so 3600 puts a 450 vessel at 3375..3825: 25 clear of the
+		// shower's wet area, 317 clear of the east wall, and clear in plan of the riser at 2900 and of
+		// the arm that reaches out from it.
+		FitOutBathroom(TEXT("F_CBath"), TEXT("R_CBath"), 3600.0, 2200.0, 3500.0,
 			TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
-		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 8610.0, 8700.0, 9950.0,
+
+		// The master's has less choice. Its shower is at the WEST end (X 8160..9060) and D_MBath takes
+		// X 9200..9950 of the same wall, which leaves 250 mm between them and 735 east of the door. So
+		// the geyser goes east of the doorway at 10300: X 10075..10525, 125 clear of the door's jamb
+		// and 160 clear of the east wall. Further from the shower than anybody would choose, and the
+		// only place on this wall a 450 vessel fits without standing over a door or over the rose.
+		FitOutBathroom(TEXT("F_MBath"), TEXT("R_MBath"), 10300.0, 8700.0, 9950.0,
 			TEXT("W_Mid_Upper"), TEXT("W_Mid_Lower"));
 
 		// ------------------------------------------------------ where a bathroom fan actually blows
@@ -1033,6 +1461,11 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 
 	// ------------------------------------------------------------------------- balconies
 	{
+		// All three are drawn 60 mm inboard of their parapet's centreline, which leaves 27.5 of a 60
+		// wide railing hanging over the balcony with nothing under its base plates. Left exactly as
+		// drawn: FHFFixturePlacement::OnWallTop centres it on the coping, because that is a fact
+		// about how a balustrade is fixed rather than a number three fixtures should each carry a
+		// copy of - the same argument OnWallFace's correction is made from.
 		auto AddRailing = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
 			const FVector2D& Footprint, double Rotation, const FName& AnchorWall)
 		{

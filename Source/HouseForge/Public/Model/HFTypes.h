@@ -248,6 +248,22 @@ enum class EHFShutterMotion : uint8
 	TopHung,
 
 	/**
+	 * Hinged along its FOOT and tilting out and down: a shoe rack's flap, a tip-out sink tray.
+	 *
+	 * The mirror of TopHung and a genuinely different object from either of the hinges above. The
+	 * leaf stands ABOVE its hinge, so its local Z runs from 0 up to LeafHeight and it turns about the
+	 * horizontal axis at its own foot; its leading edge is therefore the TOP one.
+	 *
+	 * IT ALSO STOPS SOMEWHERE DIFFERENT, and that is not a detail. Every other leaf here opens to
+	 * 100 degrees because a concealed hinge does; a tilt-out flap stops at about 68, because past
+	 * that the compartment tips its contents onto the floor and the gear is built with a stay that
+	 * says so. A shoe rack whose flaps swung to 100 would lie flat out into the foyer and read as
+	 * four open drawers rather than as a shoe cabinet - which is exactly the sort of thing that
+	 * measures correct and looks wrong. See FHFJoineryDefaults::TiltOutFlapAngleDegrees.
+	 */
+	BottomHung,
+
+	/**
 	 * Running on a track, passing its neighbour rather than swinging clear of it.
 	 *
 	 * Different from a hinged run in a way that shows: sliding leaves LAP one another on separate

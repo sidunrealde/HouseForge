@@ -254,7 +254,7 @@
 				"y": -1500
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 450,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -272,7 +272,7 @@
 				"y": 0
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -290,7 +290,7 @@
 				"y": 0
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -308,7 +308,7 @@
 				"y": 9900
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 450,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -326,7 +326,7 @@
 				"y": 9900
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -344,7 +344,7 @@
 				"y": 9900
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -362,7 +362,7 @@
 				"y": 5400
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 450,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -380,7 +380,7 @@
 				"y": 3600
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -398,7 +398,7 @@
 				"y": 5400
 			},
 			"thickness": 115,
-			"height": 1100,
+			"height": 1250,
 			"baseZ": 0,
 			"bIsExternal": true,
 			"surfaceRole": "WallPaint"
@@ -1992,7 +1992,7 @@
 			"position":
 			{
 				"x": 3800,
-				"y": 2900
+				"y": 3092.5
 			},
 			"rotationDegrees": 180,
 			"footprint":
@@ -2030,7 +2030,7 @@
 			"position":
 			{
 				"x": 3800,
-				"y": 1800
+				"y": 1850
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2068,7 +2068,7 @@
 			"position":
 			{
 				"x": 690,
-				"y": 400
+				"y": 340
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2106,7 +2106,7 @@
 			"position":
 			{
 				"x": 3800,
-				"y": 400
+				"y": 340
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2143,8 +2143,8 @@
 			"label": "4-seater dining",
 			"position":
 			{
-				"x": 5100,
-				"y": 1800
+				"x": 5200,
+				"y": 1200
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2153,6 +2153,158 @@
 				"y": 800
 			},
 			"height": 750,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Chair_D1",
+			"roomId": "R_Living",
+			"type": "Chair",
+			"label": "Dining chair",
+			"position":
+			{
+				"x": 4910,
+				"y": 1690
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 450,
+				"y": 480
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Chair_D2",
+			"roomId": "R_Living",
+			"type": "Chair",
+			"label": "Dining chair",
+			"position":
+			{
+				"x": 5490,
+				"y": 1690
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 450,
+				"y": 480
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Chair_D3",
+			"roomId": "R_Living",
+			"type": "Chair",
+			"label": "Dining chair",
+			"position":
+			{
+				"x": 4510,
+				"y": 1200
+			},
+			"rotationDegrees": 90,
+			"footprint":
+			{
+				"x": 450,
+				"y": 480
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "None",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Chair_D4",
+			"roomId": "R_Living",
+			"type": "Chair",
+			"label": "Dining chair",
+			"position":
+			{
+				"x": 5890,
+				"y": 1200
+			},
+			"rotationDegrees": 270,
+			"footprint":
+			{
+				"x": 450,
+				"y": 480
+			},
+			"height": 850,
 			"baseZ": 0,
 			"anchorWallId": "None",
 			"params":
@@ -2220,7 +2372,7 @@
 			"position":
 			{
 				"x": 415,
-				"y": 6900
+				"y": 7085
 			},
 			"rotationDegrees": 90,
 			"footprint":
@@ -2251,19 +2403,19 @@
 			}
 		},
 		{
-			"id": "F_Kitchen_BaseN",
+			"id": "F_Kitchen_BaseNW",
 			"roomId": "R_Kitchen",
 			"type": "KitchenBaseCabinet",
-			"label": "Base units, north run",
+			"label": "Base unit, north run west of the sink",
 			"position":
 			{
-				"x": 1750,
+				"x": 1045,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2300,
+				"x": 570,
 				"y": 600
 			},
 			"height": 850,
@@ -2271,7 +2423,83 @@
 			"anchorWallId": "W_North",
 			"params":
 			{
-				"shutterCount": 3,
+				"shutterCount": 1,
+				"drawerCount": 0,
+				"shelfCount": 1,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 100,
+				"handleStyle": "JProfile",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_BaseSink",
+			"roomId": "R_Kitchen",
+			"type": "KitchenBaseCabinet",
+			"label": "Sink base unit, north run",
+			"position":
+			{
+				"x": 1780,
+				"y": 7985
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 900,
+				"y": 600
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 1,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 100,
+				"handleStyle": "JProfile",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Kitchen_BaseN",
+			"roomId": "R_Kitchen",
+			"type": "KitchenBaseCabinet",
+			"label": "Base units, north run east of the sink",
+			"position":
+			{
+				"x": 2565,
+				"y": 7985
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 670,
+				"y": 600
+			},
+			"height": 850,
+			"baseZ": 0,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 0,
 				"drawerCount": 2,
 				"shelfCount": 0,
 				"bHasLoft": false,
@@ -2296,7 +2524,7 @@
 			"position":
 			{
 				"x": 415,
-				"y": 6900
+				"y": 7085
 			},
 			"rotationDegrees": 90,
 			"footprint":
@@ -2333,13 +2561,13 @@
 			"label": "Granite counter, north",
 			"position":
 			{
-				"x": 1750,
+				"x": 1827.5,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2300,
+				"x": 2145,
 				"y": 600
 			},
 			"height": 40,
@@ -2485,7 +2713,7 @@
 			"label": "4-burner hob",
 			"position":
 			{
-				"x": 415,
+				"x": 435,
 				"y": 6300
 			},
 			"rotationDegrees": 90,
@@ -2523,7 +2751,7 @@
 			"label": "Chimney",
 			"position":
 			{
-				"x": 415,
+				"x": 375,
 				"y": 6300
 			},
 			"rotationDegrees": 90,
@@ -2652,12 +2880,12 @@
 			"params":
 			{
 				"shutterCount": 0,
-				"drawerCount": 0,
+				"drawerCount": 2,
 				"shelfCount": 0,
 				"bHasLoft": false,
 				"loftHeight": 60,
-				"plinthHeight": 10,
-				"handleStyle": "Bar",
+				"plinthHeight": 80,
+				"handleStyle": "HandlelessGroove",
 				"shutterMotion": "SideHung",
 				"loftShutterMotion": "SideHung",
 				"bHasHangingRail": false,
@@ -2690,12 +2918,12 @@
 			"params":
 			{
 				"shutterCount": 0,
-				"drawerCount": 0,
+				"drawerCount": 2,
 				"shelfCount": 0,
 				"bHasLoft": false,
 				"loftHeight": 60,
-				"plinthHeight": 10,
-				"handleStyle": "Bar",
+				"plinthHeight": 80,
+				"handleStyle": "HandlelessGroove",
 				"shutterMotion": "SideHung",
 				"loftShutterMotion": "SideHung",
 				"bHasHangingRail": false,
@@ -2827,8 +3055,8 @@
 			"label": "Queen bed",
 			"position":
 			{
-				"x": 8300,
-				"y": 1300
+				"x": 8600,
+				"y": 1200
 			},
 			"rotationDegrees": 0,
 			"footprint":
@@ -2990,7 +3218,7 @@
 			},
 			"height": 400,
 			"baseZ": 0,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3028,7 +3256,7 @@
 			},
 			"height": 200,
 			"baseZ": 800,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3066,7 +3294,7 @@
 			},
 			"height": 2100,
 			"baseZ": 0,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Upper",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3104,7 +3332,7 @@
 			},
 			"height": 2100,
 			"baseZ": 0,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Upper",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3180,7 +3408,7 @@
 			},
 			"height": 180,
 			"baseZ": 800,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3218,7 +3446,7 @@
 			},
 			"height": 400,
 			"baseZ": 0,
-			"anchorWallId": "None",
+			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
 				"shutterCount": 0,
@@ -3397,8 +3625,8 @@
 			"label": "Shoe rack",
 			"position":
 			{
-				"x": 1600,
-				"y": 4300
+				"x": 1567.5,
+				"y": 4600
 			},
 			"rotationDegrees": 90,
 			"footprint":
@@ -3445,7 +3673,7 @@
 				"y": 20
 			},
 			"height": 120,
-			"baseZ": 300,
+			"baseZ": 1100,
 			"anchorWallId": "W_South",
 			"params":
 			{
@@ -3967,7 +4195,7 @@
 			"label": "Storage water heater",
 			"position":
 			{
-				"x": 2900,
+				"x": 3600,
 				"y": 5250
 			},
 			"rotationDegrees": 0,
@@ -4015,7 +4243,7 @@
 				"y": 30
 			},
 			"height": 800,
-			"baseZ": 1000,
+			"baseZ": 1200,
 			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
@@ -4081,7 +4309,7 @@
 			"label": "Storage water heater",
 			"position":
 			{
-				"x": 8610,
+				"x": 10300,
 				"y": 5250
 			},
 			"rotationDegrees": 0,
@@ -4129,7 +4357,7 @@
 				"y": 30
 			},
 			"height": 800,
-			"baseZ": 1000,
+			"baseZ": 1200,
 			"anchorWallId": "W_Mid_Lower",
 			"params":
 			{
@@ -4319,7 +4547,7 @@
 				"y": 60
 			},
 			"height": 800,
-			"baseZ": 1100,
+			"baseZ": 450,
 			"anchorWallId": "W_Balc_South",
 			"params":
 			{
@@ -4357,7 +4585,7 @@
 				"y": 60
 			},
 			"height": 800,
-			"baseZ": 1100,
+			"baseZ": 450,
 			"anchorWallId": "W_BalcN_North",
 			"params":
 			{
@@ -4395,7 +4623,7 @@
 				"y": 60
 			},
 			"height": 800,
-			"baseZ": 1100,
+			"baseZ": 450,
 			"anchorWallId": "W_BalcE_East",
 			"params":
 			{

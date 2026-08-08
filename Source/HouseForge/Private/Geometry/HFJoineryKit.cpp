@@ -596,6 +596,14 @@ FBox FHFJoineryKit::ShutterPanelBox(const FHFShutterParams& Params)
 		return FBox(FVector(0.0, 0.0, -H), FVector(W, Params.Thickness, 0.0));
 	}
 
+	if (Params.IsBottomHung())
+	{
+		// And a tilt-out flap stands ABOVE its hinge: the exact mirror, and the same absence of a
+		// hand. Its board still lies on +Y of its own origin, so the face it presents to the room is
+		// at local Y = 0 exactly as every other leaf's is.
+		return FBox(FVector(0.0, 0.0, 0.0), FVector(W, Params.Thickness, H));
+	}
+
 	if (Params.IsSliding())
 	{
 		// Set out over the module rather than inside it: the near edge stands off the jamb by the
@@ -623,6 +631,14 @@ EHFHandleEdge FHFJoineryKit::ShutterLeadingEdge(const FHFShutterParams& Params)
 		return EHFHandleEdge::Bottom;
 	}
 
+	// A tilt-out flap's leading edge is its TOP one, for the same reason and the other way up: that
+	// is the edge that comes towards you, and the edge the hand goes behind to tip the compartment
+	// open. A pull at the bottom of a tilt-out is a pull that fights the hinge it is next to.
+	if (Params.IsBottomHung())
+	{
+		return EHFHandleEdge::Top;
+	}
+
 	// A sliding leaf leads with the edge it runs towards, which is the one away from the jamb it is
 	// set out from - the same edge a hinged leaf of that hand opens from.
 	return Params.Hinge == EHFShutterHinge::Left ? EHFHandleEdge::MaxX : EHFHandleEdge::MinX;
@@ -643,6 +659,14 @@ FTransform FHFJoineryKit::ShutterPivotTransform(const FHFShutterParams& Params)
 	{
 		// The head of the module, half a reveal down from its top. The leaf hangs below.
 		return FTransform(FVector(HalfReveal, AxisY, Params.ModuleHeight - HalfReveal));
+	}
+
+	if (Params.IsBottomHung())
+	{
+		// The FOOT of the module, half a reveal up from its bottom. The leaf stands above, and the
+		// axis lies on its front face like every other leaf's - which is what keeps the flap swinging
+		// out of the compartment rather than back through the shelf behind it.
+		return FTransform(FVector(HalfReveal, AxisY, HalfReveal));
 	}
 
 	if (Params.IsSliding())
@@ -676,6 +700,19 @@ FHFPartMotion FHFJoineryKit::ShutterMotion(const FHFShutterParams& Params)
 		Motion.Type = EHFMotionType::Hinge;
 		Motion.Axis = FVector::XAxisVector;
 		Motion.MaxAngleDegrees = -Params.OpenAngleDegrees;
+		return Motion;
+	}
+
+	if (Params.IsBottomHung())
+	{
+		// The same axis and the OPPOSITE sign, which is the whole of the difference between a lift-up
+		// and a tilt-out. Rotating a point at +Z about +X by a positive angle carries it to negative
+		// Y - forward, out of the compartment - and the leaf's top edge comes down into the room as
+		// it goes. The other sign would tip the flap backwards through the shelf behind it, which
+		// looks identical in elevation and is obvious the instant it is opened.
+		Motion.Type = EHFMotionType::Hinge;
+		Motion.Axis = FVector::XAxisVector;
+		Motion.MaxAngleDegrees = Params.OpenAngleDegrees;
 		return Motion;
 	}
 
@@ -2472,24 +2509,40 @@ FDynamicMesh3 FHFJoineryKit::GenerateCarcass(const FHFCarcassParams& Params)
 	// Sides full height and full depth; top and bottom running between them; the back behind both.
 	// Exactly the lay-up the composition tests build by hand, so their clearances keep measuring the
 	// same boards in the same places.
-	AppendRail(Mesh, FVector3d(0.0, 0.0, 0.0), FVector3d(T, D, H), Carc);
-	AppendRail(Mesh, FVector3d(W - T, 0.0, 0.0), FVector3d(W, D, H), Carc);
+	const double TopFace = P.TopFaceZ();
+
+	// The two gables, in the role each one actually is. A gable dying into a wall or into the next run
+	// is bare board; one standing in the room is a finished end, laminated to match the fronts. See
+	// FHFCarcassParams::bLeftEndFinished - left as carcass, an exposed end renders as a bare cream
+	// slab beside a wall of shutters, which is how the TV column, both nightstands, the wall cabinet
+	// and the vanity all came out.
+	const EHFSurfaceRole LeftRole = P.bLeftEndFinished ? EHFSurfaceRole::ShutterLaminate : Carc;
+	const EHFSurfaceRole RightRole = P.bRightEndFinished ? EHFSurfaceRole::ShutterLaminate : Carc;
+
+	AppendRail(Mesh, FVector3d(0.0, 0.0, 0.0), FVector3d(T, D, H), LeftRole);
+	AppendRail(Mesh, FVector3d(W - T, 0.0, 0.0), FVector3d(W, D, H), RightRole);
 	AppendRail(Mesh, FVector3d(T, 0.0, 0.0), FVector3d(W - T, D, T), Carc);
-	AppendRail(Mesh, FVector3d(T, 0.0, H - T), FVector3d(W - T, D, H), Carc);
+
+	// A BASE UNIT UNDER A COUNTER HAS NO TOP BOARD - the granite is its top, and a bowl 200 deep has
+	// to pass through the plane where a board would be. See FHFCarcassParams::bHasTop.
+	if (P.bHasTop)
+	{
+		AppendRail(Mesh, FVector3d(T, 0.0, H - T), FVector3d(W - T, D, H), Carc);
+	}
 
 	if (P.bHasBack && D - BackY > UE_KINDA_SMALL_NUMBER)
 	{
-		AppendRail(Mesh, FVector3d(T, BackY, T), FVector3d(W - T, D, H - T), Carc);
+		AppendRail(Mesh, FVector3d(T, BackY, T), FVector3d(W - T, D, TopFace), Carc);
 	}
 
-	// Mid partitions on the internal bay boundaries, butted between the bottom and the top and
-	// stopping at the back panel rather than running through it.
+	// Mid partitions on the internal bay boundaries, butted between the bottom and whatever closes
+	// the box above, and stopping at the back panel rather than running through it.
 	const double Module = P.ModuleWidth();
 	for (int32 Boundary = 1; Boundary < P.Bays(); ++Boundary)
 	{
 		const double Centre = Boundary * Module;
 		AppendRail(Mesh, FVector3d(Centre - T * 0.5, 0.0, T),
-			FVector3d(Centre + T * 0.5, BackY, H - T), Carc);
+			FVector3d(Centre + T * 0.5, BackY, TopFace), Carc);
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
@@ -2510,7 +2563,7 @@ FBox FHFJoineryKit::CarcassBayClearVolume(const FHFCarcassParams& Params, int32 
 	CarcassBayClearX(P, Bay, X0, X1);
 
 	const double Z0 = P.BoardThickness;
-	const double Z1 = P.Height - P.BoardThickness;
+	const double Z1 = P.TopFaceZ();
 
 	// A bay whose partitions have eaten it has no clear volume, and saying so is what stops a caller
 	// placing a shelf stack into a negative width and getting geometry inside out.

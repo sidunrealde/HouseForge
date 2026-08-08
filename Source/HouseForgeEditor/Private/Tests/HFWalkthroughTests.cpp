@@ -15,6 +15,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Misc/AutomationTest.h"
+#include "Model/HFFixturePlacement.h"
 #include "Model/HFSampleHouse.h"
 #include "Model/HFTypes.h"
 
@@ -107,17 +108,78 @@ namespace HouseForgeWalkthrough
 	}
 
 	/**
-	 * A point comfortably inside a room's boundary.
+	 * A point inside a room that is FLOOR - inside its boundary and clear of the furniture in it.
 	 *
 	 * The centroid of the vertices is outside an L-shaped room, so it is only used when the room
 	 * actually contains it; otherwise the bounding box is sampled until a point inside turns up.
+	 *
+	 * ## Why the furniture matters
+	 *
+	 * It did not, while the flat was empty. The bedroom group put a queen bed at the exact centroid
+	 * of R_Bed2 - which is where a bed goes, against the long wall of a room that size - and a trace
+	 * dropped from head height at the centroid landed on the mattress at Z 60 instead of on the slab
+	 * at 0. The test correctly reported that there was no floor there.
+	 *
+	 * The right answer is not to relax what the trace will accept. "You can stand here" is exactly
+	 * what this test exists to prove, and a bed IS something you cannot stand on; accepting a fixture
+	 * as a floor would have thrown away the check that a room has a slab at all. What was wrong was
+	 * WHERE it asked, so this asks somewhere a person could actually stand - which is what a
+	 * walkthrough pawn does when it walks into a bedroom.
+	 *
+	 * @param Fixtures The FITTED fixtures of the whole house. Only those the house builds geometry
+	 *        for are avoided: a fixture with no mesh cannot be stood on and must not narrow the
+	 *        search, or a flat full of unbuilt types would have no floor to test at all.
 	 */
-	bool InteriorPoint(const FHFRoom& Room, FVector2D& OutPoint)
+	bool InteriorPoint(const FHFRoom& Room, const TArray<FHFFixture>& Fixtures, FVector2D& OutPoint)
 	{
 		if (Room.Boundary.Num() < 3)
 		{
 			return false;
 		}
+
+		// Clear of the furniture by a margin, because a pawn has a capsule rather than a point and
+		// standing with half a foot inside a wardrobe is not standing.
+		constexpr double StandingMargin = 20.0;
+
+		/** Where the floor probe drops from. Anything reaching below this is something you would hit. */
+		constexpr double ProbeStartHeight = 150.0;
+
+		auto IsFloor = [&Room, &Fixtures](const FVector2D& Point)
+		{
+			if (!Room.ContainsPoint(Point))
+			{
+				return false;
+			}
+
+			for (const FHFFixture& Fixture : Fixtures)
+			{
+				if (Fixture.RoomId != Room.Id || !AHFHouseActor::BuildsGeometryFor(Fixture.Type))
+				{
+					continue;
+				}
+
+				// ANYTHING THE TRACE CAN REACH IS IN THE WAY, and that is not the same as anything on
+				// the floor. It used to be: a fixture whose base was above ankle height was assumed to
+				// be something a pawn walks under. A ceiling fan is; a towel rail at 1200 and a mirror
+				// at 1000 are not, and the probe drops from 1500 - so it came down THROUGH the rail and
+				// reported that the common bathroom's floor was a piece of chrome tube.
+				//
+				// The physical question is whether a person standing here would be inside something,
+				// and the answer is the same one the trace asks: does this fixture occupy any of the
+				// height the probe passes through.
+				if (Fixture.IsCeilingMounted() || Fixture.BaseZ > ProbeStartHeight)
+				{
+					continue;
+				}
+
+				if (FHFFixturePlacement::FootprintContains(Fixture, Point, StandingMargin))
+				{
+					return false;
+				}
+			}
+
+			return true;
+		};
 
 		FVector2D Centroid = FVector2D::ZeroVector;
 		FVector2D Min = Room.Boundary[0];
@@ -131,7 +193,7 @@ namespace HouseForgeWalkthrough
 		}
 		Centroid /= double(Room.Boundary.Num());
 
-		if (Room.ContainsPoint(Centroid))
+		if (IsFloor(Centroid))
 		{
 			OutPoint = Centroid;
 			return true;
@@ -146,7 +208,7 @@ namespace HouseForgeWalkthrough
 					FMath::Lerp(Min.X, Max.X, double(i) / Steps),
 					FMath::Lerp(Min.Y, Max.Y, double(j) / Steps));
 
-				if (Room.ContainsPoint(Candidate))
+				if (IsFloor(Candidate))
 				{
 					OutPoint = Candidate;
 					return true;
@@ -347,16 +409,21 @@ bool FHFWalkthroughFloorTest::RunTest(const FString& Parameters)
 
 	int32 Checked = 0;
 
+	// The FITTED fixtures, which is the list the house actually built from - so the floor is looked
+	// for clear of the furniture that is really standing there rather than of the drawing's version
+	// of it.
+	const TArray<FHFFixture> Fixtures = House->FittedFixtures();
+
 	for (const FHFRoom& Room : Spec.Rooms)
 	{
 		FVector2D Plan;
-		if (!InteriorPoint(Room, Plan))
+		if (!InteriorPoint(Room, Fixtures, Plan))
 		{
 			continue;
 		}
 
 		// Straight down from head height onto the finished floor level.
-		const FVector Start(Plan.X, Plan.Y, Room.FloorZ + 150.0);
+		const FVector Start(Plan.X, Plan.Y, Room.FloorZ + 150.0);   // ProbeStartHeight
 		const FVector End(Plan.X, Plan.Y, Room.FloorZ - 50.0);
 
 		FHitResult Hit;

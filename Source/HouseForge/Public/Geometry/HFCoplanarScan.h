@@ -21,6 +21,16 @@ struct HOUSEFORGE_API FHFScanSurface
 
 	/** Mesh space to world. */
 	FTransform ToWorld = FTransform::Identity;
+
+	/**
+	 * What object this surface is a piece of - an element id, typically.
+	 *
+	 * Only FHFClashScan reads it, and only to skip comparing a fixture's parts with each other: a
+	 * drawer inside its own carcass is a drawer in the right place. The coplanar scan ignores it,
+	 * because two faces of one fixture fighting over a plane is a real defect wherever it comes
+	 * from. Left unset, nothing is skipped.
+	 */
+	FName Owner;
 };
 
 /** How close two faces have to be before they count as fighting over the same plane. */

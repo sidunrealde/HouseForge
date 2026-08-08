@@ -508,6 +508,14 @@ FDynamicMesh3 FHFGenerators::GenerateFloor(const FHFRoom& Room, double SlabThick
 		// same winding the boundary uses - which is what lets one offset serve both.
 		for (const FHFSkirtingReturn& Run : Skirting.Returns)
 		{
+			// RESOLVED BUT NOT BUILT. A cupboard scribed into the corner stands over the column, so
+			// the board that would have gone round it goes inside the carcass instead. See
+			// FHFSkirtingReturn::bCoveredByJoinery, where what that looked like is set out.
+			if (Run.bCoveredByJoinery)
+			{
+				continue;
+			}
+
 			const FWallFrame Frame = MakeWallFrame(Run.Start, Run.End);
 			if (!Frame.bValid || Frame.Length <= MinMemberSize)
 			{

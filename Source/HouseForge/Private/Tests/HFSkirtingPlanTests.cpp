@@ -266,7 +266,16 @@ bool FHFSkirtingJoineryTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("And it is named as joinery"),
 			Plan.Breaks[0].Cause == EHFSkirtingBreakCause::Joinery);
 		TestEqual(TEXT("By its own id"), Plan.Breaks[0].SourceId, FName(TEXT("F_Wardrobe")));
-		TestNearlyEqual(TEXT("Over exactly its own width"), Plan.Breaks[0].Length(), 180.0, 0.01);
+
+		// ITS OWN WIDTH PLUS A JAMB CLEARANCE EACH SIDE, which is the same slack a doorway gets and
+		// is there for the same reason. Cut to the carcass exactly, the board's end grain finishes
+		// in precisely the plane of the unit's end panel - two solids sharing a face at every end of
+		// every run of scribed joinery in the flat, and in two places in the reference flat the
+		// carcass came out a couple of millimetres INSIDE the board. No carpenter scribes a skirting
+		// to a hairline against a cupboard either; the board is cut short and the joint is a shadow.
+		const FHFSkirtingParams Section;
+		TestNearlyEqual(TEXT("Over its own width and a scribe clearance each side"),
+			Plan.Breaks[0].Length(), 180.0 + 2.0 * Section.JambClearance, 0.01);
 	}
 
 	// SAME TYPE, LIFTED OFF THE FLOOR. A wardrobe whose underside clears the top of the skirting
@@ -542,12 +551,19 @@ bool FHFSkirtingCoverageTest::RunTest(const FString& Parameters)
  * triangles at the time: the foyer lost 120 cm to a shoe rack, bedroom 2 lost 120 cm to a study
  * table, and the kitchen lost 230 + 240 cm to two runs of base units - 710 cm of the flat's
  * perimeter with the board deleted and nothing in front of it, because eight fixture types answer
- * true to IsScribedJoinery and only Wardrobe is built.
+ * true to IsScribedJoinery and only Wardrobe was built.
  *
  * So this measures the two resolutions against each other. Told nothing, the resolver still cuts for
  * every scribed type, which is the right answer for a room being resolved on its own. Told what the
- * house builds, the unbuilt units leave the run whole - and the wardrobes, which ARE built, still
- * cut, because a carcass really does stand there.
+ * house builds, the unbuilt units leave the run whole - and the units that ARE built still cut,
+ * because a carcass really does stand there.
+ *
+ * THE BUILT SET GROWS AS THE CATALOGUE LANDS, AND THAT IS THE POINT OF THE TEST RATHER THAN A
+ * NUISANCE. Milestone 9's kitchen group made the two runs of base units real, so the kitchen's
+ * 230 + 240 cm came back OUT of the recovered total and went back to being genuine breaks with
+ * genuine carcasses in front of them. The assertions below are therefore written against
+ * BuildsGeometryFor rather than against a number somebody typed: a break must exist exactly where
+ * something is built, and the recovered skirting must be exactly the runs that are not.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSkirtingUnbuiltJoineryTest,
 	"HouseForge.Model.SkirtingIsNotCutForJoineryNobodyBuilds", HF_TEST_FLAGS)
@@ -560,7 +576,10 @@ bool FHFSkirtingUnbuiltJoineryTest::RunTest(const FString& Parameters)
 	const TSet<FName> BuiltIds = AHFHouseActor::BuiltFixtureIds(Spec.Fixtures);
 
 	double RecoveredTotal = 0.0;
-	int32 WardrobeBreaks = 0;
+	int32 JoineryBreaks = 0;
+
+	/** Every fixture that interrupts the board somewhere in the flat, on the informed plan. */
+	TSet<FName> Interrupts;
 
 	for (const FHFRoom& Room : Spec.Rooms)
 	{
@@ -582,48 +601,75 @@ bool FHFSkirtingUnbuiltJoineryTest::RunTest(const FString& Parameters)
 		{
 			if (Break.Cause == EHFSkirtingBreakCause::Joinery)
 			{
-				++WardrobeBreaks;
+				++JoineryBreaks;
+				Interrupts.Add(Break.SourceId);
 			}
+
+			// EVERY BREAK, IN EVERY ROOM, IS PAID FOR. This used to be asked of three rooms by name -
+			// the ones the user had looked at - which is a check on the rooms somebody happened to
+			// think of rather than on the flat. It costs nothing to ask it of all thirteen.
+			TestTrue(*FString::Printf(TEXT("%s: the gap for '%s' has something built standing in it"),
+				*Room.Id.ToString(), *Break.SourceId.ToString()),
+				Break.Cause != EHFSkirtingBreakCause::Joinery || BuiltIds.Contains(Break.SourceId));
 		}
 	}
 
-	AddInfo(FString::Printf(TEXT("Skirting recovered across the flat: %.0f cm."), RecoveredTotal));
+	AddInfo(FString::Printf(TEXT("Skirting recovered across the flat: %.0f cm over %d joinery breaks."),
+		RecoveredTotal, JoineryBreaks));
 
-	// The four unbuilt runs, to the centimetre: 120 + 120 + 230 + 240.
-	TestTrue(TEXT("The flat gets its missing skirting back"), RecoveredTotal > 700.0);
+	// NOTHING IS RECOVERED ANY MORE, AND THAT IS THE MILESTONE FINISHING THE JOB. Recovery is the
+	// skirting the informed plan puts back because the fixture that would have cut it is not built,
+	// so it was 710 cm when only the wardrobe existed and 230 after the kitchen group. The bedroom
+	// group takes it to zero: the TV units, the shoe rack and the nightstands are built, and the
+	// study table stopped claiming a break it could not pay for - a desk is not scribed joinery,
+	// because the board runs on through its knee hole.
+	//
+	// Zero is also a figure that STAYS zero as the catalogue lands, which is why it replaces the
+	// window this test used to assert. Every remaining type either builds or does not scribe, so the
+	// only way this can go positive again is somebody adding a scribed type without geometry - which
+	// is precisely the 710 cm of missing board the mechanism exists to prevent.
+	TestNearlyEqual(TEXT("Every run this flat scribes into its skirting now has a carcass in it"),
+		RecoveredTotal, 0.0, 0.01);
 
-	// And the wardrobes keep theirs, because a wardrobe really is built.
-	TestEqual(TEXT("Only the two wardrobes still cut the run"), WardrobeBreaks, 2);
-
-	// The rooms the user would have looked at first.
-	auto RoomNamed = [&Spec](const TCHAR* Id) -> const FHFRoom*
+	// AND THE OTHER DIRECTION, which no number can express and which is the half that would fail
+	// silently. A break with nothing in it is bare plaster; a carcass with no break is a carcass
+	// driven through a skirting board, and it looks equally wrong from the same doorway. So every
+	// scribed run the house builds against a wall must interrupt the board it stands on - derived
+	// from IsScribedJoinery and BuildsGeometryFor rather than from a count somebody keeps in step by
+	// hand, which is exactly the drift that put the missing board there in the first place.
+	for (const FHFFixture& Fixture : Spec.Fixtures)
 	{
-		return Spec.Rooms.FindByPredicate([Id](const FHFRoom& R) { return R.Id == FName(Id); });
-	};
-
-	for (const TCHAR* Id : { TEXT("R_Kitchen"), TEXT("R_Foyer"), TEXT("R_Bed2") })
-	{
-		const FHFRoom* Room = RoomNamed(Id);
-		if (Room == nullptr)
+		if (!FHFSkirting::IsScribedJoinery(Fixture.Type) || !BuiltIds.Contains(Fixture.Id)
+			|| Fixture.AnchorWallId.IsNone())
 		{
-			AddError(FString::Printf(TEXT("The sample flat has no %s."), Id));
 			continue;
 		}
 
-		const FHFSkirtingPlan Built = FHFSkirting::For(*Room, Spec.Walls, Spec.Openings,
-			Spec.Columns, Spec.Fixtures, FHFSkirtingParams(), &BuiltIds);
-
-		for (const FHFSkirtingBreak& Break : Built.Breaks)
+		// A ROOM WITH NO SKIRTING HAS NO BOARD TO INTERRUPT, and both bathrooms are exactly that -
+		// tiled to the ceiling, SkirtingHeight zero, so the resolver never reaches its scribed-joinery
+		// pass at all. The master bathroom's vanity is scribed joinery and IS built, and it still
+		// cannot appear in this set; asking it to would be asking for a break in a board that was
+		// never specified, which is the mirror image of the missing board this test exists to catch.
+		const FHFRoom* Room = Spec.FindRoom(Fixture.RoomId);
+		if (Room == nullptr || Room->SkirtingHeight <= 0.0)
 		{
-			if (Break.Cause != EHFSkirtingBreakCause::Joinery)
-			{
-				continue;
-			}
-
-			TestTrue(*FString::Printf(TEXT("%s: gap for '%s' is backed by a built fixture"),
-				Id, *Break.SourceId.ToString()), BuiltIds.Contains(Break.SourceId));
+			continue;
 		}
+
+		TestTrue(*FString::Printf(TEXT("%s is scribed joinery and is really built"),
+			*Fixture.Id.ToString()), AHFHouseActor::BuildsGeometryFor(Fixture.Type));
+
+		TestTrue(*FString::Printf(
+			TEXT("'%s' stands against '%s' and interrupts the board it is scribed to"),
+			*Fixture.Id.ToString(), *Fixture.AnchorWallId.ToString()),
+			Interrupts.Contains(Fixture.Id));
 	}
+
+	// The count is reported rather than asserted. How many breaks a flat has is a fact about how many
+	// runs it happens to contain and which corners they turn - the west kitchen run cuts TWICE,
+	// because it runs hard into the north-west corner and stands against two of the kitchen's walls -
+	// and pinning it makes every future fixture a failing test rather than a passing one.
+	TestTrue(TEXT("Scribed joinery does interrupt the board somewhere"), JoineryBreaks > 0);
 
 	return true;
 }

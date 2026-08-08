@@ -102,13 +102,26 @@ namespace
 			|| Type == EHFFixtureType::Vanity;
 	}
 
+	/** Tables a chair is pulled up to, and therefore tucked under. */
+	bool IsTable(EHFFixtureType Type)
+	{
+		return Type == EHFFixtureType::DiningTable || Type == EHFFixtureType::CoffeeTable
+			|| Type == EHFFixtureType::StudyTable;
+	}
+
 	/**
 	 * A sink cut into a worktop, a hob dropped into a counter, a basin over a vanity - these are
 	 * meant to overlap. Reporting them would train whoever reads the report to ignore the rule.
+	 *
+	 * AND A CHAIR TUCKED UNDER A TABLE, which this rule has claimed as its example since it was
+	 * written and did not actually allow, because until the loose furniture was built there were no
+	 * chairs in the flat to test it with. A chair that does not overlap its table is not tucked in -
+	 * it is standing 150 mm away from it - so the overlap is the correct state, not a tolerance.
 	 */
 	bool IsExpectedOverlap(EHFFixtureType A, EHFFixtureType B)
 	{
-		return (IsInsetFitting(A) && IsCabinetRun(B)) || (IsCabinetRun(A) && IsInsetFitting(B));
+		return (IsInsetFitting(A) && IsCabinetRun(B)) || (IsCabinetRun(A) && IsInsetFitting(B))
+			|| (A == EHFFixtureType::Chair && IsTable(B)) || (IsTable(A) && B == EHFFixtureType::Chair);
 	}
 
 	/** The four corners of a fixture's footprint after rotation, in plan. */

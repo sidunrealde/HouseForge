@@ -536,8 +536,8 @@ bool FHFNothingTouchesTheCeilingTest::RunTest(const FString& Parameters)
 
 				if (Actor == nullptr)
 				{
-					// A fixture type with no generator yet - the pelmet. Its resolved box is what
-					// HFCeilingFitTests measures; there is no mesh here to look at.
+					// A fixture type with no generator. Its resolved box is what HFCeilingFitTests
+					// measures; there is no mesh here to look at.
 					continue;
 				}
 
@@ -569,6 +569,29 @@ bool FHFNothingTouchesTheCeilingTest::RunTest(const FString& Parameters)
 
 				if (!Bounds.IsValid)
 				{
+					continue;
+				}
+
+				// A PELMET IS THE OTHER EXCEPTION, AND IT IS THE OPPOSITE ONE. Everything else in
+				// this loop has to stay clear of the plasterboard; a curtain pelmet is SCREWED TO IT,
+				// so its top board is driven a few millimetres into the ceiling rather than stopped
+				// on it - a board that stops exactly on a plane leaves two coplanar faces flashing
+				// against each other, and one that stops short leaves a slot into the plenum. See
+				// FHFFixturePlacement::UnderSoffit.
+				//
+				// So the assertion is inverted rather than relaxed: it must REACH the soffit, within
+				// the embedment. A pelmet hanging below the ceiling with bare wall above it is the
+				// defect - it is what the drawn BaseZ of 2350 produces once the ceilings become
+				// shallow bands - and a one-sided clearance test would call that a pass.
+				if (Fixture.Type == EHFFixtureType::Pelmet)
+				{
+					constexpr double Embedment = 0.3;
+
+					TestTrue(*FString::Printf(
+						TEXT("[%s] '%s' is fixed to the soffit at open %.0f (reaches %.2f, soffit %.2f)"),
+						*NameOf(Template), *Fixture.Id.ToString(), OpenAmount, Bounds.Max.Z, SoffitZ),
+						Bounds.Max.Z >= SoffitZ - 0.01 && Bounds.Max.Z <= SoffitZ + Embedment + 0.01);
+
 					continue;
 				}
 

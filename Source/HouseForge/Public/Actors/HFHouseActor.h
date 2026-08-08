@@ -112,8 +112,8 @@ public:
 	/**
 	 * Whether a fixture of this type becomes an element actor when the house is built.
 	 *
-	 * THE ONE PLACE THAT ANSWERS IT. The fixture catalogue is milestone 9 and most of it does not
-	 * exist yet: 69 fixtures are declared in the reference flat and eight are built. Every part of
+	 * THE ONE PLACE THAT ANSWERS IT. The fixture catalogue is milestone 9 and it is not finished:
+	 * 73 fixtures are declared in the reference flat and 46 are built. Every part of
 	 * the composing layer that has to know which is which asks here - the spawn loops below, the
 	 * skirting resolver that must not cut a gap for a cabinet nobody modelled, and the build report
 	 * that used to count spec rows and say "69 fixtures" over a level holding eight.

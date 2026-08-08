@@ -30,7 +30,7 @@
  * Everything here is measured on the reference 2BHK as it is really built, because the whole point
  * of these attributes is that they exist on every surface a camera can see. A chamfer on a test box
  * proves the operation works; a chamfer on all 22 walls, 19 openings, 12 rooms, 8 beams, 11 columns,
- * 7 false ceilings and 69 fixtures is the thing the renders depend on.
+ * 7 false ceilings and every built fixture is the thing the renders depend on.
  */
 namespace HouseForgePhotoreal
 {
@@ -455,12 +455,28 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 
 	const FCollisionQueryParams TraceParams(TEXT("HFSlidingCollision"), /*bTraceComplex*/ true);
 
-	// A probe through the middle of a part, along whichever way it is thinnest - which for a leaf,
-	// a sash or a shutter is its thickness, so the line crosses the solid rather than running down
-	// a shadow gap.
+	// A probe along whichever way the part is thinnest - which for a leaf, a sash or a shutter is its
+	// thickness, so the line crosses the solid rather than running down a shadow gap.
+	//
+	// AIMED AT THE PART'S OWN TRIANGLES RATHER THAN AT THE MIDDLE OF ITS BOUNDING BOX, because not
+	// every part has anything at the middle of its bounding box. A drawer's runner is a PAIR of
+	// members, one down each side of the module - see FHFJoineryKit::GenerateDrawerRunnerIntermediate,
+	// where two of them is what lets the drawer's rail overlap this member and this member overlap the
+	// cabinet's channel. Its box therefore spans the whole module and its centre is the air BETWEEN
+	// the two rails, so a central probe went cleanly through the gap and reported no collision on five
+	// parts that have perfectly good collision.
+	//
+	// Sampling a grid across the box does not fix it either - the rails are 12 mm members at the ends
+	// of a 780 mm span, so any grid coarse enough to write down misses them too, and picking offsets
+	// until the current geometry passes is fitting the test to the answer.
+	//
+	// So the probe is aimed at a point that is on the surface BY CONSTRUCTION: the centroid of one of
+	// the part's own triangles, taken from the mesh the component is rendering and pushed through the
+	// component's own transform. That cannot be defeated by any shape, and it still fails exactly as
+	// before for the case this test exists to catch - a part whose collision did not travel with its
+	// render has nothing at any of its triangles either.
 	auto ProbeHits = [&TraceParams](UDynamicMeshComponent* Component, const FBox& WorldBounds)
 	{
-		const FVector Centre = WorldBounds.GetCenter();
 		const FVector Extent = WorldBounds.GetExtent();
 
 		int32 Thinnest = 0;
@@ -472,8 +488,36 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 		FVector Along = FVector::ZeroVector;
 		Along[Thinnest] = FMath::Max(Extent[Thinnest] * 4.0, 10.0);
 
-		FHitResult Hit;
-		return Component->LineTraceComponent(Hit, Centre - Along, Centre + Along, TraceParams);
+		const UE::Geometry::FDynamicMesh3* Mesh = Component->GetMesh();
+		if (Mesh == nullptr || Mesh->TriangleCount() == 0)
+		{
+			return false;
+		}
+
+		const FTransform ToWorld = Component->GetComponentTransform();
+
+		// A handful of triangles spread through the part rather than all of them: one is enough to
+		// prove the body is there, and several guard against a single degenerate face.
+		const int32 Triangles = Mesh->MaxTriangleID();
+		const int32 Stride = FMath::Max(Triangles / 8, 1);
+
+		for (int32 Tri = 0; Tri < Triangles; Tri += Stride)
+		{
+			if (!Mesh->IsTriangle(Tri))
+			{
+				continue;
+			}
+
+			const FVector From = ToWorld.TransformPosition(FVector(Mesh->GetTriCentroid(Tri)));
+
+			FHitResult Hit;
+			if (Component->LineTraceComponent(Hit, From - Along, From + Along, TraceParams))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	};
 
 	int32 SlidingParts = 0;
@@ -600,6 +644,114 @@ bool FHFRenderFinishSettingTest::RunTest(const FString& Parameters)
 	Subsystem->ApplyProjectSettingsToLevel();
 	TestEqual(TEXT("Turning them back on restores exactly what was there"),
 		TotalTriangles(House), Chamfered);
+
+	return true;
+}
+
+/**
+ * A PULL-OUT HAS SOMEWHERE TO PULL OUT TO.
+ *
+ * The kitchen's west run put its drawer bank in the corner of the L, where the north run stands
+ * squarely in front of it: 2.5 cm of clear travel out of 55 before the drawer drove into the return's
+ * carcasses. Every existing assertion passed. The bank existed, each drawer carried a real Slide
+ * motion with a real axis, each one swept its whole declared travel, each one's collision moved with
+ * it - and the drawer could not be opened. It is the wardrobe's cancelling-leaf pair again in a
+ * different fitting: motion that is present, correct and useless.
+ *
+ * So this asserts the thing none of those did - that the space the part travels INTO is empty. Traced
+ * against the rest of the flat rather than reasoned about, because the obstruction is another actor
+ * and no generator or actor can see one.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFPullOutClearanceTest,
+	"HouseForge.Photoreal.EveryPullOutHasSomewhereToGo", HF_TEST_FLAGS)
+
+bool FHFPullOutClearanceTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgePhotoreal;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFHouseActor* House = BuildReferenceFlat(World);
+	if (!TestNotNull(TEXT("The reference flat builds"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ ClearHouseForgeActors(World); };
+
+	int32 PullOuts = 0;
+	int32 Blocked = 0;
+
+	for (const TObjectPtr<AActor>& Actor : House->ElementActors)
+	{
+		AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Actor);
+		if (Articulated == nullptr)
+		{
+			continue;
+		}
+
+		Articulated->CloseAllParts();
+
+		for (const FHFPartState& Part : Articulated->Parts)
+		{
+			// DRAWERS ONLY, and the exclusions are the point rather than a convenience.
+			//
+			// A geared runner follows its own drawer, so testing it tests the drawer twice. A sliding
+			// wardrobe leaf and a sliding window sash both run IN A TRACK, passing the leaf beside
+			// them by design - they are supposed to end up over their neighbour, and a trace along
+			// their travel correctly finds it. Only a drawer comes OUT of the thing it lives in, and
+			// only a drawer therefore needs the space in front of it to be empty.
+			//
+			// Identified by part id, which FHFJoineryKit::BuildDrawerBank and
+			// FHFCasedGoodsKit::DrawerPartIdPrefix both guarantee - it is the same contract the
+			// material panel and the pose restore already rely on.
+			if (Part.Motion.Type != EHFMotionType::Slide || Part.Motion.MaxTravelCm <= 5.0
+				|| !Part.Motion.DrivenByPartId.IsNone()
+				|| !Part.PartId.ToString().StartsWith(TEXT("Drawer")))
+			{
+				continue;
+			}
+
+			UDynamicMeshComponent* Component = Articulated->GetPartComponent(Part.PartId);
+			if (Component == nullptr)
+			{
+				continue;
+			}
+
+			++PullOuts;
+
+			// From the middle of the shut front, out along the travel, for as far as it goes. In
+			// world space, because the obstruction is in world space.
+			const FBox Shut = Component->Bounds.GetBox();
+			const FVector Axis = Articulated->GetActorRotation().RotateVector(
+				Part.Motion.Axis.GetSafeNormal());
+
+			const FVector From = Shut.GetCenter() + Axis * (Shut.GetExtent().Size() * 0.5 + 1.0);
+			const FVector To = Shut.GetCenter() + Axis * Part.Motion.MaxTravelCm;
+
+			FCollisionQueryParams TraceParams(TEXT("HFPullOut"), /*bTraceComplex*/ true);
+			TraceParams.AddIgnoredActor(Articulated);
+
+			FHitResult Hit;
+			if (World->LineTraceSingleByChannel(Hit, From, To, ECC_WorldStatic, TraceParams))
+			{
+				++Blocked;
+				AddError(FString::Printf(
+					TEXT("%s.%s has %.1f cm of clear travel out of %.1f before it hits %s."),
+					*Articulated->GetActorLabel(), *Part.PartId.ToString(),
+					(Hit.ImpactPoint - From).Size(), Part.Motion.MaxTravelCm,
+					*GetNameSafe(Hit.GetActor())));
+			}
+		}
+	}
+
+	AddInfo(FString::Printf(TEXT("%d pull-outs traced along their travel."), PullOuts));
+
+	TestTrue(TEXT("The flat has pull-outs to test"), PullOuts > 0);
+	TestEqual(TEXT("Every pull-out has clear air in front of it"), Blocked, 0);
 
 	return true;
 }
