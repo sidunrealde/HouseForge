@@ -77,6 +77,57 @@ namespace
 	}
 
 	/**
+	 * Whether a closed 2D loop turns the same way at every vertex.
+	 *
+	 * The test for whether a cap may be fanned from its own centre rather than ear-clipped - see the
+	 * Cap lambda in AppendLoft, where the difference decides how the flat top of every cushion in the
+	 * flat is shaded. Collinear runs are tolerated, because a rounded rectangle's straight sides are
+	 * exactly that; only a genuine reversal disqualifies the loop.
+	 */
+	bool IsConvexLoop(const TArray<FVector2d>& Loop)
+	{
+		const int32 Count = Loop.Num();
+		if (Count < 3)
+		{
+			return false;
+		}
+
+		// Scaled to the loop so the tolerance means the same thing on a 5 cm knob and a 2 m worktop.
+		double Extent = 0.0;
+		for (int32 i = 0; i < Count; ++i)
+		{
+			Extent = FMath::Max(Extent, (Loop[i] - Loop[0]).Length());
+		}
+		const double Tolerance = FMath::Max(Extent * Extent * 1e-9, UE_DOUBLE_KINDA_SMALL_NUMBER);
+
+		int32 Sign = 0;
+		for (int32 i = 0; i < Count; ++i)
+		{
+			const FVector2d& A = Loop[i];
+			const FVector2d& B = Loop[(i + 1) % Count];
+			const FVector2d& C = Loop[(i + 2) % Count];
+
+			const double Cross = (B.X - A.X) * (C.Y - B.Y) - (B.Y - A.Y) * (C.X - B.X);
+			if (FMath::Abs(Cross) <= Tolerance)
+			{
+				continue;
+			}
+
+			const int32 ThisSign = Cross > 0.0 ? 1 : -1;
+			if (Sign == 0)
+			{
+				Sign = ThisSign;
+			}
+			else if (Sign != ThisSign)
+			{
+				return false;
+			}
+		}
+
+		return Sign != 0;
+	}
+
+	/**
 	 * Which of the six axis directions a triangle is projected along.
 	 *
 	 * SIGNED, and that is what makes the projection safe to weld along. The plane a triangle
@@ -858,13 +909,79 @@ bool FHFMeshOps::AppendLoft(FDynamicMesh3& Mesh, const TArray<TArray<FVector2D>>
 		}
 	}
 
-	auto Cap = [&Mesh, Group](const TArray<FVector2D>& Loop, const TArray<int32>& Row, bool bFacingDown)
+	auto Cap = [&Mesh, Group](const TArray<FVector2D>& Loop, const TArray<int32>& Row, double CapZ,
+		bool bFacingDown)
 	{
 		TArray<FVector2d> Flat;
 		Flat.Reserve(Loop.Num());
 		for (const FVector2D& Point : Loop)
 		{
 			Flat.Add(FVector2d(Point.X, Point.Y));
+		}
+
+		// A CONVEX CAP IS FANNED FROM ITS OWN CENTRE, AND THAT IS A SHADING DECISION, NOT A TIDINESS
+		// ONE. It cost a fortnight of the sofa reading as damaged furniture.
+		//
+		// Shading normals are area-weighted per vertex, so what a boundary vertex's normal comes out as
+		// depends on how much CAP area happens to touch it against how much ROLL area does. Ear
+		// clipping distributes that area wildly unevenly round a ring: along the straight sides it
+		// hands a vertex most of a large ear, and at a tight corner - where a rounded rectangle packs
+		// CornerSteps + 1 points into a few millimetres of arc - it hands it nothing but slivers. So
+		// the cap of a cushion shaded flat along its edges and swung outward at its four corners, and
+		// the ear triangulation radiating out of each corner painted that discontinuity as a dark
+		// arrowhead with a hard crease down both sides. Every cushion, both sofa arms, both mattresses,
+		// all four chair seats. Read from four metres as a tear in the upholstery.
+		//
+		// A centroid fan gives every boundary vertex the same share of the cap - its own edge length
+		// times half the cap's span - which is enormous against a roll band a few millimetres wide, so
+		// the whole ring resolves to the cap's own normal and the flat face shades as a flat face. The
+		// roll below it is untouched and still welds smooth.
+		//
+		// Convex only. Ear clipping stays for everything else: a fan across a concave ring puts
+		// triangles outside the polygon, which is a hole in the solid rather than a mark on it.
+		if (IsConvexLoop(Flat))
+		{
+			FVector2d Centre(0.0, 0.0);
+			for (const FVector2d& Point : Flat)
+			{
+				Centre += Point;
+			}
+			Centre /= static_cast<double>(Flat.Num());
+
+			const int32 Hub = Mesh.AppendVertex(FVector3d(Centre.X, Centre.Y, CapZ));
+			const int32 Count = Row.Num();
+
+			// The fan is put through the SAME orientation step the ear-clipped path uses rather than
+			// wound by hand, and that is not caution. Emitted by eye it came out inverted: half the
+			// caps in the flat faced into their own solids, which reads as a 173-degree crease on the
+			// bevel check, as sixty centimetres of concavity, and as fourteen surfaces in the flat
+			// suddenly sharing a plane with the floor. Deriving the winding from the loop's own signed
+			// area means a ring authored either way round lands the same way up.
+			TArray<FIndex3i> Triangles;
+			Triangles.Reserve(Count);
+
+			const int32 HubIndex = Flat.Add(Centre);
+			for (int32 i = 0; i < Count; ++i)
+			{
+				Triangles.Add(FIndex3i(HubIndex, i, (i + 1) % Count));
+			}
+
+			OrientCapCounterClockwise(Triangles, Flat);
+
+			auto VertexFor = [&Row, Hub, Count](int32 Index) { return Index == Count ? Hub : Row[Index]; };
+
+			for (const FIndex3i& Tri : Triangles)
+			{
+				if (bFacingDown)
+				{
+					Mesh.AppendTriangle(VertexFor(Tri.A), VertexFor(Tri.B), VertexFor(Tri.C), Group);
+				}
+				else
+				{
+					Mesh.AppendTriangle(VertexFor(Tri.C), VertexFor(Tri.B), VertexFor(Tri.A), Group);
+				}
+			}
+			return true;
 		}
 
 		TArray<FIndex3i> Triangles;
@@ -892,11 +1009,11 @@ bool FHFMeshOps::AppendLoft(FDynamicMesh3& Mesh, const TArray<TArray<FVector2D>>
 
 	if (bCapBottom)
 	{
-		Cap(Rings[0], Verts[0], /*bFacingDown*/ true);
+		Cap(Rings[0], Verts[0], SectionZ[0], /*bFacingDown*/ true);
 	}
 	if (bCapTop)
 	{
-		Cap(Rings.Last(), Verts.Last(), /*bFacingDown*/ false);
+		Cap(Rings.Last(), Verts.Last(), SectionZ.Last(), /*bFacingDown*/ false);
 	}
 
 	return true;
@@ -1028,6 +1145,40 @@ bool FHFMeshOps::AppendSoftBox(FDynamicMesh3& Mesh, const FVector3d& Min, const 
 	TopR = FMath::Min(TopR, MaxInset);
 	BottomR = FMath::Min(BottomR, MaxInset);
 
+	// THE CORNER ARC CENTRE MUST NOT MOVE BETWEEN RINGS, and everything below turns on why.
+	//
+	// RoundedRectangle puts its corner arc centres at HalfExtents - Radius. A ring drawn in by Inset
+	// has HalfExtents = Size/2 - Inset, so as long as its Radius is CornerRadius - Inset the centre
+	// sits at Size/2 - CornerRadius no matter which ring it is: the four vertical arc centres are one
+	// fixed line, every ring is the same inner box offset outward by one distance, and the corner is
+	// the sphere octant a fillet actually is.
+	//
+	// The moment Radius is floored at anything other than CornerRadius - Inset, that centre becomes
+	// Size/2 - Inset - Floor and TRAVELS INWARD as the roll turns. At the top ring, where Inset is the
+	// whole of TopRadius, the centre has moved in by TopRadius - Floor diagonally and the ring's
+	// corner is pulled INSIDE the surface below it. The skin folds back on itself: a re-entrant
+	// faceted wedge with a hard crease down each side of it, on all four corners of every cushion and
+	// both ends of both arms of the sofa. Six millimetres of fold on a 70 mm roll, plainly visible
+	// from four metres, and invisible to every measurement in the suite - the solid is still closed,
+	// still the right volume, and still exactly inside its declared box.
+	//
+	// The floor existed for a real reason: at CornerRadius == TopRadius the top ring's true radius is
+	// zero, RoundedRectangle emits that corner point CornerSteps + 1 times over, and the band above it
+	// is a fan of zero-area triangles whose absent normals get averaged into the real ones. The answer
+	// is not to move the centre, it is to KEEP THE RADIUS OFF ZERO IN THE FIRST PLACE: hold the plan
+	// radius strictly above both rolls, so CornerRadius - Inset is always positive and the centre
+	// never has to be compromised. A cushion whose top face has 4 mm of round on its plan corners is
+	// what a cushion has anyway.
+	double CornerR = FMath::Clamp(Params.CornerRadius, 0.0, FMath::Min(Size.X, SlabY) * 0.5);
+	if (CornerR > 0.0)
+	{
+		// Enough to keep four distinct points in the tightest arc, and never so much that it eats the
+		// section: a quarter of what is left over the roll, capped at a tenth of the half-section.
+		const double MinPlan = FMath::Min(FMath::Max(CornerR * 0.15, 0.2), FMath::Min(Size.X, SlabY) * 0.05);
+		CornerR = FMath::Min(FMath::Max(CornerR, FMath::Max(TopR, BottomR) + MinPlan),
+			FMath::Min(Size.X, SlabY) * 0.5);
+	}
+
 	// One ring per level, bottom-up: height and how far that level is drawn in from the declared box.
 	TArray<double> RingZ;
 	TArray<double> RingInset;
@@ -1047,15 +1198,41 @@ bool FHFMeshOps::AppendSoftBox(FDynamicMesh3& Mesh, const FVector3d& Min, const 
 		RingInset.Add(Inset);
 	};
 
+	// THE ROLL IS STEPPED FINELY AT ITS TWO ENDS AND COARSELY IN THE MIDDLE, and that is not a
+	// refinement - it is what stops the flat top of a cushion reading as a chevron.
+	//
+	// A roll spaced evenly in angle meets the flat cap above it at a real angle. At five steps the
+	// topmost band lies 9 degrees off horizontal, which is far below the 40 that ComputeShadingNormals
+	// splits at, so the cap and the band weld: every vertex on the cap's boundary gets a normal tilted
+	// outward by half that, while the cap has no interior vertices of its own to hold the true
+	// vertical. A flat polygon shaded entirely from tilted boundary normals renders its own ear
+	// triangulation - a dark arrowhead across each corner of every cushion, every mattress and both
+	// sofa arms, with a hard crease down each side of it. It is the same picture as a geometric fold
+	// and it was read as one.
+	//
+	// Smoothstep in the parameter makes the discretisation tangent-matched at BOTH ends: horizontal
+	// where it meets the cap, vertical where it meets the side. The top band drops to under 5 degrees
+	// and the shading runs continuously off the flat face into the roll, which is what the surface
+	// actually does. The middle bands take up the slack at about 27 degrees - still comfortably
+	// welded, and on the part of the roll that is turning fastest anyway, where it is invisible.
+	//
+	// Cheaper and more honest than the alternative of splitting the seam hard: a rounded box IS
+	// tangent-continuous there, so a clean crease would be a line that is not on the object.
+	auto RollTheta = [RollSteps](int32 Step) -> double
+	{
+		const double U = static_cast<double>(Step) / RollSteps;
+		return UE_DOUBLE_HALF_PI * (U * U * (3.0 - 2.0 * U));
+	};
+
 	for (int32 Step = 0; Step <= RollSteps; ++Step)
 	{
-		const double Theta = (static_cast<double>(Step) / RollSteps) * UE_DOUBLE_HALF_PI;
+		const double Theta = RollTheta(Step);
 		PushRing(Min.Z + BottomR * (1.0 - FMath::Cos(Theta)), BottomR * (1.0 - FMath::Sin(Theta)));
 	}
 
 	for (int32 Step = RollSteps; Step >= 0; --Step)
 	{
-		const double Theta = (static_cast<double>(Step) / RollSteps) * UE_DOUBLE_HALF_PI;
+		const double Theta = RollTheta(Step);
 		PushRing(Max.Z - TopR * (1.0 - FMath::Cos(Theta)), TopR * (1.0 - FMath::Sin(Theta)));
 	}
 
@@ -1090,18 +1267,10 @@ bool FHFMeshOps::AppendSoftBox(FDynamicMesh3& Mesh, const FVector3d& Min, const 
 		// and the three radii meet in one continuous surface. It also means a plan radius smaller than
 		// the roll cannot blend, so the kits above keep CornerRadius at or above both rolls.
 		//
-		// FLOORED RATHER THAN LET TO ZERO, and that floor is not cosmetic. RoundedRectangle at zero
-		// radius emits its corner point CornerSteps + 1 times over, so the ring above a fully closed
-		// corner is joined to a stack of coincident vertices and the skin there is a fan of zero-area
-		// triangles. Those have no normal, ComputeShadingNormals averages the nothing they contribute
-		// into the real vertices around them, and the result is a hard crease diagonally across every
-		// corner of every cushion - on a mesh that measures perfectly and renders visibly wrong.
-		//
-		// A fifth of the radius keeps four distinct points in the arc at the tightest ring, which is
-		// under a millimetre of shape on a 70 mm roll and is exactly what a modeller would do rather
-		// than converge a quad grid to a pole.
-		const double Floor = Params.CornerRadius * 0.2;
-		const double Radius = FMath::Clamp(Params.CornerRadius - Inset, Floor,
+		// NOT FLOORED, AND THAT IS THE WHOLE POINT - see the CornerR note above. CornerR has already
+		// been held above both rolls, so this stays positive on every ring and the arc centre it
+		// implies, HalfExtents - Radius, is the same fixed line for all of them.
+		const double Radius = FMath::Clamp(CornerR - Inset, 0.0,
 			FMath::Max(FMath::Min(Half.X, Half.Y), 0.0));
 
 		Sections.Add(RoundedRectangle(Centre, Half, Radius, CornerSteps));

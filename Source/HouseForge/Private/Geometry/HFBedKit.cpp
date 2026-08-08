@@ -29,6 +29,44 @@ namespace
 
 		FHFMeshOps::AppendBox(Mesh, (Min + Max) * 0.5, Size * 0.5, 0.0, Role);
 	}
+
+	/**
+	 * A soft solid: the same box, rolled on its arrises.
+	 *
+	 * FOR THE TWO THINGS ON A BED THAT ARE MADE OF FOAM. A mattress and an upholstered headboard pad
+	 * were both going through AppendSolid, which asks AppendBox for a bevel of exactly zero, so the
+	 * largest soft object in two of the flat's rooms was a mathematically sharp slab. Fabric's bevel
+	 * width is deliberately zero in the render finish - a cushion has no arris to chamfer - which
+	 * means the render pass could not put it back either, and the bed broke the project's own "no
+	 * perfectly sharp edges" rule in the one place the eye goes first from the doorway.
+	 *
+	 * Every radius is measured INWARD, so the mattress still measures the drawn box and the drawing
+	 * check is unaffected. See FHFSoftBoxParams.
+	 */
+	void AppendFoam(FDynamicMesh3& Mesh, const FVector3d& Min, const FVector3d& Max,
+		double EdgeRadius, double BottomRadius, EHFSurfaceRole Role)
+	{
+		const FVector3d Size = Max - Min;
+		if (Size.X <= MinSolid || Size.Y <= MinSolid || Size.Z <= MinSolid)
+		{
+			return;
+		}
+
+		FHFSoftBoxParams Soft;
+		Soft.TopRadius = EdgeRadius;
+		Soft.BottomRadius = BottomRadius;
+
+		// At or above both rolls, so the corner is a sphere octant rather than a lozenge with its own
+		// highlight. See FHFSoftBoxParams::CornerRadius.
+		Soft.CornerRadius = FMath::Max(EdgeRadius, BottomRadius);
+
+		// A mattress corner is 1.8 m from the camera when somebody stands in the bedroom door. Four by
+		// three facets read as a chamfer; this reads as foam.
+		Soft.CornerSteps = 6;
+		Soft.RollSteps = 5;
+
+		FHFMeshOps::AppendSoftBox(Mesh, Min, Max, Soft, Role);
+	}
 }
 
 FHFBedParams FHFBedKit::Sanitise(const FHFBedParams& Params)
@@ -126,10 +164,15 @@ FHFBedBuild FHFBedKit::Build(const FHFBedParams& Params)
 		const double PadZ0 = P.MattressTopZ + P.UpholsteryMargin;
 		const double PadZ1 = P.HeadboardHeight - P.UpholsteryMargin;
 
-		AppendSolid(Out.Headboard,
+		// Rolled on every arris. A stuffed pad's whole tell is that its edge turns over rather than
+		// stopping, and the roll can be no deeper than the pad stands proud of its backing board.
+		const double PadRoll = FMath::Min(P.UpholsteryProud * 0.9,
+			FMath::Max(P.UpholsteryMargin * 0.4, 1.0));
+
+		AppendFoam(Out.Headboard,
 			FVector3d(P.UpholsteryMargin, HeadFaceY - P.UpholsteryProud, PadZ0),
 			FVector3d(W - P.UpholsteryMargin, HeadFaceY, PadZ1),
-			EHFSurfaceRole::Fabric);
+			PadRoll, PadRoll, EHFSurfaceRole::Fabric);
 	}
 
 	FHFMeshOps::ApplyWorldScaleUVs(Out.Headboard);
@@ -140,10 +183,16 @@ FHFBedBuild FHFBedKit::Build(const FHFBedParams& Params)
 	// the bed that is NOT set in from anything, and that is the whole arrangement: everything else
 	// retreats from it, so it is the mattress that catches the light along its edge.
 
-	AppendSolid(Out.Mattress,
+	// A ROLLED EDGE, NOT AN ARRIS. 35 mm of turn on the top edge is what a pocket-sprung mattress
+	// actually has, and it is the line that tells the eye this is a bed rather than a platform: it
+	// catches light along its whole length from any direction. Smaller underneath, because a mattress
+	// is compressed where it sits on the deck.
+	const double MattressRoll = FMath::Min(3.5, P.MattressThickness * 0.35);
+
+	AppendFoam(Out.Mattress,
 		FVector3d(0.0, 0.0, DeckTopZ),
 		FVector3d(W, MattressLength, P.MattressTopZ),
-		EHFSurfaceRole::Fabric);
+		MattressRoll, MattressRoll * 0.45, EHFSurfaceRole::Fabric);
 
 	FHFMeshOps::ApplyWorldScaleUVs(Out.Mattress);
 

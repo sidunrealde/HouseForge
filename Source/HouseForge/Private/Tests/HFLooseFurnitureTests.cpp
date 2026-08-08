@@ -97,6 +97,49 @@ namespace
 	}
 
 	/**
+	 * How far the worst vertex on the mesh stands OUTSIDE the supporting plane of some triangle.
+	 *
+	 * THE MEASUREMENT THAT SEES A FOLDED CORNER, and nothing else in this file can.
+	 *
+	 * A soft box is the offset of an inner box, so it is convex by construction: no vertex may lie on
+	 * the outward side of any triangle's plane. Everything else the suite asserts about one survives a
+	 * fold untouched - the solid stays closed, its volume stays plausible, its bounds stay exactly the
+	 * declared box, and its sharpest dihedral stays below the bevel threshold, because a fold is made
+	 * of the same small facets as the surface it folds out of.
+	 *
+	 * What produced one: AppendSoftBox floored the plan radius proportionally, and RoundedRectangle
+	 * puts its arc centres at HalfExtents - Radius, so the moment the floor bound, the corner's arc
+	 * centre travelled inward as the roll turned instead of standing still. The top ring's corner
+	 * ended up INSIDE the ring below it and the skin folded back on itself: a re-entrant faceted
+	 * wedge with a hard crease down each side, on all four corners of every cushion, every mattress
+	 * and both sofa arms. Found by looking at a render from four metres; invisible to the gate.
+	 *
+	 * Returned as a distance rather than a bool so a failure says how deep the fold is.
+	 */
+	double WorstConcavityCm(const FDynamicMesh3& Mesh)
+	{
+		double Worst = 0.0;
+
+		for (const int32 Tri : Mesh.TriangleIndicesItr())
+		{
+			const FVector3d Normal = Mesh.GetTriNormal(Tri);
+			if (!Normal.IsNormalized())
+			{
+				continue;
+			}
+
+			const FVector3d OnPlane = Mesh.GetTriCentroid(Tri);
+
+			for (const int32 Vertex : Mesh.VertexIndicesItr())
+			{
+				Worst = FMath::Max(Worst, (Mesh.GetVertex(Vertex) - OnPlane).Dot(Normal));
+			}
+		}
+
+		return Worst;
+	}
+
+	/**
 	 * Bounds of only the geometry lying in a Z band - how a lean is measured without a transform.
 	 *
 	 * The band has to be chosen against the mesh rather than against the object, and that caught this
@@ -257,15 +300,40 @@ bool FHFSoftBoxTest::RunTest(const FString& Parameters)
 		}
 
 		// With CornerRadius equal to TopRadius the plan radius has closed almost to nothing exactly
-		// where the roll finishes. Almost, rather than exactly: a corner allowed to converge on a
-		// point stacks coincident vertices and creases - see AppendSoftBox's floor.
+		// where the roll finishes. Almost, rather than exactly: the kit holds the plan radius a little
+		// above both rolls precisely so it never has to converge on a point - see AppendSoftBox.
 		TestTrue(FString::Printf(TEXT("The plan radius closes as the roll turns (%.2f cm from the cap corner)"),
-			NearestOnCap), NearestOnCap < Soft.CornerRadius * 0.25);
+			NearestOnCap), NearestOnCap < Soft.CornerRadius * 0.45);
 
 		// And at full width it has NOT: the widest ring keeps its corner radius, so nothing there gets
 		// anywhere near the box's own corner. This is the half that fails if the blend is removed.
 		TestTrue(FString::Printf(TEXT("The widest ring is still rounded in plan (%.2f cm)"),
 			NearestAtMidHeight), NearestAtMidHeight > Soft.CornerRadius * 0.3);
+	}
+
+	// NO PART OF THE SURFACE FOLDS BACK ON ITSELF. See WorstConcavityCm: this is the only assertion
+	// here that a re-entrant corner fails, and a re-entrant corner is what the sofa, both mattresses
+	// and all four chairs were carrying while every other line in this test passed.
+	TestTrue(FString::Printf(TEXT("A soft box is convex everywhere (worst %.3f cm outside a face)"),
+		WorstConcavityCm(Mesh)), WorstConcavityCm(Mesh) < 0.02);
+
+	// And it holds at the proportions the flat actually builds, not only at this test's tidy 60 cube.
+	// A cushion's plan radius equals its top roll, which is exactly the case the floor used to bind on.
+	{
+		FHFSoftBoxParams Cushion;
+		Cushion.CornerRadius = 7.5;
+		Cushion.TopRadius = 7.5;
+		Cushion.BottomRadius = 3.0;
+		Cushion.CornerSteps = 6;
+		Cushion.RollSteps = 5;
+
+		FDynamicMesh3 Arm;
+		FHFMeshOps::InitialiseMesh(Arm);
+		FHFMeshOps::AppendSoftBox(Arm, FVector3d::Zero(), FVector3d(20.0, 90.0, 62.0), Cushion,
+			EHFSurfaceRole::Fabric);
+
+		TestTrue(FString::Printf(TEXT("A sofa arm is convex everywhere (worst %.3f cm)"),
+			WorstConcavityCm(Arm)), WorstConcavityCm(Arm) < 0.02);
 	}
 
 	// A radius bigger than the box can carry is clamped rather than turning the solid inside out.
