@@ -880,8 +880,13 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		CounterW.AnchorWallId = TEXT("W_West");
 		CounterW.Params.UpstandHeight = 100.0;
 
+		// X 1827.5 and 2145 long, NOT 1830 and 2140: the north run now starts at 755, which is exactly
+		// where the west run's slab ends, rather than at 760. Five millimetres of open joint straight
+		// through the worktop at the one place a fitter mitres tight - visible as a dark line across
+		// the corner in any render taken from the kitchen door, and reported by nothing, because a
+		// clash scan finds solids INSIDE one another and two slabs 5 mm apart are not inside anything.
 		FHFFixture& CounterN = B.AddFixture(TEXT("F_Kitchen_CounterN"), TEXT("R_Kitchen"), EHFFixtureType::CounterTop,
-			TEXT("Granite counter, north"), FVector2D(1830.0, 7985.0), FVector2D(2140.0, 600.0), 40.0, 0.0, 850.0);
+			TEXT("Granite counter, north"), FVector2D(1827.5, 7985.0), FVector2D(2145.0, 600.0), 40.0, 0.0, 850.0);
 		CounterN.AnchorWallId = TEXT("W_North");
 		CounterN.Params.UpstandHeight = 100.0;
 
@@ -994,6 +999,23 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 			Night.Params.DrawerCount = 2;
 			Night.Params.PlinthHeight = 80.0;
 			Night.Params.HandleStyle = EHFHandleStyle::HandlelessGroove;
+
+			// DELIBERATELY NOT ANCHORED, and this is the one place in the flat where the 85 mm the
+			// render reviews complained about is doing a job.
+			//
+			// Anchoring it makes FHFFixturePlacement::AgainstWall put its drawn back on the plaster,
+			// which is right for a wardrobe and wrong for this. A nightstand is not scribed joinery,
+			// so the skirting runs on behind it and its plinth lands 6 mm inside the board; and
+			// F_Soc_MBed_1 and F_Soc_MBed_2 are at 300 above the floor directly behind these two
+			// units, so the carcass closes on the socket plate and both rockers end up inside it
+			// through their whole travel. Measured: eight solids sharing space and twenty-four part
+			// positions fouling, none of which exist at the drawn position.
+			//
+			// The answer is not a placement rule. Either the sockets move up over the units - which is
+			// where a bedside socket belongs and is a change to the drawing, not to the code - or the
+			// unit carries the skirting setback the desk, the bed and the refrigerator all carry. Both
+			// are real; neither is a review pass's decision to take. Stated here so the gap is a
+			// recorded choice rather than the oversight the beds turned out to be.
 			return Night;
 		};
 

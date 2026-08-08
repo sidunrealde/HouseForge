@@ -120,6 +120,22 @@ struct HOUSEFORGE_API FHFChimneyParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
 	double TaperHeight = 40.0;
 
+	/**
+	 * How far the back of the canopy stands off the plaster, on its brackets.
+	 *
+	 * A cooker hood hangs on a wall bracket, so its back panel is NEAR the tiles rather than in the
+	 * same plane as them. That distinction is a rendering fact, not a pedantry: with the back exactly
+	 * coplanar with the wall, 1617 cm2 of the flat's kitchen z-fights - both faces are drawn, the depth
+	 * test picks a different winner each frame, and the surface strobes as the camera moves.
+	 * HouseForge.SampleHouse.NoTwoSurfacesShareAPlane measures exactly that and it is what caught this.
+	 *
+	 * It only appeared when FHFFixturePlacement::AgainstWall started putting a run's drawn back on the
+	 * finished face instead of leaving it where the drawing put it; the drawing happened to carry a
+	 * 10 mm gap here and the correction closed it. The wall owns the plane, so the fitting stands off.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double WallGap = 0.8;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "1", ClampMax = "6"))
 	int32 FilterPanels = 3;
 
@@ -130,7 +146,10 @@ struct HOUSEFORGE_API FHFChimneyParams
 	/** Overall height of what is actually built: the canopy plus whatever duct stands on it. */
 	double BuiltHeight() const { return CanopyHeight + FMath::Max(DuctLength, 0.0); }
 
-	bool IsValid() const { return Width > 0.0 && Depth > 0.0 && CanopyHeight > 0.0; }
+	/** The back of the hood in its own frame: the drawn depth, less the gap it hangs off the wall by. */
+	double BackY() const { return FMath::Max(Depth - WallGap, 0.0); }
+
+	bool IsValid() const { return Width > 0.0 && BackY() > 0.0 && CanopyHeight > 0.0; }
 };
 
 /**

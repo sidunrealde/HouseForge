@@ -555,8 +555,20 @@ bool FHFSanitaryClearanceTest::RunTest(const FString& Parameters)
 
 			const double Into = Interpenetration(Bounds, ClearOpeningOf(Opening, *Wall));
 
-			TestTrue(*FString::Printf(TEXT("%s is not standing in '%s' (%.1f cm in)"),
-				Wanted.What, *Opening.Id.ToString(), Into), Into <= 0.0);
+			// TOUCHING IS NOT STANDING IN. ClearOpeningOf spans the wall's WHOLE thickness, face to
+			// face, so a fitting set out to land exactly on one of those faces is tangent to the
+			// opening box of any door in the same wall - from the room on the other side of it, where
+			// it is not in anybody's way. The master bathroom's vanity is exactly that case: it backs
+			// onto W_Mid_Lower, and D_Bed2 is a door through the same wall into bedroom 2.
+			//
+			// It only surfaced when FHFFixturePlacement::AgainstWall started putting a run's drawn back
+			// ON the finished face instead of leaving it wherever the drawing put it, which turned a
+			// quarter-millimetre clearance into exact tangency and a floating-point coin toss. A tenth
+			// of a millimetre of slack is the difference between abutting a plane and crossing it.
+			constexpr double TangentToleranceCm = 0.01;
+
+			TestTrue(*FString::Printf(TEXT("%s is not standing in '%s' (%.2f cm in)"),
+				Wanted.What, *Opening.Id.ToString(), Into), Into <= TangentToleranceCm);
 		}
 	}
 

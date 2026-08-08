@@ -31,7 +31,35 @@ double FHFFixturePlacement::FacingYaw(const FHFFixture& Fixture, const FHFWall* 
 
 FTransform FHFFixturePlacement::AgainstWall(const FHFFixture& Fixture, double FloorZ, const FHFWall* AnchorWall)
 {
-	const FRotator Rotation(0.0, FacingYaw(Fixture, AnchorWall), 0.0);
+	const double Yaw = FacingYaw(Fixture, AnchorWall);
+	const FRotator Rotation(0.0, Yaw, 0.0);
+
+	// AND IT ACTUALLY GOES AGAINST THE WALL. This function resolved the half turn, converted the drawn
+	// centre to the front-left corner, and stopped - it never touched the finished face at all, which
+	// only OnWallFace did. Everything that looked flush was flush because somebody had edited its drawn
+	// position by hand in the spec to land on the plaster: the kitchen runs, the TV units and the sofa
+	// all carry positions worked back from a wall face rather than off a drawing's grid.
+	//
+	// The two nobody had hand-corrected were the beds, and both stood 85 mm clear of the wall behind
+	// their headboards with the skirting and the floor visible through the gap and the headboard
+	// casting a shadow on the plaster. Found by standing in the master bedroom door in a render. The
+	// name of this function and the comment above SeedBed both promised the correction; neither
+	// happened.
+	//
+	// ALONG THE BACK DIRECTION AND NOWHERE ELSE, exactly as OnWallFace does it and for the same reason:
+	// where a run sits ALONG its wall is a real decision on the drawing, and only the depth across it
+	// is a setting-out detail. A run whose drawn back is already on the face - which is every one that
+	// was hand-corrected - does not move at all.
+	//
+	// What keeps a carcass out of the skirting is the fixture's own setback, taken out of its depth
+	// rather than out of its position: see FHFDeskParams::SupportSetback, FHFRefrigeratorParams
+	// ::SkirtingSetback and FHFBedParams::SkirtingSetback, which are all the same figure for the same
+	// reason. Nudging the placement instead would put the drawn box somewhere the drawing did not.
+	const double Correction = WallFaceCorrection(Fixture, AnchorWall);
+
+	const double Radians = FMath::DegreesToRadians(Yaw);
+	const FVector2D Back(-FMath::Sin(Radians), FMath::Cos(Radians));
+	const FVector2D Corrected = Fixture.Position - Back * Correction;
 
 	// The fixture is positioned by the CENTRE of its footprint and a run is built from its front-left
 	// corner, so the corner is where the actor goes. Rotated with the run, or a turned fixture lands
@@ -40,7 +68,7 @@ FTransform FHFFixturePlacement::AgainstWall(const FHFFixture& Fixture, double Fl
 		FVector(-Fixture.Footprint.X * 0.5, -Fixture.Footprint.Y * 0.5, 0.0));
 
 	return FTransform(Rotation,
-		FVector(Fixture.Position.X, Fixture.Position.Y, FloorZ + Fixture.BaseZ) + ToCorner);
+		FVector(Corrected.X, Corrected.Y, FloorZ + Fixture.BaseZ) + ToCorner);
 }
 
 FTransform FHFFixturePlacement::FreeStanding(const FHFFixture& Fixture, double FloorZ)

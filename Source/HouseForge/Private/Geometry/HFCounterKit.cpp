@@ -142,12 +142,47 @@ FHFCounterBuild FHFCounterKit::Build(const FHFCounterParams& Params)
 		FDynamicMesh3 Upstand;
 		FHFMeshOps::InitialiseMesh(Upstand);
 
+		const double UpstandZ = P.TopZ() + P.UpstandHeight * 0.5;
+		const double HalfHeight = P.UpstandHeight * 0.5;
+		const double HalfThickness = P.UpstandThickness * 0.5;
+
 		FHFMeshOps::AppendBox(Upstand,
-			FVector3d(P.Width * 0.5,
-				P.Depth - P.UpstandThickness * 0.5,
-				P.TopZ() + P.UpstandHeight * 0.5),
-			FVector3d(P.Width * 0.5, P.UpstandThickness * 0.5, P.UpstandHeight * 0.5),
+			FVector3d(P.Width * 0.5, P.Depth - HalfThickness, UpstandZ),
+			FVector3d(P.Width * 0.5, HalfThickness, HalfHeight),
 			0.0, EHFSurfaceRole::CounterStone);
+
+		// AND ROUND THE ENDS THAT DIE INTO A WALL. See FHFCounterParams::bUpstandReturnsAtStart: two
+		// runs meeting at an internal corner are ONE splashback, and built without this the corner is
+		// bare plaster standing on stone with a square open end on each side of it.
+		//
+		// The return runs from the back to the front of the SLAB rather than to the drawn footprint, so
+		// it finishes flush with the worked edge instead of stopping short of it with a nib of stone
+		// left over. It is deliberately allowed to overlap the back bar in the corner square: that is
+		// one mitred piece of stone in reality, and two solids sharing a corner is what a boolean is
+		// for, not something to avoid by leaving a gap.
+		const double ReturnY0 = P.FrontY();
+		const double ReturnY1 = P.Depth;
+		const double ReturnDepth = ReturnY1 - ReturnY0;
+
+		if (ReturnDepth > 0.0)
+		{
+			auto AppendReturn = [&Upstand, &P, UpstandZ, HalfHeight, HalfThickness, ReturnY0, ReturnDepth](double CentreX)
+			{
+				FHFMeshOps::AppendBox(Upstand,
+					FVector3d(CentreX, ReturnY0 + ReturnDepth * 0.5, UpstandZ),
+					FVector3d(HalfThickness, ReturnDepth * 0.5, HalfHeight),
+					0.0, EHFSurfaceRole::CounterStone);
+			};
+
+			if (P.bUpstandReturnsAtStart)
+			{
+				AppendReturn(HalfThickness);
+			}
+			if (P.bUpstandReturnsAtEnd)
+			{
+				AppendReturn(P.Width - HalfThickness);
+			}
+		}
 
 		FHFMeshOps::AppendPreservingRoles(Out.Shell, Upstand);
 	}

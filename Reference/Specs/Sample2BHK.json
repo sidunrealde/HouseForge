@@ -2561,13 +2561,13 @@
 			"label": "Granite counter, north",
 			"position":
 			{
-				"x": 1830,
+				"x": 1827.5,
 				"y": 7985
 			},
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2140,
+				"x": 2145,
 				"y": 600
 			},
 			"height": 40,

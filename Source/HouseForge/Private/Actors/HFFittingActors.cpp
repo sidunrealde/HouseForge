@@ -63,6 +63,16 @@ void AHFHobActor::ApplyFixture(const FHFFixture& Fixture)
 	Hob.BodyDepth = Overall - Above;
 }
 
+double AHFHobActor::CookingSurfaceAboveStone(const FHFFixture& Fixture)
+{
+	// The same split ApplyFixture makes, read off the kit's own figures rather than off a built actor.
+	// A hob drawn shallower than its own glass and grates is a drawing mistake, and the honest answer
+	// there is the whole of what was drawn.
+	const FHFHobParams Defaults;
+	return FMath::Min(Defaults.GlassThickness + Defaults.GrateHeight,
+		FMath::Max(Fixture.Height, Defaults.GlassThickness));
+}
+
 FDynamicMesh3 AHFHobActor::BuildMesh() const
 {
 	return FHFApplianceKit::BuildHob(Hob).Shell;

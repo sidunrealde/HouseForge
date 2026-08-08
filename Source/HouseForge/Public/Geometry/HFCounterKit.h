@@ -136,6 +136,31 @@ struct HOUSEFORGE_API FHFCounterParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
 	double UpstandThickness = 2.0;
 
+	/**
+	 * Whether the splashback turns the corner and runs across this end of the run.
+	 *
+	 * THE UPSTAND IS A PROPERTY OF THE RUN, NOT OF ONE WALL OF IT. Built as a single bar along the
+	 * back over the full width, the reference flat's L-shaped kitchen had 64.5 cm of bare plaster
+	 * standing directly on the stone across its internal corner - the one place in a kitchen where a
+	 * splashback matters most and where water actually runs down the wall - with both runs' upstands
+	 * ending square and open on either side of it.
+	 *
+	 * Nothing in the tree could see it, by construction: the clash scan looks for solids standing
+	 * INSIDE one another and the coplanar scan for surfaces sharing a plane, and a MISSING piece is
+	 * invisible to both. It was found by rendering the corner dead-on and looking at it. The skirting
+	 * has HouseForge.Flat.EverySkirtingBreakIsPaidFor for exactly this class of fault; upstands had no
+	 * counterpart.
+	 *
+	 * Resolved by the composing layer, which is the only thing that can see whether a wall stands at
+	 * the end of this run - a generator may not go looking. Start is the local X = 0 end.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Construction")
+	bool bUpstandReturnsAtStart = false;
+
+	/** As bUpstandReturnsAtStart, for the local X = Width end. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Construction")
+	bool bUpstandReturnsAtEnd = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions")
 	EHFCounterEdge Edge = EHFCounterEdge::DripGroove;
 

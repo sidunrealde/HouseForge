@@ -76,6 +76,17 @@ public:
 
 	static bool Builds(EHFFixtureType Type) { return Type == EHFFixtureType::Hob; }
 
+	/**
+	 * How far the cooking surface stands above the stone the hob is set into.
+	 *
+	 * The glass and the pan supports on it - the height a cooker hood's clearance is measured from,
+	 * and the reason this is public. AHFHouseActor::SeedChimney has to know where the hob it serves
+	 * actually ends up before it can hang the canopy the right distance over it, and it may not go
+	 * asking another ACTOR: the hob may not have been seeded yet. A static function of the drawn
+	 * fixture answers it without needing one to exist.
+	 */
+	static double CookingSurfaceAboveStone(const FHFFixture& Fixture);
+
 	static FName KnobPartId(int32 Index) { return FHFApplianceKit::KnobPartId(Index); }
 
 protected:

@@ -168,31 +168,38 @@
 <polygon points="1028.20,403.87 1072.60,403.87 1072.60,381.17 1028.20,381.17" fill="#464646" stroke="#000000" stroke-width="1.40"/>
 <line x1="1028.20" y1="403.87" x2="1072.60" y2="381.17" stroke="#ffffff" stroke-width="0.90" stroke-linecap="round"/>
 <line x1="1072.60" y1="403.87" x2="1028.20" y2="381.17" stroke="#ffffff" stroke-width="0.90" stroke-linecap="round"/>
-<polygon points="1114.55,890.88 907.31,890.88 907.31,979.70 1114.55,979.70" fill="none" stroke="#464646" stroke-width="1.40"/>
-<polygon points="1114.55,890.88 907.31,890.88 907.31,912.20 1114.55,912.20" fill="none" stroke="#464646" stroke-width="1.00"/>
-<polygon points="1114.55,890.88 1089.68,890.88 1089.68,979.70 1114.55,979.70" fill="none" stroke="#464646" stroke-width="1.00"/>
-<polygon points="907.31,890.88 932.17,890.88 932.17,979.70 907.31,979.70" fill="none" stroke="#464646" stroke-width="1.00"/>
-<line x1="1045.47" y1="890.88" x2="1045.47" y2="979.70" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<line x1="976.39" y1="890.88" x2="976.39" y2="979.70" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<polygon points="956.65,1073.45 1065.20,1073.45 1065.20,1014.24 956.65,1014.24" fill="none" stroke="#464646" stroke-width="1.40"/>
-<polygon points="659.60,1204.21 748.42,1204.21 748.42,1159.80 659.60,1159.80" fill="none" stroke="#464646" stroke-width="1.40"/>
-<line x1="704.01" y1="1204.21" x2="704.01" y2="1159.80" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<polygon points="951.71,1204.21 1070.14,1204.21 1070.14,1159.80 951.71,1159.80" fill="none" stroke="#464646" stroke-width="1.40"/>
-<line x1="991.19" y1="1204.21" x2="991.19" y2="1159.80" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<line x1="1030.66" y1="1204.21" x2="1030.66" y2="1159.80" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<polygon points="1070.14,1083.32 1208.30,1083.32 1208.30,1004.37 1070.14,1004.37" fill="none" stroke="#464646" stroke-width="1.40"/>
-<polygon points="1078.43,1088.06 1122.64,1088.06 1122.64,1110.16 1078.43,1110.16" fill="none" stroke="#787878" stroke-width="1.00"/>
-<polygon points="1078.43,999.63 1122.64,999.63 1122.64,977.53 1078.43,977.53" fill="none" stroke="#787878" stroke-width="1.00"/>
-<polygon points="1155.80,1088.06 1200.01,1088.06 1200.01,1110.16 1155.80,1110.16" fill="none" stroke="#787878" stroke-width="1.00"/>
-<polygon points="1155.80,999.63 1200.01,999.63 1200.01,977.53 1155.80,977.53" fill="none" stroke="#787878" stroke-width="1.00"/>
-<polygon points="706.48,658.97 706.48,422.13 647.27,422.13 647.27,658.97" fill="none" stroke="#464646" stroke-width="1.40"/>
-<line x1="706.48" y1="580.02" x2="647.27" y2="580.02" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<line x1="706.48" y1="501.07" x2="647.27" y2="501.07" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<polygon points="695.13,463.08 922.11,463.08 922.11,403.87 695.13,403.87" fill="none" stroke="#464646" stroke-width="1.40"/>
-<line x1="770.79" y1="463.08" x2="770.79" y2="403.87" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<line x1="846.45" y1="463.08" x2="846.45" y2="403.87" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
-<polygon points="706.48,658.97 706.48,422.13 647.27,422.13 647.27,658.97" fill="none" stroke="#464646" stroke-width="1.80"/>
-<polygon points="695.13,463.08 922.11,463.08 922.11,403.87 695.13,403.87" fill="none" stroke="#464646" stroke-width="1.80"/>
+<polygon points="1114.55,871.89 907.31,871.89 907.31,960.70 1114.55,960.70" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="1114.55,871.89 907.31,871.89 907.31,893.20 1114.55,893.20" fill="none" stroke="#464646" stroke-width="1.00"/>
+<polygon points="1114.55,871.89 1089.68,871.89 1089.68,960.70 1114.55,960.70" fill="none" stroke="#464646" stroke-width="1.00"/>
+<polygon points="907.31,871.89 932.17,871.89 932.17,960.70 907.31,960.70" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="1045.47" y1="871.89" x2="1045.47" y2="960.70" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="976.39" y1="871.89" x2="976.39" y2="960.70" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="956.65,1068.52 1065.20,1068.52 1065.20,1009.31 956.65,1009.31" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="659.60,1210.13 748.42,1210.13 748.42,1165.72 659.60,1165.72" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="704.01" y1="1210.13" x2="704.01" y2="1165.72" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="951.71,1210.13 1070.14,1210.13 1070.14,1165.72 951.71,1165.72" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="991.19" y1="1210.13" x2="991.19" y2="1165.72" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="1030.66" y1="1210.13" x2="1030.66" y2="1165.72" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="1080.01,1142.53 1218.17,1142.53 1218.17,1063.58 1080.01,1063.58" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="1088.30,1147.27 1132.51,1147.27 1132.51,1169.37 1088.30,1169.37" fill="none" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1088.30,1058.85 1132.51,1058.85 1132.51,1036.74 1088.30,1036.74" fill="none" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1165.67,1147.27 1209.88,1147.27 1209.88,1169.37 1165.67,1169.37" fill="none" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1165.67,1058.85 1209.88,1058.85 1209.88,1036.74 1165.67,1036.74" fill="none" stroke="#787878" stroke-width="1.00"/>
+<polygon points="1098.26,1078.39 1142.67,1078.39 1142.67,1031.02 1098.26,1031.02" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="1155.50,1078.39 1199.91,1078.39 1199.91,1031.02 1155.50,1031.02" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="1104.68,1125.26 1104.68,1080.85 1057.31,1080.85 1057.31,1125.26" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="1193.49,1080.85 1193.49,1125.26 1240.86,1125.26 1240.86,1080.85" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="706.48,640.71 706.48,403.87 647.27,403.87 647.27,640.71" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="706.48" y1="561.77" x2="647.27" y2="561.77" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<line x1="706.48" y1="482.82" x2="647.27" y2="482.82" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="710.92,463.08 767.17,463.08 767.17,403.87 710.92,403.87" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="710.92" y1="433.47" x2="767.17" y2="433.47" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="767.17,463.08 855.99,463.08 855.99,403.87 767.17,403.87" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="811.58" y1="463.08" x2="811.58" y2="403.87" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="855.99,463.08 922.11,463.08 922.11,403.87 855.99,403.87" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="889.05" y1="463.08" x2="889.05" y2="403.87" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="706.48,640.71 706.48,403.87 647.27,403.87 647.27,640.71" fill="none" stroke="#464646" stroke-width="1.80"/>
+<polygon points="710.43,463.08 922.11,463.08 922.11,403.87 710.43,403.87" fill="none" stroke="#464646" stroke-width="1.80"/>
 <polygon points="695.13,433.47 754.34,433.47 754.34,403.87 695.13,403.87" fill="none" stroke="#464646" stroke-width="1.40" stroke-dasharray="10 7"/>
 <line x1="724.74" y1="433.47" x2="724.74" y2="403.87" stroke="#787878" stroke-width="1.00" stroke-dasharray="10 7" stroke-linecap="round"/>
 <polygon points="872.77,433.47 922.11,433.47 922.11,403.87 872.77,403.87" fill="none" stroke="#464646" stroke-width="1.40" stroke-dasharray="10 7"/>
@@ -201,13 +208,13 @@
 <polygon points="778.03,447.69 809.61,447.69 809.61,421.04 778.03,421.04" fill="none" stroke="#464646" stroke-width="1.00"/>
 <polygon points="817.50,447.69 849.08,447.69 849.08,421.04 817.50,421.04" fill="none" stroke="#464646" stroke-width="1.00"/>
 <circle cx="813.55" cy="452.13" r="4.44" fill="none" stroke="#464646" stroke-width="1.00"/>
-<polygon points="701.55,628.38 701.55,571.14 652.20,571.14 652.20,628.38" fill="none" stroke="#464646" stroke-width="1.40"/>
-<circle cx="688.72" cy="613.50" r="7.89" fill="none" stroke="#464646" stroke-width="1.00"/>
-<circle cx="688.72" cy="586.02" r="7.89" fill="none" stroke="#464646" stroke-width="1.00"/>
-<circle cx="665.03" cy="613.50" r="7.89" fill="none" stroke="#464646" stroke-width="1.00"/>
-<circle cx="665.03" cy="586.02" r="7.89" fill="none" stroke="#464646" stroke-width="1.00"/>
-<polygon points="701.55,629.37 701.55,570.15 652.20,570.15 652.20,629.37" fill="none" stroke="#464646" stroke-width="1.40" stroke-dasharray="10 7"/>
-<line x1="701.55" y1="629.37" x2="652.20" y2="570.15" stroke="#787878" stroke-width="0.80" stroke-dasharray="10 7" stroke-linecap="round"/>
+<polygon points="703.52,628.38 703.52,571.14 654.18,571.14 654.18,628.38" fill="none" stroke="#464646" stroke-width="1.40"/>
+<circle cx="690.69" cy="613.50" r="7.89" fill="none" stroke="#464646" stroke-width="1.00"/>
+<circle cx="690.69" cy="586.02" r="7.89" fill="none" stroke="#464646" stroke-width="1.00"/>
+<circle cx="667.01" cy="613.50" r="7.89" fill="none" stroke="#464646" stroke-width="1.00"/>
+<circle cx="667.01" cy="586.02" r="7.89" fill="none" stroke="#464646" stroke-width="1.00"/>
+<polygon points="697.60,629.37 697.60,570.15 648.26,570.15 648.26,629.37" fill="none" stroke="#464646" stroke-width="1.40" stroke-dasharray="10 7"/>
+<line x1="697.60" y1="629.37" x2="648.26" y2="570.15" stroke="#787878" stroke-width="0.80" stroke-dasharray="10 7" stroke-linecap="round"/>
 <polygon points="808.62,682.66 877.70,682.66 877.70,613.58 808.62,613.58" fill="none" stroke="#464646" stroke-width="1.40"/>
 <circle cx="843.16" cy="648.12" r="19.34" fill="none" stroke="#464646" stroke-width="1.00"/>
 <text x="843.16" y="690.95" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#787878" text-anchor="middle" dominant-baseline="central">REF</text>
@@ -237,11 +244,11 @@
 <circle cx="1178.69" cy="678.71" r="13.82" fill="#ffffff" stroke="#005aaa" stroke-width="1.40"/>
 <line x1="1178.69" y1="678.71" x2="1202.18" y2="655.22" stroke="#005aaa" stroke-width="1.20" stroke-linecap="round"/>
 <text x="1204.94" y="649.70" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#005aaa" text-anchor="start" dominant-baseline="central">S6</text>
-<polygon points="1381.00,1191.87 1529.03,1191.87 1529.03,994.50 1381.00,994.50" fill="none" stroke="#464646" stroke-width="1.40"/>
-<polygon points="1381.00,1191.87 1529.03,1191.87 1529.03,1176.08 1381.00,1176.08" fill="#b9b9b9" stroke="#464646" stroke-width="1.00"/>
-<polygon points="1389.88,1168.19 1449.09,1168.19 1449.09,1132.66 1389.88,1132.66" fill="none" stroke="#464646" stroke-width="1.00"/>
-<polygon points="1460.93,1168.19 1520.14,1168.19 1520.14,1132.66 1460.93,1132.66" fill="none" stroke="#464646" stroke-width="1.00"/>
-<line x1="1381.00" y1="1081.35" x2="1529.03" y2="1081.35" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="1410.60,1201.74 1558.63,1201.74 1558.63,1004.37 1410.60,1004.37" fill="none" stroke="#464646" stroke-width="1.40"/>
+<polygon points="1410.60,1201.74 1558.63,1201.74 1558.63,1185.95 1410.60,1185.95" fill="#b9b9b9" stroke="#464646" stroke-width="1.00"/>
+<polygon points="1419.48,1178.06 1478.70,1178.06 1478.70,1142.53 1419.48,1142.53" fill="none" stroke="#464646" stroke-width="1.00"/>
+<polygon points="1490.54,1178.06 1549.75,1178.06 1549.75,1142.53 1490.54,1142.53" fill="none" stroke="#464646" stroke-width="1.00"/>
+<line x1="1410.60" y1="1091.21" x2="1558.63" y2="1091.21" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
 <polygon points="1690.38,1073.45 1690.38,895.82 1631.17,895.82 1631.17,1073.45" fill="none" stroke="#464646" stroke-width="1.40"/>
 <line x1="1690.38" y1="1014.24" x2="1631.17" y2="1014.24" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
 <line x1="1690.38" y1="955.03" x2="1631.17" y2="955.03" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
@@ -283,8 +290,8 @@
 <text x="816.61" y="827.33" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#005aaa" text-anchor="start" dominant-baseline="central">S4</text>
 <polygon points="796.78,728.05 796.78,698.45 790.86,698.45 790.86,728.05" fill="#ffffff" stroke="#005aaa" stroke-width="1.80"/>
 <text x="793.82" y="713.25" font-family="DejaVu Sans, Arial, sans-serif" font-size="12.00" fill="#005aaa" text-anchor="middle" dominant-baseline="central" font-weight="bold">DB</text>
-<polygon points="811.09,856.34 811.09,737.92 776.55,737.92 776.55,856.34" fill="none" stroke="#464646" stroke-width="1.40"/>
-<line x1="811.09" y1="797.13" x2="776.55" y2="797.13" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="807.88,826.74 807.88,708.31 773.34,708.31 773.34,826.74" fill="none" stroke="#464646" stroke-width="1.40"/>
+<line x1="807.88" y1="767.53" x2="773.34" y2="767.53" stroke="#464646" stroke-width="1.00" stroke-linecap="round"/>
 <circle cx="1010.93" cy="1209.64" r="14.80" fill="#ffffff" stroke="#005aaa" stroke-width="1.40"/>
 <line x1="996.12" y1="1209.64" x2="1025.73" y2="1209.64" stroke="#005aaa" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1010.93" y1="1209.64" x2="1010.93" y2="1181.51" stroke="#005aaa" stroke-width="1.20" stroke-linecap="round"/>
@@ -340,8 +347,8 @@
 <line x1="971.45" y1="404.36" x2="958.89" y2="416.92" stroke="#005aaa" stroke-width="1.00" stroke-linecap="round"/>
 <line x1="971.45" y1="404.36" x2="984.01" y2="416.92" stroke="#005aaa" stroke-width="1.00" stroke-linecap="round"/>
 <text x="998.10" y="404.36" font-family="DejaVu Sans, Arial, sans-serif" font-size="10.00" fill="#005aaa" text-anchor="start" dominant-baseline="central">EF</text>
-<circle cx="922.11" cy="703.38" r="19.74" fill="#ffffff" stroke="#464646" stroke-width="1.40"/>
-<text x="922.11" y="703.38" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#464646" text-anchor="middle" dominant-baseline="central" font-weight="bold">G</text>
+<circle cx="991.19" cy="703.38" r="19.74" fill="#ffffff" stroke="#464646" stroke-width="1.40"/>
+<text x="991.19" y="703.38" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#464646" text-anchor="middle" dominant-baseline="central" font-weight="bold">G</text>
 <polygon points="823.42,855.85 882.63,855.85 882.63,852.89 823.42,852.89" fill="#e8f0f5" stroke="#464646" stroke-width="1.20"/>
 <line x1="828.16" y1="855.85" x2="842.37" y2="852.89" stroke="#b9b9b9" stroke-width="0.70" stroke-linecap="round"/>
 <line x1="845.92" y1="855.85" x2="860.13" y2="852.89" stroke="#b9b9b9" stroke-width="0.70" stroke-linecap="round"/>
@@ -349,8 +356,8 @@
 <line x1="956.65" y1="856.34" x2="1005.99" y2="856.34" stroke="#464646" stroke-width="2.00" stroke-linecap="round"/>
 <line x1="956.65" y1="858.32" x2="956.65" y2="854.37" stroke="#464646" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1005.99" y1="858.32" x2="1005.99" y2="854.37" stroke="#464646" stroke-width="1.20" stroke-linecap="round"/>
-<circle cx="1485.60" cy="703.38" r="19.74" fill="#ffffff" stroke="#464646" stroke-width="1.40"/>
-<text x="1485.60" y="703.38" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#464646" text-anchor="middle" dominant-baseline="central" font-weight="bold">G</text>
+<circle cx="1652.38" cy="703.38" r="19.74" fill="#ffffff" stroke="#464646" stroke-width="1.40"/>
+<text x="1652.38" y="703.38" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#464646" text-anchor="middle" dominant-baseline="central" font-weight="bold">G</text>
 <polygon points="1464.88,855.85 1524.09,855.85 1524.09,852.89 1464.88,852.89" fill="#e8f0f5" stroke="#464646" stroke-width="1.20"/>
 <line x1="1469.62" y1="855.85" x2="1483.83" y2="852.89" stroke="#b9b9b9" stroke-width="0.70" stroke-linecap="round"/>
 <line x1="1487.38" y1="855.85" x2="1501.59" y2="852.89" stroke="#b9b9b9" stroke-width="0.70" stroke-linecap="round"/>
@@ -549,60 +556,62 @@
 <text x="408.00" y="244.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
 <text x="88.00" y="263.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">BED</text>
 <text x="408.00" y="263.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="282.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">CHIMNEY</text>
-<text x="408.00" y="282.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="301.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">COFFEE TABLE</text>
+<text x="88.00" y="282.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">CHAIR</text>
+<text x="408.00" y="282.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x4</text>
+<text x="88.00" y="301.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">CHIMNEY</text>
 <text x="408.00" y="301.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="320.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">COUNTER TOP</text>
-<text x="408.00" y="320.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="339.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">DINING TABLE</text>
-<text x="408.00" y="339.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="358.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">DISTRIBUTION BOARD</text>
+<text x="88.00" y="320.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">COFFEE TABLE</text>
+<text x="408.00" y="320.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
+<text x="88.00" y="339.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">COUNTER TOP</text>
+<text x="408.00" y="339.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
+<text x="88.00" y="358.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">DINING TABLE</text>
 <text x="408.00" y="358.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="377.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">EXHAUST FAN</text>
-<text x="408.00" y="377.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x3</text>
-<text x="88.00" y="396.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">GEYSER</text>
-<text x="408.00" y="396.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="415.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">HOB</text>
-<text x="408.00" y="415.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="434.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">KITCHEN BASE CABINET</text>
-<text x="408.00" y="434.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="453.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">KITCHEN WALL CABINET</text>
-<text x="408.00" y="453.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="472.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">MIRROR</text>
+<text x="88.00" y="377.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">DISTRIBUTION BOARD</text>
+<text x="408.00" y="377.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
+<text x="88.00" y="396.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">EXHAUST FAN</text>
+<text x="408.00" y="396.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x3</text>
+<text x="88.00" y="415.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">GEYSER</text>
+<text x="408.00" y="415.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
+<text x="88.00" y="434.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">HOB</text>
+<text x="408.00" y="434.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
+<text x="88.00" y="453.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">KITCHEN BASE CABINET</text>
+<text x="408.00" y="453.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x4</text>
+<text x="88.00" y="472.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">KITCHEN WALL CABINET</text>
 <text x="408.00" y="472.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="491.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">NIGHTSTAND</text>
+<text x="88.00" y="491.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">MIRROR</text>
 <text x="408.00" y="491.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="510.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">PELMET</text>
-<text x="408.00" y="510.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x3</text>
-<text x="88.00" y="529.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">POWER SOCKET</text>
-<text x="408.00" y="529.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x8</text>
-<text x="88.00" y="548.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">RAILING</text>
-<text x="408.00" y="548.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x3</text>
-<text x="88.00" y="567.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">REFRIGERATOR</text>
-<text x="408.00" y="567.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="586.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SHOE RACK</text>
+<text x="88.00" y="510.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">NIGHTSTAND</text>
+<text x="408.00" y="510.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
+<text x="88.00" y="529.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">PELMET</text>
+<text x="408.00" y="529.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x3</text>
+<text x="88.00" y="548.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">POWER SOCKET</text>
+<text x="408.00" y="548.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x8</text>
+<text x="88.00" y="567.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">RAILING</text>
+<text x="408.00" y="567.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x3</text>
+<text x="88.00" y="586.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">REFRIGERATOR</text>
 <text x="408.00" y="586.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="605.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SHOWER</text>
-<text x="408.00" y="605.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="624.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SINK</text>
+<text x="88.00" y="605.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SHOE RACK</text>
+<text x="408.00" y="605.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
+<text x="88.00" y="624.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SHOWER</text>
 <text x="408.00" y="624.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="643.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SOFA</text>
-<text x="408.00" y="643.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="662.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">STUDY TABLE</text>
+<text x="88.00" y="643.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SINK</text>
+<text x="408.00" y="643.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
+<text x="88.00" y="662.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SOFA</text>
 <text x="408.00" y="662.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="681.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SWITCH PLATE</text>
-<text x="408.00" y="681.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x5</text>
-<text x="88.00" y="700.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">T V UNIT</text>
-<text x="408.00" y="700.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="719.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">TOWEL RAIL</text>
+<text x="88.00" y="681.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">STUDY TABLE</text>
+<text x="408.00" y="681.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
+<text x="88.00" y="700.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">SWITCH PLATE</text>
+<text x="408.00" y="700.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x5</text>
+<text x="88.00" y="719.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">T V UNIT</text>
 <text x="408.00" y="719.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="738.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">VANITY</text>
-<text x="408.00" y="738.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
-<text x="88.00" y="757.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">W C</text>
-<text x="408.00" y="757.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="776.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">WARDROBE</text>
+<text x="88.00" y="738.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">TOWEL RAIL</text>
+<text x="408.00" y="738.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
+<text x="88.00" y="757.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">VANITY</text>
+<text x="408.00" y="757.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
+<text x="88.00" y="776.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">W C</text>
 <text x="408.00" y="776.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
-<text x="88.00" y="795.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">WASHING MACHINE</text>
-<text x="408.00" y="795.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
+<text x="88.00" y="795.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">WARDROBE</text>
+<text x="408.00" y="795.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x2</text>
+<text x="88.00" y="814.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#000000" text-anchor="start" dominant-baseline="hanging">WASHING MACHINE</text>
+<text x="408.00" y="814.00" font-family="DejaVu Sans, Arial, sans-serif" font-size="11.00" fill="#5a5a5a" text-anchor="start" dominant-baseline="hanging">x1</text>
 </svg>

@@ -90,6 +90,24 @@ struct HOUSEFORGE_API FHFBedParams
 	double HeadboardThickness = 6.0;
 
 	/**
+	 * How far the whole bed stands forward of the drawn back, so the skirting can run behind it.
+	 *
+	 * A bed is not scribed joinery - FHFSkirting::IsScribedJoinery says so, and the board runs on
+	 * behind it - so the headboard has to stand IN FRONT of that board. Left at zero it stands 18 mm
+	 * inside it, which is invisible in plan and permanent in the built room.
+	 *
+	 * It matters now in a way it did not before: FHFFixturePlacement::AgainstWall used not to move a
+	 * fixture onto the wall face at all, so every bed in the flat sat 85 mm clear of the plaster and
+	 * nothing could reach the skirting. With that corrected, this is what keeps the headboard off it.
+	 *
+	 * Resolved by the composing layer from the project's skirting depth and handed in as a plain
+	 * dimension, exactly as FHFDeskParams::SupportSetback and FHFRefrigeratorParams::SkirtingSetback
+	 * are - a generator may not go looking for the room it is in.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
+	double SkirtingSetback = 0.0;
+
+	/**
 	 * How far the frame is set in from the mattress on the foot and the two sides.
 	 *
 	 * The shadow line that separates a mattress from the box under it. See the header - this is the
@@ -120,8 +138,11 @@ struct HOUSEFORGE_API FHFBedParams
 		meta = (EditCondition = "bUpholsteredHeadboard", ClampMin = "0.0"))
 	double UpholsteryProud = 1.5;
 
+	/** Back of the headboard: the drawn back, brought forward far enough for the skirting. */
+	double HeadboardBackY() const { return FMath::Max(Depth - SkirtingSetback, 0.0); }
+
 	/** Front face of the headboard: where the mattress stops and the panel starts. */
-	double HeadboardFaceY() const { return FMath::Max(Depth - HeadboardThickness, 0.0); }
+	double HeadboardFaceY() const { return FMath::Max(HeadboardBackY() - HeadboardThickness, 0.0); }
 
 	/** Foot to head of the mattress itself, which is the drawn depth less the headboard. */
 	double MattressLength() const { return HeadboardFaceY(); }

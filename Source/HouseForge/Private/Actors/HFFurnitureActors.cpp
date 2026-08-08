@@ -23,10 +23,16 @@ namespace
 
 void AHFBedActor::ApplyProjectDefaults()
 {
-	// A BED IS BOUGHT, NOT BUILT ON SITE, so nothing on it comes off the joinery settings page - a
-	// mattress is whatever the manufacturer made it. The hook exists so the composing layer can treat
-	// every fixture the same way, and so there is somewhere obvious for a future furniture catalogue
-	// to be read from. The same reason AHFSinkActor has one.
+	// A BED IS BOUGHT, NOT BUILT ON SITE, so almost nothing on it comes off the joinery settings page
+	// - a mattress is whatever the manufacturer made it.
+	//
+	// The one exception is the skirting, which is the project's and not the manufacturer's. A bed is
+	// not scribed joinery, so the board runs on behind it and the headboard has to stand in front of
+	// that board. It never mattered before because FHFFixturePlacement::AgainstWall was leaving every
+	// bed 85 mm off the plaster; now that it puts the drawn back on the finished face, this is the
+	// figure that keeps the headboard out of the skirting - exactly as it does on the desk above and
+	// on the refrigerator.
+	Bed.SkirtingSetback = FHFBuildDefaults::FromProjectSettings().Skirting.Depth + SkirtingScribeGap;
 }
 
 FHFBedParams AHFBedActor::ParamsFor(const FHFFixture& Fixture)
@@ -50,7 +56,14 @@ FHFBedParams AHFBedActor::ParamsFor(const FHFFixture& Fixture)
 
 void AHFBedActor::ApplyFixture(const FHFFixture& Fixture)
 {
+	// The skirting setback survives, for the reason spelled out on the desk below: a drawing has no
+	// opinion about where a skirting board runs, and re-reading it must not throw the figure away.
+	const double Setback = Bed.SkirtingSetback;
+
 	Bed = ParamsFor(Fixture);
+
+	Bed.SkirtingSetback = Setback;
+	Bed = FHFBedKit::Sanitise(Bed);
 }
 
 FDynamicMesh3 AHFBedActor::BuildMesh() const

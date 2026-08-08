@@ -376,9 +376,14 @@ FHFChimneyParams FHFApplianceKit::SanitiseChimney(const FHFChimneyParams& Params
 	P.CanopyHeight = FMath::Max(P.CanopyHeight, 0.0);
 	P.DuctLength = FMath::Max(P.DuctLength, 0.0);
 
+	// The bracket gap comes off the depth before anything is measured against it, and it can never eat
+	// more than a fifth of the hood: a gap that swallowed the canopy would be a hood hanging in
+	// mid-air rather than one screwed to a wall.
+	P.WallGap = FMath::Clamp(P.WallGap, 0.0, P.Depth * 0.2);
+
 	// The duct casing cannot be wider than the canopy it stands on, or the taper turns inside out.
 	P.DuctWidth = FMath::Clamp(P.DuctWidth, 0.0, P.Width);
-	P.DuctDepth = FMath::Clamp(P.DuctDepth, 0.0, P.Depth);
+	P.DuctDepth = FMath::Clamp(P.DuctDepth, 0.0, P.BackY());
 
 	// The taper is part of the canopy, so it cannot be taller than one.
 	P.TaperHeight = FMath::Clamp(P.TaperHeight, 0.0, P.CanopyHeight);
@@ -417,8 +422,8 @@ FHFApplianceBuild FHFApplianceKit::BuildChimney(const FHFChimneyParams& Params)
 		const double Inner = FMath::Min(SkirtWallThickness,
 			FMath::Min(P.Width, P.Depth) * 0.25);
 
-		const TArray<FVector2D> Outer = PlanRect(0.0, 0.0, P.Width, P.Depth);
-		const TArray<FVector2D> Mouth = PlanRect(Inner, Inner, P.Width - Inner, P.Depth - Inner);
+		const TArray<FVector2D> Outer = PlanRect(0.0, 0.0, P.Width, P.BackY());
+		const TArray<FVector2D> Mouth = PlanRect(Inner, Inner, P.Width - Inner, P.BackY() - Inner);
 
 		FDynamicMesh3 Skirt;
 		FHFMeshOps::InitialiseMesh(Skirt);
@@ -449,12 +454,12 @@ FHFApplianceBuild FHFApplianceKit::BuildChimney(const FHFChimneyParams& Params)
 
 		// The duct rises at the BACK of the canopy, against the wall, which is where a flue actually
 		// runs - not up the middle of the hood.
-		const double DuctY0 = P.Depth - P.DuctDepth;
-		const double DuctY1 = P.Depth;
+		const double DuctY0 = P.BackY() - P.DuctDepth;
+		const double DuctY1 = P.BackY();
 
 		const FVector3d Bottom[4] = {
 			FVector3d(0.0, 0.0, Z0), FVector3d(P.Width, 0.0, Z0),
-			FVector3d(P.Width, P.Depth, Z0), FVector3d(0.0, P.Depth, Z0)
+			FVector3d(P.Width, P.BackY(), Z0), FVector3d(0.0, P.BackY(), Z0)
 		};
 		const FVector3d Top[4] = {
 			FVector3d(DuctX0, DuctY0, Z1), FVector3d(DuctX1, DuctY0, Z1),
@@ -496,7 +501,7 @@ FHFApplianceBuild FHFApplianceKit::BuildChimney(const FHFChimneyParams& Params)
 		FHFMeshOps::InitialiseMesh(Duct);
 
 		FHFMeshOps::AppendBox(Duct,
-			FVector3d(P.Width * 0.5, P.Depth - P.DuctDepth * 0.5,
+			FVector3d(P.Width * 0.5, P.BackY() - P.DuctDepth * 0.5,
 				P.CanopyHeight + P.DuctLength * 0.5),
 			FVector3d(P.DuctWidth * 0.5, P.DuctDepth * 0.5, P.DuctLength * 0.5),
 			0.0, EHFSurfaceRole::Appliance);

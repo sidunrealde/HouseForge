@@ -78,10 +78,15 @@ FHFBedParams FHFBedKit::Sanitise(const FHFBedParams& Params)
 	P.MattressThickness = FMath::Max(P.MattressThickness, 0.0);
 	P.MattressTopZ = FMath::Max(P.MattressTopZ, 0.0);
 
+	// The setback comes off the depth FIRST, because everything below is measured against what is left
+	// of it. A tenth of the bed is far more than any skirting, and stops a mistyped figure turning a
+	// two metre bed into a headboard with a mattress in front of it.
+	P.SkirtingSetback = FMath::Clamp(P.SkirtingSetback, 0.0, P.Depth * 0.1);
+
 	// A HEADBOARD CANNOT BE THE WHOLE BED. Clamped rather than refused, because a drawing that gave a
 	// bed 60 mm of depth has made a units mistake, and the honest response to that is a bed with a
 	// thin headboard rather than no bed at all - the validator is what says the drawing is wrong.
-	P.HeadboardThickness = FMath::Clamp(P.HeadboardThickness, 0.0, P.Depth * 0.5);
+	P.HeadboardThickness = FMath::Clamp(P.HeadboardThickness, 0.0, P.HeadboardBackY() * 0.5);
 
 	// The panel has to clear the mattress it stands behind, or it is a rail rather than a headboard.
 	P.HeadboardHeight = FMath::Max(P.HeadboardHeight, P.MattressTopZ);
@@ -152,7 +157,7 @@ FHFBedBuild FHFBedKit::Build(const FHFBedParams& Params)
 
 	AppendSolid(Out.Headboard,
 		FVector3d(0.0, HeadFaceY, 0.0),
-		FVector3d(W, P.Depth, P.HeadboardHeight),
+		FVector3d(W, P.HeadboardBackY(), P.HeadboardHeight),
 		EHFSurfaceRole::ShutterLaminate);
 
 	// The upholstered pad, PROUD of the panel rather than flush in it. A pad let into a rebate is

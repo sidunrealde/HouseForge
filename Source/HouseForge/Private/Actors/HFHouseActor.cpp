@@ -549,12 +549,83 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::FreeStanding(*C.Fixture, C.FloorZ()));
 	}
 
+	/**
+	 * Which ends of a run die into a wall, so the splashback has to turn the corner there.
+	 *
+	 * THE UPSTAND IS A PROPERTY OF THE RUN. See FHFCounterParams::bUpstandReturnsAtStart for what
+	 * went wrong without this: 64.5 cm of bare plaster standing on the stone across the reference
+	 * kitchen's internal corner, with both runs' upstands ending square and open on either side.
+	 *
+	 * The same question ReturnWallInsets asks for a railing and the same answer: a wall running ACROSS
+	 * the run, whose finished face the run's end abuts. Answered here because only the composing layer
+	 * may look at the spec.
+	 *
+	 * @param Yaw The counter's resolved yaw, so +X is known to be along the run.
+	 */
+	void UpstandReturns(const FHFHouseSpec& Spec, const FHFFixture& Fixture, const FHFWall* Anchor,
+		double Yaw, bool& bOutStart, bool& bOutEnd)
+	{
+		bOutStart = false;
+		bOutEnd = false;
+
+		if (Fixture.Footprint.X <= 0.0)
+		{
+			return;
+		}
+
+		const double Radians = FMath::DegreesToRadians(Yaw);
+		const FVector2D Along(FMath::Cos(Radians), FMath::Sin(Radians));
+
+		const FVector2D StartEnd = Fixture.Position - Along * (Fixture.Footprint.X * 0.5);
+		const FVector2D PlusEnd = Fixture.Position + Along * (Fixture.Footprint.X * 0.5);
+
+		// How far past the finished face a drawn end may sit and still be "against" it. A run is set
+		// out to the plaster, so this only has to absorb the setting-out slack, not a real gap.
+		constexpr double MeetsWithin = 3.0;
+
+		for (const FHFWall& Wall : Spec.Walls)
+		{
+			if (Anchor != nullptr && Wall.Id == Anchor->Id)
+			{
+				continue;
+			}
+
+			const FVector2D Direction = (Wall.End - Wall.Start).GetSafeNormal();
+
+			// A wall carrying on in the same line is not a return; it is the same wall the run is
+			// already backed onto, or its continuation.
+			if (FMath::Abs(FVector2D::DotProduct(Direction, Along)) > 0.9)
+			{
+				continue;
+			}
+
+			// Distance from the run's end to the wall's FACE, not to its centreline: a run stops at
+			// the plaster, and the centreline is half a wall further on.
+			auto AbutsFace = [&Wall](const FVector2D& Point)
+			{
+				const FVector2D OnLine = FMath::ClosestPointOnSegment2D(Point, Wall.Start, Wall.End);
+				return FMath::Abs(FVector2D::Distance(Point, OnLine) - Wall.Thickness * 0.5) < MeetsWithin;
+			};
+
+			bOutStart |= AbutsFace(StartEnd);
+			bOutEnd |= AbutsFace(PlusEnd);
+		}
+	}
+
 	void SeedCounter(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFCounterActor& Actor = static_cast<AHFCounterActor&>(Element);
 
 		Actor.ApplyProjectDefaults();
 		Actor.ApplyFixture(*C.Fixture);
+
+		// THE SPLASHBACK TURNS THE CORNER where the run dies into a wall. See UpstandReturns.
+		if (C.Spec != nullptr)
+		{
+			UpstandReturns(*C.Spec, *C.Fixture, C.AnchorWall,
+				FHFFixturePlacement::FacingYaw(*C.Fixture, C.AnchorWall),
+				Actor.Counter.bUpstandReturnsAtStart, Actor.Counter.bUpstandReturnsAtEnd);
+		}
 
 		// THE HOLES, WORKED OUT BY THE ONLY LAYER THAT CAN SEE TWO FIXTURES AT ONCE. Empty for a
 		// counter with nothing set into it, which is an uncut slab and not an error.
@@ -623,21 +694,76 @@ namespace
 		Actor.ApplyProjectDefaults();
 		Actor.ApplyFixture(*C.Fixture);
 
+		// THE CANOPY HANGS OVER THE HOB, NOT OVER THE DRAWING. This is the same resolution the duct
+		// below gets, applied to the other end of the same fitting, and it was missing.
+		//
+		// The drawn BaseZ of 1500 was worked back from a hob standing at the drawn 850. The hob does
+		// not stand there: it is set into the counter at the counter's RESOLVED finished top, which
+		// comes from the project's slab and plinth settings, and its glass and grates stand above that
+		// again. Measured in the built flat, the hob's cooking surface is at 92.3 and the canopy's
+		// underside at 150.0 - 57.7 cm apart, under the 65 a gas hob needs and under the 650 to 750
+		// the milestone plan states. Close enough to look plausible in a render and wrong in a way
+		// nobody would build.
+		//
+		// Exactly the stale-drawn-BaseZ failure already fixed for the sink and the pelmet, left
+		// unfixed for the one fitting in the flat that hangs over another. Resolved here because only
+		// the composing layer may look at a second fixture - see SetInPlacement, which is where the
+		// hob's own surface was resolved - and handed to the actor as a plain height.
+		constexpr double MinHobClearanceCm = 65.0;
+
+		double CanopyBaseZ = C.FloorZ() + C.Fixture->BaseZ;
+
+		if (C.Fixtures != nullptr)
+		{
+			for (const FHFFixture& Other : *C.Fixtures)
+			{
+				if (Other.Type != EHFFixtureType::Hob || Other.RoomId != C.Fixture->RoomId)
+				{
+					continue;
+				}
+
+				// The stone the hob is set into, resolved; or the drawn rim where it found no host, on
+				// exactly the same fallback SetInPlacement uses.
+				double StoneZ = C.FloorZ() + Other.BaseZ + Other.Height;
+				if (C.SetIn != nullptr)
+				{
+					if (const double* Resolved = C.SetIn->SurfaceZ.Find(Other.Id))
+					{
+						StoneZ = *Resolved;
+					}
+				}
+
+				// What actually stands over the stone: the glass, and the pan supports on it. The
+				// clearance a hood needs is measured from the cooking surface, which is the grate.
+				const double CookingSurfaceZ = StoneZ + AHFHobActor::CookingSurfaceAboveStone(Other);
+
+				CanopyBaseZ = FMath::Max(CanopyBaseZ, CookingSurfaceZ + MinHobClearanceCm);
+			}
+		}
+
 		// THE DUCT HAS TO REACH THE SOFFIT, and the soffit is a false ceiling whose depth is a project
 		// setting. Measured here, where the room and its ceilings are both visible, and handed in as a
 		// length - exactly as a ceiling fan's rod is. A chimney built to a fixed duct length in a room
 		// whose ceiling somebody deepened has its flue buried in plasterboard.
+		//
+		// Measured from where the canopy ACTUALLY ends up rather than from its drawn top, or lifting it
+		// clear of the hob would push the flue that far through the ceiling.
 		double SoffitAboveCanopy = 0.0;
 
 		if (C.Room != nullptr)
 		{
-			const double SoffitZ = C.Room->CeilingHeight - C.SoffitDrop;
-			const double CanopyTopZ = C.Fixture->BaseZ + C.Fixture->Height;
-			SoffitAboveCanopy = SoffitZ - CanopyTopZ;
+			const double SoffitZ = C.FloorZ() + C.Room->CeilingHeight - C.SoffitDrop;
+			SoffitAboveCanopy = SoffitZ - (CanopyBaseZ + C.Fixture->Height);
 		}
 
 		Actor.ApplyCeilingAbove(SoffitAboveCanopy);
-		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
+
+		// The canopy's own base, not the drawing's, for the reason above. Everything else about the
+		// placement - the half turn, the wall face, the position along the wall - is unchanged.
+		FTransform Placed = FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall);
+		Placed.SetLocation(FVector(Placed.GetLocation().X, Placed.GetLocation().Y, CanopyBaseZ));
+
+		Actor.SetActorTransform(Placed);
 	}
 
 	// -------------------------------------------------------------------------- the bathroom fittings
