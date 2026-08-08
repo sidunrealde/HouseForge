@@ -260,7 +260,7 @@ Steps 1â€“4 are the useful panel. 5â€“7 are the user's other request. 
 
 | Deferred | Why |
 |---|---|
-| SURFACES / ASSETS / LIGHT sections | The material library, asset override and lighting do not exist in `Source/`. Three greyed "planned" rows are fake UI. The `FHFPanelSection` array is the reservation; reserving a code seam is honest, reserving pixels is not |
+| ~~SURFACES~~ / ASSETS / LIGHT sections | **SURFACES no longer qualifies.** `UHFMaterialLibrary` landed in milestone 10: a `UDataAsset` mapping every `EHFSurfaceRole` to an `FHFSurfaceFinish`, with `PushFinish(Role, EHFMaterialPush)` as the live-update path — `Interactive` for a drag (`RecacheUniformExpressions`, no render-state recreate), `Commit` on release. So SURFACES has something real to surface and should be built against that API rather than reserved. Asset override and lighting still do not exist in `Source/`; three greyed "planned" rows are fake UI, and the `FHFPanelSection` array remains the reservation for those two. Reserving a code seam is honest, reserving pixels is not |
 | Per-property editing in the panel | The Details panel already does it better â€” `ShowOnlyInnerProperties`, `ClampMin`, `CallInEditor`, undo, multi-object edit. The panel gets a `[Details]` button, not a reimplementation that must be kept in sync with `FHFWall` forever |
 | A spec JSON text editor | Rule 04: the spec is the import/export format, not a live second source of truth. `Copy spec JSON` in `[...]` is the whole surface |
 | Element creation (Add Wall / Room / Fixture) | Houses come from drawings; `SampleIsNotOnTheBuildPath` enforces it. A creation UI is a plan editor â€” a different product, and it becomes the path everyone uses instead of reading the drawing |
