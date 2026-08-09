@@ -375,6 +375,7 @@ bool FHFBakeFlatArticulationTest::RunTest(const FString& Parameters)
 	int32 Drifted = 0;
 	int32 Stuck = 0;
 	int32 NotMovable = 0;
+	int32 OutOfLumen = 0;
 	int32 FailedToBake = 0;
 
 	// Sampled rather than end-to-end. A part can be right shut and right open and wrong in between:
@@ -431,7 +432,25 @@ bool FHFBakeFlatArticulationTest::RunTest(const FString& Parameters)
 
 		TotalParts += Fixture->BakedParts.Num();
 
-		// -------------------------------------------------------------------------------- MOVABLE
+		// ------------------------------------------------------------------- MOVABLE, AND IN LUMEN
+		//
+		// The bake's second job. A UDynamicMeshComponent is absent from the Lumen scene entirely -
+		// FBaseDynamicMeshSceneProxy hardcodes its distance field flags to false - and the measured
+		// consequence is the dangerous kind: the broken configuration renders BRIGHTER, because
+		// unoccluded sky floods through walls Lumen cannot see. So a baked part that is in the level
+		// but not in the Lumen scene is worse than no bake at all, and it is asserted rather than
+		// assumed.
+		//
+		// Three things, each of which alone removes the element:
+		//   MOBILITY is NOT one of them - it appears nowhere in the chain, and Movable is chosen
+		//     because a Static component that MOVES rebuilds its scene proxy on every transform change
+		//     (ShouldRecreateProxyOnUpdateTransform), forcing LumenRemovePrimitive + LumenAddPrimitive
+		//     and a full surface-cache re-capture every time a door opens. Movable re-transforms the
+		//     cards and keeps the captured pages, so it is strictly cheaper for anything that moves.
+		//   The two per-component flags below, both default true, either of which turns the element off.
+		//   DistanceFieldResolutionScale on the ASSET, which UE::AssetUtils sets to 0.0 - killing the
+		//     distance field, and with it the mesh cards, which are chained off the DF build - if
+		//     FStaticMeshAssetOptions::bAllowDistanceField is ever set false in FHFBakeService.
 		for (const FHFBakedPart& Part : Fixture->BakedParts)
 		{
 			if (IsValid(Part.Component) && Part.Component->Mobility != EComponentMobility::Movable)
@@ -442,6 +461,27 @@ bool FHFBakeFlatArticulationTest::RunTest(const FString& Parameters)
 					static_cast<int32>(Part.Component->Mobility.GetValue()),
 					static_cast<int32>(EComponentMobility::Movable)));
 				++NotMovable;
+			}
+
+			if (IsValid(Part.Component)
+				&& (!Part.Component->bAffectDistanceFieldLighting || !Part.Component->bAffectDynamicIndirectLighting))
+			{
+				AddError(FString::Printf(
+					TEXT("%s baked part '%s' has bAffectDistanceFieldLighting=%d bAffectDynamicIndirectLighting=%d. Either one false removes it from the Lumen scene, and the flat then renders brighter than the truth rather than darker."),
+					*Where, *Part.SourceComponentName.ToString(),
+					Part.Component->bAffectDistanceFieldLighting ? 1 : 0,
+					Part.Component->bAffectDynamicIndirectLighting ? 1 : 0));
+				++OutOfLumen;
+			}
+
+			if (Part.BakedMesh != nullptr
+				&& Part.BakedMesh->GetNumSourceModels() > 0
+				&& Part.BakedMesh->GetSourceModel(0).BuildSettings.DistanceFieldResolutionScale <= 0.0)
+			{
+				AddError(FString::Printf(
+					TEXT("%s baked part '%s' was built with DistanceFieldResolutionScale 0, so it has no distance field - and the mesh card build is chained off the distance field build, so it has no surface cache and contributes no radiance."),
+					*Where, *Part.SourceComponentName.ToString()));
+				++OutOfLumen;
 			}
 		}
 
@@ -597,6 +637,7 @@ bool FHFBakeFlatArticulationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Every baked part rides the live part it stands in for"), Drifted, 0);
 	TestEqual(TEXT("Every part that claims to move, moves"), Stuck, 0);
 	TestEqual(TEXT("Every baked moving part is Movable"), NotMovable, 0);
+	TestEqual(TEXT("And every baked part is in the Lumen scene, which is what the bake is FOR"), OutOfLumen, 0);
 	TestTrue(TEXT("The flat really has moving parts to have baked"), TotalMoving > 0);
 
 	return true;

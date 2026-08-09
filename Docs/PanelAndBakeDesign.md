@@ -206,6 +206,41 @@ UPROPERTY(Transient, VisibleAnywhere, Category="HouseForge|Bake") bool bBakeAsse
 
 Part 0's `UStaticMeshComponent` is a constructor default subobject (`CreateDefaultSubobject<UStaticMeshComponent>("BakedMesh_0")`, `SetupAttachment(Mesh)`, created hidden and non-colliding). Parts > 0 are created by `EnsurePartComponent(int32)` with `NewObject` + `AddInstanceComponent` + `RegisterComponent`, attached to **that part's dynamic component** so it inherits the articulated pose for free.
 
+**Built as described, with one departure and two additions the design did not anticipate.** The
+departure: part 0's component is created lazily like every other, not as a default subobject.
+`AHFArticulatedActor` already creates all of its mesh components that way and they round-trip through
+save and load, so the subobject buys only a second code path and one always-present component on all
+150-odd elements of a flat that may never be baked at all.
+
+The additions came out of taking the per-part model from one door to the whole flat - **77 articulated
+elements, 327 parts, 250 of them moving** - and both are silent failures.
+
+**Parts must be MATCHED to sources, not truncated to length.** `SyncBakedPartsToSources` trimmed
+`BakedParts` from the end until the two lists were the same length, which is correct only while parts
+can vanish from the end alone. They cannot: a wardrobe's parts are its body leaves and *then* its loft
+leaves, so narrowing it by one bay loses a body leaf out of the **middle** while every loft leaf above
+it stays. Truncation drops the last entry instead, and from that moment `BakedParts[i]` stands for a
+part it was never baked from - the loft leaves wear the body leaves' assets, one slot out, and every
+re-bake writes the wrong geometry into the wrong asset path. Nothing logs.
+
+The dropped part's baked component is the visible half. `USceneComponent::OnComponentDestroyed`
+re-attaches a live child to its **grandparent** rather than destroying it, so a baked leaf whose
+dynamic twin has gone comes back parented to the carcass and hangs there, frozen. Matching is
+therefore by **attachment first** - the baked component hangs off the dynamic component it stands in
+for, and that is the one record a reordering cannot falsify - by recorded `SourceComponentName`
+second, for an asset loaded from a saved level with no component yet to be attached by. The shell's
+slot is **pinned** rather than matched, so an orphan the engine has just re-parented onto the shell
+cannot be mistaken for the shell's own; and a survivor's attachment is repaired rather than trusted.
+Guarded by `HouseForge.Bake.Articulation.ADroppedMiddlePartDoesNotShuffleTheBakedMeshes`.
+
+**A baked component is created `Movable`, which is the opposite of the usual instinct.** Mobility
+appears nowhere in the chain that decides Lumen scene membership, so it costs nothing there;
+`UStaticMeshComponent::ShouldRecreateProxyOnUpdateTransform` returns true for anything that is *not*
+Movable, so a Static-mobility baked shutter would destroy and rebuild its scene proxy every time it
+opened, forcing `LumenRemovePrimitive` + `LumenAddPrimitive` and a full surface-cache re-capture.
+Movable re-transforms the cards and keeps the captured pages. Movable is strictly cheaper for anything
+that moves.
+
 ### 4.4 The switch â€” the only place visibility or collision is touched
 
 ```cpp
@@ -237,6 +272,23 @@ void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
 Two non-obvious requirements. **Collision switches with visibility** - leaving both on double-traces
 every wall and leaves complex-as-simple dynamic collision under a mesh the user believes is the only
 thing there.
+
+**And `SetCollisionEnabled` alone is not the declaration.** The listing above restores a single enum,
+which is right for a wall and wrong for anything articulated. `AHFArticulatedActor::ApplyPartCollision`
+gives a fan rotor `QueryOnly` with every response set to `Ignore` except `Visibility`, because
+collision geometry cannot spin with the render and a blocking rotor is one blade frozen across a third
+of its own sweep. Copying the source's collision **profile name** across carries none of that: writing
+a response by hand invalidates the profile name to `Custom`, and loading a name that is not a real
+profile takes `FBodyInstance::LoadProfileData`'s no-profile branch (BodyInstance.cpp:4507-4533) and
+rebuilds the responses from the **target's** own array - block everything. So a baked rotor came out
+`QueryOnly` and blocking, and `QueryOnly` is quite enough to stop a walking character, because
+character movement is a sweep and a sweep is a query. Every baked ceiling fan in the flat was an
+invisible wall at head height. The object type and the whole response container are copied when the
+source is carrying custom responses, before the `CollisionEnabled` stamp because loading a real
+profile sets `CollisionEnabled` as a side effect - and re-copied on **every** switch to Baked rather
+than only at bake time, because a regeneration re-declares what a part blocks. Guarded by
+`HouseForge.Bake.Articulation.ABakedRotorStillBlocksNothingButTraces`, which traces the world on both
+channels rather than reading flags back.
 
 **The baked component's `UStaticMesh` is cleared while Dynamic.** This paragraph used to say
 "unregistered", and that was wrong. `HouseForge.Bake.Probe.ToolTargetSelection` builds an actor with
@@ -367,6 +419,32 @@ All named `HouseForge.*` so `hf-validate.ps1` catches them.
 * `MissingAssetFallsBackToDynamic` â€” null a part mesh, `ReconcileBakeState()`, assert Dynamic + `bBakeAssetMissing`.
 * `AllFourStateCombinationsRoundTrip` â€” {edited, generated} Ã— {baked, dynamic} through serialise/deserialise.
 * `ArticulatedBakeKeepsPartsSeparate` â€” bake an `AHFOpeningActor`, assert one `FHFBakedPart` per source component and that the leaf still moves with `SetPartOpenAmount`. Rule 04's "a bake must not weld a chest of drawers into a block", tested on the one articulated element that exists today.
+
+**`HouseForge.Bake.Articulation.*`** - `Source/HouseForgeEditor/Private/Tests/HFBakeArticulationTests.cpp`.
+The above tested one door; these test the flat, and writing them found two silent defects (the
+collision declaration in 4.4, the middle-part drop in 4.3):
+
+* `EveryArticulatedFixtureInTheFlatBakesAndStillMoves` - **77 articulated elements, 327 parts, 250 of
+  them moving.** Per fixture: one baked part per source, no two parts sharing an asset, every baked
+  component `Movable` with both Lumen flags on and a non-zero `DistanceFieldResolutionScale`, and
+  every baked component's world transform equal to its live part's at five open amounts. The fixture
+  is driven as a WHOLE rather than a part at a time, because `SequencedAfterPartId` means a drawer
+  cannot come out through a shut shutter and asking one part alone for a full open would be measuring
+  the interlock and reporting it as a bake defect. Spinning parts get a phase past a whole turn
+  instead; a leaf that a master open deliberately holds shut gets `OpenRunFrom`.
+* `ABakedRotorStillBlocksNothingButTraces` - traced on both channels, against the live rotor's own
+  measured behaviour rather than against a flag written down in the test.
+* `BakedCollisionFollowsAPartThroughItsRange` - a walk trace hits the baked leaf at 0, 25, 50, 75 and
+  100% open. Rule 04's "including on open doors".
+* `PosesAndSpinPhasesSurviveBakeUnbakeAndRebuild` - four opening parts and two spinning ones, through
+  bake, unbake, re-bake and a whole-house `BuildGeometry`. The spinner is sought separately, because a
+  flat has far more doors than fans and "take the first few" never reaches one - which is how this
+  test first passed while proving nothing about the case it exists for.
+* `ABakedSliderStillOpensInCentimetres` - 88.4 cm uncovered on a 179.4 cm run, measured off the
+  BAKED meshes. Not "the leaf moved": a pair of sliding leaves driven out together report their full
+  travel and uncover nothing, which is the whole reason `bMasterOpens` exists.
+* `ADroppedMiddlePartDoesNotShuffleTheBakedMeshes` - and every surviving baked component still hangs
+  on the part it stands in for.
 
 **`HouseForge.Editor.Bake.*`**:
 * `HouseRebuildPreservesBakedElements` â€” extends the existing rebuild-preserves-edits test: a baked, non-artist-edited element survives `BuildGeometry`, keeps its asset, is not orphaned.
