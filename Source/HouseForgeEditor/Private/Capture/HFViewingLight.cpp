@@ -70,13 +70,25 @@ namespace
 	/**
 	 * The ambient fill that makes the inside of the flat visible.
 	 *
-	 * The engine's own daylight ambient cubemap, at the intensity the reference flat was measured
-	 * at: the master bedroom renders around 44% mean brightness with it and around 3% without,
-	 * while the plan barely moves - so this lights interiors and leaves the sun in charge of
-	 * everything the sky can see.
-	 *
 	 * An ambient cubemap rather than the sky light because a scene capture has no global
 	 * illumination, and a sky light's diffuse arrives through GI. See the class comment.
+	 *
+	 * THE INTENSITY IS BALANCED AGAINST THE ALBEDOS, AND IT HAS BEEN WRONG ONCE FOR EXACTLY THAT
+	 * REASON. It was 10.0, chosen when every surface was a dark untextured placeholder. Milestone 10
+	 * raised the albedo set to what real finishes actually are - wall paint 0.79, ceiling 0.87, cove
+	 * 0.90 linear - and left this where it was, which drove every interior render into the shoulder
+	 * of the tone curve. Measured over the delivered images: 72.9% of the living room above sRGB 225
+	 * with an interquartile range of 14 levels, and the corridor 90.3% above it with an IQR of 6 -
+	 * a whole room living inside six levels. Every contrast the milestone bought landed where the
+	 * curve is flat, so the tile grout measured four to eight levels out of 232 and the flat read as
+	 * a white box. The finishes had been tuned against renders that could not show what was being
+	 * tuned.
+	 *
+	 * At 3.0 the same two shots sit at a median of 198 and 202 with IQRs of 26 and 16: walls in the
+	 * 190-200 band a real emulsion occupies, and roughly double the contrast to carry the detail.
+	 *
+	 * So this number is not free to drift from the material library. If the albedo set moves again,
+	 * re-measure - a histogram of one interior shot is the whole test, and it takes a minute.
 	 */
 	void ApplyAmbientFill(FPostProcessSettings& Settings)
 	{
@@ -86,7 +98,7 @@ namespace
 		{
 			Settings.AmbientCubemap = Cubemap;
 			Settings.bOverride_AmbientCubemapIntensity = 1;
-			Settings.AmbientCubemapIntensity = 10.0f;
+			Settings.AmbientCubemapIntensity = 3.0f;
 		}
 	}
 
