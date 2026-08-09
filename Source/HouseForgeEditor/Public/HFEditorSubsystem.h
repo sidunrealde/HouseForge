@@ -231,6 +231,49 @@ public:
 	/** The house actor in the current level, or nullptr. */
 	AHFHouseActor* FindHouseActor() const;
 
+	// ---------------------------------------------------------------------------------- bake
+	//
+	// The bake exists as a switch on every element actor, but until this section there was no way to
+	// reach it from anywhere except C++ and the details panel - and HouseForge is driven over MCP by
+	// a model, which has neither. A feature that cannot be invoked from the route the plugin is
+	// actually used through is not a feature.
+
+	/**
+	 * Bakes or unbakes every element of every house in the level.
+	 *
+	 * BAKING IS A RENDERING CHOICE AND IT IS REVERSIBLE - the dynamic meshes are kept, hidden, and
+	 * restored exactly by the unbake. What it changes is whether Lumen can see the flat at all: a
+	 * UDynamicMeshComponent gets no mesh cards and so no surface cache, and an unbaked interior is
+	 * lit by unoccluded sky rather than by its own fixtures.
+	 *
+	 * @param bBaked    True to bake, false to switch every element back to its live mesh.
+	 * @param OutReport What was baked, skipped or failed, element by element.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
+	FHFOperationResult SetHouseRenderMode(bool bBaked, FString& OutReport);
+
+	/**
+	 * Re-bakes every baked element whose geometry has changed since it was baked.
+	 *
+	 * The one case bAutoRebakeOnRegenerate does not cover: an element baked, then edited with
+	 * auto-rebake switched off, is drawing geometry the spec no longer describes.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
+	FHFOperationResult RebakeStale(FString& OutReport);
+
+	/**
+	 * Whether the flat is in the Lumen scene, and what is missing if it is not.
+	 *
+	 * The same check the capture path refuses on, exposed so it can be asked BEFORE spending the
+	 * time on a render - and so that "is this render trustworthy" has an answer that is not a
+	 * judgement of the image.
+	 *
+	 * @param OutReport The full account: counts, area share, the absent elements and the remedy.
+	 * @return          Ok when the flat is covered; Fail, with the report, when it is not.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
+	FHFOperationResult CheckLumenCoverage(FString& OutReport) const;
+
 	// ------------------------------------------------------------------------------ surfaces
 	//
 	// The read and write halves of "what every surface role is made of". The material panel is a

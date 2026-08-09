@@ -184,3 +184,33 @@ FString UHFToolset::CaptureView(const FString& FileName, int32 Resolution,
 		FieldOfViewDegrees, Path);
 	return Report(Result);
 }
+
+FString UHFToolset::SetHouseRenderMode(bool Baked)
+{
+	UHFEditorSubsystem* Editor = Subsystem();
+	if (Editor == nullptr)
+	{
+		return NoEditor();
+	}
+
+	FString BakeReport;
+	const FHFOperationResult Result = Editor->SetHouseRenderMode(Baked, BakeReport);
+
+	// The report goes back on success as well as on failure. A bake's interesting numbers - how many
+	// parts, how many skipped, and what share of the flat is now radiant - are exactly what the
+	// caller needs in order to decide whether to render, and a bare "Ok" would throw them away.
+	return Report(Result);
+}
+
+FString UHFToolset::CheckLumenCoverage()
+{
+	UHFEditorSubsystem* Editor = Subsystem();
+	if (Editor == nullptr)
+	{
+		return NoEditor();
+	}
+
+	FString Coverage;
+	const FHFOperationResult Result = Editor->CheckLumenCoverage(Coverage);
+	return Report(Result);
+}

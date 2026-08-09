@@ -153,4 +153,31 @@ public:
 		float CameraX, float CameraY, float CameraZ,
 		float TargetX, float TargetY, float TargetZ,
 		float FieldOfViewDegrees);
+
+	/**
+	 * Bakes the house to static meshes, or switches it back. REQUIRED BEFORE ANY LIT RENDER.
+	 *
+	 * Lumen cannot see the dynamic meshes HouseForge generates: they get no mesh cards, so no
+	 * surface cache, so no bounce light - on software AND hardware tracing. An unbaked interior is
+	 * lit by sky flooding straight through its own walls, which renders BRIGHTER than the correct
+	 * result and looks perfectly cheerful. CaptureView refuses to draw an unbaked flat for that
+	 * reason.
+	 *
+	 * The bake is reversible and non-destructive: the live meshes are kept and hidden, articulation
+	 * is preserved part by part, and unbaking restores them exactly. It writes one static mesh asset
+	 * per part into the project's Content folder, so it is not free - bake when you are ready to
+	 * look at the flat, not after every edit.
+	 * @param Baked True to bake, false to switch back to the live editable meshes.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString SetHouseRenderMode(bool Baked);
+
+	/**
+	 * Reports whether the flat is in the Lumen scene, so a render can be trusted before it is taken.
+	 *
+	 * Ask this rather than judging an image: the failure mode is a BRIGHTER, more attractive picture,
+	 * not a dark or obviously broken one. Names the elements that are absent and why.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString CheckLumenCoverage();
 };

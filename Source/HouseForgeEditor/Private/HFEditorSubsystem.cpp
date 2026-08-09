@@ -3,6 +3,8 @@
 #include "HFEditorSubsystem.h"
 
 #include "Actors/HFHouseActor.h"
+#include "Bake/HFBakeService.h"
+#include "Capture/HFLumenCoverage.h"
 #include "Capture/HFPlanSection.h"
 #include "Capture/HFSceneCapture.h"
 #include "Capture/HFViewingLight.h"
@@ -14,6 +16,7 @@
 #include "FileHelpers.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
+#include "HFRenderSettings.h"
 #include "HouseForgeEditor.h"
 #include "ImageUtils.h"
 #include "Interfaces/IPluginManager.h"
@@ -393,6 +396,38 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 			Spec.Fixtures.Num() - BuiltFixtures);
 	}
 
+	// ============================================================== bake, and say which way it went
+	//
+	// THE DEFAULT IS NOT TO BAKE, and the reasoning is written out in Docs/LumenAndTheBake.md and on
+	// EHFBakeOnBuild::Never. What matters here is that the choice is never silent: a house that has
+	// just been built is not in the Lumen scene, that fact decides whether any render of it can be
+	// believed, and the one place a caller is guaranteed to read is the result of the build they
+	// just asked for. Leaving it to be discovered at capture time would be leaving it to be
+	// discovered by whoever is holding the wrong picture.
+	if (UHFRenderSettings::Policy().BakeOnBuild == EHFBakeOnBuild::Always)
+	{
+		FString BakeReport;
+		const FHFOperationResult BakeResult = SetHouseRenderMode(true, BakeReport);
+
+		Message += FString::Printf(TEXT("\nBaked on build (Project Settings > Plugins > HouseForge Rendering): %s"),
+			*BakeReport);
+
+		if (!BakeResult.bSuccess)
+		{
+			// Not fatal to the build - the house is standing and editable either way - but it must
+			// not read as a success, because the render that follows would be the wrong one.
+			Message += TEXT("\nTHE BAKE DID NOT COMPLETE. Renders of this house are not trustworthy until it does.");
+		}
+	}
+	else
+	{
+		Message += TEXT("\nRENDER MODE: live dynamic meshes, NOT baked - which is the default, and right for ")
+			TEXT("editing: the modelling tools target the live mesh and nothing has been written to the ")
+			TEXT("project's Content folder. Lumen cannot see a dynamic mesh, so BAKE BEFORE RENDERING ")
+			TEXT("(SetHouseRenderMode / the BakeHouse tool). Captures refuse an unbaked flat rather than ")
+			TEXT("drawing it, because the unbaked render is the BRIGHTER one and looks fine.");
+	}
+
 	if (Validation.HasWarnings())
 	{
 		Message += FString::Printf(TEXT("\n%s"), *Validation.ToString());
@@ -450,6 +485,98 @@ AHFHouseActor* UHFEditorSubsystem::FindHouseActor() const
 		return *It;
 	}
 	return nullptr;
+}
+
+FHFOperationResult UHFEditorSubsystem::SetHouseRenderMode(bool bBaked, FString& OutReport)
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	FHFBakeReport Report;
+	FHFBakeService::SetHouseRenderMode(World, bBaked, Report);
+
+	// The coverage the operation actually achieved, not the operation's own opinion of itself. A
+	// bake that reports "150 baked" and still leaves the flat invisible to Lumen - because the
+	// project does not build distance fields, say - is a bake that has not done its job, and the
+	// caller should be told in the same breath.
+	FHFLumenCoverageReport Coverage;
+	FHFLumenCoverage::Inspect(World, Coverage);
+
+	OutReport = FString::Printf(TEXT("%s\n%s"), *Report.Summary(), *Coverage.Summary());
+
+	if (Report.ElementsFailed > 0)
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("%d element(s) could not be baked.\n%s"), Report.ElementsFailed, *OutReport));
+	}
+
+	if (bBaked && !Coverage.IsCovered())
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("The bake ran but the flat is still not in the Lumen scene.\n%s\n%s"),
+			*OutReport, *Coverage.WhyNot()));
+	}
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::RebakeStale(FString& OutReport)
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	FHFBakeReport Report;
+	FHFBakeService::RebakeStale(World, Report);
+	OutReport = Report.Summary();
+
+	return (Report.ElementsFailed > 0)
+		? FHFOperationResult::Fail(OutReport)
+		: FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::CheckLumenCoverage(FString& OutReport) const
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	FHFLumenCoverageReport Report;
+	FHFLumenCoverage::Inspect(World, Report);
+
+	if (!Report.IsApplicable())
+	{
+		// Said rather than silently passed. "The check does not apply" and "the check passed" are
+		// different answers, and a caller that cannot tell them apart will believe a render is
+		// trustworthy on a project where nothing has been checked at all.
+		OutReport = FString::Printf(
+			TEXT("%s\nThis project is not using Lumen (r.DynamicGlobalIlluminationMethod is not 1), ")
+			TEXT("so nothing here decides whether a render is correct. The check is inert, not passing."),
+			*Report.Summary());
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	if (Report.IsCovered())
+	{
+		OutReport = Report.Summary();
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	OutReport = Report.WhyNot();
+	return FHFOperationResult::Fail(OutReport);
 }
 
 FHFOperationResult UHFEditorSubsystem::GetSpecJson(FString& OutSpecJson) const
@@ -834,6 +961,12 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 	// the flat only makes the comparison harder.
 	Request.bShowSky = false;
 
+	// And no Lumen guard. A plan is an orthographic section of a temporary cut copy with the sky and
+	// fog switched off, judged on where the walls are; no part of that answer comes from bounce. The
+	// guard exists to stop a LIT render being trusted, and blocking the layout tool over a bake would
+	// make the check something to switch off rather than something to believe.
+	Request.LumenGuard = EHFLumenGuard::Off;
+
 	Request.OutputPath = CapturePath(FileName, TEXT("Plan"));
 
 	FIntPoint Written = FIntPoint::ZeroValue;
@@ -895,6 +1028,11 @@ FHFOperationResult UHFEditorSubsystem::CaptureView(const FString& FileName, int3
 
 	// The whole scene, uncut: this is a view of the flat as built, not a diagnostic drawing of it.
 	Request.bShowSky = true;
+
+	// A LIT view, so the Lumen guard applies. Taken from the project policy rather than left at the
+	// struct default, because this is the one capture a user can deliberately want the broken
+	// configuration out of - measuring it is how the evidence in Saved/Review/lumen was gathered.
+	Request.LumenGuard = UHFRenderSettings::Policy().LumenGuard;
 
 	Request.OutputPath = CapturePath(FileName, TEXT("View"));
 

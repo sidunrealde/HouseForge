@@ -2,6 +2,7 @@
 
 #include "Capture/HFSceneCapture.h"
 
+#include "Capture/HFLumenCoverage.h"
 #include "Capture/HFViewingLight.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -210,6 +211,43 @@ bool FHFSceneCapture::EnsureMaterialsReady(UWorld* World, const FHFCaptureReques
 	return true;
 }
 
+bool FHFSceneCapture::EnsureLumenCoverage(UWorld* World, const FHFCaptureRequest& Request, FString& OutWhyNot)
+{
+	OutWhyNot.Reset();
+
+	if (World == nullptr || Request.LumenGuard == EHFLumenGuard::Off)
+	{
+		return true;
+	}
+
+	FHFLumenCoverageReport Report;
+	FHFLumenCoverage::Inspect(World, Report);
+
+	if (Report.IsCovered())
+	{
+		// Logged on the way past rather than only on failure, so a review package carries the
+		// evidence that the flat WAS in the Lumen scene when the picture was taken. A number in the
+		// log beside the image is the difference between "this render is trustworthy" and "this
+		// render was probably fine".
+		UE_LOG(LogHouseForgeEditor, Log, TEXT("%s"), *Report.Summary());
+		return true;
+	}
+
+	OutWhyNot = Report.WhyNot();
+
+	if (Request.LumenGuard == EHFLumenGuard::Warn)
+	{
+		// The whole refusal, at Warning, and then the render happens anyway. This is how the
+		// comparison in Saved/Review/lumen was taken: measuring the broken configuration requires
+		// being allowed to render it, and being told in full what is broken about it.
+		UE_LOG(LogHouseForgeEditor, Warning, TEXT("%s"), *OutWhyNot);
+		OutWhyNot.Reset();
+		return true;
+	}
+
+	return false;
+}
+
 bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Request,
 	TArray<FColor>& OutPixels, FIntPoint& OutSize, FString& OutError)
 {
@@ -232,6 +270,14 @@ bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Req
 	// that cannot be correct must not be written: an image of the wrong thing is acted on, whereas a
 	// refusal is read.
 	if (!EnsureMaterialsReady(World, Request, OutError))
+	{
+		return false;
+	}
+
+	// And the geometry, on the same terms. A material that is not ready draws checkerboard, which is
+	// obvious; geometry Lumen cannot see draws a brighter, more attractive version of the wrong
+	// answer, which is not. Both refusals happen before a single pixel is written.
+	if (!EnsureLumenCoverage(World, Request, OutError))
 	{
 		return false;
 	}
