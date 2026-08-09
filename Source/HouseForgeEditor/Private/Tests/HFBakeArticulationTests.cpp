@@ -750,6 +750,54 @@ bool FHFBakeRotorCollisionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("And it still answers a sight trace, so picking and line-of-sight still work"),
 		bBakedAnswersSight);
 
+	// ================================================== AND THE OLD COPY REALLY WAS NOT ENOUGH
+	//
+	// An executable record of the defect, which is worth more than a commit message and more than a
+	// revert-and-rebuild proof - one of those was attempted here and UnrealBuildTool reported the
+	// target up to date and compiled nothing, so it measured the fixed binary and proved exactly
+	// nothing. This cannot go stale that way.
+	//
+	// A second stand-in is built exactly as the previous implementation built it - the source's
+	// collision PROFILE NAME copied across and nothing else - and it is asked the same question. It
+	// blocks. A fresh UStaticMeshComponent already carries the Custom profile sentinel, so assigning
+	// the rotor's identical sentinel changes nothing at all and its block-everything default response
+	// container survives untouched. That is the whole mechanism, demonstrated rather than described.
+	UStaticMeshComponent* AsItWas = NewObject<UStaticMeshComponent>(Fan);
+	if (!TestNotNull(TEXT("A stand-in built the old way can be made"), AsItWas))
+	{
+		return false;
+	}
+
+	AsItWas->SetupAttachment(LiveRotor);
+	AsItWas->SetMobility(EComponentMobility::Movable);
+	AsItWas->RegisterComponent();
+	Fan->AddInstanceComponent(AsItWas);
+
+	// THE OLD LINE, VERBATIM.
+	AsItWas->SetCollisionProfileName(LiveRotor->GetCollisionProfileName());
+
+	AsItWas->SetStaticMesh(Fan->BakedParts[RotorIndex].BakedMesh);
+	AsItWas->SetCollisionEnabled(Fan->BakedParts[RotorIndex].SourceCollisionEnabled.GetValue());
+
+	// The correctly-built one stands down, so a hit can only be the old one's.
+	BakedRotor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	FHitResult OldHit;
+	const bool bOldWayBlocksWalk = AimThrough(AsItWas, Start, End)
+		&& WalkTraceHits(World, Start, End, OldHit);
+
+	AddInfo(FString::Printf(
+		TEXT("A stand-in built the old way (profile name only) reports profile '%s' and blocks a pawn: %s."),
+		*AsItWas->GetCollisionProfileName().ToString(), bOldWayBlocksWalk ? TEXT("yes") : TEXT("no")));
+
+	TestTrue(
+		TEXT("Copying only the profile name really does leave a baked rotor blocking a pawn - which is what makes the full copy load-bearing rather than tidy"),
+		bOldWayBlocksWalk);
+
+	Fan->RemoveInstanceComponent(AsItWas);
+	AsItWas->DestroyComponent();
+	BakedRotor->SetCollisionEnabled(Fan->BakedParts[RotorIndex].SourceCollisionEnabled.GetValue());
+
 	return true;
 }
 
@@ -1379,12 +1427,18 @@ bool FHFBakeMiddlePartDropTest::RunTest(const FString& Parameters)
 	AddInfo(FString::Printf(TEXT("After the drop the loft leaf is source %d of %d."),
 		LoftIndexNow, After.Num()));
 
-	// THE ASSERTION. The loft leaf kept its OWN asset rather than inheriting the lost body leaf's.
+	// THE ASSERTION, and it is its own counter-proof rather than needing one.
+	//
+	// The loft leaf has slid DOWN into the slot the dropped body leaf used to occupy - source 3 was
+	// 'Shutter2' before and is 'Loft0' after, which the two lines logged above state in numbers. So a
+	// sync that trimmed the list to length would leave slot 3 holding exactly LostAsset, and the
+	// second assertion below names that value and refuses it. Nothing here passes by accident on an
+	// implementation that truncates.
 	UStaticMesh* LoftAssetNow = Wardrobe->BakedParts[LoftIndexNow].BakedMesh;
 
 	TestEqual(TEXT("The loft leaf still wears its own baked mesh, not the lost leaf's"),
 		LoftAssetNow, KeptAsset);
-	TestTrue(TEXT("And in particular it has not inherited the dropped body leaf's mesh"),
+	TestTrue(TEXT("And in particular it has not inherited the dropped body leaf's mesh, which is precisely what trimming the list to length would have handed it"),
 		LoftAssetNow != LostAsset);
 
 	// Every surviving baked component hangs on the part it stands in for, and on nothing else. A
