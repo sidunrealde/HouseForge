@@ -6,6 +6,7 @@
 
 #include "Actors/HFArticulatedActor.h"
 #include "Actors/HFCounterActor.h"
+#include "Actors/HFCurtainActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFHouseActor.h"
 #include "Actors/HFOpeningActor.h"
@@ -370,6 +371,359 @@ namespace HouseForgeFlat
 		OutWhy.Reset();
 		return 0.0;
 	}
+
+	/**
+	 * TWO THINGS THAT CANNOT BOTH BE OPEN, named, with the reason and the measured figure.
+	 *
+	 * The first run of HouseForge.Flat.TwoThingsOpenAtOnceDoNotMeet found five of these, and every one
+	 * had been invisible for the whole life of the project: each is a pair of fixtures that is
+	 * individually correct, that the single-fixture sweep passes because it drives one thing against a
+	 * world where everything else is shut, and that occupies one piece of space when both are open.
+	 *
+	 * Two of the five involve a DOOR, which needed both closed gaps at once to see - the door had to be
+	 * in the sweep at all, and the sweep had to compare two open things.
+	 *
+	 * ## Why these are recorded rather than fixed
+	 *
+	 * They are properties of the LAYOUT, in the two places in this flat where a layout runs out of
+	 * room: the L-shaped kitchen's inside corner, and a 1.8 x 1.8 m foyer with the front door and the
+	 * shoe rack in it. Every one is under a centimetre, and the honest description of all five is "two
+	 * things you cannot have wide open at the same moment", which is true of most real kitchens. The
+	 * fixes are layout decisions and belong to whoever owns the drawing, not to a test.
+	 *
+	 * Recording is not tolerating, and this is the same instrument as FKnownObstruction above: each
+	 * pair is named, each carries the depth it reaches TODAY with about a tenth of a millimetre of
+	 * headroom and no more, nothing else in the flat may foul anything at all, a new conflict cannot
+	 * hide behind these, and none of these can get deeper without the gate saying so. They are warned
+	 * on every run, green or not.
+	 *
+	 * Kept separate from FKnownObstruction deliberately. That list says "this part cannot travel its
+	 * whole range"; this one says "these two cannot both be open". They are different claims about
+	 * different things, and merging them would let an entry written for one loosen the other.
+	 */
+	struct FKnownPairConflict
+	{
+		/** Substring of each party's name. Order-independent: both directions are tried. */
+		const TCHAR* PartA;
+		const TCHAR* PartB;
+
+		/** How deep the pair currently goes, in centimetres. Not a tolerance - a measurement. */
+		double DepthCm;
+
+		const TCHAR* Why;
+	};
+
+	const TArray<FKnownPairConflict>& KnownPairConflicts()
+	{
+		static const TArray<FKnownPairConflict> Known = {
+			{ TEXT("F_Kitchen_BaseSink.Shutter"), TEXT("F_Kitchen_BaseN.Drawer"), 0.92,
+				TEXT("THE GALLEY. The sink base's right-hand door swings across the aisle into the drawer bank opposite, which is what a galley under 1200 between fronts does to any pair of facing units. Measured at 0.84 cm with the door wide and the drawer half out. The trade's answer is to hang that door on the other stile so it opens away from the run, which needs a per-bay hinge hand this catalogue does not carry.") },
+
+			{ TEXT("D_Main.Leaf"), TEXT("F_ShoeRack.Shutter"), 0.80,
+				TEXT("THE FOYER, AND IT NEEDED BOTH KNOWN GAPS CLOSED TO SEE AT ALL. The front door's leaf and the shoe rack's shutters are both fully open across the same 1.8 x 1.8 m foyer. Measured at 0.72 cm. The door was excluded from the sweep entirely, and even in it, the shoe rack is shut in the rest snapshot the sweep compares against - so this pair could not be reported by any test that existed. A shoe rack beside the front door is where a shoe rack goes; the flat is simply 1800 square there.") },
+
+			{ TEXT("F_Kitchen_BaseW.Shutter"), TEXT("F_Kitchen_BaseNW.Shutter"), 0.92,
+				TEXT("THE BLIND CORNER AGAIN, now as a pair rather than as one leaf into a standing carcass - see FKnownObstruction's first three rows for the same corner measured the other way. Deepest at 0.84 cm, between the west run's end leaf a quarter open and the north run's end leaf wide. One blind-corner unit settles this row and those.") },
+
+			{ TEXT("D_Kitchen.Leaf"), TEXT("F_Kitchen_BaseW.Drawer"), 0.60,
+				TEXT("The kitchen door at half swing across the west run's drawers at three quarters out. Measured at 0.54 cm. The door is hung to open into the kitchen, which is right - a door opening into the 1800 corridor would foul the circulation this flat has less of - and the run has to start where the wall does.") },
+
+			{ TEXT("F_Kitchen_BaseN.Drawer"), TEXT("F_Util_Washer.Porthole"), 0.40,
+				TEXT("The north run's drawer out into the washing machine's porthole at full swing, through the utility opening. Measured at 0.34 cm. The porthole is already recorded in FKnownObstruction for reaching the utility's west wall - it is a left-hand door in a 1200 room, and the right-hand machine that answers both is the same missing hinge hand.") },
+		};
+
+		return Known;
+	}
+
+	/** The recorded depth for a known pair conflict, or zero if this pair is not one. */
+	double KnownPairConflictDepth(const FString& NameA, const FString& NameB, FString& OutWhy)
+	{
+		for (const FKnownPairConflict& Known : KnownPairConflicts())
+		{
+			const bool bForward = NameA.Contains(Known.PartA) && NameB.Contains(Known.PartB);
+			const bool bReverse = NameB.Contains(Known.PartA) && NameA.Contains(Known.PartB);
+
+			if (bForward || bReverse)
+			{
+				OutWhy = Known.Why;
+				return Known.DepthCm;
+			}
+		}
+
+		OutWhy.Reset();
+		return 0.0;
+	}
+
+	/**
+	 * ROOMS WHOSE ONLY WAY IN IS THROUGH A BATHROOM, named, with the reason.
+	 *
+	 * "A room you can only get to through a bathroom is not a room you can get to" was the other half
+	 * of the sealed-foyer defect, and the flood fill in
+	 * HouseForge.Flat.EveryRoomIsReachableFromTheFrontDoor found one in this flat the first time it was
+	 * asked: the SERVICE BALCONY. R_BalconyE spans x = 10800 to 12300, y = 3600 to 5400; its only
+	 * opening, D_BalcE, sits on W_East at y = 4500, and the room on the inside of that wall over that
+	 * whole y band is R_MBath, x = 8100 to 10800. There is no other door into it. So the flat's drying
+	 * balcony is entered through the master bathroom, and the utility that would normally serve it is
+	 * at the other end of the plan at x = 3000 to 4200, y = 6600 to 8400.
+	 *
+	 * ## Why it is recorded rather than fixed
+	 *
+	 * It is a LAYOUT fact, not a fault in the geometry: every wall, door and room here is built exactly
+	 * as the spec asks, and the spec asks for a service balcony off a bathroom. Where that door ought
+	 * to go is a decision about the drawing and belongs to whoever owns it - and two other workflows
+	 * are editing production on this branch as this is written, so a test file quietly moving a door in
+	 * the sample house is how a change lands on top of somebody else's.
+	 *
+	 * Recording is not tolerating, and this is the same instrument as FKnownObstruction and
+	 * FKnownPairConflict above. The assertion is EXACT in both directions: a room that is not on this
+	 * list and can only be reached through a bathroom FAILS, and a room on this list that stops being
+	 * bathroom-only fails too, so the day somebody moves that door the gate makes them delete the row
+	 * rather than letting the record quietly become a licence.
+	 */
+	struct FKnownBathroomOnly
+	{
+		/** The room's spec id. */
+		const TCHAR* RoomId;
+
+		/** Why its only route runs through a wet room. */
+		const TCHAR* Why;
+	};
+
+	const TArray<FKnownBathroomOnly>& KnownBathroomOnlyRooms()
+	{
+		static const TArray<FKnownBathroomOnly> Known = {
+			{ TEXT("R_BalconyE"),
+				TEXT("The service balcony's only opening, D_BalcE on W_East at y = 4500, gives onto R_MBath - the master bathroom is the whole of the inside face of that wall over the balcony's y band. Drying laundry is carried through the master bathroom, and the utility that would normally serve this balcony is at the far end of the plan. Where that door belongs is a question about the drawing.") },
+		};
+
+		return Known;
+	}
+
+	/** The recorded reason this room is only reachable through a bathroom, or null if it is not one. */
+	const TCHAR* KnownBathroomOnlyWhy(const FName RoomId)
+	{
+		for (const FKnownBathroomOnly& Known : KnownBathroomOnlyRooms())
+		{
+			if (RoomId == FName(Known.RoomId))
+			{
+				return Known.Why;
+			}
+		}
+
+		return nullptr;
+	}
+
+	/** Where a placed surface is, in the world. */
+	FBox WorldBoundsOf(const FHFScanSurface& Surface)
+	{
+		FBox Box(ForceInit);
+		if (Surface.Mesh != nullptr)
+		{
+			for (const int32 V : Surface.Mesh->VertexIndicesItr())
+			{
+				Box += Surface.ToWorld.TransformPosition(FVector(Surface.Mesh->GetVertex(V)));
+			}
+		}
+		return Box;
+	}
+
+	/**
+	 * HOW FAR THE FASTEST-MOVING POINT OF ONE PART TRAVELS OVER ITS WHOLE RANGE, in centimetres.
+	 *
+	 * The one number a sweep needs and the one it used to guess at. Two things were derived from the
+	 * fixture's resting FOOTPRINT instead - what is near enough to be worth comparing against, and how
+	 * finely to sample the motion - on the stated premise that "a door swings its own width and a
+	 * drawer comes out its own depth". That is an assumption about the catalogue, it was never
+	 * measured, and the flat already contains its counterexample: a curtain fold travels six times its
+	 * own width. Anything whose travel exceeds its host's plan size was swept against a neighbourhood
+	 * that had been clipped to the host, found nothing, and reported the parts as swept.
+	 *
+	 * So it is read off the motion the part actually declares:
+	 *
+	 *   SLIDE - the declared travel, which is the distance every point of the part moves.
+	 *
+	 *   HINGE - the arc the outermost point turns through: the angle in radians times the part's
+	 *   radius, where the radius is the furthest any vertex lies from the hinge LINE. Local space has
+	 *   its origin on the pivot and the axis through it (see FHFPartMotion), so that is the distance
+	 *   from the vertex to the axis, which is what a rotation actually swings.
+	 *
+	 * Arc length rather than chord, deliberately. It is used both as the radius to gather neighbours
+	 * within - where an over-estimate costs time and an under-estimate loses the answer - and as the
+	 * distance the sampling has to cover, where the arc is the path and the chord is the shortcut.
+	 */
+	double SweptDistanceCm(const AHFArticulatedActor* Actor, int32 PartIndex)
+	{
+		if (Actor == nullptr || !Actor->Parts.IsValidIndex(PartIndex))
+		{
+			return 0.0;
+		}
+
+		const FHFPartMotion& Motion = Actor->Parts[PartIndex].Motion;
+		if (!Motion.Opens())
+		{
+			return 0.0;
+		}
+
+		if (Motion.Type == EHFMotionType::Slide)
+		{
+			return FMath::Abs(Motion.MaxTravelCm);
+		}
+
+		const TArray<TObjectPtr<UDynamicMeshComponent>>& Parts = Actor->GetPartComponents();
+		if (!Parts.IsValidIndex(PartIndex) || Parts[PartIndex] == nullptr ||
+			Parts[PartIndex]->GetDynamicMesh() == nullptr)
+		{
+			return 0.0;
+		}
+
+		const FVector Axis = Motion.UnitAxis();
+		const FVector Scale = Parts[PartIndex]->GetComponentTransform().GetScale3D();
+		const double ScaleMax = FMath::Max3(
+			FMath::Abs(Scale.X), FMath::Abs(Scale.Y), FMath::Abs(Scale.Z));
+
+		double RadiusSq = 0.0;
+		Parts[PartIndex]->GetDynamicMesh()->ProcessMesh([&Axis, &RadiusSq](const FDynamicMesh3& Mesh)
+		{
+			for (const int32 V : Mesh.VertexIndicesItr())
+			{
+				const FVector Local(Mesh.GetVertex(V));
+
+				// Distance to the hinge LINE, not to the pivot point: a tall leaf's top corner is far
+				// from the origin along the axis and does not move any further for it.
+				const FVector Perp = Local - Axis * FVector::DotProduct(Local, Axis);
+				RadiusSq = FMath::Max(RadiusSq, Perp.SizeSquared());
+			}
+		});
+
+		return FMath::DegreesToRadians(FMath::Abs(Motion.MaxAngleDegrees))
+			* FMath::Sqrt(RadiusSq) * ScaleMax;
+	}
+
+	/** The furthest any one opening part of this actor travels, in centimetres. */
+	double WidestSweptDistanceCm(const AHFArticulatedActor* Actor)
+	{
+		double Widest = 0.0;
+		if (Actor != nullptr)
+		{
+			for (int32 Index = 0; Index < Actor->Parts.Num(); ++Index)
+			{
+				Widest = FMath::Max(Widest, SweptDistanceCm(Actor, Index));
+			}
+		}
+		return Widest;
+	}
+
+	/** One actor's opening parts at whatever pose it is currently holding, meshes owned alongside. */
+	struct FPosedParts
+	{
+		/** Reserved once and never grown: every surface holds a pointer into this. */
+		TArray<FDynamicMesh3> Meshes;
+		TArray<FHFScanSurface> Surfaces;
+	};
+
+	/**
+	 * Reads the actor's opening parts back AFTER it has been posed. A part component's transform IS
+	 * the pose, so nothing here may be cached across a SetAllPartsOpenAmount.
+	 */
+	void CapturePosedParts(const AHFArticulatedActor* Actor, const TCHAR* PoseLabel, FPosedParts& Out)
+	{
+		Out.Meshes.Reset();
+		Out.Surfaces.Reset();
+
+		if (Actor == nullptr)
+		{
+			return;
+		}
+
+		const TArray<TObjectPtr<UDynamicMeshComponent>>& Parts = Actor->GetPartComponents();
+		Out.Meshes.Reserve(Parts.Num());
+		Out.Surfaces.Reserve(Parts.Num());
+
+		for (int32 Index = 0; Index < Parts.Num(); ++Index)
+		{
+			if (!Actor->Parts.IsValidIndex(Index) || !Actor->Parts[Index].Motion.Opens())
+			{
+				continue;
+			}
+
+			UDynamicMeshComponent* Component = Parts[Index];
+			if (Component == nullptr || Component->GetDynamicMesh() == nullptr)
+			{
+				continue;
+			}
+
+			const FDynamicMesh3& Mesh = Component->GetDynamicMesh()->GetMeshRef();
+			if (Mesh.TriangleCount() == 0)
+			{
+				continue;
+			}
+
+			Out.Meshes.Add(Mesh);
+
+			FHFScanSurface Surface;
+			Surface.Name = FString::Printf(TEXT("%s.%s %s"),
+				*Actor->ElementId.ToString(), *Actor->Parts[Index].PartId.ToString(), PoseLabel);
+			Surface.Mesh = &Out.Meshes.Last();
+			Surface.ToWorld = Component->GetComponentTransform();
+			Surface.Owner = Actor->ElementId;
+			Out.Surfaces.Add(MoveTemp(Surface));
+		}
+	}
+
+	/** Everything with a part that goes from shut to open, doors and fixtures alike. */
+	TArray<AHFArticulatedActor*> OpeningActorsIn(const AHFHouseActor* House)
+	{
+		TArray<AHFArticulatedActor*> Out;
+		if (House == nullptr)
+		{
+			return Out;
+		}
+
+		for (const TObjectPtr<AActor>& Actor : House->ElementActors)
+		{
+			AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Actor);
+			if (!IsValid(Articulated))
+			{
+				continue;
+			}
+
+			for (const FHFPartState& Part : Articulated->Parts)
+			{
+				if (Part.Motion.Opens())
+				{
+					Out.Add(Articulated);
+					break;
+				}
+			}
+		}
+
+		return Out;
+	}
+
+	/** The thinnest thing a moving part must not step over between two sampled positions, in cm. */
+	double ThinnestObstructionCm(const FHFHouseSpec& Spec)
+	{
+		double Thinnest = TNumericLimits<double>::Max();
+
+		for (const FHFWall& Wall : Spec.Walls)
+		{
+			if (Wall.Thickness > KINDA_SMALL_NUMBER)
+			{
+				Thinnest = FMath::Min(Thinnest, Wall.Thickness);
+			}
+		}
+
+		for (const FHFColumn& Column : Spec.Columns)
+		{
+			const double Least = FMath::Min(Column.Size.X, Column.Size.Y);
+			if (Least > KINDA_SMALL_NUMBER)
+			{
+				Thinnest = FMath::Min(Thinnest, Least);
+			}
+		}
+
+		return Thinnest < TNumericLimits<double>::Max() ? Thinnest : 0.0;
+	}
 }
 
 /**
@@ -691,6 +1045,40 @@ bool FHFFlatApertureTest::RunTest(const FString& Parameters)
  * walls, the beams, the columns and the ceilings. A fridge door into a wall, a wardrobe leaf into a
  * bed, a shutter into the run round the corner - all of them are this one question.
  *
+ * ## DOORS ARE IN THIS SWEEP, AND FOR TEN MILESTONES THEY WERE NOT
+ *
+ * The loop opened with `!FixtureIds.Contains(Articulated->ElementId)`, and FixtureIds was built from
+ * Spec.Fixtures alone. Every door, sliding door, window and ventilator in the flat takes its element
+ * id from Spec.Openings, so not one of them was ever posed or compared - while the header above
+ * listed "a fridge door into a wall" as the thing this test was for. The exclusion was invisible:
+ * the section naming what is left out mentioned only spinning parts.
+ *
+ * That is the largest leaf in the building excluded from the sweep that exists to catch large leaves.
+ * The main door is 1050 wide and swings through the foyer; the balcony sliders run past the pelmets
+ * and the curtains hung on them. Removing the filter is most of what this file is for.
+ *
+ * ## HOW FINELY, AND HOW FAR - BOTH MEASURED NOW, NEITHER ASSUMED
+ *
+ * Two numbers used to be guesses dressed as reasoning, and both were wrong in the direction that
+ * loses answers:
+ *
+ * HOW FAR TO LOOK. The neighbourhood was the fixture's own resting footprint expanded by its largest
+ * plan dimension, "because a door swings its own width and a drawer comes out its own depth". Nothing
+ * measured that, and the flat holds the counterexample already - a curtain fold travels six times its
+ * own width. A part travelling further than its host is wide was swept against a neighbourhood
+ * clipped to the host: zero fouls, from having compared against nothing, reported as parts swept. It
+ * is now the rest bounds expanded by SweptDistanceCm, read off the part's own declared motion.
+ *
+ * HOW FINELY TO SAMPLE. Six positions, with the comment "close enough that a leaf cannot step over a
+ * 115 partition between two of them at any hinge radius in this flat". Six over 90 degrees is 18
+ * degrees a step; a 115 partition at the main door's 105 hinge radius subtends 6.3. The claim was
+ * arithmetically false and stated as established fact, and the failure it denied is the exact one the
+ * header says this test exists for - a leaf clear at 0 and clear at 1 that goes through the wall
+ * between two samples. The step count is now derived per part from SweptDistanceCm so that no
+ * sampled position is more than half the thinnest obstruction in the flat away from the next, that
+ * thinnest obstruction is read off the spec rather than remembered, and the worst step actually
+ * taken is asserted against it instead of being asserted in a comment.
+ *
  * ## What is NOT swept here, and why
  *
  * SPINNING PARTS. A fan rotor and a condenser fan have no open amount - see EHFMotionType::Spin - and
@@ -698,6 +1086,10 @@ bool FHFFlatApertureTest::RunTest(const FString& Parameters)
  * and HouseForge.Services.CondenserFanSpinsAndDoesNotBlock measure those where the disc is, which is
  * the right shape of question for them. Driving one here would stop it at an arbitrary angle and
  * prove nothing.
+ *
+ * TWO THINGS OPEN AT ONCE. Each fixture here is driven against a world in which everything else is
+ * shut, which cannot see a pair that only meets when both are open. That is
+ * HouseForge.Flat.TwoThingsOpenAtOnceDoNotMeet, below, and it says what it does and does not cover.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFlatArticulationSweepTest,
 	"HouseForge.Flat.EveryMovingPartClearsTheFlatThroughItsRange", HF_TEST_FLAGS)
@@ -720,51 +1112,54 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TSet<FName> FixtureIds;
-	for (const FHFFixture& Fixture : Spec.Fixtures)
-	{
-		FixtureIds.Add(Fixture.Id);
-	}
-
 	// The flat at rest, collected ONCE. Everything a moving part could run into is standing still
 	// while it moves, and a fixture's own parts are its own kit's business - see FHFScanSurface::Owner.
 	FFlatSurfaces AtRest;
 	CollectSurfaces(House, Spec, AtRest);
 
-	auto WorldBoundsOf = [](const FHFScanSurface& Surface)
+	// THE THINNEST THING A LEAF MUST NOT STEP OVER, off the spec rather than out of a comment. The
+	// sampling has to be fine enough that no part can be on one side of it at one sample and the
+	// other side at the next, so half of it is the furthest any sample may be from the one after.
+	const double Thinnest = ThinnestObstructionCm(Spec);
+	if (!TestTrue(TEXT("The flat has walls and columns to measure the sampling against"), Thinnest > 0.0))
 	{
-		FBox Box(ForceInit);
-		if (Surface.Mesh != nullptr)
-		{
-			for (const int32 V : Surface.Mesh->VertexIndicesItr())
-			{
-				Box += Surface.ToWorld.TransformPosition(FVector(Surface.Mesh->GetVertex(V)));
-			}
-		}
-		return Box;
-	};
+		return false;
+	}
 
-	// Six positions, ends included. Close enough that a leaf cannot step over a 115 partition between
-	// two of them at any hinge radius in this flat, and few enough that the sweep runs in a gate.
-	static constexpr double Steps[] = { 0.0, 0.2, 0.4, 0.6, 0.8, 1.0 };
+	const double MaxChordCm = Thinnest * 0.5;
+
+	// A CAP, AND IT IS ASSERTED RATHER THAN TRUSTED. The step count is derived, so a future part with
+	// a metre of travel would derive a step count that stops the gate rather than protecting it. The
+	// cap bounds the run; the assertion below fails if the cap ever costs the resolution, so it can
+	// never quietly become the guess this replaced.
+	constexpr int32 MaxSteps = 64;
 
 	int32 MovingParts = 0;
 	int32 Fixtures = 0;
+	int32 Doors = 0;
+	int32 Poses = 0;
+	double WorstChordCm = 0.0;
 	TArray<FHFClash> Fouls;
 	TArray<FHFClash> Obstructed;
 
-	for (const TObjectPtr<AActor>& Actor : House->ElementActors)
+	TSet<FName> OpeningIds;
+	for (const FHFOpening& Opening : Spec.Openings)
 	{
-		AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Actor);
-		if (!IsValid(Articulated) || !FixtureIds.Contains(Articulated->ElementId))
-		{
-			continue;
-		}
+		OpeningIds.Add(Opening.Id);
+	}
 
+	for (AHFArticulatedActor* Articulated : OpeningActorsIn(House))
+	{
 		int32 Opens = 0;
-		for (const FHFPartState& Part : Articulated->Parts)
+		double Widest = 0.0;
+
+		for (int32 Index = 0; Index < Articulated->Parts.Num(); ++Index)
 		{
-			Opens += Part.Motion.Opens() ? 1 : 0;
+			if (Articulated->Parts[Index].Motion.Opens())
+			{
+				++Opens;
+				Widest = FMath::Max(Widest, SweptDistanceCm(Articulated, Index));
+			}
 		}
 
 		if (Opens == 0)
@@ -774,17 +1169,18 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 
 		MovingParts += Opens;
 		++Fixtures;
+		Doors += OpeningIds.Contains(Articulated->ElementId) ? 1 : 0;
 
-		// What is near enough to be reached. Everything else in a twelve-room flat is a pair the scan
-		// would throw out on bounds anyway, and throwing it out here instead is what makes six
-		// positions of every moving part in the flat finish in a gate rather than in a quarter of an
-		// hour.
+		// WHAT IS NEAR ENOUGH TO BE REACHED, from the travel the parts declare rather than from how
+		// wide the thing they are bolted to happens to be. Everything else in a twelve-room flat is a
+		// pair the scan would throw out on bounds anyway, and throwing it out here instead is what
+		// makes the whole flat's motion finish in a gate rather than in a quarter of an hour.
 		FBox Reach(ForceInit);
-		for (const int32 Index : AtRest.FixtureIndices)
+		for (const FHFScanSurface& Surface : AtRest.All)
 		{
-			if (AtRest.All[Index].Owner == Articulated->ElementId)
+			if (Surface.Owner == Articulated->ElementId)
 			{
-				Reach += WorldBoundsOf(AtRest.All[Index]);
+				Reach += WorldBoundsOf(Surface);
 			}
 		}
 
@@ -793,9 +1189,10 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
-		// A door swings its own width and a drawer comes out its own depth, so the largest plan
-		// dimension of the fixture reaches anything either could arrive at.
-		Reach = Reach.ExpandBy(FMath::Max3(Reach.GetSize().X, Reach.GetSize().Y, 60.0));
+		// A point on a part is at most its swept distance from where it started - exactly, for a
+		// slide; conservatively for a hinge, whose arc is longer than the chord it subtends. Plus a
+		// centimetre for the chamfer on every arris.
+		Reach = Reach.ExpandBy(Widest + 1.0);
 
 		TArray<FHFScanSurface> Neighbourhood;
 		for (const FHFScanSurface& Surface : AtRest.All)
@@ -812,51 +1209,27 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 			}
 		}
 
-		for (const double Step : Steps)
+		// Enough positions that the fastest point of the fastest part moves less than half the
+		// thinnest obstruction between two of them. Ends always included.
+		const int32 StepCount = FMath::Clamp(FMath::CeilToInt(Widest / MaxChordCm) + 1, 2, MaxSteps);
+		const double ChordCm = StepCount > 1 ? Widest / (StepCount - 1) : 0.0;
+		WorstChordCm = FMath::Max(WorstChordCm, ChordCm);
+
+		FPosedParts Posed;
+
+		for (int32 Step = 0; Step < StepCount; ++Step)
 		{
+			const double Amount = static_cast<double>(Step) / static_cast<double>(StepCount - 1);
+
 			// Through the actor, so gearing and sequencing settle the pose. A seat that may not lift
 			// under a shut lid must not be swept as though it could.
-			Articulated->SetAllPartsOpenAmount(Step);
+			Articulated->SetAllPartsOpenAmount(Amount);
+			++Poses;
 
-			// Re-read AFTER posing: a part component's transform IS the pose.
-			TArray<FDynamicMesh3> PartMeshes;
-			TArray<FHFScanSurface> PartSurfaces;
+			CapturePosedParts(Articulated,
+				*FString::Printf(TEXT("at %.0f%% open"), Amount * 100.0), Posed);
 
-			const TArray<TObjectPtr<UDynamicMeshComponent>>& Parts = Articulated->GetPartComponents();
-			PartMeshes.Reserve(Parts.Num());
-
-			for (int32 Index = 0; Index < Parts.Num(); ++Index)
-			{
-				if (!Articulated->Parts.IsValidIndex(Index) || !Articulated->Parts[Index].Motion.Opens())
-				{
-					continue;
-				}
-
-				UDynamicMeshComponent* Component = Parts[Index];
-				if (Component == nullptr || Component->GetDynamicMesh() == nullptr)
-				{
-					continue;
-				}
-
-				const FDynamicMesh3& Mesh = Component->GetDynamicMesh()->GetMeshRef();
-				if (Mesh.TriangleCount() == 0)
-				{
-					continue;
-				}
-
-				PartMeshes.Add(Mesh);
-
-				FHFScanSurface Surface;
-				Surface.Name = FString::Printf(TEXT("%s.%s at %.0f%% open"),
-					*Articulated->ElementId.ToString(),
-					*Articulated->Parts[Index].PartId.ToString(), Step * 100.0);
-				Surface.Mesh = &PartMeshes.Last();
-				Surface.ToWorld = Component->GetComponentTransform();
-				Surface.Owner = Articulated->ElementId;
-				PartSurfaces.Add(MoveTemp(Surface));
-			}
-
-			for (const FHFClash& Clash : FHFClashScan::FindBetween(PartSurfaces, Neighbourhood))
+			for (const FHFClash& Clash : FHFClashScan::FindBetween(Posed.Surfaces, Neighbourhood))
 			{
 				FString Why;
 
@@ -884,12 +1257,33 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 	}
 
 	AddInfo(FString::Printf(
-		TEXT("Swept %d opening part(s) on %d fixture(s) through %d positions each."),
-		MovingParts, Fixtures, static_cast<int32>(UE_ARRAY_COUNT(Steps))));
+		TEXT("Swept %d opening part(s) on %d articulated element(s), %d of them doorways and windows, through %d poses in all."),
+		MovingParts, Fixtures, Doors, Poses));
+
+	AddInfo(FString::Printf(
+		TEXT("The thinnest obstruction in the flat is %.1f cm; the coarsest step any part took was %.2f cm."),
+		Thinnest, WorstChordCm));
 
 	// A run of this that swept nothing would pass by having asked nothing. The flat has shutters,
 	// drawers, doors, flaps, lids and louvres in every room of it.
 	TestTrue(TEXT("The flat has moving parts to sweep"), MovingParts > 40);
+
+	// AND THE DOORS ARE IN IT. This is the assertion that would have failed for ten milestones: the
+	// sweep excluded every opening in the flat while its header advertised door leaves as the case it
+	// was for. A filter that quietly narrows what is measured is the failure this whole file guards
+	// against, so the breadth of the sweep is now itself measured.
+	TestTrue(*FString::Printf(
+		TEXT("Every doorway and window in the flat is in the sweep - %d of them"), Doors),
+		Doors >= 10);
+
+	// THE SAMPLING IS FINE ENOUGH TO CATCH WHAT IT CLAIMS TO, and this is where that stops being a
+	// comment. A step longer than the thinnest obstruction is a leaf that can be on one side of a
+	// partition at one sample and the other side at the next, which is precisely the failure the
+	// header says this test exists for.
+	TestTrue(*FString::Printf(
+		TEXT("No part steps further than the %.1f cm it must not skip over (worst step %.2f cm)"),
+		Thinnest, WorstChordCm),
+		WorstChordCm < Thinnest);
 
 	// SAID OUT LOUD ON EVERY RUN, GREEN OR NOT. Two layouts in this flat have a part that cannot
 	// travel its whole range, both of them wanting a fixture type the catalogue has not got. A
@@ -917,6 +1311,246 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Part positions that foul something"), Fouls.Num(), 0);
+
+	return true;
+}
+
+/**
+ * DO TWO THINGS OPEN AT ONCE STILL FIT?
+ *
+ * The sweep above drives one fixture at a time against a flat collected ONCE, at rest. Every other
+ * moving part in that snapshot is shut. So the comparison it makes is (this one open) x (everything
+ * else closed), and the pair that only exists when BOTH are open is invisible to it by construction -
+ * each one passes alone, and together they are in the same cubic metre.
+ *
+ * That is not a hypothetical shape of defect in this flat. The kitchen's two base runs stand facing
+ * each other across a galley and both have drawers that come out towards the middle. A wardrobe leaf
+ * and a bedroom door swing into the same corner. A fridge door and the tall unit's shutter beside it
+ * open into the same aisle. Every one of those is two correct fixtures and one impossible room.
+ *
+ * ## THE COMBINATORICS, SAID OUT LOUD
+ *
+ * Every pair of articulated parts at every open amount is not a test, it is a weekend. Roughly ninety
+ * opening parts in this flat, sampled to the resolution the sweep above needs, is of the order of a
+ * million pose pairs and a clash scan on each. So this is deliberately coarse, and what it buys and
+ * what it gives up are both stated:
+ *
+ *   WHICH PAIRS. Two elements are compared only if their SWEPT boxes meet - each one's rest bounds
+ *   expanded by the furthest its own parts travel, which is a measurement off the declared motion and
+ *   not a guess at a radius. Two things that cannot reach each other at full travel cannot meet at
+ *   any partial travel, so this discards nothing.
+ *
+ *   WHICH POSES. Four amounts each, a quarter apart, ends included: sixteen combinations per pair.
+ *   That is far coarser than the sweep above and it is the resolution that makes this run at all.
+ *
+ *   WHAT IS COMPARED. Only the OPENING PARTS of one against the OPENING PARTS of the other. A moving
+ *   part against a standing carcass, wall, beam or ceiling is exactly what the sweep above already
+ *   does at full resolution, and repeating it here would cost sixteen times as much to learn nothing.
+ *   What is only available here is leaf against leaf.
+ *
+ * ## WHAT THIS DOES NOT COVER, and it is not a small list
+ *
+ * A pair that meets ONLY between two of the four sampled amounts and is clear at all sixteen. A pair
+ * of parts on the SAME element - a drawer against its own shutter is its kit's business, and
+ * FHFScanSurface::Owner drops it here as everywhere else. THREE things open at once, which is a
+ * different test and probably not one worth writing. And the ordering inside one element is whatever
+ * SetAllPartsOpenAmount settles on, so a hand pose no master control would ever produce is not
+ * covered either.
+ *
+ * It finds the pair that stands in the same place with both wide open, which is the shape the
+ * examples above all have. It does not prove two things never touch.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFlatOpenPairSweepTest,
+	"HouseForge.Flat.TwoThingsOpenAtOnceDoNotMeet", HF_TEST_FLAGS)
+
+bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeFlat;
+
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ ClearHouseForgeActors(World); };
+
+	FHFHouseSpec Spec;
+	AHFHouseActor* House = BuildReferenceFlat(World, Spec);
+	if (!TestNotNull(TEXT("The reference flat builds"), House))
+	{
+		return false;
+	}
+
+	FFlatSurfaces AtRest;
+	CollectSurfaces(House, Spec, AtRest);
+
+	const TArray<AHFArticulatedActor*> Movers = OpeningActorsIn(House);
+
+	// Each mover's swept box: where any part of it can be at any open amount.
+	TArray<FBox> Swept;
+	Swept.Reserve(Movers.Num());
+
+	for (AHFArticulatedActor* Mover : Movers)
+	{
+		FBox Box(ForceInit);
+		for (const FHFScanSurface& Surface : AtRest.All)
+		{
+			if (Surface.Owner == Mover->ElementId)
+			{
+				Box += WorldBoundsOf(Surface);
+			}
+		}
+
+		if (Box.IsValid)
+		{
+			Box = Box.ExpandBy(WidestSweptDistanceCm(Mover) + 1.0);
+		}
+
+		Swept.Add(Box);
+	}
+
+	// A quarter apart, ends included. Coarse on purpose - see the note above.
+	static constexpr double Amounts[] = { 0.25, 0.5, 0.75, 1.0 };
+
+	int32 Pairs = 0;
+	int32 Comparisons = 0;
+	TArray<FHFClash> Fouls;
+	TArray<FHFClash> Obstructed;
+
+	FPosedParts PosedA;
+	FPosedParts PosedB;
+
+	for (int32 A = 0; A < Movers.Num(); ++A)
+	{
+		if (!Swept[A].IsValid)
+		{
+			continue;
+		}
+
+		for (int32 B = A + 1; B < Movers.Num(); ++B)
+		{
+			if (!Swept[B].IsValid || !Swept[A].Intersect(Swept[B]))
+			{
+				continue;
+			}
+
+			++Pairs;
+
+			for (const double AmountA : Amounts)
+			{
+				Movers[A]->SetAllPartsOpenAmount(AmountA);
+				CapturePosedParts(Movers[A],
+					*FString::Printf(TEXT("at %.0f%% open"), AmountA * 100.0), PosedA);
+
+				if (PosedA.Surfaces.IsEmpty())
+				{
+					continue;
+				}
+
+				for (const double AmountB : Amounts)
+				{
+					Movers[B]->SetAllPartsOpenAmount(AmountB);
+					CapturePosedParts(Movers[B],
+						*FString::Printf(TEXT("at %.0f%% open"), AmountB * 100.0), PosedB);
+
+					if (PosedB.Surfaces.IsEmpty())
+					{
+						continue;
+					}
+
+					++Comparisons;
+
+					for (const FHFClash& Clash : FHFClashScan::FindBetween(PosedA.Surfaces, PosedB.Surfaces))
+					{
+						FString Why;
+
+						const double Allowance = AllowanceFor(Clash.NameA, Clash.NameB, Why);
+						if (Allowance > 0.0 && Clash.DepthCm <= Allowance)
+						{
+							continue;
+						}
+
+						// A NAMED, MEASURED PAIR IS NOT A TOLERANCE, and this list is its own - see
+						// FKnownPairConflict for why it is not FKnownObstruction's.
+						const double Known = KnownPairConflictDepth(Clash.NameA, Clash.NameB, Why);
+						if (Known > 0.0 && Clash.DepthCm <= Known)
+						{
+							Obstructed.Add(Clash);
+							continue;
+						}
+
+						Fouls.Add(Clash);
+					}
+				}
+
+				Movers[B]->SetAllPartsOpenAmount(0.0);
+			}
+
+			Movers[A]->SetAllPartsOpenAmount(0.0);
+		}
+	}
+
+	for (AHFArticulatedActor* Mover : Movers)
+	{
+		Mover->SetAllPartsOpenAmount(0.0);
+	}
+
+	AddInfo(FString::Printf(
+		TEXT("%d of %d articulated element(s) can reach each other at full travel: %d pair(s), %d pose combination(s) compared."),
+		Pairs > 0 ? Movers.Num() : 0, Movers.Num(), Pairs, Comparisons));
+
+	// A RUN THAT COMPARED NOTHING WOULD PASS BY HAVING ASKED NOTHING, and that is the exact failure
+	// mode this test was written to close - the sweep above reported parts swept while its
+	// neighbourhood had been clipped to empty. So the breadth is asserted, not reported.
+	TestTrue(*FString::Printf(TEXT("There are pairs close enough to compare - %d of them"), Pairs),
+		Pairs >= 20);
+	TestTrue(*FString::Printf(TEXT("Pose combinations actually compared - %d"), Comparisons),
+		Comparisons >= 200);
+
+	// SAID OUT LOUD ON EVERY RUN, GREEN OR NOT. Five pairs in this flat cannot both be wide open, all
+	// of them in the two places a layout runs out of room. A limitation nobody is reminded of is a
+	// limitation that becomes a habit.
+	//
+	// The deepest of each pair only, because sixteen pose combinations of one conflict is one
+	// conflict reported sixteen times, and a warning nobody can read is a warning nobody reads.
+	TMap<FString, FHFClash> WorstByPair;
+	for (const FHFClash& Clash : Obstructed)
+	{
+		FString Why;
+		KnownPairConflictDepth(Clash.NameA, Clash.NameB, Why);
+
+		const FString Key = Why;
+		FHFClash& Worst = WorstByPair.FindOrAdd(Key, Clash);
+		if (Clash.DepthCm > Worst.DepthCm)
+		{
+			Worst = Clash;
+		}
+	}
+
+	for (const TPair<FString, FHFClash>& Pair : WorstByPair)
+	{
+		AddWarning(FString::Printf(
+			TEXT("KNOWN, AND STILL OPEN: '%s' reaches %.2f cm into '%s' when both are open. %s"),
+			*Pair.Value.NameA, Pair.Value.DepthCm, *Pair.Value.NameB, *Pair.Key));
+	}
+
+	AddInfo(FString::Printf(
+		TEXT("%d pose combination(s) hit one of the %d recorded pair conflicts."),
+		Obstructed.Num(), WorstByPair.Num()));
+
+	for (const FString& Line : FHFClashScan::Describe(Fouls, 60))
+	{
+		AddError(Line);
+	}
+
+	if (!Fouls.IsEmpty())
+	{
+		AddError(FString::Printf(
+			TEXT("%d pose combination(s) put two elements in the same space, the worst by %.2f cm. Each of these is two fixtures that are individually correct and cannot both be used."),
+			Fouls.Num(), FHFClashScan::DeepestCm(Fouls)));
+	}
+
+	TestEqual(TEXT("Pose combinations where two open elements meet"), Fouls.Num(), 0);
 
 	return true;
 }
@@ -1169,23 +1803,49 @@ bool FHFFlatSkirtingTest::RunTest(const FString& Parameters)
  * trace. A line finds a gap a body cannot fit through, and the question here is whether a PERSON gets
  * between two rooms rather than whether light does.
  *
- * Two claims, and between them they are what "reachable" means in a plan like this one, where every
- * room opens off the corridor, the foyer, or a room that does:
- *
- *   EVERY DOORWAY IS PASSABLE, measured in the middle of it and a stride out on each side, so the
- *   approach is answered as well as the opening. A fixture put BESIDE a door stops somebody just as
- *   surely as one put in it.
+ * Four claims, and between them they are what "reachable" means:
  *
  *   EVERY ROOM HAS FLOOR, measured as the area a body can actually stand on rather than as the room's
  *   own area. That is the check a furnishing milestone has to pass: seventy-three fixtures can fill a
  *   3.24 sq m foyer without any single one of them being in the wrong place.
+ *
+ *   EVERY ROOM IS REACHABLE FROM THE FRONT DOOR, by a four-connected flood fill over that same
+ *   standability grid, seeded one stride inside the threshold of D_Main. This is the assertion that
+ *   would have caught the sealed foyer, and until now it did not exist at any layer: the grid was
+ *   built and then only counted. HouseForge.Model.SampleHouseIsConnected does fill, but over the
+ *   SPEC - rooms joined where a door's wall separates them - and the spec has no fixture geometry in
+ *   it, so a wardrobe standing in a doorway is invisible to it by construction.
+ *
+ *   AND NOT ONLY THROUGH A BATHROOM. The same fill again with every bathroom cell solid. That was the
+ *   other half of the same defect, and connectivity alone is happy to route a bedroom through a WC.
+ *
+ *   AND EACH ROOM IS SOMEWHERE TO BE, not somewhere to fit: at least one reachable position whose
+ *   four neighbours are reachable too, so a body can stand there and step out of it in any direction.
+ *   The assertion this replaces was `SquareMetres > 0.0`, which one 5 cm cell anywhere in a room
+ *   satisfies - a room could go from 23.76 sq m of standable floor to 0.0025 and still pass.
+ *
+ * ## WHAT IT FOUND ON ITS FIRST RUN
+ *
+ * That the flat is walkable, and that its service balcony is entered through the master bathroom.
+ *
+ * The first answer took a correction to get to. With the body's feet pinned a centimetre off the
+ * slab, the fill reported the standable floor in FOUR pieces and eight of the twelve rooms
+ * unreachable - and that was the model, not the building: the two 1800 balcony sliders run in a floor
+ * track, and a body that cannot lift a foot cannot cross one. The tell was that D_BalcE, the one
+ * balcony door with no track in it, connected perfectly while the two with tracks did not. With the
+ * 20 cm step described at the grid below, all twelve rooms are one piece and 16051 of 16144 standable
+ * cells are reachable from the front door.
+ *
+ * The second answer is real and is recorded in FKnownBathroomOnly above: R_BalconyE's only door opens
+ * off R_MBath. That is a layout decision for whoever owns the drawing, and it is asserted exactly, so
+ * neither a second such room nor a fix to this one can pass unnoticed.
  *
  * Doors are opened first, because a walkthrough opens doors, and HouseForge.Walkthrough.ClosedDoors-
  * BlockAndOpenOnesDoNot is where the other half of that is measured. An open leaf standing in its own
  * doorway is part of what this has to get past.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFlatWalkabilityTest,
-	"HouseForge.Flat.EveryDoorwayIsPassableAndEveryRoomHasFloor", HF_TEST_FLAGS)
+	"HouseForge.Flat.EveryRoomIsReachableFromTheFrontDoor", HF_TEST_FLAGS)
 
 bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 {
@@ -1207,6 +1867,8 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 
 	// Doors open. A shut door is a wall, and that is a different test.
 	int32 Opened = 0;
+	int32 Drawn = 0;
+
 	for (const TObjectPtr<AActor>& Actor : House->ElementActors)
 	{
 		AHFOpeningActor* Door = Cast<AHFOpeningActor>(Actor);
@@ -1214,6 +1876,23 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 		{
 			Door->SetAllPartsOpenAmount(1.0);
 			++Opened;
+		}
+
+		// AND THE CURTAINS DRAWN BACK, for exactly the reason the doors are opened.
+		//
+		// A curtain hangs across the two 1800 balcony sliders, which are the only way onto two of the
+		// three balconies. Left shut it is a wall of cloth, and the fill reported both balconies
+		// unreachable - correctly, for a flat nobody had drawn the curtains in. Somebody walking out
+		// onto a balcony draws the curtain first, in the same breath as opening the door, so leaving
+		// it shut would make this test measure a housekeeping state rather than the plan.
+		//
+		// Drawn back rather than ignored, which is the difference between this and the door leaves
+		// below: a drawn-back curtain still occupies its stack at the jambs, and that stack is real,
+		// permanent and exactly the thing worth measuring - it is how a curtain narrows a door.
+		if (AHFCurtainActor* Curtain = Cast<AHFCurtainActor>(Actor))
+		{
+			Curtain->SetAllPartsOpenAmount(1.0);
+			++Drawn;
 		}
 	}
 
@@ -1296,6 +1975,61 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 		return nullptr;
 	};
 
+	// EVERY ROOM A POINT COULD BELONG TO, not just the first one found.
+	//
+	// RoomAt above answers "which room is this in", which is the right question for labelling a cell
+	// and the wrong one for standing a body up in it. A cell on a room boundary is in two rooms, and
+	// the two have different floors: the wet rooms and the balconies are SUNK. Placing the capsule at
+	// the first room's datum puts it 5 cm into the slab of the other, so it reports blocked - and
+	// because every doorway sits on a boundary, that draws a solid line of blocked cells across the
+	// threshold of every sunk room in the flat. Four-connected, that severs them: both balconies off
+	// the living room read as unreachable when they are wide open.
+	//
+	// That is the grid's fault and not the building's, so the cell is stood up in each candidate room
+	// in turn and counted free if a body fits in ANY of them. A point genuinely inside one room has
+	// one candidate and is unaffected.
+	auto RoomsAt = [&Spec, &RoomAt](const FVector2D& Point)
+	{
+		TArray<const FHFRoom*, TInlineAllocator<4>> Found;
+
+		for (const FHFRoom& Room : Spec.Rooms)
+		{
+			if (Room.ContainsPoint(Point))
+			{
+				Found.Add(&Room);
+			}
+		}
+
+		// On a line, inside neither polygon: fall back to the nudge, which resolves exactly that.
+		if (Found.IsEmpty())
+		{
+			if (const FHFRoom* Nudged = RoomAt(Point))
+			{
+				Found.Add(Nudged);
+
+				// And the room on the far side of the line, which is what the boundary case is for.
+				static constexpr double Reach = 6.0;
+				static const FVector2D Offsets[4] = {
+					FVector2D(Reach, 0.0), FVector2D(-Reach, 0.0),
+					FVector2D(0.0, Reach), FVector2D(0.0, -Reach)
+				};
+
+				for (const FVector2D& Offset : Offsets)
+				{
+					for (const FHFRoom& Room : Spec.Rooms)
+					{
+						if (Room.ContainsPoint(Point + Offset) && !Found.Contains(&Room))
+						{
+							Found.Add(&Room);
+						}
+					}
+				}
+			}
+		}
+
+		return Found;
+	};
+
 	TArray<uint8> Free;
 	TArray<int32> RoomOf;
 	Free.SetNumZeroed(NX * NY);
@@ -1303,7 +2037,57 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 
 	FCollisionQueryParams Query(TEXT("HFWalkable"), /*bTraceComplex*/ false);
 
+	// ------------------------------------------------------ A DOOR LEAF IS NOT A PERMANENT OBSTACLE
+	//
+	// The fill below asks whether the FLAT connects its rooms - whether construction or furniture
+	// seals one - and a door leaf is neither. It is the one solid in the building that the person
+	// walking past it is holding: it was posed to 1.0 a few lines up because a walkthrough opens
+	// doors, but "wide open" is a pose chosen by this test, not a property of the flat. Left blocking,
+	// it decides the answer: at 1.0 the 1050 main door leaf stands across the corridor doorway of a
+	// 1.8 x 1.8 m foyer, and the fill reports the foyer, the kitchen and the utility reachable and the
+	// other nine rooms sealed - which is the exact symptom the note at the boundary nudge above
+	// describes, was read as a grid artefact, and is not one. It is the leaf.
+	//
+	// So the LEAVES are ignored and everything else is not. Frames, jambs and thresholds still block,
+	// because those are built and cannot be pushed out of the way; every fixture in the flat still
+	// blocks, which is what makes a wardrobe in a doorway fail here.
+	//
+	// WHAT THIS THEREFORE DOES NOT COVER, and it is covered elsewhere: a leaf that cannot swing clear
+	// of what is beside it. That is a motion question, and it is measured through the whole range in
+	// HouseForge.Flat.EveryMovingPartClearsTheFlatThroughItsRange and against a moving pawn in
+	// HouseForge.Walkthrough.ClosedDoorsBlockAndOpenOnesDoNot. Asking it here as well would make one
+	// arbitrary pose of every door in the flat decide whether the plan is walkable.
+	FCollisionQueryParams WalkQuery(TEXT("HFWalkableNoLeaves"), /*bTraceComplex*/ false);
+
+	int32 IgnoredLeaves = 0;
+	for (const TObjectPtr<AActor>& Actor : House->ElementActors)
+	{
+		const AHFOpeningActor* Door = Cast<AHFOpeningActor>(Actor);
+		if (!IsValid(Door) || !FHFSkirting::IsDoorway(Door->Opening))
+		{
+			continue;
+		}
+
+		for (const TObjectPtr<UDynamicMeshComponent>& Part : Door->GetPartComponents())
+		{
+			if (Part != nullptr)
+			{
+				WalkQuery.AddIgnoredComponent(Part.Get());
+				++IgnoredLeaves;
+			}
+		}
+	}
+
+	AddInfo(FString::Printf(
+		TEXT("%d doorway(s) opened; %d door leaf part(s) treated as movable rather than as building."),
+		Opened, IgnoredLeaves));
+
 	int32 Standable = 0;
+
+	// Cells a body only stands in by lifting a foot - a door track, a threshold, a sunk-room lip. A
+	// number worth having in front of you: if it ever climbs into the thousands, the flat has grown
+	// something being stepped over that ought to be walked round, and this is the line that shows it.
+	int32 SteppedOver = 0;
 
 	for (int32 i = 0; i < NX; ++i)
 	{
@@ -1311,28 +2095,60 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 		{
 			const FVector2D Point(Extent.Min.X + i * Pitch, Extent.Min.Y + j * Pitch);
 
-			const FHFRoom* Room = RoomAt(Point);
-			if (Room == nullptr)
+			const TArray<const FHFRoom*, TInlineAllocator<4>> Candidates = RoomsAt(Point);
+			if (Candidates.IsEmpty())
 			{
 				continue;
 			}
 
 			RoomOf[i * NY + j] = Spec.Rooms.IndexOfByPredicate(
-				[Room](const FHFRoom& R) { return R.Id == Room->Id; });
+				[&Candidates](const FHFRoom& R) { return R.Id == Candidates[0]->Id; });
 
-			// Feet a centimetre clear of the slab, so standing ON the floor is not standing IN it.
-			const FVector Centre(Point.X, Point.Y, Room->FloorZ + 1.0 + HalfHeight);
-
-			if (!World->OverlapBlockingTestByChannel(Centre, FQuat::Identity, ECC_Pawn, Body, Query))
+			for (const FHFRoom* Room : Candidates)
 			{
-				Free[i * NY + j] = 1;
-				++Standable;
+				// Feet a centimetre clear of the slab, so standing ON the floor is not standing IN it -
+				// and again with the foot RAISED, because a person walking crosses thresholds by
+				// lifting a foot over them and this grid otherwise cannot.
+				//
+				// WHY THERE HAS TO BE A STEP AT ALL. The two 1800 balcony sliders run in a floor track
+				// across their opening. With the body's feet pinned a centimetre off the slab that
+				// track is a wall: the fill reported both balconies as islands of standable floor
+				// reachable from nowhere, while the one balcony door with no track in it - D_BalcE, the
+				// 900 swing door - connected perfectly. That is the model failing to describe a person,
+				// not the building failing to admit one.
+				//
+				// AND WHY IT IS 20 AND NOT MORE. It has to clear a door track and a threshold and it
+				// must NOT clear furniture, or this stops being a walkability test and starts being a
+				// clambering test. 20 cm is a full step riser, well over any track; the living room's
+				// coffee table is 40 cm and its sofa 80, so nothing in this flat's circulation is
+				// stepped over by raising the foot this far. UE's own CharacterMovement defaults
+				// MaxStepHeight to 45, which would clear a coffee table, so this is deliberately less
+				// than the engine's own walking model allows.
+				static constexpr double StepCm = 20.0;
+
+				const FVector Feet(Point.X, Point.Y, Room->FloorZ + 1.0 + HalfHeight);
+				const FVector Stepped(Point.X, Point.Y, Room->FloorZ + StepCm + HalfHeight);
+
+				const bool bFlat = !World->OverlapBlockingTestByChannel(
+					Feet, FQuat::Identity, ECC_Pawn, Body, WalkQuery);
+
+				const bool bOverSomething = !bFlat && !World->OverlapBlockingTestByChannel(
+					Stepped, FQuat::Identity, ECC_Pawn, Body, WalkQuery);
+
+				if (bFlat || bOverSomething)
+				{
+					Free[i * NY + j] = 1;
+					++Standable;
+					SteppedOver += bOverSomething ? 1 : 0;
+					break;
+				}
 			}
 		}
 	}
 
-	AddInfo(FString::Printf(TEXT("%d doorway(s) opened; %d of %d grid cells are standable."),
-		Opened, Standable, NX * NY));
+	AddInfo(FString::Printf(
+		TEXT("%d of %d grid cells at %.0f cm pitch are standable; %d of those only with a foot lifted over a track or threshold."),
+		Standable, NX * NY, Pitch, SteppedOver));
 
 	// ------------------------------------------------------------------- what is in each doorway
 	//
@@ -1376,193 +2192,522 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 			Blockers.IsEmpty() ? TEXT("clear") : *FString::Join(Blockers, TEXT(", "))));
 	}
 
-	// ------------------------------------------------------------- and every doorway is passable
+	// =========================================================== CAN YOU ACTUALLY GET THERE FROM THE
+	//                                                                                    FRONT DOOR?
 	//
-	// A ROOM IS REACHABLE IF IT HAS FLOOR AND ITS DOORWAY IS PASSABLE, and both of those are measured
-	// directly rather than inferred from a flood fill. The doorway is the only place in this plan
-	// where a person can be stopped: every room in the flat opens off the corridor, the foyer or a
-	// room that does, and the clear widths in between are metres.
+	// THE FLOOD FILL, WHICH IS THE WHOLE POINT AND WAS THE ONE THING MISSING.
 	//
-	// Three points per doorway - the middle of it, and a stride out on each side - so the APPROACH is
-	// answered too. A door somebody can stand in and not get out of is the same failure as a blocked
-	// one, and a fixture put beside a doorway rather than in it is the way that happens.
-	for (const FHFOpening& Opening : Spec.Openings)
+	// Everything above this line was already computed - a standability grid at 5 cm, a room index per
+	// cell, a boundary nudge written specifically so cells on wall centrelines resolve to a room - and
+	// then used only to COUNT cells per room. The graph was built and never walked. What stood here
+	// instead was a doorway probe whose result went to AddWarning with a written justification, so the
+	// test named for doorway passability asserted nothing about doorways at all; that is the
+	// SampleHouseValidates AddInfo failure this project has already shipped through once, in a new
+	// coat. The justification was also stale: it said a slider driven by SetAllPartsOpenAmount opens
+	// BOTH leaves and cancels, and AHFArticulatedActor.cpp has honoured bMasterOpens - one leaf, not
+	// two - since before the note was written.
+	//
+	// A count per room cannot see the defect this flat has already had. A SEALED FOYER has floor in
+	// every room of it: the foyer's cells are free, the living room's cells are free, and there is no
+	// way from one to the other. So is a room reachable only through a bathroom, which was the other
+	// half of that same defect.
+	//
+	// Reachability is a property of the GRAPH, and the only honest way to ask it is to walk it.
+	//
+	// Four-connected rather than eight, deliberately: a diagonal step between two cells that are each
+	// free but whose shared corner is solid is a body passing through an arris. Four-connected can
+	// only ever be pessimistic, and a fill that under-reports reachability fails loudly rather than
+	// passing quietly.
+	auto CellIndex = [NY](int32 i, int32 j) { return i * NY + j; };
+
+	// The front door, by the same identity HouseForge.Model.SampleHouseIsConnected uses.
+	const FHFOpening* Entrance = Spec.Openings.FindByPredicate(
+		[](const FHFOpening& O) { return O.Id == FName(TEXT("D_Main")); });
+
+	if (!TestNotNull(TEXT("The flat has a main entrance to start from"), Entrance))
 	{
-		const FHFWall* Wall = Spec.FindWall(Opening.WallId);
-		if (!FHFSkirting::IsDoorway(Opening) || Wall == nullptr)
+		return false;
+	}
+
+	const FHFWall* EntranceWall = Spec.FindWall(Entrance->WallId);
+	if (!TestNotNull(TEXT("The entrance hangs on a real wall"), EntranceWall) ||
+		EntranceWall->Length() <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	// Just inside the threshold: through the door and clear of its reveal. Which side is "inside" is
+	// whichever one is in a room - the other is the landing, and the flat does not model it.
+	const FVector2D EntranceDown = (EntranceWall->End - EntranceWall->Start) / EntranceWall->Length();
+	const FVector2D EntranceOut(-EntranceDown.Y, EntranceDown.X);
+	const FVector2D Threshold = EntranceWall->Start + EntranceDown * Entrance->OffsetAlongWall;
+	const double InStep = EntranceWall->Thickness + Radius * 2.0;
+
+	FVector2D Inside = Threshold + EntranceOut * InStep;
+	if (RoomAt(Inside) == nullptr)
+	{
+		Inside = Threshold - EntranceOut * InStep;
+	}
+
+	if (!TestNotNull(TEXT("There is a room on the inside of the front door"), RoomAt(Inside)))
+	{
+		return false;
+	}
+
+	// The cell a person is standing in once they are through the door. The nearest STANDABLE one to
+	// that point, because the exact centimetre of the grid is an artefact of where it was hung - but
+	// only within a stride, so a front door with a wardrobe behind it fails here rather than seeding
+	// itself from somewhere across the flat.
+	int32 Seed = INDEX_NONE;
+	double SeedDistSq = TNumericLimits<double>::Max();
+	const double SeedReach = Radius * 2.0 + Pitch;
+
+	for (int32 i = 0; i < NX; ++i)
+	{
+		for (int32 j = 0; j < NY; ++j)
 		{
-			continue;
-		}
-
-		const double Length = Wall->Length();
-		if (Length <= KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-
-		const FVector2D Down = (Wall->End - Wall->Start) / Length;
-		const FVector2D Out(-Down.Y, Down.X);
-		const FVector2D Middle = Wall->Start + Down * Opening.OffsetAlongWall;
-
-		// A stride is a body's width plus the thickness of the wall being stepped through, so the
-		// probe lands clear of the reveal on each side rather than inside it.
-		const double Stride = Radius * 2.0 + Wall->Thickness;
-
-		// ACROSS THE OPENING AS WELL AS THROUGH IT, and one clear line is enough.
-		//
-		// A DOORWAY IS NOT PASSABLE AT ITS MIDDLE - it is passable SOMEWHERE. The middle is exactly
-		// the wrong place to ask about the two 1800 balcony sliders: an open slider has one leaf
-		// parked over half its opening and the two leaves meet on the centreline, so the centre is
-		// the one position that is blocked at every open amount and the door is wide open beside it.
-		// The same is true of a hinged leaf standing in its own approach.
-		//
-		// So five lines are tried across the width, and each has to be clear at the opening AND a
-		// stride out on both sides. Any one of them clear is a person getting through; none of them
-		// is a door nobody can use.
-		static constexpr double Across[5] = { -0.34, -0.17, 0.0, 0.17, 0.34 };
-
-		// EVERY BLOCKER, NOT THE LAST ONE THE LOOP HAPPENED TO SEE. The overlap loop below used to
-		// overwrite a single name on each hit and report whichever came last, so the warning named an
-		// arbitrary actor - and whoever read it attributed D_Foyer's blockage to the D_Foyer leaf,
-		// when what actually lies across that doorway at all five offsets is Opening_D_Main, the open
-		// front door. A diagnostic that names the wrong thing is worse than one that names nothing:
-		// it gets believed, and the note written from it goes into the record.
-		TSet<FString> Blockers;
-		bool bPassable = false;
-
-		for (const double Fraction : Across)
-		{
-			const FVector2D Line = Middle + Down * (Opening.Width * Fraction);
-
-			const FVector2D Points[3] = { Line, Line + Out * Stride, Line - Out * Stride };
-
-			bool bLineClear = true;
-
-			for (const FVector2D& Point : Points)
+			if (Free[CellIndex(i, j)] == 0)
 			{
-				const FHFRoom* Room = RoomAt(Point);
-				if (Room == nullptr)
-				{
-					// Outside the building, which is where the front door's outer approach is.
-					// Nothing to say about the weather.
-					continue;
-				}
-
-				const FVector Centre(Point.X, Point.Y, Room->FloorZ + 1.0 + HalfHeight);
-
-				TArray<FOverlapResult> Overlaps;
-				World->OverlapMultiByChannel(Overlaps, Centre, FQuat::Identity, ECC_Pawn, Body, Query);
-
-				for (const FOverlapResult& Overlap : Overlaps)
-				{
-					if (const AActor* Actor = Overlap.GetActor())
-					{
-						bLineClear = false;
-						if (const AHFElementActor* Element = Cast<AHFElementActor>(Actor))
-						{
-							Blockers.Add(Element->ElementId.ToString());
-						}
-						else
-						{
-							Blockers.Add(Actor->GetName());
-						}
-					}
-				}
-
-				if (!bLineClear)
-				{
-					break;
-				}
+				continue;
 			}
 
-			if (bLineClear)
+			const FVector2D At(Extent.Min.X + i * Pitch, Extent.Min.Y + j * Pitch);
+			const double DistSq = FVector2D::DistSquared(At, Inside);
+
+			if (DistSq < SeedDistSq && DistSq <= SeedReach * SeedReach)
 			{
-				bPassable = true;
-				break;
+				SeedDistSq = DistSq;
+				Seed = CellIndex(i, j);
 			}
-		}
-
-		// ------------------------------------------------------------- REPORTED, NOT YET ASSERTED
-		//
-		// This probe finds real geometry and it is not yet trustworthy enough to fail a gate on.
-		//
-		// Two of its answers are certainly its own fault. A two-leaf slider driven through
-		// SetAllPartsOpenAmount opens BOTH leaves, which for a sliding run just exchanges tracks and
-		// leaves the elevation exactly as covered as it was - the cancelling-pair failure this plugin
-		// already knows about, and the reason AHFArticulatedActor::OpenRunFrom exists. Both balcony
-		// doors are reported blocked for that reason and both are wide open in the level. Those two
-		// are the only ones the probe now names ONLY the doorway itself for, which is the shape a
-		// cancelling pair makes and is worth reading as a signature.
-		//
-		// The other three name a list, and the list is the useful part. It used to be a single name,
-		// overwritten on every hit, so whichever actor the overlap query happened to return last was
-		// reported as the cause - and D_Foyer's blockage was written up as the D_Foyer leaf when what
-		// actually lies across it is D_Main, the open front door, at all five offsets. What the three
-		// now say:
-		//
-		//   D_Foyer   - D_Main's leaf swings across it. A real circulation conflict in a 1.8 x 1.8 m
-		//               foyer, made tighter by F_ShoeRack, and not the probe's fault.
-		//   D_Kitchen - F_ShoeRack and the foyer's switch plate, both a stride out on the foyer side.
-		//   D_Utility - F_Util_Sink, a stride out on the utility side.
-		//
-		// Every one of them also names its own room actor, which is a floor slab and a skirting that
-		// the 300 mm-clear body should not be touching - so the probe still has something wrong with
-		// it, and how far "a stride out" should reach into a small room is still an open question.
-		// That is why this is a warning: the naming is now trustworthy, the threshold is not.
-		//
-		// So it is warned rather than asserted. An assertion nobody can explain is worse than none:
-		// it gets muted, and then it is not there when it matters. What IS asserted here is the floor
-		// below, which is measured the same way and behaves.
-		if (!bPassable)
-		{
-			TArray<FString> Named = Blockers.Array();
-			Named.Sort();
-
-			AddWarning(FString::Printf(
-				TEXT("UNVERIFIED: every line across '%s' (%.0f cm wide) probes blocked, by: %s. See the note above - this probe is not yet trusted."),
-				*Opening.Id.ToString(), Opening.Width, *FString::Join(Named, TEXT(", "))));
 		}
 	}
 
-	// ---------------------------------------------------------- and every room has floor to stand on
-	TArray<int32> FreePerRoom;
-	FreePerRoom.SetNumZeroed(Spec.Rooms.Num());
-
-	for (int32 Cell = 0; Cell < Free.Num(); ++Cell)
+	if (Seed == INDEX_NONE)
 	{
-		if (RoomOf[Cell] != INDEX_NONE && Free[Cell] != 0)
+		AddError(FString::Printf(
+			TEXT("Nobody can stand inside the front door: no standable cell within %.0f cm of (%.0f, %.0f). The flat is not enterable, so nothing beyond this can be measured."),
+			SeedReach, Inside.X, Inside.Y));
+		return false;
+	}
+
+	// The fill itself. Blocked is a cell that is not free; a cell in no room was never free.
+	auto FloodFrom = [&](int32 From, const TFunctionRef<bool(int32)>& bPassable, TArray<uint8>& OutSeen)
+	{
+		OutSeen.Init(0, Free.Num());
+
+		if (!bPassable(From))
 		{
-			++FreePerRoom[RoomOf[Cell]];
+			return;
 		}
+
+		TArray<int32> Queue;
+		Queue.Reserve(Free.Num() / 4);
+		Queue.Add(From);
+		OutSeen[From] = 1;
+
+		while (!Queue.IsEmpty())
+		{
+			const int32 Cell = Queue.Pop(EAllowShrinking::No);
+			const int32 i = Cell / NY;
+			const int32 j = Cell % NY;
+
+			const int32 Neighbours[4][2] = { { i + 1, j }, { i - 1, j }, { i, j + 1 }, { i, j - 1 } };
+
+			for (const int32(&N)[2] : Neighbours)
+			{
+				if (N[0] < 0 || N[0] >= NX || N[1] < 0 || N[1] >= NY)
+				{
+					continue;
+				}
+
+				const int32 Next = CellIndex(N[0], N[1]);
+				if (OutSeen[Next] == 0 && bPassable(Next))
+				{
+					OutSeen[Next] = 1;
+					Queue.Add(Next);
+				}
+			}
+		}
+	};
+
+	TArray<uint8> Reached;
+	FloodFrom(Seed, [&Free](int32 Cell) { return Free[Cell] != 0; }, Reached);
+
+	// ------------------------------------------------- and again with the wet rooms taken out of it
+	//
+	// A ROOM YOU CAN ONLY GET TO THROUGH A BATHROOM IS NOT A ROOM YOU CAN GET TO. That was the other
+	// half of the sealed-foyer defect and it is a different question from connectivity: the fill above
+	// is perfectly happy to route the master bedroom through the master bath. So the fill runs a
+	// second time with every bathroom cell treated as solid, and every room that is not itself a
+	// bathroom has to survive it.
+	TArray<uint8> ReachedDry;
+	FloodFrom(Seed, [&](int32 Cell)
+	{
+		if (Free[Cell] == 0)
+		{
+			return false;
+		}
+
+		const int32 Room = RoomOf[Cell];
+		return Room == INDEX_NONE || Spec.Rooms[Room].Type != EHFRoomType::Bathroom;
+	}, ReachedDry);
+
+	// ------------------------------------------------------------------------------- the accounting
+	TArray<int32> FreePerRoom;
+	TArray<int32> ReachedPerRoom;
+	TArray<int32> DryPerRoom;
+	TArray<int32> RoomyPerRoom;
+
+	FreePerRoom.SetNumZeroed(Spec.Rooms.Num());
+	ReachedPerRoom.SetNumZeroed(Spec.Rooms.Num());
+	DryPerRoom.SetNumZeroed(Spec.Rooms.Num());
+	RoomyPerRoom.SetNumZeroed(Spec.Rooms.Num());
+
+	for (int32 i = 0; i < NX; ++i)
+	{
+		for (int32 j = 0; j < NY; ++j)
+		{
+			const int32 Cell = CellIndex(i, j);
+			const int32 Room = RoomOf[Cell];
+
+			if (Room == INDEX_NONE || Free[Cell] == 0)
+			{
+				continue;
+			}
+
+			++FreePerRoom[Room];
+			ReachedPerRoom[Room] += Reached[Cell] != 0 ? 1 : 0;
+			DryPerRoom[Room] += ReachedDry[Cell] != 0 ? 1 : 0;
+
+			// SOMEWHERE TO BE, NOT SOMEWHERE TO FIT. A cell whose four neighbours are all reachable
+			// too is a position a body can stand in and step out of in any direction. One reachable
+			// cell on its own is a pinhole - a place the capsule happens to fit and cannot move
+			// within - and "SquareMetres > 0.0", which is all this test used to assert, is satisfied
+			// by exactly that: one 5 cm cell, 0.0025 sq m, in a room otherwise furnished solid.
+			if (Reached[Cell] == 0 || i == 0 || j == 0 || i == NX - 1 || j == NY - 1)
+			{
+				continue;
+			}
+
+			const bool bRoomy =
+				Reached[CellIndex(i + 1, j)] != 0 && Reached[CellIndex(i - 1, j)] != 0 &&
+				Reached[CellIndex(i, j + 1)] != 0 && Reached[CellIndex(i, j - 1)] != 0;
+
+			RoomyPerRoom[Room] += bRoomy ? 1 : 0;
+		}
+	}
+
+	int32 TotalReached = 0;
+	for (const uint8 Cell : Reached)
+	{
+		TotalReached += Cell != 0 ? 1 : 0;
+	}
+
+	AddInfo(FString::Printf(
+		TEXT("Seeded inside '%s' at (%.0f, %.0f); %d of %d standable cells are reachable from it."),
+		*Entrance->Id.ToString(), Inside.X, Inside.Y, TotalReached, Standable));
+
+	// -------------------------------------------------------------- HOW MANY PIECES THE FLOOR IS IN
+	//
+	// The doorway report below answers "which doorway did the fill not get through". It cannot answer
+	// "the fill got through the doorway and stopped in the middle of the room", which is what a sofa
+	// across the only route east does - and that is a real state of this flat, not a hypothetical: the
+	// D_Living doorway probes CLEAR at its middle, has 276 standable cells around it, and none of them
+	// are reachable, because the living room's own free floor is in two pieces and the doorway is in
+	// the far one.
+	//
+	// So the whole standable grid is decomposed into connected components and the big ones are named
+	// with the rooms they span. "The flat's floor is in five pieces and the front door is in piece 2"
+	// is an address; "eight rooms unreachable" is not.
+	{
+		TArray<int32> Component;
+		Component.Init(INDEX_NONE, Free.Num());
+
+		struct FPiece
+		{
+			int32 Cells = 0;
+			TSet<int32> Rooms;
+			bool bHasSeed = false;
+		};
+
+		TArray<FPiece> Pieces;
+		TArray<int32> Queue;
+
+		for (int32 Start = 0; Start < Free.Num(); ++Start)
+		{
+			if (Free[Start] == 0 || Component[Start] != INDEX_NONE)
+			{
+				continue;
+			}
+
+			const int32 Id = Pieces.AddDefaulted();
+			Queue.Reset();
+			Queue.Add(Start);
+			Component[Start] = Id;
+
+			while (!Queue.IsEmpty())
+			{
+				const int32 Cell = Queue.Pop(EAllowShrinking::No);
+				const int32 ci = Cell / NY;
+				const int32 cj = Cell % NY;
+
+				++Pieces[Id].Cells;
+				Pieces[Id].bHasSeed |= Cell == Seed;
+
+				if (RoomOf[Cell] != INDEX_NONE)
+				{
+					Pieces[Id].Rooms.Add(RoomOf[Cell]);
+				}
+
+				const int32 Neighbours[4][2] = { { ci + 1, cj }, { ci - 1, cj }, { ci, cj + 1 }, { ci, cj - 1 } };
+
+				for (const int32(&N)[2] : Neighbours)
+				{
+					if (N[0] < 0 || N[0] >= NX || N[1] < 0 || N[1] >= NY)
+					{
+						continue;
+					}
+
+					const int32 Next = CellIndex(N[0], N[1]);
+					if (Free[Next] != 0 && Component[Next] == INDEX_NONE)
+					{
+						Component[Next] = Id;
+						Queue.Add(Next);
+					}
+				}
+			}
+		}
+
+		TArray<int32> Order;
+		for (int32 Id = 0; Id < Pieces.Num(); ++Id)
+		{
+			Order.Add(Id);
+		}
+		Order.Sort([&Pieces](int32 A, int32 B) { return Pieces[A].Cells > Pieces[B].Cells; });
+
+		AddInfo(FString::Printf(
+			TEXT("The flat's standable floor is in %d disconnected piece(s)."), Pieces.Num()));
+
+		// The big ones only. A 5 cm pitch leaves a scatter of one- and two-cell slivers behind every
+		// fixture, and listing those buries the pieces that are rooms.
+		const int32 Significant = FMath::Max(1, static_cast<int32>(1.0 * 10000.0 / (Pitch * Pitch)));
+
+		for (int32 Rank = 0; Rank < Order.Num() && Rank < 12; ++Rank)
+		{
+			const FPiece& Piece = Pieces[Order[Rank]];
+			if (Piece.Cells < Significant)
+			{
+				break;
+			}
+
+			TArray<FString> Names;
+			for (const int32 Room : Piece.Rooms)
+			{
+				Names.Add(Spec.Rooms[Room].Id.ToString());
+			}
+			Names.Sort();
+
+			AddInfo(FString::Printf(TEXT("  piece %d: %.2f sq m across %s%s"),
+				Rank + 1, Piece.Cells * Pitch * Pitch / 10000.0, *FString::Join(Names, TEXT(", ")),
+				Piece.bHasSeed ? TEXT("  <- the front door is in this one") : TEXT("")));
+		}
+	}
+
+	// ------------------------------------------------------------- WHICH DOORWAY THE FILL STOPS AT
+	//
+	// "Nine of twelve rooms are unreachable" is a true sentence with one cause and no address. The
+	// fill knows exactly where it ran out - the doorway with free cells on one side of it and none
+	// reached on the other - so it says so, per doorway, on every run. A connectivity failure that
+	// does not name a doorway costs an afternoon; one that does costs a look.
+	for (const FHFOpening& Opening : Spec.Openings)
+	{
+		const FHFWall* Wall = Spec.FindWall(Opening.WallId);
+		if (!FHFSkirting::IsDoorway(Opening) || Wall == nullptr || Wall->Length() <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector2D Down = (Wall->End - Wall->Start) / Wall->Length();
+		const FVector2D Out(-Down.Y, Down.X);
+		const FVector2D Middle = Wall->Start + Down * Opening.OffsetAlongWall;
+
+		// The opening's own footprint, plus a body's width out on each side, which is the run of
+		// cells a person has to be able to chain through.
+		const double HalfAlong = Opening.Width * 0.5;
+		const double HalfThrough = Wall->Thickness * 0.5 + Radius * 2.0;
+
+		int32 InsideOpening = 0;
+		int32 FreeHere = 0;
+		int32 ReachedHere = 0;
+		TArray<FVector2D> Blocked;
+
+		for (int32 i = 0; i < NX; ++i)
+		{
+			for (int32 j = 0; j < NY; ++j)
+			{
+				const FVector2D At(Extent.Min.X + i * Pitch, Extent.Min.Y + j * Pitch);
+				const FVector2D Delta = At - Middle;
+
+				if (FMath::Abs(FVector2D::DotProduct(Delta, Down)) > HalfAlong ||
+					FMath::Abs(FVector2D::DotProduct(Delta, Out)) > HalfThrough)
+				{
+					continue;
+				}
+
+				++InsideOpening;
+
+				const int32 Cell = CellIndex(i, j);
+				FreeHere += Free[Cell] != 0 ? 1 : 0;
+				ReachedHere += Reached[Cell] != 0 ? 1 : 0;
+
+				if (Free[Cell] == 0 && RoomOf[Cell] != INDEX_NONE)
+				{
+					Blocked.Add(At);
+				}
+			}
+		}
+
+		// AND WHAT IS STANDING IN IT. "Nine rooms unreachable" has one cause and no address; the
+		// doorway, with the actors occupying it by name, is an address.
+		//
+		// Asked whenever anything at all stands in the opening, not only when the fill failed to get
+		// through it. A doorway the fill DID cross while half of it was full is the one about to
+		// become a doorway the fill cannot cross, and that is precisely when the name of what is
+		// narrowing it is worth having. It is an overlap query per blocked cell, so it is bounded by
+		// the doorway's own footprint and nothing else.
+		FString Names;
+		if (FreeHere < InsideOpening)
+		{
+			TSet<FString> Blockers;
+			for (const FVector2D& At : Blocked)
+			{
+				const TArray<const FHFRoom*, TInlineAllocator<4>> Candidates = RoomsAt(At);
+				if (Candidates.IsEmpty())
+				{
+					continue;
+				}
+
+				const FVector Centre(At.X, At.Y, Candidates[0]->FloorZ + 1.0 + HalfHeight);
+
+				TArray<FOverlapResult> Overlaps;
+				World->OverlapMultiByChannel(Overlaps, Centre, FQuat::Identity, ECC_Pawn, Body, WalkQuery);
+
+				for (const FOverlapResult& Overlap : Overlaps)
+				{
+					if (const AHFElementActor* Element = Cast<AHFElementActor>(Overlap.GetActor()))
+					{
+						Blockers.Add(Element->ElementId.ToString());
+					}
+					else if (const AActor* Actor = Overlap.GetActor())
+					{
+						Blockers.Add(Actor->GetName());
+					}
+				}
+			}
+
+			TArray<FString> Sorted = Blockers.Array();
+			Sorted.Sort();
+			Names = FString::Printf(TEXT(" Standing in it: %s."), *FString::Join(Sorted, TEXT(", ")));
+		}
+
+		AddInfo(FString::Printf(
+			TEXT("Doorway '%s' (%.0f wide): %d of %d cells in and around it are standable, %d of those reached.%s"),
+			*Opening.Id.ToString(), Opening.Width, FreeHere, InsideOpening, ReachedHere, *Names));
 	}
 
 	for (int32 Room = 0; Room < Spec.Rooms.Num(); ++Room)
 	{
 		const FHFRoom& Which = Spec.Rooms[Room];
-		const double SquareMetres = FreePerRoom[Room] * Pitch * Pitch / 10000.0;
+		const double PerCell = Pitch * Pitch / 10000.0;
 
+		AddInfo(FString::Printf(
+			TEXT("'%s' (%s): %.2f sq m standable, %.2f sq m of it reachable from the front door, %.2f sq m without going through a bathroom, in a %.2f sq m room."),
+			*Which.Id.ToString(), *Which.Name,
+			FreePerRoom[Room] * PerCell, ReachedPerRoom[Room] * PerCell, DryPerRoom[Room] * PerCell,
+			Which.Area() / 10000.0));
+
+		// ------------------------------------------------------------------ THE THREE ASSERTIONS
+		//
 		// A ROOM FURNISHED WALL TO WALL IS A ROOM NOBODY CAN BE IN, and that is a thing seventy-three
-		// fixtures could do to a room without any one of them being in the wrong place.
-		//
-		// The assertion is that there is somewhere to stand AT ALL, and the figure is reported beside
-		// it rather than thresholded, because there is no honest number for "enough". A 1.2 x 1.8
-		// utility with a 600 machine and a sink in it really does come down to the doorway and a step
-		// - that is what such a room is, in this domain, and calling it a failure would be inventing
-		// a standard the drawing never claimed.
-		//
-		// What IS worth saying every time is which rooms are down to nothing, so a milestone that
-		// quietly furnishes one of them shut is visible the run it happens.
+		// fixtures could do to a room without any single one of them being in the wrong place.
 		TestTrue(*FString::Printf(
-			TEXT("'%s' (%s) has floor a person can stand on - about %.2f sq m of it"),
-			*Which.Id.ToString(), *Which.Name, SquareMetres),
-			SquareMetres > 0.0);
+			TEXT("'%s' (%s) has floor a person can stand on - %.2f sq m"),
+			*Which.Id.ToString(), *Which.Name, FreePerRoom[Room] * PerCell),
+			FreePerRoom[Room] > 0);
 
-		if (SquareMetres < 1.0)
+		// AND YOU CAN GET TO IT FROM THE FRONT DOOR. The sealed foyer, on built geometry. Every room,
+		// unconditionally: there is no record and no exemption here, because there is nothing in this
+		// flat a person cannot walk to and the day there is, this is the line that says so.
+		const bool bReached = ReachedPerRoom[Room] > 0;
+
+		TestTrue(*FString::Printf(
+			TEXT("'%s' (%s) is reachable from the front door - %.2f sq m of it"),
+			*Which.Id.ToString(), *Which.Name, ReachedPerRoom[Room] * PerCell),
+			bReached);
+
+		// AND NOT ONLY THROUGH A BATHROOM, which was the other half of the sealed-foyer defect and is
+		// a different question from connectivity - the fill above is perfectly happy to route a bedroom
+		// through a WC. Only asked of a room the fill can get to at all, because a room it cannot reach
+		// by any route is already failing above and would report the same thing twice.
+		if (Which.Type != EHFRoomType::Bathroom && bReached)
+		{
+			const TCHAR* BathroomOnlyWhy = KnownBathroomOnlyWhy(Which.Id);
+			const bool bDry = DryPerRoom[Room] > 0;
+
+			if (BathroomOnlyWhy == nullptr)
+			{
+				TestTrue(*FString::Printf(
+					TEXT("'%s' (%s) is reachable without going through a bathroom - %.2f sq m of it"),
+					*Which.Id.ToString(), *Which.Name, DryPerRoom[Room] * PerCell),
+					bDry);
+			}
+			else
+			{
+				// SAID OUT LOUD ON EVERY RUN, GREEN OR NOT. A limitation nobody is reminded of is a
+				// limitation that becomes a habit.
+				AddWarning(FString::Printf(
+					TEXT("KNOWN, AND STILL OPEN: '%s' (%s) can only be reached through a bathroom. %s"),
+					*Which.Id.ToString(), *Which.Name, BathroomOnlyWhy));
+
+				TestFalse(*FString::Printf(
+					TEXT("'%s' (%s) is recorded as bathroom-only and still is - if this has been fixed, delete its row from FKnownBathroomOnly"),
+					*Which.Id.ToString(), *Which.Name),
+					bDry);
+			}
+		}
+
+		// AND IT IS SOMEWHERE TO BE RATHER THAN SOMEWHERE TO FIT. No square-metre threshold, because
+		// there is no honest number for "enough" - a 1.2 x 1.8 utility with a 600 machine and a sink
+		// really does come down to the doorway and a step, and calling that a failure would invent a
+		// standard the drawing never claimed. What is not a matter of taste is whether a body can
+		// move at all once it is in there.
+		//
+		// Asked of the REACHED floor, so it means "somewhere to be once you are in", and therefore
+		// only asked of a room you can get into. Asking it of a stranded room would measure the shape
+		// of floor nobody can be standing on.
+		if (bReached)
+		{
+			TestTrue(*FString::Printf(
+				TEXT("'%s' (%s) has somewhere a person can stand and step out of in any direction - %d such position(s)"),
+				*Which.Id.ToString(), *Which.Name, RoomyPerRoom[Room]),
+				RoomyPerRoom[Room] > 0);
+		}
+
+		if (bReached && ReachedPerRoom[Room] * PerCell < 1.0)
 		{
 			AddWarning(FString::Printf(
-				TEXT("'%s' (%s) is down to %.2f sq m of standable floor out of %.2f sq m of room. Anything else put in it closes it."),
-				*Which.Id.ToString(), *Which.Name, SquareMetres, Which.Area() / 10000.0));
+				TEXT("'%s' (%s) is down to %.2f sq m of reachable floor out of %.2f sq m of room. Anything else put in it closes it."),
+				*Which.Id.ToString(), *Which.Name, ReachedPerRoom[Room] * PerCell, Which.Area() / 10000.0));
 		}
+	}
+
+	// AND THE RECORD IS NOT ALLOWED TO OUTLIVE THE DEFECT. A row naming a room that no longer exists
+	// is a row nobody will notice has stopped meaning anything.
+	for (const FKnownBathroomOnly& Known : KnownBathroomOnlyRooms())
+	{
+		TestNotNull(*FString::Printf(
+			TEXT("FKnownBathroomOnly's row for '%s' names a room this flat actually has"), Known.RoomId),
+			Spec.FindRoom(FName(Known.RoomId)));
 	}
 
 	return true;
