@@ -449,6 +449,28 @@ public:
 		meta = (ClampMin = "0.0", ClampMax = "120.0", UIMin = "10.0", UIMax = "90.0"))
 	double CeilingFanDropLength = 30.0;
 
+	// =========================================================================== loose furniture
+
+	/**
+	 * Which named sofa this project buys, and how a sectional's chaise is set out.
+	 *
+	 * A DESIGN IS THE UNIT OF CHOICE HERE, exactly as a template is for a ceiling. A spec names one -
+	 * SquareArm, ChaiseSectional, LowProfile, RolledArm - and a spec that names none gets whatever
+	 * this says, so changing this one control changes the sofa in every living room the project
+	 * builds. See EHFSofaDesign for why the sixty figures behind those four designs are NOT on this
+	 * page and live in FHFUpholsteryKit::FiguresFor instead.
+	 *
+	 * WHAT THIS DOES NOT DO YET, said here rather than in a comment nobody reads: changing it
+	 * re-sofas the next house built, not one already standing in the level.
+	 * UHFEditorSubsystem::ApplyProjectSettingsToLevel re-seeds openings and joinery, which are the
+	 * two classes whose actors carry construction figures off this page; a sofa's design is chosen
+	 * when the composing layer reads the fixture, and re-choosing it on a placed actor is a
+	 * rebuild rather than a re-seed. Rebuild the house to see it.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Loose Furniture|Sofa",
+		meta = (ShowOnlyInnerProperties))
+	FHFSofaDefaults Sofa;
+
 	// =========================================================================== false ceilings
 
 	/**

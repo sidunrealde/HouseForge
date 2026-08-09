@@ -11,6 +11,8 @@
 #include "Geometry/HFUpholsteryKit.h"
 #include "MeshQueries.h"
 #include "Misc/AutomationTest.h"
+#include "Model/HFBuildDefaults.h"
+#include "Model/HFFixturePlacement.h"
 #include "Model/HFSampleHouse.h"
 #include "Model/HFTypes.h"
 
@@ -1066,6 +1068,911 @@ bool FHFDiningClearanceTest::RunTest(const FString& Parameters)
 		const FBox2D SofaBounds = FootprintBounds(*Sofa);
 		TestTrue(FString::Printf(TEXT("The sofa's back is on the plaster (%.1f mm off)"),
 			3542.5 - SofaBounds.Max.Y), FMath::IsNearlyEqual(SofaBounds.Max.Y, 3542.5, 1.0));
+	}
+
+	return true;
+}
+
+// ======================================================================== the four named designs
+
+namespace
+{
+	/**
+	 * The four designs and the box a plan of this living room draws each of them in.
+	 *
+	 * Held here in centimetres AND in FHFSampleHouse::Make2BHK(EHFSofaDesign) in millimetres, which
+	 * would be two places for one fact - so SofaDesignsMatchTheSampleHouse asserts they agree. A
+	 * design whose drawn box drifts between the geometry tests and the room-fit tests would pass both
+	 * while measuring two different sofas.
+	 */
+	struct FSofaDesignCase
+	{
+		EHFSofaDesign Design;
+		const TCHAR* Name;
+
+		/** Centimetres. */
+		FVector2D Footprint;
+		double Height;
+
+		/** The researched seat height for this design, in centimetres. */
+		double SeatHeight;
+
+		/** The band its seat depth has to land in, in centimetres. */
+		double MinSeatDepth;
+		double MaxSeatDepth;
+	};
+
+	const FSofaDesignCase SofaDesignCases[] = {
+		{ EHFSofaDesign::SquareArm,       TEXT("SquareArm"),       FVector2D(210.0,  90.0), 80.0, 43.0, 55.0, 62.0 },
+		{ EHFSofaDesign::ChaiseSectional, TEXT("ChaiseSectional"), FVector2D(220.0, 140.0), 80.0, 43.0, 55.0, 62.0 },
+		{ EHFSofaDesign::LowProfile,      TEXT("LowProfile"),      FVector2D(210.0,  95.0), 70.0, 40.0, 58.0, 68.0 },
+		{ EHFSofaDesign::RolledArm,       TEXT("RolledArm"),       FVector2D(210.0,  95.0), 85.0, 45.0, 55.0, 62.0 }
+	};
+
+	/** An enum reported as a number, because TestEqual has no overload that can print one. */
+	int32 AsNumber(EHFSofaDesign Design) { return static_cast<int32>(Design); }
+
+	FHFFixture MakeSofaFixture(const FSofaDesignCase& Case)
+	{
+		FHFFixture F = MakeFixture(TEXT("F_Sofa"), EHFFixtureType::Sofa, Case.Footprint, Case.Height);
+		F.Params.SofaDesign = Case.Design;
+		F.Params.bChaiseOnLeft = false;
+		return F;
+	}
+
+	FHFSofaBuild BuildDesign(const FSofaDesignCase& Case)
+	{
+		return FHFUpholsteryKit::BuildSofa(AHFSofaActor::ParamsFor(MakeSofaFixture(Case)));
+	}
+
+	/**
+	 * Width of the FLAT strip along the top of an arm, as a fraction of the arm's own width.
+	 *
+	 * THE ONLY MEASUREMENT THAT SEPARATES A ROLLED ARM FROM A SQUARE ONE, and neither volume, bounds
+	 * nor dihedral angle can do it: both are soft boxes of the same construction, both are exactly
+	 * their declared size, and every edge on both welds smooth. What differs is how much of the top
+	 * is still flat once the roll has turned - a 70 mm roll on a 180 arm leaves 40 mm of flat, which
+	 * is a square arm with the corners eased, and a roll at half the width leaves almost none, which
+	 * is a scroll.
+	 */
+	double ArmFlatTopFraction(const FDynamicMesh3& Arm)
+	{
+		const FAxisAlignedBox3d Bounds = Arm.GetBounds();
+		const FBox Top = BoundsInZBand(Arm, Bounds.Max.Z - 0.01, Bounds.Max.Z + 0.01);
+
+		if (Top.IsValid == 0 || Bounds.Width() <= 0.0)
+		{
+			return 0.0;
+		}
+
+		return (Top.Max.X - Top.Min.X) / Bounds.Width();
+	}
+}
+
+/**
+ * Every named design builds, is the sofa it says it is, and is soft everywhere a soft box has to be.
+ *
+ * The per-design half of what HouseForge.Upholstery.Sofa asserts about the reference three-seater,
+ * plus the two figures that decide whether a sofa reads as furniture or as a game asset: SEAT HEIGHT
+ * AND SEAT DEPTH, in centimetres, against the researched range rather than against whatever the code
+ * happens to produce. 400-450 to the seat and 550-600 deep is a sofa; 500 and 450 is a hall bench,
+ * and the difference is invisible in every screenshot and obvious the moment somebody sits in it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSofaDesignsTest, "HouseForge.Upholstery.SofaDesigns", HF_TEST_FLAGS)
+
+bool FHFSofaDesignsTest::RunTest(const FString& Parameters)
+{
+	for (const FSofaDesignCase& Case : SofaDesignCases)
+	{
+		const FHFSofaBuild Built = BuildDesign(Case);
+
+		if (!TestTrue(FString::Printf(TEXT("%s builds"), Case.Name), Built.bValid))
+		{
+			continue;
+		}
+
+		const FHFSofaParams& P = Built.Used;
+
+		TestTrue(FString::Printf(TEXT("%s is watertight"), Case.Name),
+			FHFMeshOps::IsClosed(Built.Shell));
+		TestTrue(FString::Printf(TEXT("%s faces outward"), Case.Name), Volume(Built.Shell) > 0.0);
+		TestTrue(FString::Printf(TEXT("%s carries a surface role on every triangle"), Case.Name),
+			EveryTriangleHasARole(Built.Shell));
+
+		// Two materials on the three with legs; ONE on the skirted design, deliberately - there is no
+		// timber on a sofa whose legs are behind a valance, and inventing some would be four solids
+		// nobody can see. See FHFSofaParams::bHasSkirt.
+		const TSet<EHFSurfaceRole> Roles = FHFMeshOps::RolesPresent(Built.Shell);
+		TestTrue(FString::Printf(TEXT("%s is upholstered in Fabric"), Case.Name),
+			Roles.Contains(EHFSurfaceRole::Fabric));
+		TestEqual(FString::Printf(TEXT("%s shows timber legs only when it has any"), Case.Name),
+			Roles.Contains(EHFSurfaceRole::JoineryCarcass) ? 1 : 0, P.bHasSkirt ? 0 : 1);
+
+		// ---------------------------------------------------------------- the box it was drawn in
+		//
+		// THE DRAWN BOX IS THE OBJECT, for every design. A sofa that grew past its footprint would go
+		// through the wall behind it and the drawing would still say it fitted.
+		const FAxisAlignedBox3d Bounds = Built.Shell.GetBounds();
+
+		TestTrue(FString::Printf(TEXT("%s fills its drawn width (%.2f..%.2f of %.1f)"),
+			Case.Name, Bounds.Min.X, Bounds.Max.X, Case.Footprint.X),
+			FMath::IsNearlyEqual(Bounds.Min.X, 0.0, 0.05)
+				&& FMath::IsNearlyEqual(Bounds.Max.X, Case.Footprint.X, 0.05));
+		TestTrue(FString::Printf(TEXT("%s fills its drawn depth (%.2f..%.2f of %.1f)"),
+			Case.Name, Bounds.Min.Y, Bounds.Max.Y, Case.Footprint.Y),
+			FMath::IsNearlyEqual(Bounds.Min.Y, 0.0, 0.05)
+				&& FMath::IsNearlyEqual(Bounds.Max.Y, Case.Footprint.Y, 0.05));
+		TestTrue(FString::Printf(TEXT("%s stands exactly as tall as it was drawn (%.2f of %.1f)"),
+			Case.Name, Bounds.Max.Z, Case.Height),
+			FMath::IsNearlyEqual(Bounds.Max.Z, Case.Height, 0.05));
+
+		// The floor, and the one design that deliberately does not touch it: a skirt's hem stops
+		// 15 mm clear, which is what stops it reading as painted onto the tiles.
+		const double ExpectedLowZ = P.bHasSkirt ? P.SkirtBottomZ() : 0.0;
+		TestTrue(FString::Printf(TEXT("%s meets the floor where it should (%.2f, expected %.2f)"),
+			Case.Name, Bounds.Min.Z, ExpectedLowZ),
+			FMath::IsNearlyEqual(Bounds.Min.Z, ExpectedLowZ, 0.05));
+
+		// -------------------------------------------------------------- the two ergonomic figures
+		//
+		// MEASURED ON THE BUILT CUSHION, not on the parameter struct: a seat height copied faithfully
+		// into a field and then ignored by the generator passes every check made on the struct.
+		if (Built.SeatCushions.Num() > 0)
+		{
+			const FAxisAlignedBox3d Cushion = Built.SeatCushions[0].GetBounds();
+
+			TestTrue(FString::Printf(TEXT("%s seats you at %.1f cm, its researched %.1f"),
+				Case.Name, Cushion.Max.Z, Case.SeatHeight),
+				FMath::IsNearlyEqual(Cushion.Max.Z, Case.SeatHeight, 0.3));
+
+			// And inside the band that separates a sofa from a dining chair at 450-460 and from a
+			// day bed at 350. Asserted as well as the exact figure, so a design added later cannot
+			// quietly land outside it.
+			TestTrue(FString::Printf(TEXT("%s seats you like a sofa (%.1f cm)"), Case.Name, Cushion.Max.Z),
+				Cushion.Max.Z >= 38.0 && Cushion.Max.Z <= 46.0);
+
+			const double SeatDepth = Cushion.Max.Y - Cushion.Min.Y;
+			TestTrue(FString::Printf(TEXT("%s has a %.1f cm seat, wanted %.0f..%.0f"),
+				Case.Name, SeatDepth, Case.MinSeatDepth, Case.MaxSeatDepth),
+				SeatDepth >= Case.MinSeatDepth && SeatDepth <= Case.MaxSeatDepth);
+
+			const double CushionWidth = Cushion.Max.X - Cushion.Min.X;
+			TestTrue(FString::Printf(TEXT("%s has seat-width cushions (%.1f cm)"), Case.Name, CushionWidth),
+				CushionWidth > 50.0 && CushionWidth < 68.0);
+		}
+		else
+		{
+			AddError(FString::Printf(TEXT("%s built no seat cushions"), Case.Name));
+		}
+
+		// ------------------------------------------------------------------ NOTHING FOLDS BACK ON ITSELF
+		//
+		// The assertion that caught the defect this kit was built around - AppendSoftBox flooring its
+		// plan radius, which walked the corner's arc centre inward as the roll turned and left a
+		// re-entrant faceted wedge on every cushion and both arms. See WorstConcavityCm.
+		//
+		// Applied to every part that IS one soft box, which is where the property holds. It is not
+		// asserted on the shell, the base of an L or a skirt: those are two or four solids in one
+		// mesh and are non-convex by construction, so a bound on them would measure the design rather
+		// than the primitive.
+		TArray<TPair<FString, const FDynamicMesh3*>> SoftParts;
+		SoftParts.Emplace(TEXT("back panel"), &Built.Back);
+		if (!P.IsSectional())
+		{
+			SoftParts.Emplace(TEXT("base"), &Built.Base);
+		}
+		if (P.IsSectional())
+		{
+			SoftParts.Emplace(TEXT("chaise cushion"), &Built.ChaiseCushion);
+		}
+		for (int32 Index = 0; Index < Built.Arms.Num(); ++Index)
+		{
+			SoftParts.Emplace(FString::Printf(TEXT("arm %d"), Index), &Built.Arms[Index]);
+		}
+		for (int32 Index = 0; Index < Built.SeatCushions.Num(); ++Index)
+		{
+			SoftParts.Emplace(FString::Printf(TEXT("seat cushion %d"), Index), &Built.SeatCushions[Index]);
+		}
+		for (int32 Index = 0; Index < Built.BackCushions.Num(); ++Index)
+		{
+			SoftParts.Emplace(FString::Printf(TEXT("back cushion %d"), Index), &Built.BackCushions[Index]);
+		}
+
+		for (const TPair<FString, const FDynamicMesh3*>& Part : SoftParts)
+		{
+			if (Part.Value->TriangleCount() == 0)
+			{
+				continue;
+			}
+
+			const double Worst = WorstConcavityCm(*Part.Value);
+			TestTrue(FString::Printf(TEXT("%s: the %s is convex everywhere (worst %.3f cm)"),
+				Case.Name, *Part.Key, Worst), Worst < 0.02);
+		}
+
+		// And soft: no arris anywhere on the upholstery sharp enough to need the chamfer that
+		// FHFBevelParams deliberately does not give Fabric.
+		const FHFBevelParams Bevel;
+		for (const FDynamicMesh3& Arm : Built.Arms)
+		{
+			TestTrue(FString::Printf(TEXT("%s: no arm edge is sharp (%.1f deg)"),
+				Case.Name, SharpestEdgeDegrees(Arm)),
+				SharpestEdgeDegrees(Arm) < Bevel.MinAngleDegrees);
+		}
+	}
+
+	return true;
+}
+
+/**
+ * THE FOUR ARE DIFFERENT OBJECTS, and this is where that claim is measured rather than asserted.
+ *
+ * The point of a named design is that swapping it changes the room, so "it built" is not the test -
+ * every one of them would build if all four were the same box with different numbers. What follows
+ * is one measurement per design of the thing that makes it that design, taken on the geometry:
+ *
+ *   LowProfile       how much daylight there is under it, and how far the leg's foot rakes out
+ *   RolledArm        how little of the arm's top is still flat, and that a skirt closed the gap
+ *   ChaiseSectional  that the plan is an L and the chaise's cushion is a metre long
+ *   SquareArm        that it is none of those things
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSofaDesignSilhouettesTest,
+	"HouseForge.Upholstery.SofaDesignSilhouettes", HF_TEST_FLAGS)
+
+bool FHFSofaDesignSilhouettesTest::RunTest(const FString& Parameters)
+{
+	const FHFSofaBuild Square = BuildDesign(SofaDesignCases[0]);
+	const FHFSofaBuild Sectional = BuildDesign(SofaDesignCases[1]);
+	const FHFSofaBuild Low = BuildDesign(SofaDesignCases[2]);
+	const FHFSofaBuild Rolled = BuildDesign(SofaDesignCases[3]);
+
+	if (!TestTrue(TEXT("All four designs build"),
+		Square.bValid && Sectional.bValid && Low.bValid && Rolled.bValid))
+	{
+		return false;
+	}
+
+	// ----------------------------------------------------------------- LowProfile shows the floor
+	//
+	// The clear band under the base, in centimetres. It is most of what separates loose furniture
+	// from joinery, and this design's whole argument is that MORE of it makes a small room look
+	// larger: 180 mm against a square arm's 120.
+	{
+		const double SquareGap = Square.Base.GetBounds().Min.Z;
+		const double LowGap = Low.Base.GetBounds().Min.Z;
+
+		TestTrue(FString::Printf(TEXT("A low-profile sofa shows more floor under it (%.1f vs %.1f cm)"),
+			LowGap, SquareGap), LowGap > SquareGap + 4.0);
+		TestTrue(FString::Printf(TEXT("A low-profile sofa stands 180 mm clear (%.1f cm)"), LowGap),
+			FMath::IsNearlyEqual(LowGap, 18.0, 0.3));
+
+		// And it is LOWER, which is the other half of the name.
+		TestTrue(FString::Printf(TEXT("A low-profile sofa is lower (%.1f vs %.1f cm)"),
+			Low.Shell.GetBounds().Max.Z, Square.Shell.GetBounds().Max.Z),
+			Low.Shell.GetBounds().Max.Z < Square.Shell.GetBounds().Max.Z - 5.0);
+
+		// THE LEGS RAKE OUT AND STAY INSIDE THE BOX.
+		//
+		// Measured as the SPREAD of the set at the floor against its spread at the head, which is the
+		// only form of the question that survives the taper. Comparing one leg's outer edge top to
+		// bottom mixes two effects that pull opposite ways - the splay pushes the foot out, the taper
+		// pulls its radius in - and on a 50 mm leg the taper eats most of the answer. Across the set
+		// the sign is unambiguous: splayed legs stand FURTHER apart at the floor than at the base
+		// they carry, and a tapered vertical leg stands closer.
+		auto SpreadAt = [](const FDynamicMesh3& Legs, bool bAtFloor) -> double
+		{
+			const FAxisAlignedBox3d Bounds = Legs.GetBounds();
+			const FBox Band = bAtFloor
+				? BoundsInZBand(Legs, Bounds.Min.Z, Bounds.Min.Z + 0.5)
+				: BoundsInZBand(Legs, Bounds.Max.Z - 0.5, Bounds.Max.Z);
+
+			return Band.IsValid != 0 ? (Band.Max.X - Band.Min.X) : 0.0;
+		};
+
+		if (TestTrue(TEXT("The low-profile sofa has legs to measure"), Low.Legs.TriangleCount() > 0))
+		{
+			const double FootSpread = SpreadAt(Low.Legs, true);
+			const double HeadSpread = SpreadAt(Low.Legs, false);
+
+			TestTrue(FString::Printf(TEXT("A splayed leg stands wider at the floor than at the base "
+				"(%.1f vs %.1f cm)"), FootSpread, HeadSpread), FootSpread > HeadSpread + 2.0);
+
+			// And the toe is still inside the drawn footprint, or the sofa's plan stops meaning
+			// anything to the room that has to hold it. See SanitiseSofa's splay clamp.
+			const FAxisAlignedBox3d LegBounds = Low.Legs.GetBounds();
+			TestTrue(FString::Printf(TEXT("And its toe stays inside the drawn box (%.2f cm in)"),
+				LegBounds.Min.X), LegBounds.Min.X > 0.0);
+		}
+
+		// A turned leg does the opposite: vertical, so its tapered foot stands NARROWER than its head.
+		{
+			const double FootSpread = SpreadAt(Square.Legs, true);
+			const double HeadSpread = SpreadAt(Square.Legs, false);
+
+			TestTrue(FString::Printf(TEXT("A turned leg stands vertical (%.1f vs %.1f cm)"),
+				FootSpread, HeadSpread), FootSpread < HeadSpread);
+		}
+	}
+
+	// -------------------------------------------------------------- RolledArm is round on top
+	{
+		const FAxisAlignedBox3d SquareArm = Square.Arms[0].GetBounds();
+		const FAxisAlignedBox3d RolledArmBounds = Rolled.Arms[0].GetBounds();
+		const double SquareArmWidth = SquareArm.Max.X - SquareArm.Min.X;
+		const double RolledArmWidth = RolledArmBounds.Max.X - RolledArmBounds.Min.X;
+
+		// A ROLL ARM IS FAT BEFORE IT IS ROUND, and this is the bigger of the two differences from
+		// across a room: 240 mm of arm against 180. Both are measured on the built solid.
+		TestTrue(FString::Printf(TEXT("A rolled arm is a fat arm (%.1f vs %.1f cm)"),
+			RolledArmWidth, SquareArmWidth), RolledArmWidth > SquareArmWidth + 4.0);
+
+		const double SquareFlat = ArmFlatTopFraction(Square.Arms[0]);
+		const double RolledFlat = ArmFlatTopFraction(Rolled.Arms[0]);
+
+		// AND ITS TOP IS A HALF-ROUND. 30 mm of flat across a 240 arm is a scroll; 40 across 180 is a
+		// square arm with its corners eased. The absolute figure is the honest one - the roll cannot
+		// reach a true semicircle without landing on AppendSoftBox's singular plan radius, see
+		// ClampSoftToBox - so the claim is "flat for under 35 mm", not "flat for nothing".
+		TestTrue(FString::Printf(TEXT("A rolled arm's top is flat for under 35 mm (%.1f mm, %.1f%% of "
+			"its width)"), RolledFlat * RolledArmWidth * 10.0, RolledFlat * 100.0),
+			RolledFlat * RolledArmWidth < 3.5);
+		TestTrue(FString::Printf(TEXT("A square arm still has a flat top (%.1f mm, %.1f%%)"),
+			SquareFlat * SquareArmWidth * 10.0, SquareFlat * 100.0),
+			SquareFlat * SquareArmWidth > 3.8);
+		TestTrue(FString::Printf(TEXT("And proportionally more of it (%.1f%% vs %.1f%%)"),
+			SquareFlat * 100.0, RolledFlat * 100.0), SquareFlat > RolledFlat * 1.4);
+
+		// AND NOTHING TOUCHES THE FLOOR EXCEPT CLOTH. The skirt exists, the legs do not, and the
+		// gap the other three leave open is closed.
+		TestTrue(TEXT("A rolled-arm sofa has a skirt"), Rolled.Skirt.TriangleCount() > 0);
+		TestEqual(TEXT("And no legs behind it"), Rolled.Legs.TriangleCount(), 0);
+		TestEqual(TEXT("Nothing else here has a skirt"), Square.Skirt.TriangleCount(), 0);
+
+		// The skirt reaches from the underside of the base down to its hem, so there is no band of
+		// daylight under this design at all - which is the silhouette change.
+		const FAxisAlignedBox3d SkirtBounds = Rolled.Skirt.GetBounds();
+		TestTrue(FString::Printf(TEXT("The skirt hangs to 15 mm off the floor (%.2f cm)"), SkirtBounds.Min.Z),
+			FMath::IsNearlyEqual(SkirtBounds.Min.Z, 1.5, 0.05));
+		TestTrue(FString::Printf(TEXT("And up to the base above it (%.2f vs %.2f cm)"),
+			SkirtBounds.Max.Z, Rolled.Base.GetBounds().Min.Z),
+			SkirtBounds.Max.Z >= Rolled.Base.GetBounds().Min.Z - 0.05);
+
+		// It is also a taller, higher-seated object than the contemporary sofa: 450 to the seat.
+		TestTrue(FString::Printf(TEXT("A roll arm seats you higher (%.1f vs %.1f cm)"),
+			Rolled.Used.SeatHeight, Square.Used.SeatHeight),
+			Rolled.Used.SeatHeight > Square.Used.SeatHeight + 1.0);
+	}
+
+	// ------------------------------------------------------------------ ChaiseSectional is an L
+	{
+		const FHFSofaParams& P = Sectional.Used;
+
+		TestTrue(TEXT("The sectional really is a sectional"), P.IsSectional());
+		TestEqual(TEXT("And says so"), AsNumber(P.BuiltDesign()), AsNumber(EHFSofaDesign::ChaiseSectional));
+
+		// THE RETURN, in centimetres. 500 in front of a 900 straight run out of a 1400 drawn box.
+		TestTrue(FString::Printf(TEXT("The chaise returns 500 mm in front of the run (%.1f cm)"),
+			P.BuiltChaiseProjection()),
+			FMath::IsNearlyEqual(P.BuiltChaiseProjection(), 50.0, 0.05));
+		TestTrue(FString::Printf(TEXT("Leaving the straight run a sofa's own depth (%.1f cm)"),
+			P.MainRunDepth()), FMath::IsNearlyEqual(P.MainRunDepth(), 90.0, 0.05));
+
+		// THE MEASUREMENT THAT SAYS IT IS A CHAISE AND NOT A CORNER SEAT: one uninterrupted cushion
+		// over a metre long, where a seat cushion is 570.
+		//
+		// Measured as Max.Y - Min.Y and not as FAxisAlignedBox3d::Depth(), which is the Z extent:
+		// Width/Height/Depth on that type are X/Y/Z, so "Depth" on a cushion is how THICK it is. The
+		// first version of this assertion reported a 1070 mm chaise as 140 mm long and passed nothing.
+		const FAxisAlignedBox3d Chaise = Sectional.ChaiseCushion.GetBounds();
+		const FAxisAlignedBox3d Seat = Sectional.SeatCushions[0].GetBounds();
+		const double ChaiseLength = Chaise.Max.Y - Chaise.Min.Y;
+		const double SeatLength = Seat.Max.Y - Seat.Min.Y;
+
+		TestTrue(TEXT("The chaise has a cushion"), Sectional.ChaiseCushion.TriangleCount() > 0);
+		TestTrue(FString::Printf(TEXT("It is a metre long (%.1f cm)"), ChaiseLength),
+			ChaiseLength > 100.0);
+		TestTrue(FString::Printf(TEXT("Which is nearly twice a seat cushion (%.1f vs %.1f cm)"),
+			ChaiseLength, SeatLength), ChaiseLength > SeatLength * 1.6);
+
+		// AND THE PLAN IS AN L, measured where it matters: at the front of the drawn box only the
+		// return is there, and the other end of the sofa is 500 mm behind it. A rectangle would fill
+		// the whole width at every depth.
+		const FBox Front = BoundsInZBand(Sectional.Shell, P.SeatHeight - 0.5, P.SeatHeight);
+		{
+			double FrontmostAtRunEnd = TNumericLimits<double>::Max();
+			double FrontmostAtChaise = TNumericLimits<double>::Max();
+
+			for (const int32 Vertex : Sectional.Shell.VertexIndicesItr())
+			{
+				const FVector3d V = Sectional.Shell.GetVertex(Vertex);
+				if (V.X < P.Width * 0.25)
+				{
+					FrontmostAtRunEnd = FMath::Min(FrontmostAtRunEnd, V.Y);
+				}
+				else if (V.X > P.Width * 0.75)
+				{
+					FrontmostAtChaise = FMath::Min(FrontmostAtChaise, V.Y);
+				}
+			}
+
+			TestTrue(FString::Printf(TEXT("The chaise end reaches the front of the box (%.2f cm)"),
+				FrontmostAtChaise), FMath::IsNearlyEqual(FrontmostAtChaise, 0.0, 0.05));
+			TestTrue(FString::Printf(TEXT("And the other end stops 500 mm behind it (%.2f cm) - an L, "
+				"not a rectangle"), FrontmostAtRunEnd),
+				FrontmostAtRunEnd > P.BuiltChaiseProjection() - 0.5);
+		}
+
+		// The straight run gives up a seat to the return: two cushions plus a chaise, not three.
+		TestEqual(TEXT("A 2200 box with a 900 return is a two-seater plus a chaise"),
+			Sectional.SeatCushions.Num(), 2);
+
+		// Six legs, not four: an L standing on four is a table with a corner hanging off it.
+		TestTrue(TEXT("The return stands on legs of its own"),
+			Sectional.Legs.GetBounds().Min.Y < 20.0);
+
+		// And the back runs the WHOLE width, behind the chaise as well as behind the run. Taken to
+		// the seat's span instead it would have stopped where the chaise begins and left 900 mm of
+		// the sofa open to the room behind it.
+		const FAxisAlignedBox3d Back = Sectional.Back.GetBounds();
+		const double BackSpan = Back.Max.X - Back.Min.X;
+		TestTrue(FString::Printf(TEXT("The back panel spans arm to arm (%.1f of %.1f cm)"),
+			BackSpan, P.Width), BackSpan > P.Width - 2.0 * P.ArmWidth - 0.1);
+	}
+
+	// ------------------------------------------------------------------- and SquareArm is none of it
+	{
+		TestFalse(TEXT("A square-arm sofa is not a sectional"), Square.Used.IsSectional());
+		TestEqual(TEXT("It has no chaise cushion"), Square.ChaiseCushion.TriangleCount(), 0);
+		TestEqual(TEXT("A 2100 box with no return is a three-seater"), Square.SeatCushions.Num(), 3);
+		TestTrue(TEXT("It stands on legs"), Square.Legs.TriangleCount() > 0);
+	}
+
+	return true;
+}
+
+/**
+ * The design a spec names, and the one a project defaults to, both reach the geometry.
+ *
+ * The half of this feature that is not geometry at all. A named design that FHFFixtureParams could
+ * carry and AHFSofaActor never read would be EHFShutterMotion's first milestone all over again -
+ * every wardrobe in the reference flat side-hung because the field existed and nothing copied it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSofaDesignSelectionTest,
+	"HouseForge.Upholstery.SofaDesignSelection", HF_TEST_FLAGS)
+
+bool FHFSofaDesignSelectionTest::RunTest(const FString& Parameters)
+{
+	// ------------------------------------------------------- what the spec names is what gets built
+	for (const FSofaDesignCase& Case : SofaDesignCases)
+	{
+		const FHFSofaParams P = AHFSofaActor::ParamsFor(MakeSofaFixture(Case));
+		TestEqual(FString::Printf(TEXT("A fixture naming %s builds one"), Case.Name),
+			AsNumber(P.BuiltDesign()), AsNumber(Case.Design));
+	}
+
+	// -------------------------------------------------------------- and Default asks the project
+	//
+	// The sentinel a spec written before designs existed carries, and a drawing that shows a sofa
+	// without saying which one. Both mean "whatever this project buys".
+	{
+		FHFFixture Unnamed = MakeFixture(TEXT("F_Sofa"), EHFFixtureType::Sofa,
+			FVector2D(200.0, 95.0), 85.0);
+		TestEqual(TEXT("An unnamed sofa carries the sentinel"),
+			AsNumber(Unnamed.Params.SofaDesign), AsNumber(EHFSofaDesign::Default));
+
+		// With no project in hand at all: the sofa this kit built before designs existed.
+		TestEqual(TEXT("With no project, an unnamed sofa is the contemporary one"),
+			AsNumber(AHFSofaActor::ParamsFor(Unnamed).BuiltDesign()), AsNumber(EHFSofaDesign::SquareArm));
+
+		FHFSofaDefaults Project;
+		Project.DefaultDesign = EHFSofaDesign::RolledArm;
+
+		const FHFSofaParams P = AHFSofaActor::ParamsFor(Unnamed, Project);
+		TestEqual(TEXT("A project that buys roll arms gets one"),
+			AsNumber(P.BuiltDesign()), AsNumber(EHFSofaDesign::RolledArm));
+
+		// Measured on the geometry rather than on the field, which is the assertion a value copied
+		// and then ignored cannot pass.
+		const FHFSofaBuild Built = FHFUpholsteryKit::BuildSofa(P);
+		TestTrue(TEXT("And the sofa in the level has the skirt to prove it"),
+			Built.Skirt.TriangleCount() > 0);
+
+		// A NAMED DESIGN STILL WINS. The project is the fallback, not an override: a drawing that
+		// says the living room has a sectional gets a sectional whatever the project usually buys.
+		FHFFixture Named = Unnamed;
+		Named.Footprint = FVector2D(220.0, 140.0);
+		Named.Params.SofaDesign = EHFSofaDesign::ChaiseSectional;
+		TestEqual(TEXT("A drawing that names a design overrules the project"),
+			AsNumber(AHFSofaActor::ParamsFor(Named, Project).BuiltDesign()),
+			AsNumber(EHFSofaDesign::ChaiseSectional));
+	}
+
+	// ---------------------------------------------- a sectional with nowhere to return says so
+	//
+	// The fallback, and the reason it is not silent. A 900 deep box has no room for a chaise, and the
+	// honest answers are either to refuse or to build the straight sofa and REPORT that it did. A
+	// 200 mm stub off one end is neither - it is a shape nobody ordered, and the drawing would still
+	// say the room had a sectional in it.
+	{
+		FHFFixture Shallow = MakeFixture(TEXT("F_Sofa"), EHFFixtureType::Sofa,
+			FVector2D(210.0, 90.0), 80.0);
+		Shallow.Params.SofaDesign = EHFSofaDesign::ChaiseSectional;
+
+		const FHFSofaBuild Built = FHFUpholsteryKit::BuildSofa(AHFSofaActor::ParamsFor(Shallow));
+
+		TestTrue(TEXT("A sectional in a 900 box still builds a sofa"), Built.bValid);
+		TestFalse(TEXT("But it is not a sectional"), Built.Used.IsSectional());
+		TestEqual(TEXT("And it says so rather than pretending"),
+			AsNumber(Built.Used.BuiltDesign()), AsNumber(EHFSofaDesign::SquareArm));
+		TestEqual(TEXT("There is no stub of a chaise on it"), Built.ChaiseCushion.TriangleCount(), 0);
+		TestTrue(TEXT("It is a straight three-seater"), Built.SeatCushions.Num() == 3);
+
+		// The floor is a figure, not a constant: raise the project's minimum and a return that WAS
+		// long enough stops being one.
+		FHFFixture Deep = MakeFixture(TEXT("F_Sofa"), EHFFixtureType::Sofa,
+			FVector2D(220.0, 140.0), 80.0);
+		Deep.Params.SofaDesign = EHFSofaDesign::ChaiseSectional;
+
+		FHFSofaDefaults Fussy;
+		Fussy.MinChaiseProjection = 80.0;
+
+		TestTrue(TEXT("A 500 return is a chaise by default"),
+			AHFSofaActor::ParamsFor(Deep).IsSectional());
+		TestFalse(TEXT("And is not, to a project that wants 800"),
+			AHFSofaActor::ParamsFor(Deep, Fussy).IsSectional());
+	}
+
+	// -------------------------------------------------- the chaise has a hand, and it is honoured
+	{
+		FHFFixture Left = MakeFixture(TEXT("F_Sofa"), EHFFixtureType::Sofa, FVector2D(220.0, 140.0), 80.0);
+		Left.Params.SofaDesign = EHFSofaDesign::ChaiseSectional;
+		Left.Params.bChaiseOnLeft = true;
+
+		FHFFixture Right = Left;
+		Right.Params.bChaiseOnLeft = false;
+
+		const FHFSofaBuild L = FHFUpholsteryKit::BuildSofa(AHFSofaActor::ParamsFor(Left));
+		const FHFSofaBuild R = FHFUpholsteryKit::BuildSofa(AHFSofaActor::ParamsFor(Right));
+
+		const FAxisAlignedBox3d LeftChaise = L.ChaiseCushion.GetBounds();
+		const FAxisAlignedBox3d RightChaise = R.ChaiseCushion.GetBounds();
+
+		TestTrue(FString::Printf(TEXT("A left-hand chaise is at the -X end (%.1f..%.1f cm)"),
+			LeftChaise.Min.X, LeftChaise.Max.X), LeftChaise.Max.X < 220.0 * 0.5);
+		TestTrue(FString::Printf(TEXT("A right-hand chaise is at the +X end (%.1f..%.1f cm)"),
+			RightChaise.Min.X, RightChaise.Max.X), RightChaise.Min.X > 220.0 * 0.5);
+	}
+
+	return true;
+}
+
+// ================================================ and whether each of them fits the room it is in
+
+namespace
+{
+	/**
+	 * A box given in the fixture's own local frame, mapped into the room. Spec units.
+	 *
+	 * Local here is the kit's frame - X from 0 to Width, Y from 0 (front) to Depth (back) - and the
+	 * yaw is the RESOLVED one rather than the drawn one. FHFFixturePlacement::FacingYaw turns a run
+	 * round until its back faces its anchor wall, so the sofa drawn at 180 against W_Mid_Lower is
+	 * built at zero; taking the drawn figure would mirror the L and put the chaise at the wrong end.
+	 * It never mattered for a rectangle, whose bounds are the same either way.
+	 */
+	FBox2D MapLocalBox(const FHFFixture& Fixture, double YawDegrees, const FBox2D& Local)
+	{
+		const double Radians = FMath::DegreesToRadians(YawDegrees);
+		const double CosR = FMath::Cos(Radians);
+		const double SinR = FMath::Sin(Radians);
+		const FVector2D Half = Fixture.Footprint * 0.5;
+
+		FBox2D Out(ForceInit);
+		for (int32 Corner = 0; Corner < 4; ++Corner)
+		{
+			const double LX = ((Corner == 0 || Corner == 3) ? Local.Min.X : Local.Max.X) - Half.X;
+			const double LY = ((Corner < 2) ? Local.Min.Y : Local.Max.Y) - Half.Y;
+
+			Out += Fixture.Position + FVector2D(LX * CosR - LY * SinR, LX * SinR + LY * CosR);
+		}
+		return Out;
+	}
+
+	/**
+	 * THE SOFA'S REAL PLAN, which on a sectional is an L and not the rectangle round it.
+	 *
+	 * Two boxes for a sectional - the straight run and the return - and one for everything else. The
+	 * distinction is the whole difference between a clearance test that means something and one that
+	 * reports the empty crook of an L as occupied: with the bounding box, the coffee table sitting
+	 * exactly where a sectional's table goes reads as 17% inside the sofa.
+	 *
+	 * Boxes[0] is always the straight run, which is what "how far is it from the seat" is measured to.
+	 */
+	TArray<FBox2D> SofaPlanBoxes(const FHFHouseSpec& Spec, const FHFFixture& Sofa, double UnitsPerCm)
+	{
+		const FHFWall* Anchor = nullptr;
+		for (const FHFWall& Wall : Spec.Walls)
+		{
+			if (Wall.Id == Sofa.AnchorWallId)
+			{
+				Anchor = &Wall;
+			}
+		}
+
+		const double Yaw = FHFFixturePlacement::FacingYaw(Sofa, Anchor);
+
+		FHFFixture InCentimetres = Sofa;
+		InCentimetres.Footprint = Sofa.Footprint / UnitsPerCm;
+		InCentimetres.Height = Sofa.Height / UnitsPerCm;
+
+		const FHFSofaParams P = AHFSofaActor::ParamsFor(InCentimetres);
+
+		TArray<FBox2D> Out;
+
+		if (!P.IsSectional())
+		{
+			Out.Add(MapLocalBox(Sofa, Yaw, FBox2D(FVector2D::ZeroVector, Sofa.Footprint)));
+			return Out;
+		}
+
+		const double Front = P.MainRunFrontY() * UnitsPerCm;
+		const double ChaiseW = P.BuiltChaiseWidth() * UnitsPerCm;
+		const double ChaiseX0 = P.bChaiseOnLeft ? 0.0 : Sofa.Footprint.X - ChaiseW;
+
+		Out.Add(MapLocalBox(Sofa, Yaw,
+			FBox2D(FVector2D(0.0, Front), FVector2D(Sofa.Footprint.X, Sofa.Footprint.Y))));
+		Out.Add(MapLocalBox(Sofa, Yaw,
+			FBox2D(FVector2D(ChaiseX0, 0.0), FVector2D(ChaiseX0 + ChaiseW, Front))));
+
+		return Out;
+	}
+
+	/** Smallest clear distance from any part of the sofa's real plan to a box. */
+	double SofaGapTo(const TArray<FBox2D>& SofaBoxes, const FBox2D& Other)
+	{
+		double Worst = TNumericLimits<double>::Max();
+		for (const FBox2D& Box : SofaBoxes)
+		{
+			Worst = FMath::Min(Worst, GapBetween(Box, Other));
+		}
+		return Worst;
+	}
+}
+
+/**
+ * EVERY DESIGN HAS TO FIT THE ROOM IT IS IN, and this is the only layer that can ask.
+ *
+ * A generator may not go looking for the rest of the house, so nothing in FHFUpholsteryKit knows
+ * there is a balcony door in front of the sofa or a TV unit facing it. Swapping a sofa design is
+ * exactly the kind of change that breaks a room silently: the object is still a perfectly good sofa,
+ * still exactly its drawn box, still watertight - and now standing 7 mm off the coffee table, or with
+ * its chaise across the way onto the balcony.
+ *
+ * All in millimetres, off the spec, against the room's finished faces:
+ *
+ *     W_South's living-room face      Y =  115      the TV wall
+ *     W_Mid_Lower's face              Y = 3542.5    the wall the sofa backs onto
+ *     W_West's face                   X =  115
+ *     W_Living_Bed2's face            X = 6542.5
+ *     D_Foyer's leaf sweep            X =  375..1425
+ *     D_Living's leaf sweep           X = 4950..5850
+ *     D_Balcony                       X = 1200..3000 in W_South
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFSofaDesignsFitTheLivingRoomTest,
+	"HouseForge.Upholstery.SofaDesignsFitTheLivingRoom", HF_TEST_FLAGS)
+
+bool FHFSofaDesignsFitTheLivingRoomTest::RunTest(const FString& Parameters)
+{
+	constexpr double UnitsPerCm = 10.0;
+
+	constexpr double SouthFace = 115.0;
+	constexpr double NorthFace = 3542.5;
+	constexpr double WestFace = 115.0;
+	constexpr double EastFace = 6542.5;
+
+	// How far back somebody pulls a dining chair to sit down, as the dining clearance test uses it.
+	constexpr double PullOut = 350.0;
+
+	for (const FSofaDesignCase& Case : SofaDesignCases)
+	{
+		const FHFHouseSpec Spec = FHFSampleHouse::Make2BHK(Case.Design);
+
+		const FHFFixture* Sofa = Find(Spec, TEXT("F_Sofa"));
+		const FHFFixture* Coffee = Find(Spec, TEXT("F_CoffeeTable"));
+
+		if (!TestTrue(FString::Printf(TEXT("%s: the living room still has a sofa and a coffee table"),
+			Case.Name), Sofa != nullptr && Coffee != nullptr))
+		{
+			continue;
+		}
+
+		// ------------------------------------------------- the two places this design is written down
+		//
+		// The geometry tests build from FSofaDesignCase and the room tests build from the sample
+		// house; they have to be describing the same sofa or both pass while measuring different ones.
+		TestTrue(FString::Printf(TEXT("%s: the sample house draws the box the design tests build (%.0f x %.0f)"),
+			Case.Name, Sofa->Footprint.X, Sofa->Footprint.Y),
+			FMath::IsNearlyEqual(Sofa->Footprint.X, Case.Footprint.X * UnitsPerCm, 0.5)
+				&& FMath::IsNearlyEqual(Sofa->Footprint.Y, Case.Footprint.Y * UnitsPerCm, 0.5));
+		TestTrue(FString::Printf(TEXT("%s: and the height (%.0f)"), Case.Name, Sofa->Height),
+			FMath::IsNearlyEqual(Sofa->Height, Case.Height * UnitsPerCm, 0.5));
+		TestEqual(FString::Printf(TEXT("%s: and names the design"), Case.Name),
+			AsNumber(Sofa->Params.SofaDesign), AsNumber(Case.Design));
+
+		const TArray<FBox2D> SofaBoxes = SofaPlanBoxes(Spec, *Sofa, UnitsPerCm);
+		const FBox2D DrawnBox = FootprintBounds(*Sofa);
+		const FBox2D CoffeeBounds = FootprintBounds(*Coffee);
+
+		// -------------------------------------------------------------- back on the plaster, in the room
+		TestTrue(FString::Printf(TEXT("%s: the sofa's back is on the wall (%.1f mm off)"),
+			Case.Name, NorthFace - DrawnBox.Max.Y),
+			FMath::IsNearlyEqual(DrawnBox.Max.Y, NorthFace, 1.0));
+
+		TestTrue(FString::Printf(TEXT("%s: the sofa is inside the room (X %.0f..%.0f, Y %.0f..%.0f)"),
+			Case.Name, DrawnBox.Min.X, DrawnBox.Max.X, DrawnBox.Min.Y, DrawnBox.Max.Y),
+			DrawnBox.Min.X > WestFace && DrawnBox.Max.X < EastFace
+				&& DrawnBox.Min.Y > SouthFace && DrawnBox.Max.Y <= NorthFace + 0.5);
+
+		// ------------------------------------------------------------------- clear of both doorways
+		//
+		// The sofa's back is ON the wall both living-room doors are in, so a sofa across either of
+		// them is a sofa across the way out of the flat. Measured against the opening itself, which
+		// is also the span the leaf sweeps.
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			if (Opening.WallId != FName(TEXT("W_Mid_Lower")) || Opening.Kind != EHFOpeningKind::Door)
+			{
+				continue;
+			}
+
+			const double DoorMin = Opening.OffsetAlongWall - Opening.Width * 0.5;
+			const double DoorMax = Opening.OffsetAlongWall + Opening.Width * 0.5;
+			const double Gap = FMath::Max(DoorMin - DrawnBox.Max.X, DrawnBox.Min.X - DoorMax);
+
+			TestTrue(FString::Printf(TEXT("%s: the sofa clears '%s' (%.0f mm)"),
+				Case.Name, *Opening.Id.ToString(), Gap), Gap > 0.0);
+		}
+
+		// ------------------------------------------------- and of everything else standing on the floor
+		//
+		// Against the L's REAL plan, dining chairs included at the position somebody pulls them to.
+		// The tolerance is zero: this is not asking for comfort, it is asking whether the sofa is
+		// inside something.
+		for (const FHFFixture& Other : Spec.Fixtures)
+		{
+			if (Other.Id == Sofa->Id || Other.RoomId != FName(TEXT("R_Living"))
+				|| Other.IsCeilingMounted() || Other.BaseZ > 45.0
+				|| Other.Type == EHFFixtureType::Curtain)
+			{
+				continue;
+			}
+
+			const double Gap = SofaGapTo(SofaBoxes, FootprintBounds(Other));
+			TestTrue(FString::Printf(TEXT("%s: the sofa clears '%s' (%.0f mm)"),
+				Case.Name, *Other.Id.ToString(), Gap), Gap > 0.0);
+
+			if (Other.Type == EHFFixtureType::Chair)
+			{
+				const double Pulled = SofaGapTo(SofaBoxes,
+					FootprintBounds(Other, PullOutOffset(Other, PullOut)));
+				TestTrue(FString::Printf(TEXT("%s: and '%s' pulled out to sit in (%.0f mm)"),
+					Case.Name, *Other.Id.ToString(), Pulled), Pulled > 0.0);
+			}
+		}
+
+		// --------------------------------------------------------- it sits correctly against the TV
+		//
+		// Two things at once. The seating has to be far enough back to watch a television - 1200 is
+		// where a 43 inch screen stops filling the eye - and the strip of floor between them is the
+		// route across the living room, which nothing may close. Measured to where the console's
+		// drawers actually reach when they are open, not to its carcass.
+		{
+			double TVFront = SouthFace;
+			bool bFoundTV = false;
+
+			for (const FHFFixture& Other : Spec.Fixtures)
+			{
+				if (Other.Type == EHFFixtureType::TVUnit && Other.RoomId == FName(TEXT("R_Living")))
+				{
+					TVFront = FMath::Max(TVFront, FootprintBounds(Other).Max.Y);
+					bFoundTV = true;
+				}
+			}
+
+			if (TestTrue(FString::Printf(TEXT("%s: there is a TV run to sit against"), Case.Name), bFoundTV))
+			{
+				// Drawer travel on F_TVUnit_E, which is what really stands in the room.
+				constexpr double DrawerTravel = 230.0;
+
+				double Nearest = TNumericLimits<double>::Max();
+				for (const FBox2D& Box : SofaBoxes)
+				{
+					Nearest = FMath::Min(Nearest, Box.Min.Y - TVFront);
+				}
+
+				TestTrue(FString::Printf(TEXT("%s: the seating sits back from the TV (%.0f mm)"),
+					Case.Name, Nearest), Nearest > 1200.0);
+				TestTrue(FString::Printf(TEXT("%s: and clears its drawers pulled out (%.0f mm)"),
+					Case.Name, Nearest - DrawerTravel), Nearest - DrawerTravel > 900.0);
+
+				// THE WALKING ROUTE, which is the band between the coffee table and the TV run. 750 is
+				// a corridor somebody passes through; below about 600 they turn sideways.
+				const double Route = CoffeeBounds.Min.Y - TVFront;
+				TestTrue(FString::Printf(TEXT("%s: there is a route across the room (%.0f mm)"),
+					Case.Name, Route), Route > 750.0);
+			}
+		}
+
+		// --------------------------------------------------------- and it does not foul the balcony
+		//
+		// D_Balcony is an 1800 slider centred at 2100 in W_South, so it occupies X 1200..3000 and a
+		// person walks straight out through it. A chaise across it would be exactly the defect the TV
+		// run had before it was split around the same door.
+		{
+			const FHFOpening* Balcony = nullptr;
+			for (const FHFOpening& Opening : Spec.Openings)
+			{
+				if (Opening.Id == FName(TEXT("D_Balcony")))
+				{
+					Balcony = &Opening;
+				}
+			}
+
+			if (TestTrue(FString::Printf(TEXT("%s: the balcony door is still there"), Case.Name),
+				Balcony != nullptr))
+			{
+				const double DoorMin = Balcony->OffsetAlongWall - Balcony->Width * 0.5;
+				const double DoorMax = Balcony->OffsetAlongWall + Balcony->Width * 0.5;
+
+				const FBox2D Approach(FVector2D(DoorMin, SouthFace), FVector2D(DoorMax, SouthFace + 900.0));
+
+				for (const FBox2D& Box : SofaBoxes)
+				{
+					TestFalse(FString::Printf(
+						TEXT("%s: no part of the sofa stands in the way onto the balcony"), Case.Name),
+						Box.Intersect(Approach));
+				}
+
+				TestFalse(FString::Printf(TEXT("%s: nor does the coffee table"), Case.Name),
+					CoffeeBounds.Intersect(Approach));
+			}
+		}
+
+		// ------------------------------------------------------- and the table can be reached from it
+		//
+		// Boxes[0] is the straight run - the part somebody sits on facing the television - so this is
+		// the reach a person actually makes for their tea. 300 is close enough to be in the way;
+		// past about 600 a coffee table has stopped serving the sofa.
+		{
+			const double Reach = GapBetween(SofaBoxes[0], CoffeeBounds);
+			TestTrue(FString::Printf(TEXT("%s: the coffee table can be reached from the seat (%.0f mm)"),
+				Case.Name, Reach), Reach > 300.0 && Reach < 600.0);
+		}
+	}
+
+	// ------------------------------------------------ and naming the design it already had changes nothing
+	//
+	// The invariant that keeps the reference flat the SquareArm case rather than a fifth thing:
+	// Make2BHK(SquareArm) is Make2BHK() with a name written on the sofa.
+	{
+		const FHFHouseSpec Plain = FHFSampleHouse::Make2BHK();
+		const FHFHouseSpec Named = FHFSampleHouse::Make2BHK(EHFSofaDesign::SquareArm);
+
+		const FHFFixture* PlainSofa = Find(Plain, TEXT("F_Sofa"));
+		const FHFFixture* NamedSofa = Find(Named, TEXT("F_Sofa"));
+		const FHFFixture* PlainTable = Find(Plain, TEXT("F_CoffeeTable"));
+		const FHFFixture* NamedTable = Find(Named, TEXT("F_CoffeeTable"));
+
+		if (PlainSofa != nullptr && NamedSofa != nullptr && PlainTable != nullptr && NamedTable != nullptr)
+		{
+			TestTrue(TEXT("Naming SquareArm leaves the sofa exactly where it was"),
+				NamedSofa->Position.Equals(PlainSofa->Position, 0.01));
+			TestTrue(TEXT("And exactly the size it was"),
+				NamedSofa->Footprint.Equals(PlainSofa->Footprint, 0.01));
+			TestTrue(TEXT("And the seating group with it"),
+				NamedTable->Position.Equals(PlainTable->Position, 0.01));
+			TestEqual(TEXT("The reference flat's own sofa never named a design at all"),
+				AsNumber(PlainSofa->Params.SofaDesign), AsNumber(EHFSofaDesign::Default));
+		}
 	}
 
 	return true;

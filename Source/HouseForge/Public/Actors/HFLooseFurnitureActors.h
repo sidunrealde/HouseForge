@@ -6,6 +6,7 @@
 #include "Actors/HFElementActors.h"
 #include "Geometry/HFFrameKit.h"
 #include "Geometry/HFUpholsteryKit.h"
+#include "Model/HFBuildDefaults.h"
 #include "Model/HFTypes.h"
 #include "HFLooseFurnitureActors.generated.h"
 
@@ -62,6 +63,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ShowOnlyInnerProperties))
 	FHFSofaParams Sofa;
 
+	/**
+	 * The project's answer for a sofa, seeded by ApplyProjectDefaults and read by ApplyFixture.
+	 *
+	 * THE SEAM WHERE EHFSofaDesign::Default STOPS BEING A SENTINEL. A generator may not read a
+	 * settings object (.claude/rules/04-conventions.md), and the fixture only says "Default" when the
+	 * drawing named no design - so something between the two has to turn that into a design, and this
+	 * actor is the composing layer's end of it. Held rather than re-read because ApplyFixture may run
+	 * long after ApplyProjectDefaults, exactly as AHFBedActor holds its skirting setback.
+	 */
+	UPROPERTY()
+	FHFSofaDefaults Project;
+
 	/** Seeds the project's construction figures. Called by the composing layer, not by generation. */
 	void ApplyProjectDefaults();
 
@@ -69,12 +82,17 @@ public:
 	void ApplyFixture(const FHFFixture& Fixture);
 
 	/**
-	 * What a sofa of this size is before anything else touches it.
+	 * What a sofa of this size and this named design is before anything else touches it.
 	 *
 	 * Static and public for the reason AHFBedActor::ParamsFor is: the composing layer has to be able
 	 * to ask what one comes out as without spawning it.
+	 *
+	 * @param Defaults The project's answer, used only where the fixture leaves EHFSofaDesign::Default
+	 *        on itself. Defaulted to the plugin's own figures so a test - or any caller with no
+	 *        project in hand - gets the SquareArm sofa this kit built before designs existed.
 	 */
-	static FHFSofaParams ParamsFor(const FHFFixture& Fixture);
+	static FHFSofaParams ParamsFor(const FHFFixture& Fixture,
+		const FHFSofaDefaults& Defaults = FHFSofaDefaults());
 
 	static bool Builds(EHFFixtureType Type) { return Type == EHFFixtureType::Sofa; }
 

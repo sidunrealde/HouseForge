@@ -1615,6 +1615,116 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	return B.Spec;
 }
 
+FHFHouseSpec FHFSampleHouse::Make2BHK(EHFSofaDesign SofaDesign)
+{
+	FHFHouseSpec Spec = Make2BHK();
+
+	FHFFixture* Sofa = Spec.Fixtures.FindByPredicate(
+		[](const FHFFixture& F) { return F.Id == FName(TEXT("F_Sofa")); });
+	FHFFixture* Coffee = Spec.Fixtures.FindByPredicate(
+		[](const FHFFixture& F) { return F.Id == FName(TEXT("F_CoffeeTable")); });
+
+	if (Sofa == nullptr || Coffee == nullptr)
+	{
+		return Spec;
+	}
+
+	Sofa->Params.SofaDesign = SofaDesign;
+
+	// THE DRAWN BOX IS PART OF THE DESIGN, because a drawing of a low-profile sofa is not a drawing
+	// of a square-arm one with a note attached: it is drawn 950 deep and 700 tall, and the plan of a
+	// sectional is drawn as an L. So each of these is what a plan of this living room would actually
+	// dimension, and the kit takes it from there. See EHFSofaDesign.
+	switch (SofaDesign)
+	{
+	case EHFSofaDesign::LowProfile:
+		// 50 deeper and 100 lower. The seating group does not move: the front goes from 2450 to 2592
+		// and the coffee table keeps 442 of knee room, against 492 before.
+		Sofa->Label = TEXT("3-seater sofa, low profile");
+		Sofa->Footprint = FVector2D(2100.0, 950.0);
+		Sofa->Height = 700.0;
+		Sofa->Position = FVector2D(3800.0, 3067.5);
+		break;
+
+	case EHFSofaDesign::RolledArm:
+		// Deeper and 50 mm taller, in the same 2100 the room already gives a sofa. THE WIDTH DOES NOT
+		// MOVE, deliberately: a roll arm's arms are 220 against a square arm's 180, so at 2000 the
+		// three seats it has to hold come out 493 wide - under the 500 nobody sells - and the design
+		// would have been paying for its arms out of the cushions. It keeps its 2100 and the arms are
+		// what change.
+		Sofa->Label = TEXT("3-seater sofa, rolled arm");
+		Sofa->Footprint = FVector2D(2100.0, 950.0);
+		Sofa->Height = 850.0;
+		Sofa->Position = FVector2D(3800.0, 3067.5);
+		break;
+
+	case EHFSofaDesign::ChaiseSectional:
+	{
+		// ----------------------------------------------------------------- why the whole group moves
+		//
+		// A 1400 deep box against the same wall puts the chaise's front on Y 2142.5, and the coffee
+		// table's back edge is at 2150. Seven millimetres. Everything below is what that costs.
+		//
+		// THE SOFA GOES 300 WEST AND 100 WIDER, to X 2400..4600. The width buys back the seats the
+		// chaise takes: a 900 return out of a 2100 box leaves 1020 of straight run, which is two 480
+		// cushions, and 2200 makes them 540. It cannot grow further east - at the old centre the
+		// return reached X 4850, which is 165 mm across the dining chair F_Chair_D1 pulled out to
+		// Y 2180 and 38 mm into it in the other axis, and that chair is one of the two anybody
+		// actually sits on. 4600 leaves 85. West is bounded too: D_Foyer's leaf sweeps X 375..1425.
+		//
+		// THE CHAISE TAKES THE EAST END, which is bChaiseOnLeft FALSE. The 180 degrees on this fixture
+		// is not the yaw it is built at - FHFFixturePlacement::FacingYaw turns a run round until its
+		// back faces its anchor wall, and W_Mid_Lower is north of it, so the sofa is built at zero and
+		// its own +X is the room's east. The other hand would put 900 mm of return in front of
+		// D_Balcony (X 1200..3000), which is the way out onto the balcony.
+		//
+		// THE COFFEE TABLE GOES BESIDE THE RETURN AND SMALLER, at 1000 x 600 on (3100, 1800), so
+		// X 2600..3600 and Y 1500..2100. Measured:
+		//
+		//     table  -> the chaise's west face (X 3700)            100
+		//     table  -> the straight run's front (Y 2642.5)        542   reach from the seat
+		//     table  -> the TV run's front (Y 565)                 935   the walking route
+		//     table  -> D_Balcony's threshold (Y 115)             1385   the approach off the balcony
+		//     table  -> F_Chair_D3 pulled out (X 3920)             320
+		//     chaise -> F_TVUnit_E's drawers pulled out (Y 795)   1347
+		//     chaise -> F_Chair_D1 pulled out (X 4685)              85
+		//     chaise -> the dining table (Y 1600)                  542
+		//     sofa   -> D_Living's leaf sweep (X 4950)             350
+		//     sofa   -> D_Foyer's leaf sweep (X 1425)              975
+		//
+		// IT STOPS 42 mm SHORT OF THE SOFA'S DRAWN BOX, and the 42 is not slack - it is the one place
+		// this layout answers to something other than the geometry. The L's real plan leaves the
+		// crook empty, so the table could stand 100 mm inside that box and touch nothing; but the
+		// SPEC's overlap rule reads a fixture as the rectangle round it, and a table 17% inside the
+		// sofa's box would be reported as two solids in one place by every validation of the flat.
+		// Correct, given what a spec can see. Keeping the boxes apart is cheaper than teaching the
+		// validator about L-shaped fixtures, and it costs 42 mm of reach.
+		//
+		// See HouseForge.Upholstery.SofaDesignsFitTheLivingRoom, which measures every figure above
+		// from the spec rather than trusting this comment - and measures them against the L's REAL
+		// plan rather than the box round it.
+		Sofa->Label = TEXT("2-seater sofa with chaise");
+		Sofa->Footprint = FVector2D(2200.0, 1400.0);
+		Sofa->Height = 800.0;
+		Sofa->Position = FVector2D(3500.0, 2842.5);
+		Sofa->Params.bChaiseOnLeft = false;
+
+		Coffee->Footprint = FVector2D(1000.0, 600.0);
+		Coffee->Position = FVector2D(3100.0, 1800.0);
+		break;
+	}
+
+	case EHFSofaDesign::SquareArm:
+	case EHFSofaDesign::Default:
+	default:
+		// The reference flat's own sofa, untouched. Naming the design it already was is the whole
+		// change, and it is what keeps Sample2BHK.json the SquareArm case rather than a fifth thing.
+		break;
+	}
+
+	return Spec;
+}
+
 FString FHFSampleHouse::GetCommittedSpecPath()
 {
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HouseForge"));
@@ -1638,6 +1748,61 @@ bool FHFSampleHouse::ExportCommittedSpec(FString& OutError)
 
 	return FHFSpecSerializer::SaveToFile(Make2BHK(), Path, OutError);
 }
+
+bool FHFSampleHouse::ExportSofaDesignSpecs(TArray<FString>& OutPaths, FString& OutError)
+{
+	OutPaths.Reset();
+
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HouseForge"));
+	if (!Plugin.IsValid())
+	{
+		OutError = TEXT("Could not locate the HouseForge plugin directory.");
+		return false;
+	}
+
+	const FString Dir = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(Plugin->GetBaseDir(), TEXT("Saved"), TEXT("Review"), TEXT("sofa-designs")));
+
+	const TPair<EHFSofaDesign, const TCHAR*> Designs[] = {
+		{ EHFSofaDesign::SquareArm,       TEXT("square-arm") },
+		{ EHFSofaDesign::ChaiseSectional, TEXT("chaise-sectional") },
+		{ EHFSofaDesign::LowProfile,      TEXT("low-profile") },
+		{ EHFSofaDesign::RolledArm,       TEXT("rolled-arm") }
+	};
+
+	for (const TPair<EHFSofaDesign, const TCHAR*>& Design : Designs)
+	{
+		const FString Path = FPaths::Combine(Dir, FString::Printf(TEXT("Sample2BHK-%s.json"), Design.Value));
+		if (!FHFSpecSerializer::SaveToFile(Make2BHK(Design.Key), Path, OutError))
+		{
+			return false;
+		}
+
+		OutPaths.Add(Path);
+	}
+
+	return true;
+}
+
+static FAutoConsoleCommand GExportSofaDesignSpecsCommand(
+	TEXT("HouseForge.ExportSofaDesignSpecs"),
+	TEXT("Writes one spec per named sofa design into Saved/Review/sofa-designs/."),
+	FConsoleCommandDelegate::CreateStatic([]()
+	{
+		TArray<FString> Paths;
+		FString Error;
+		if (FHFSampleHouse::ExportSofaDesignSpecs(Paths, Error))
+		{
+			for (const FString& Path : Paths)
+			{
+				UE_LOG(LogHouseForge, Display, TEXT("Exported sofa design spec to %s"), *Path);
+			}
+		}
+		else
+		{
+			UE_LOG(LogHouseForge, Error, TEXT("Failed to export sofa design specs: %s"), *Error);
+		}
+	}));
 
 static FAutoConsoleCommand GExportSampleSpecCommand(
 	TEXT("HouseForge.ExportSampleSpec"),

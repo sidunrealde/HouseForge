@@ -636,7 +636,20 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// side of the same number is one scalar on one instance per role, shared by all 155 of them, so
 	// two elements disagreeing about it have no answer to give the material. It is a shared constant
 	// now. Removing a control is worth more than the count it costs when the control was a trap.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 146);
+	// 149 rather than 146: the sofa section's three - DefaultDesign, ChaiseWidth and
+	// MinChaiseProjection. Three, not sixty, and that is the decision worth recording: the four named
+	// sofa designs differ in about fifteen figures each, and a page carrying all of them would have
+	// fifty-five controls greyed out at any moment because a rolled arm's 240 arm and a low-profile's
+	// 120 one are two objects' dimensions rather than one figure at two values. The recipes live in
+	// FHFUpholsteryKit::FiguresFor, where a coffee table and a dining table already keep their
+	// difference; what is on the page is what a project genuinely decides - which sofa it buys when a
+	// drawing does not say, and how a chaise is set out. See EHFSofaDesign.
+	//
+	// NONE OF THE THREE IS INERT. DefaultDesign reaches AHFSofaActor::ParamsFor, which is what turns
+	// EHFSofaDesign::Default into a design before the kit ever sees one, and the other two reach
+	// FHFSofaParams::BuiltChaiseProjection. All three are measured on the built geometry by
+	// HouseForge.Upholstery.SofaDesignSelection rather than on the parameter struct.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 149);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
 	return true;
@@ -905,7 +918,11 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 	// 141 rather than 142: TexelSizeCm came off the page and became a shared constant. It is the one
 	// number the unwrap and the material graph must agree on, and it was reachable from two places
 	// that could not both be right. See FHFRenderFinish::TexelSizeCm.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 141);
+	// 143 rather than 141: the sofa section's two numeric controls, ChaiseWidth and
+	// MinChaiseProjection. DefaultDesign is the third control in that section and is an enum, so it
+	// is its own explanation and is not counted here. See the marking test for why the section is
+	// three controls rather than sixty.
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 143);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

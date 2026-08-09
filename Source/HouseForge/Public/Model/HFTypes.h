@@ -206,6 +206,82 @@ enum class EHFFixtureType : uint8
 	WallNiche
 };
 
+/**
+ * Which sofa a living room gets.
+ *
+ * EHFCeilingTemplate'S ARGUMENT, APPLIED TO THE LARGEST SOFT OBJECT IN THE FLAT. A style is a
+ * construction and a design is a whole recipe: a sofa is not one shape with a width and a height
+ * dialled into it, it is a choice between objects that differ in their silhouette before they
+ * differ in any number. A drawing of a living room shows which one is in it - the L of a sectional
+ * is drawn as an L, a low-profile sofa is drawn with a metre of floor showing under it - so the
+ * design belongs in the spec, exactly as a ceiling's template does, and not in a settings page
+ * somebody clicked once.
+ *
+ * What each of them supplies is FHFUpholsteryKit::FiguresFor: seat height, arm width and height,
+ * the back's section, the legs and whether there are any, the radii, and which forms get built at
+ * all. What the DRAWING supplies is the footprint, and the overall height when it states one.
+ *
+ * The reason the figures live in the kit rather than in FHFSofaDefaults, where the ceiling's live:
+ * the four ceiling templates share one set of figures and pick which of them apply, so there are
+ * about twenty numbers for four designs. These four share almost nothing - a rolled arm's 220 mm
+ * arm and a low-profile's 120 mm arm are not the same figure at two values - so a settings page
+ * carrying them would be sixty controls, and fifty-five of them would be greyed out at any moment.
+ * The project's page carries the choice and the two figures that really are a project's (see
+ * FHFSofaDefaults); the recipes are construction, and construction lives with the generator.
+ */
+UENUM(BlueprintType)
+enum class EHFSofaDesign : uint8
+{
+	/**
+	 * Whatever this project's FHFSofaDefaults::DefaultDesign says.
+	 *
+	 * The sentinel, and the reason it is first: a spec written before designs existed has a zero
+	 * here, and a zero has to mean "the project decides" rather than silently naming one of the
+	 * four. Resolved before the kit sees it - FHFSofaParams::Design is never Default.
+	 */
+	Default,
+
+	/**
+	 * Straight run, square track arms the full depth of the seat, low turned legs.
+	 *
+	 * The commodity contemporary sofa and what every one of these flats is photographed with. It is
+	 * also what the plugin built before there was a choice, figure for figure, so a project that
+	 * never names a design gets exactly the sofa it already had.
+	 */
+	SquareArm,
+
+	/**
+	 * L-shaped: a straight run with a chaise returning at one end.
+	 *
+	 * What most 2BHK living rooms actually get, and the only one of the four whose PLAN is a
+	 * different shape rather than a different elevation. Needs a drawn depth deep enough to hold the
+	 * return - see FHFSofaParams::BuiltChaiseProjection, which falls back to SquareArm rather than
+	 * building a 200 mm stub and calling it a chaise.
+	 */
+	ChaiseSectional,
+
+	/**
+	 * Low and long on splayed tapered legs, with slim arms and a shallow back.
+	 *
+	 * The one that changes the ROOM rather than the object: 180 mm of leg instead of 120 and a 700
+	 * back instead of 800 puts floor and skirting back in the frame behind the seating, which is
+	 * most of what makes a small living room read as larger.
+	 */
+	LowProfile,
+
+	/**
+	 * English roll arm: semicircular arms, a fabric skirt to the floor, a higher seat.
+	 *
+	 * The classic, and the one this kit had to be talked into. See the rejection note in
+	 * FHFUpholsteryKit: a Chesterfield is what most people mean by "classic sofa" and its deep
+	 * buttoning is a re-entrant dimple in the cloth, which is precisely the shape AppendSoftBox
+	 * cannot loft and WorstConcavityCm exists to refuse. A roll arm is the honest half of that
+	 * family: the arm really is a half-round in section and the skirt really is a flat panel, so
+	 * both are generated rather than suggested.
+	 */
+	RolledArm
+};
+
 /** Handle treatment on joinery shutters and drawers. */
 UENUM(BlueprintType)
 enum class EHFHandleStyle : uint8
@@ -937,6 +1013,30 @@ struct HOUSEFORGE_API FHFFixtureParams
 	/** Gang count for a switch plate. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0"))
 	int32 GangCount = 0;
+
+	/**
+	 * Which named sofa a Sofa fixture is. Default takes the project's.
+	 *
+	 * READ OFF THE DRAWING, like the shutter motion above it and for the same reason: a plan draws
+	 * an L-shaped sofa as an L and a straight one as a rectangle, so this is information the drawing
+	 * genuinely carries. It is also the field that makes a design a CHOICE rather than a preset -
+	 * without it every sofa in every house this plugin builds would be whichever one the project
+	 * happened to default to, which is precisely how EHFShutterMotion's absence made every wardrobe
+	 * in the reference flat side-hung.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	EHFSofaDesign SofaDesign = EHFSofaDesign::Default;
+
+	/**
+	 * Which end of a sectional the chaise returns at, looking at the sofa from the front.
+	 *
+	 * Its own field rather than a rule, and it is the hinge-hand problem in a different object: an
+	 * L has a handedness, both hands are sold, and getting it wrong points the chaise at whatever
+	 * the sofa is meant to leave room for. A drawing states it by drawing the L, so this is read
+	 * rather than composed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	bool bChaiseOnLeft = false;
 };
 
 /** A piece of joinery, furniture, sanitary ware or electrical fitting. */
