@@ -81,26 +81,48 @@ namespace
 		return false;
 	}
 
-	/** Extent of the primary UV set, which at world scale is a real distance over the texel size. */
-	FVector2d UVExtent(const FDynamicMesh3& Mesh)
+	/**
+	 * The worst any edge's UV length disagrees with the world length it came from, in centimetres.
+	 *
+	 * Measured edge by edge rather than as the extent of the pooled UV set, which is what this used
+	 * to do and what made it a bad test. The extent of the pool is not a scale at all: it happened to
+	 * read 0.75 on a 750-wide stack only because every face was projected along a world axis with the
+	 * same sign convention, so the front face's UVs sat exactly on top of the back face's. Once back
+	 * faces stopped being mirrored - which they had to, or every directional texture ran backwards on
+	 * half the flat - the pool spanned both signs and the extent doubled while the SCALE was
+	 * unchanged. A pooled extent cannot tell those two apart. An edge can.
+	 */
+	double WorstUVScaleErrorCm(const FDynamicMesh3& Mesh, double TexelSizeCm)
 	{
-		if (!Mesh.HasAttributes() || Mesh.Attributes()->PrimaryUV() == nullptr)
+		const FDynamicMeshUVOverlay* UVs = Mesh.HasAttributes() ? Mesh.Attributes()->PrimaryUV() : nullptr;
+		if (UVs == nullptr || UVs->ElementCount() == 0)
 		{
-			return FVector2d::Zero();
+			return TNumericLimits<double>::Max();
 		}
 
-		const FDynamicMeshUVOverlay* UVs = Mesh.Attributes()->PrimaryUV();
-		FVector2d Min(TNumericLimits<double>::Max(), TNumericLimits<double>::Max());
-		FVector2d Max(-TNumericLimits<double>::Max(), -TNumericLimits<double>::Max());
-
-		for (const int32 Eid : UVs->ElementIndicesItr())
+		double Worst = 0.0;
+		for (const int32 Tid : Mesh.TriangleIndicesItr())
 		{
-			const FVector2f UV = UVs->GetElement(Eid);
-			Min = FVector2d(FMath::Min(Min.X, (double)UV.X), FMath::Min(Min.Y, (double)UV.Y));
-			Max = FVector2d(FMath::Max(Max.X, (double)UV.X), FMath::Max(Max.Y, (double)UV.Y));
-		}
+			if (!UVs->IsSetTriangle(Tid))
+			{
+				return TNumericLimits<double>::Max();
+			}
 
-		return (UVs->ElementCount() > 0) ? Max - Min : FVector2d::Zero();
+			FVector3d P[3];
+			Mesh.GetTriVertices(Tid, P[0], P[1], P[2]);
+
+			FVector2f UV[3];
+			UVs->GetTriElements(Tid, UV[0], UV[1], UV[2]);
+
+			for (int32 i = 0; i < 3; ++i)
+			{
+				const int32 j = (i + 1) % 3;
+				const double WorldEdge = (P[j] - P[i]).Length();
+				const double UVEdge = (FVector2d(UV[j].X, UV[j].Y) - FVector2d(UV[i].X, UV[i].Y)).Length();
+				Worst = FMath::Max(Worst, FMath::Abs(UVEdge * TexelSizeCm - WorldEdge));
+			}
+		}
+		return Worst;
 	}
 }
 
@@ -158,10 +180,10 @@ bool FHFShelfStackTest::RunTest(const FString& Parameters)
 		Bounds.Max.Z, 200.0 - Compartment, 0.001);
 
 	// Real-world-scale UVs, or the material panel's tiling in millimetres means nothing. One tile is
-	// a metre, so a 750 wide stack spans 0.75 of a tile across.
-	const FVector2d UV = UVExtent(Mesh);
-	TestNearlyEqual(TEXT("UVs are at world scale across the stack"), UV.X, 0.75, 0.001);
-	TestTrue(TEXT("UVs are at world scale up the stack"), UV.Y > 0.0);
+	// a metre, so every centimetre of board must be a hundredth of a UV unit - on every edge of every
+	// shelf, partition and end, not merely on average across the stack.
+	TestTrue(TEXT("Every edge of the stack carries UVs at exactly world scale"),
+		WorstUVScaleErrorCm(Mesh, 100.0) <= 0.001);
 
 	return true;
 }

@@ -105,6 +105,20 @@ public:
 	static bool EnsureMaterialsReady(UWorld* World, const FHFCaptureRequest& Request, FString& OutWhyNot);
 
 	/**
+	 * Renders and hands back the pixels, writing nothing.
+	 *
+	 * Every guard Render applies is applied here - it is the same function, and Render is a thin
+	 * wrapper that adds a PNG. Separated out so a test can MEASURE a render rather than eyeball it:
+	 * asserting that a 600 mm tiling produces a 600 mm feature means counting pixels between grout
+	 * lines, and round-tripping through a PNG to do that would test the image encoder as much as the
+	 * material. See HouseForge.Materials.TilingIsInMillimetres.
+	 *
+	 * Rows run top to bottom, BGRA, sRGB, alpha forced opaque.
+	 */
+	static bool RenderToPixels(UWorld* World, const FHFCaptureRequest& Request,
+		TArray<FColor>& OutPixels, FIntPoint& OutSize, FString& OutError);
+
+	/**
 	 * Renders and writes the PNG.
 	 *
 	 * @param OutSize   Pixel size actually written.

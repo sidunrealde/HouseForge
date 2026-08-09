@@ -108,7 +108,11 @@ struct HOUSEFORGE_API FHFBevelParams
 		case EHFSurfaceRole::LightSource:
 			return MetalWidth;
 
+		// A mirror plate is cut and bevelled exactly as a pane is, and its bevel is the only part of
+		// it that catches light directly - so it takes the glass arris, not the metal one, however
+		// metallic the silvering behind it makes the shading.
 		case EHFSurfaceRole::Glass:
+		case EHFSurfaceRole::Mirror:
 			return GlassWidth;
 
 		case EHFSurfaceRole::Fabric:
@@ -176,9 +180,27 @@ struct HOUSEFORGE_API FHFRenderFinish
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFLightmapParams Lightmap;
 
-	/** World size in centimetres that one UV0 tile covers. What the material panel states tiling against. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.1"))
-	double TexelSizeCm = 100.0;
+	/**
+	 * World size in centimetres that one UV0 unit covers. The unwrap's half of the millimetre contract.
+	 *
+	 * A CONSTANT, AND DELIBERATELY NOT A SETTING. It was an EditAnywhere property on this struct,
+	 * which put it on the project settings page and on all 155 element actors - and that could not
+	 * have worked, because the material side of the same number is one UVWorldSizeCm scalar on ONE
+	 * material instance per role, shared by every element in the flat. Two elements asking for
+	 * different texel sizes have no answer to give it. Worse, nothing pushed the property to the
+	 * material at all, so changing it moved the unwrap and left the material where it was: every
+	 * tiling figure in the flat silently wrong by exactly that ratio, with each individual number
+	 * still reading as reasonable in the panel.
+	 *
+	 * There was never a reason to turn it. The user-facing tiling control is TilingMM per surface
+	 * role, in millimetres, and that is unaffected - this is only the unit the two sides agree to
+	 * count in. Fixing it here means the unwrap and the graph cannot drift, rather than meaning a
+	 * test notices afterwards when they have.
+	 *
+	 * gen_materials.py::UV_WORLD_SIZE_CM is the other copy, and HouseForge.Materials.LibraryAgrees
+	 * WithTheUnwrap fails if they ever disagree.
+	 */
+	static constexpr double TexelSizeCm = 100.0;
 
 	/**
 	 * True when two finishes would produce the same geometry.
@@ -201,8 +223,9 @@ struct HOUSEFORGE_API FHFRenderFinish
 			&& FMath::IsNearlyEqual(Bevel.MinFeatureFactor, Other.Bevel.MinFeatureFactor)
 			&& Lightmap.bEnabled == Other.Lightmap.bEnabled
 			&& Lightmap.TextureResolution == Other.Lightmap.TextureResolution
-			&& Lightmap.GutterPixels == Other.Lightmap.GutterPixels
-			&& FMath::IsNearlyEqual(TexelSizeCm, Other.TexelSizeCm);
+			&& Lightmap.GutterPixels == Other.Lightmap.GutterPixels;
+		// TexelSizeCm is not compared: it is a shared constant, so it is equal by construction and
+		// two finishes can never differ in it. See its declaration.
 	}
 
 	bool operator!=(const FHFRenderFinish& Other) const { return !(*this == Other); }

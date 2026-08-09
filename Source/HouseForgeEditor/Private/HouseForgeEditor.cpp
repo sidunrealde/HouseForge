@@ -4,6 +4,7 @@
 
 #include "DesktopPlatformModule.h"
 #include "Editor.h"
+#include "HAL/IConsoleManager.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HFEditorSubsystem.h"
 #include "IDesktopPlatform.h"
@@ -12,6 +13,11 @@
 #include "ToolMenus.h"
 #include "Toolset/HFToolset.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
+#include "UI/HFPanelIds.h"
+#include "UI/SHFHousePanel.h"
+#include "Widgets/Docking/SDockTab.h"
+#include "WorkspaceMenuStructure.h"
+#include "WorkspaceMenuStructureModule.h"
 
 #define LOCTEXT_NAMESPACE "FHouseForgeEditorModule"
 
@@ -87,6 +93,33 @@ namespace
 			LOCTEXT("McpTitle", "HouseForge - Unreal MCP"));
 	}
 
+	/** The panel's tab. One widget, and the tab is a frame around it. */
+	TSharedRef<SDockTab> SpawnHousePanelTab(const FSpawnTabArgs& Args)
+	{
+		return SNew(SDockTab)
+			.TabRole(ETabRole::NomadTab)
+			[
+				SNew(SHFHousePanel)
+			];
+	}
+
+	/** Opens the panel, or brings it forward if it is already open somewhere. */
+	void OpenHousePanel()
+	{
+		FGlobalTabmanager::Get()->TryInvokeTab(HFPanelTabIds::HouseForgePanel());
+	}
+
+	/**
+	 * The same thing from the console, so the panel can be opened without a mouse.
+	 *
+	 * Worth having beyond convenience: it is how a startup argument or a script gets the panel on
+	 * screen, and it is the only way to look at the panel from a headless-launched editor.
+	 */
+	FAutoConsoleCommand GOpenPanelCommand(
+		TEXT("HouseForge.OpenPanel"),
+		TEXT("Open the HouseForge panel."),
+		FConsoleCommandDelegate::CreateStatic(&OpenHousePanel));
+
 	void RegisterMenus()
 	{
 		FToolMenuOwnerScoped OwnerScoped(TEXT("HouseForge"));
@@ -99,6 +132,19 @@ namespace
 
 		FToolMenuSection& Section = Menu->FindOrAddSection(
 			TEXT("HouseForge"), LOCTEXT("HouseForgeSection", "HouseForge"));
+
+		// First entry in the section, because it is the door to everything else. The Window menu
+		// carries the same tab through the level editor workspace group, so there are two ways in
+		// and one tab: TryInvokeTab brings an already-open panel forward rather than opening a
+		// second, empty one.
+		Section.AddMenuEntry(
+			TEXT("HouseForgePanel"),
+			LOCTEXT("OpenPanel", "HouseForge Panel"),
+			LOCTEXT("OpenPanelTooltip",
+				"Open the HouseForge panel: what every surface in the flat is made of, and the "
+				"controls to change it."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateStatic(&OpenHousePanel)));
 
 		Section.AddMenuEntry(
 			TEXT("HouseForgeImportDrawings"),
@@ -138,6 +184,18 @@ void FHouseForgeEditorModule::StartupModule()
 	UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateStatic(&RegisterMenus));
 
+	// The panel's tab. Registered here rather than inside the ToolMenus callback so that the
+	// spawner exists in a headless run too - HouseForge.Editor.Panel.TabSpawnerIsRegistered is the
+	// only thing standing between a renamed tab id and a Tools menu entry that opens nothing.
+	FGlobalTabmanager::Get()
+		->RegisterNomadTabSpawner(HFPanelTabIds::HouseForgePanel(),
+			FOnSpawnTab::CreateStatic(&SpawnHousePanelTab))
+		.SetDisplayName(LOCTEXT("HouseForgeTab", "HouseForge"))
+		.SetTooltipText(LOCTEXT("HouseForgeTabTooltip",
+			"What every surface in the flat is made of, and the controls to change it."))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory())
+		.SetMenuType(ETabSpawnerMenuType::Enabled);
+
 	UE_LOG(LogHouseForgeEditor, Log, TEXT("HouseForge editor module started."));
 }
 
@@ -145,6 +203,11 @@ void FHouseForgeEditorModule::ShutdownModule()
 {
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(TEXT("HouseForge"));
+
+	if (FSlateApplication::IsInitialized())
+	{
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(HFPanelTabIds::HouseForgePanel());
+	}
 
 	if (UToolsetRegistry::IsAvailable())
 	{

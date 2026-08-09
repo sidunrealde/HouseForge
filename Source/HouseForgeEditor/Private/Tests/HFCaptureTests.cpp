@@ -652,13 +652,28 @@ bool FHFCaptureGathersWhatIsInThePictureTest::RunTest(const FString& Parameters)
 
 	// The premise the readiness check rests on, asserted rather than assumed.
 	//
-	// EnsureMaterialsReady deliberately does not use UMaterialInterface::IsComplete(), because for a
+	// EnsureMaterialsReady deliberately does not use UMaterialInterface::IsComplete(): for a
 	// parameter-only material instance that function never consults the parent that actually owns the
-	// shader map - it would answer "ready" for the very material about to render as checkerboard.
-	// That reasoning is only sound while the placeholders really are parameter-only instances. If
-	// somebody authors an MI_HF_* with a static switch, it acquires its own permutation, and whoever
-	// does that should be told that the justification in the capture code has changed under them.
+	// shader map, and it would answer "ready" for the very material about to render as checkerboard.
+	// It uses GetMaterialResource instead, which returns the instance's OWN resource when the instance
+	// has a static permutation and falls through to the parent's when it does not
+	// (UMaterialInstance::GetMaterialResource, MaterialInstance.cpp:2082).
+	//
+	// SO THE PROPERTY THAT MATTERS IS THAT THE CHAIN ENDS SOMEWHERE A RESOURCE CAN COME FROM, not
+	// that the instances happen to be parameter-only. This used to assert the latter, as a proxy for
+	// the former, and the proxy went stale the moment a role wanted a static switch:
+	// MI_HF_CoveInterior, MI_HF_Glass, MI_HF_LightSource and MI_HF_Mirror all set UseProceduralBump
+	// to compile their unused detail noise away, which gives each of them a permutation of its own
+	// and is entirely fine here. Asserting the real property covers both kinds of instance and stops
+	// the next static switch reading as a defect.
+	//
+	// The resolved FMaterialResource itself is deliberately NOT what is checked. Under -nullrhi there
+	// are no shader maps for anything, so every material would answer null and the assertion would be
+	// about the harness rather than the material. What survives headless - and what the fall-through
+	// in GetMaterialResource actually needs - is that the parent chain terminates in a base material.
 	int32 Instances = 0;
+	int32 WithOwnPermutation = 0;
+
 	for (const UMaterialInterface* Material : Gathered)
 	{
 		const UMaterialInstance* Instance = Cast<UMaterialInstance>(Material);
@@ -668,14 +683,23 @@ bool FHFCaptureGathersWhatIsInThePictureTest::RunTest(const FString& Parameters)
 		}
 
 		++Instances;
-		TestNotNull(FString::Printf(TEXT("Placeholder '%s' has a parent to inherit its shader map from"),
+		WithOwnPermutation += Instance->bHasStaticPermutationResource ? 1 : 0;
+
+		TestNotNull(FString::Printf(TEXT("'%s' has a parent to inherit its shader map from"),
 			*Instance->GetPathName()), Instance->Parent.Get());
-		TestFalse(FString::Printf(
-			TEXT("Placeholder '%s' is parameter-only, so IsComplete() would not look at that parent - ")
-			TEXT("see the reasoning in FHFSceneCapture::EnsureMaterialsReady"), *Instance->GetPathName()),
-			static_cast<bool>(Instance->bHasStaticPermutationResource));
+
+		TestNotNull(FString::Printf(
+			TEXT("'%s' resolves to a base material, so GetMaterialResource has somewhere to fall ")
+			TEXT("through to - see FHFSceneCapture::EnsureMaterialsReady"), *Instance->GetPathName()),
+			Instance->GetMaterial());
 	}
-	TestTrue(TEXT("The placeholders really are material instances"), Instances > 0);
+	TestTrue(TEXT("The role materials really are material instances"), Instances > 0);
+
+	// Both kinds are present, so the assertion above is exercised on both paths rather than only on
+	// whichever kind happens to be in the level. If this ever reads zero, the case that broke the old
+	// assumption has stopped being covered and the fall-through path is the only one still tested.
+	TestTrue(TEXT("Some role materials carry their own static permutation, and some inherit one"),
+		WithOwnPermutation > 0 && WithOwnPermutation < Instances);
 
 	return true;
 }

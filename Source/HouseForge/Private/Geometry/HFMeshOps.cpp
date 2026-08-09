@@ -128,19 +128,100 @@ namespace
 	}
 
 	/**
-	 * Which of the six axis directions a triangle is projected along.
+	 * The frame a chart is unwrapped in: U across the surface, V up it, N out of it.
 	 *
-	 * SIGNED, and that is what makes the projection safe to weld along. The plane a triangle
-	 * projects onto follows only the axis - +Z and -Z both give (X, Y) - so an unsigned answer
-	 * would let the two faces of a thin fin share UV elements, which is fine for the UV VALUES
-	 * (identical either way, since they are a function of position) and wrong for everything
-	 * downstream that reads the resulting connectivity as an island. A fin welded into one island
-	 * is an island folded back on top of itself, and a lightmap packed from it overlaps.
+	 * GRAVITY-ALIGNED, and both halves of that matter.
 	 *
-	 * The comparison order matches what the per-triangle projection has always used, so nothing
-	 * lands on a different plane than it did before.
+	 *   - V IS WORLD UP on every surface that has an up. For any normal lying in the horizontal
+	 *     plane - every wall face, every shutter, every chamfer facet on a vertical arris - V comes
+	 *     out exactly +Z, so a vertical world edge is a vertical UV edge whatever the wall's yaw.
+	 *     A grain, a grout line and a trowel direction all run the way the building does rather than
+	 *     the way the world axes happen to fall.
+	 *   - THE FRAME IS RIGHT-HANDED, (U, V, N), which is what stops back faces being mirrored. The
+	 *     axis-plane projection this replaced switched on the axis and ignored its sign, so +X and -X
+	 *     both projected to (Y, Z): seen from outside the surface, +U ran one way on the front face
+	 *     of a panel and the other way on its back. Handedness is carried per-vertex in TangentZ.W so
+	 *     the lighting maths survived it, but every directional texture - wood grain, brushed metal,
+	 *     tile grout - would run backwards on half the surfaces in the flat, and a mirrored normal
+	 *     map is a well-known tell. U = Z x N and V = N x U cannot produce that.
 	 */
-	int32 SignedProjectionAxis(const FVector3d& Normal)
+	struct FChartFrame
+	{
+		FVector3d U = FVector3d::UnitX();
+		FVector3d V = FVector3d::UnitY();
+		FVector3d N = FVector3d::UnitZ();
+
+		/** World position in the frame, over texel size. An isometry for anything in the frame's plane. */
+		FVector2d Project(const FVector3d& P, double InvTexel) const
+		{
+			return FVector2d(P.Dot(U) * InvTexel, P.Dot(V) * InvTexel);
+		}
+	};
+
+	FChartFrame MakeChartFrame(const FVector3d& Normal)
+	{
+		FChartFrame Frame;
+
+		FVector3d N = Normal;
+		if (!N.Normalize(UE_DOUBLE_SMALL_NUMBER))
+		{
+			// A degenerate triangle has no plane to speak of. Any consistent frame will do; what
+			// matters is that it is deterministic rather than a NaN propagated into the overlay.
+			N = FVector3d::UnitZ();
+		}
+		Frame.N = N;
+
+		// Only a floor or a ceiling has no up of its own to align to, and there the world X/Y grid is
+		// the right answer: it is what makes two floor elements in the same room share a tile module.
+		if (FMath::Abs(N.Z) > 0.9995)
+		{
+			Frame.U = FVector3d::UnitX();
+		}
+		else
+		{
+			Frame.U = FVector3d::UnitZ().Cross(N);
+			Frame.U.Normalize();
+		}
+
+		Frame.V = N.Cross(Frame.U);
+		Frame.V.Normalize();
+		return Frame;
+	}
+
+	/**
+	 * Charts, by one of two relations - see EChartRule for why there have to be two.
+	 *
+	 * BY SMOOTHNESS is the one UV0 uses, and it is the same relation, edge for edge, that
+	 * FMeshNormals::InitializeOverlayTopologyFromOpeningAngle welds the normal overlay on: two
+	 * triangles sharing an edge belong together when the angle between their face normals is under
+	 * the hard-edge threshold. That is not a coincidence to be kept in step by hand; it is the whole
+	 * design, and it buys the invariant this file could not state before:
+	 *
+	 *     A UV0 SEAM IS ALWAYS A NORMAL SEAM.
+	 *
+	 * MikkT accumulates a vertex's tangent per distinct (UV element, normal element, orientation)
+	 * triple, so a UV split blocks tangent averaging even where the normal is perfectly welded. Split
+	 * UV0 anywhere the normals are smooth and that surface shades faceted under a normal map however
+	 * carefully ComputeShadingNormals welded it. Charts drawn on the normals' own relation cannot.
+	 *
+	 * The one seam a chart may still carry is the cut a closed loop forces - a tube has to be opened
+	 * somewhere before it can lie flat - and that is topology, not a choice. Only a DEVELOPABLE chart
+	 * gets away with that few, though, and saying otherwise was this file's own worst comment: a
+	 * doubly-curved chart has no isometry at all, and unfolding one rigidly cuts it in proportion to
+	 * its curvature. Those charts are parameterised instead of unfolded, with no interior seams and a
+	 * little scale drift in place of the cuts. See ChartTotalAngleDefect for how the two are told
+	 * apart, UnfoldChart for the first, ParameteriseSmoothly for the second.
+	 *
+	 * BY DOMINANT AXIS is the one UV1 uses, and it answers a different question: which triangles can
+	 * share ONE plane without any of them turning more than 55 degrees away from it, which is what
+	 * makes an island certain not to fold over itself. It deliberately ignores hard edges, so a
+	 * chamfer strip packs with the face it runs along instead of becoming a 500:1 sliver island of
+	 * its own - and a sliver is the one thing the packer cannot lay out, because it is thinner than
+	 * the texel grid it allocates in. Connectivity still applies, so two separate walls facing the
+	 * same way are still two islands.
+	 */
+	/** Which of the six world axis directions a normal points most nearly along. */
+	int32 SignedDominantAxis(const FVector3d& Normal)
 	{
 		const double AbsX = FMath::Abs(Normal.X);
 		const double AbsY = FMath::Abs(Normal.Y);
@@ -151,70 +232,656 @@ namespace
 		return Normal.Y >= 0.0 ? 1 : 4;
 	}
 
-	/** World position over texel size, on the plane that axis projects onto. */
-	FVector2f ProjectOntoAxisPlane(const FVector3d& P, int32 SignedAxis, double InvTexel)
+	FVector3d AxisDirection(int32 SignedAxis)
 	{
-		switch (SignedAxis % 3)
+		switch (SignedAxis)
 		{
-		case 2:		return FVector2f(static_cast<float>(P.X * InvTexel), static_cast<float>(P.Y * InvTexel));
-		case 0:		return FVector2f(static_cast<float>(P.Y * InvTexel), static_cast<float>(P.Z * InvTexel));
-		default:	return FVector2f(static_cast<float>(P.X * InvTexel), static_cast<float>(P.Z * InvTexel));
+		case 0:		return FVector3d::UnitX();
+		case 1:		return FVector3d::UnitY();
+		case 2:		return FVector3d::UnitZ();
+		case 3:		return -FVector3d::UnitX();
+		case 4:		return -FVector3d::UnitY();
+		default:	return -FVector3d::UnitZ();
+		}
+	}
+
+	void BuildCharts(const FDynamicMesh3& Mesh, double HardEdgeAngleDegrees, bool bBySmoothness,
+		TArray<TArray<int32>>& OutCharts, TArray<int32>& OutChartForTri)
+	{
+		OutCharts.Reset();
+		OutChartForTri.Init(INDEX_NONE, Mesh.MaxTriangleID());
+
+		const double CosThreshold = FMath::Cos(FMath::DegreesToRadians(
+			FMath::Clamp(HardEdgeAngleDegrees, 1.0, 179.0)));
+
+		TArray<int32> Stack;
+		for (const int32 Seed : Mesh.TriangleIndicesItr())
+		{
+			if (OutChartForTri[Seed] != INDEX_NONE)
+			{
+				continue;
+			}
+
+			const int32 ChartId = OutCharts.AddDefaulted();
+			OutChartForTri[Seed] = ChartId;
+
+			Stack.Reset();
+			Stack.Add(Seed);
+			while (Stack.Num() > 0)
+			{
+				const int32 Current = Stack.Pop();
+				OutCharts[ChartId].Add(Current);
+
+				const FVector3d CurrentNormal = Mesh.GetTriNormal(Current);
+				const FIndex3i Neighbours = Mesh.GetTriNeighbourTris(Current);
+				for (int32 i = 0; i < 3; ++i)
+				{
+					const int32 Neighbour = Neighbours[i];
+					if (Neighbour == FDynamicMesh3::InvalidID || OutChartForTri[Neighbour] != INDEX_NONE)
+					{
+						continue;
+					}
+
+					const FVector3d NeighbourNormal = Mesh.GetTriNormal(Neighbour);
+					const bool bTogether = bBySmoothness
+						? CurrentNormal.Dot(NeighbourNormal) >= CosThreshold
+						: SignedDominantAxis(CurrentNormal) == SignedDominantAxis(NeighbourNormal);
+					if (!bTogether)
+					{
+						continue;
+					}
+
+					OutChartForTri[Neighbour] = ChartId;
+					Stack.Add(Neighbour);
+				}
+			}
 		}
 	}
 
 	/**
-	 * Fills a UV overlay with the world-scale planar projection, welded per vertex and axis.
+	 * The total angle defect a chart carries at its interior vertices, in radians.
 	 *
-	 * WELDED, where this used to append three fresh elements for every triangle corner. The values
-	 * are identical either way - a projection is a pure function of position and axis - so nothing
-	 * about the world-scale relationship the material panel depends on changes. What changes is the
-	 * connectivity, and two things read it:
+	 * GAUSS-BONNET DECIDES THIS, NOT A GUESS ABOUT WHETHER SOMETHING "LOOKS CURVED". Unfolding a
+	 * triangle rigidly against the edge it arrived over preserves all three of its edge lengths, so a
+	 * cycle of such unfoldings closes exactly when the angles it encircles sum to a full turn - and
+	 * the amount by which it fails to close IS the angle defect it encircles. A chart with no defect
+	 * at any interior vertex is developable: every contractible cycle in it closes, and the only cut
+	 * left is the one a non-contractible loop forces, which is topology rather than a choice. A chart
+	 * with defect cannot be flattened isometrically at any resolution by any algorithm.
 	 *
-	 *   - TANGENTS. UDynamicMeshComponent computes them with EDynamicMeshComponentTangentsMode::
-	 *     AutoCalculated, from the normal overlay AND the primary UV overlay. A UV overlay with no
-	 *     shared elements anywhere splits the tangent frame at every single triangle edge, so a
-	 *     surface that was carefully welded smooth by ComputeShadingNormals still gets a
-	 *     discontinuous tangent basis - invisible against today's flat colours and a faceted seam on
-	 *     every triangle of every curved surface the moment a normal map goes on. That is exactly
-	 *     the failure AHFElementActor's constructor comment predicted for tangents mode, one layer
-	 *     further down.
-	 *   - ISLANDS. The lightmap unwrap packs UV islands, and islands are connected components of
-	 *     this overlay. Fully split elements mean one island per triangle, which packs every
-	 *     triangle of the flat as its own chart with its own gutter.
+	 * That is why this is computed rather than discovered afterwards as a cut count. It answers
+	 * exactly the question the unfolder is about to be asked, before any element has been written.
+	 *
+	 * Only vertices whose WHOLE one-ring is in this chart count. A vertex on the chart's rim has no
+	 * closed cycle around it to fail to close, so its defect is not the unfolder's problem, and
+	 * charging it would send every merely-folded surface - which unfolds perfectly - down the lossy
+	 * path.
 	 */
-	void FillWorldScaleProjection(FDynamicMesh3& Mesh, FDynamicMeshUVOverlay& UVs, double TexelSizeCm)
+	double ChartTotalAngleDefect(const FDynamicMesh3& Mesh, const TArray<int32>& ChartTris,
+		const TArray<int32>& ChartForTri, int32 ChartId, TArray<double>& AngleSum,
+		TArray<int32>& InChartTriCount, TArray<int32>& TouchedVerts)
 	{
-		UVs.ClearElements();
+		TouchedVerts.Reset();
 
-		const double InvTexel = 1.0 / TexelSizeCm;
-
-		// Keyed by vertex and signed axis, so a face's interior edges weld and its arrises do not.
-		TMap<TPair<int32, int32>, int32> ElementForVertexAndAxis;
-		ElementForVertexAndAxis.Reserve(Mesh.TriangleCount() * 2);
-
-		for (const int32 Tid : Mesh.TriangleIndicesItr())
+		for (const int32 Tid : ChartTris)
 		{
 			const FIndex3i Tri = Mesh.GetTriangle(Tid);
-			const int32 Axis = SignedProjectionAxis(Mesh.GetTriNormal(Tid));
+			const FVector3d P[3] = { Mesh.GetVertex(Tri.A), Mesh.GetVertex(Tri.B), Mesh.GetVertex(Tri.C) };
 
-			int32 Elements[3];
 			for (int32 Corner = 0; Corner < 3; ++Corner)
 			{
-				const TPair<int32, int32> Key(Tri[Corner], Axis);
-				if (const int32* Existing = ElementForVertexAndAxis.Find(Key))
+				FVector3d E1 = P[(Corner + 1) % 3] - P[Corner];
+				FVector3d E2 = P[(Corner + 2) % 3] - P[Corner];
+				if (!E1.Normalize(UE_DOUBLE_SMALL_NUMBER) || !E2.Normalize(UE_DOUBLE_SMALL_NUMBER))
 				{
-					Elements[Corner] = *Existing;
 					continue;
 				}
 
-				const int32 New = UVs.AppendElement(
-					ProjectOntoAxisPlane(Mesh.GetVertex(Tri[Corner]), Axis, InvTexel));
-				ElementForVertexAndAxis.Add(Key, New);
-				Elements[Corner] = New;
+				const int32 Vid = Tri[Corner];
+				if (InChartTriCount[Vid] == 0)
+				{
+					TouchedVerts.Add(Vid);
+					AngleSum[Vid] = 0.0;
+				}
+				++InChartTriCount[Vid];
+				AngleSum[Vid] += FMath::Acos(FMath::Clamp(E1.Dot(E2), -1.0, 1.0));
+			}
+		}
+
+		double Total = 0.0;
+		for (const int32 Vid : TouchedVerts)
+		{
+			// A closed fan of this chart's triangles, and nothing else touching the vertex. Anything
+			// less is a rim vertex; anything on a mesh boundary is one by definition.
+			const bool bInterior = !Mesh.IsBoundaryVertex(Vid)
+				&& InChartTriCount[Vid] == Mesh.GetVtxTriangleCount(Vid);
+
+			if (bInterior)
+			{
+				Total += FMath::Abs(UE_DOUBLE_TWO_PI - AngleSum[Vid]);
 			}
 
-			UVs.SetTriangle(Tid, FIndex3i(Elements[0], Elements[1], Elements[2]));
+			InChartTriCount[Vid] = 0;
 		}
+
+		return Total;
+	}
+
+	/**
+	 * Unwraps a mesh into UV0 at real-world scale, one chart at a time.
+	 *
+	 * ## What this replaced, and why every part of it was wrong
+	 *
+	 * The old projection picked one of the six world axes PER TRIANGLE, by dominant normal component,
+	 * and projected onto the matching world plane. Three defects, all invisible while no material
+	 * sampled a texture:
+	 *
+	 *   - STRETCH. An orthographic projection foreshortens by cos of the angle between the surface
+	 *     and the plane, so a wall yawed 45 degrees rendered its texture 1.41x stretched along its
+	 *     length, and 2x at 60. Nothing in the reference flat is yawed, which is exactly why it went
+	 *     unexamined - but a drawing with a splayed wall is one drawing away, and every curved
+	 *     surface in the kit is off-axis by construction. Round a rail tube, a knob dome or a cove
+	 *     arc the magnification ran continuously from 1.0 to 1.41 and snapped back four times.
+	 *   - MIRRORING. See FChartFrame.
+	 *   - ARBITRARY PLANES. A chamfer facet sits at 45 degrees to two axes and took whichever won the
+	 *     tie-break, unrelated to either face it joins.
+	 *
+	 * ## What it does instead
+	 *
+	 * Per chart, never per triangle and never per polygroup. Per polygroup would be worse than either:
+	 * a whole wall element is one WallPaint group covering six faces pointing six ways, and one plane
+	 * cannot serve them.
+	 *
+	 *   - A PLANAR CHART - which is every wall face, board, shutter, cap and chamfer facet in the kit -
+	 *     is projected straight into its own frame. That is an exact isometry: one UV unit is
+	 *     TexelSizeCm of world along every edge, at any orientation, with no foreshortening left to
+	 *     measure. It stays a pure function of world position, so two elements sharing a plane share a
+	 *     tile module and the material can keep expressing tiling in millimetres.
+	 *   - A DEVELOPABLE CURVED CHART - a tube, a cove arc, a chamfer skirt, an extrusion - is UNFOLDED:
+	 *     laid out flat by walking the triangles and placing each one rigidly against the edge it
+	 *     arrived over, the way a paper model unrolls. Every triangle keeps all three of its edge
+	 *     lengths exactly, so world scale holds on a tube as well as it does on a wall - which a plane
+	 *     can never do - and the four projection-axis seams that used to run down every curved surface
+	 *     become the single cut its topology forces.
+	 *   - A DOUBLY-CURVED CHART - a cushion, a knob dome, a lofted basin, the corner of a soft box -
+	 *     is PARAMETERISED, because for that one there is no isometry to find and unfolding it rigidly
+	 *     shatters it. See ParameteriseSmoothly.
+	 *
+	 * Neither path reads or writes a polygroup, so surface roles pass through untouched.
+	 */
+	struct FWorldScaleUnwrapper
+	{
+		FDynamicMesh3& Mesh;
+		FDynamicMeshUVOverlay& UVs;
+		const TArray<int32>& ChartForTri;
+		double InvTexel;
+
+		/** 0 unplaced, 1 placed and safe to grow from, 2 placed against a cut and therefore terminal. */
+		TArray<uint8> TriState;
+
+		/** Per-vertex layout of the patch currently being grown; Stamp is what makes it cheap to reset. */
+		TArray<int32> ElementForVertex;
+		TArray<FVector2d> UVForVertex;
+		TArray<int32> VertexStamp;
+		int32 Stamp = 0;
+
+		TArray<int32> Queue;
+
+		/**
+		 * How far a reused vertex may sit from where the unfold wants it, in centimetres of world.
+		 *
+		 * Tight on purpose. Only developable charts are unfolded, so an unfold that fails to close has
+		 * met a genuine topological loop rather than accumulated curvature, and this tolerance only has
+		 * to absorb float drift along the traversal. Past it the triangle gets its own element and
+		 * stays exact, at the price of a seam - which for a tube is the one column of facets it has to
+		 * be opened along.
+		 */
+		static constexpr double ReuseToleranceCm = 0.005;
+
+		FWorldScaleUnwrapper(FDynamicMesh3& InMesh, FDynamicMeshUVOverlay& InUVs,
+			const TArray<int32>& InChartForTri, double InInvTexel)
+			: Mesh(InMesh), UVs(InUVs), ChartForTri(InChartForTri), InvTexel(InInvTexel)
+		{
+			TriState.Init(0, Mesh.MaxTriangleID());
+			ElementForVertex.Init(INDEX_NONE, Mesh.MaxVertexID());
+			UVForVertex.SetNumZeroed(Mesh.MaxVertexID());
+			VertexStamp.Init(INDEX_NONE, Mesh.MaxVertexID());
+		}
+
+		FVector2f ToElement(const FVector2d& UV) const
+		{
+			return FVector2f(static_cast<float>(UV.X), static_cast<float>(UV.Y));
+		}
+
+		int32 PlaceVertex(int32 Vid, const FVector2d& UV)
+		{
+			VertexStamp[Vid] = Stamp;
+			UVForVertex[Vid] = UV;
+			ElementForVertex[Vid] = UVs.AppendElement(ToElement(UV));
+			return ElementForVertex[Vid];
+		}
+
+		/** Exact, world-anchored, and the path almost every triangle in the flat takes. */
+		void ProjectPlanarChart(const TArray<int32>& ChartTris, const FChartFrame& Frame)
+		{
+			++Stamp;
+			for (const int32 Tid : ChartTris)
+			{
+				const FIndex3i Tri = Mesh.GetTriangle(Tid);
+
+				FIndex3i Elements;
+				for (int32 Corner = 0; Corner < 3; ++Corner)
+				{
+					const int32 Vid = Tri[Corner];
+					if (VertexStamp[Vid] != Stamp)
+					{
+						PlaceVertex(Vid, Frame.Project(Mesh.GetVertex(Vid), InvTexel));
+					}
+					Elements[Corner] = ElementForVertex[Vid];
+				}
+
+				UVs.SetTriangle(Tid, Elements);
+				TriState[Tid] = 1;
+			}
+		}
+
+		/**
+		 * Places one triangle by rigidly unfolding it about the edge it was reached over.
+		 *
+		 * The shared edge already has UVs. The third corner is the one point at the two known
+		 * distances from them, on the far side of that edge from where we came - which is the same
+		 * construction as flattening a strip of card, and preserves all three edge lengths exactly.
+		 *
+		 * @return true if the triangle may be grown from in turn. False means it closed a loop that
+		 *         does not close in the plane, so it took a fresh element and its other two edges are
+		 *         the cut.
+		 */
+		bool PlaceTriangle(int32 Tid, int32 FromTid)
+		{
+			const FIndex3i Tri = Mesh.GetTriangle(Tid);
+			const FIndex3i From = Mesh.GetTriangle(FromTid);
+
+			int32 FarCorner = INDEX_NONE;
+			for (int32 i = 0; i < 3; ++i)
+			{
+				if (From.A != Tri[i] && From.B != Tri[i] && From.C != Tri[i])
+				{
+					FarCorner = i;
+					break;
+				}
+			}
+			if (FarCorner == INDEX_NONE)
+			{
+				return false;
+			}
+
+			const int32 Vc = Tri[FarCorner];
+			const int32 Va = Tri[(FarCorner + 1) % 3];
+			const int32 Vb = Tri[(FarCorner + 2) % 3];
+
+			int32 VFrom = INDEX_NONE;
+			for (int32 i = 0; i < 3; ++i)
+			{
+				if (From[i] != Va && From[i] != Vb)
+				{
+					VFrom = From[i];
+					break;
+				}
+			}
+			if (VFrom == INDEX_NONE
+				|| VertexStamp[Va] != Stamp || VertexStamp[Vb] != Stamp || VertexStamp[VFrom] != Stamp)
+			{
+				return false;
+			}
+
+			const FVector2d A = UVForVertex[Va];
+			const FVector2d B = UVForVertex[Vb];
+			const FVector2d Edge = B - A;
+			const double EdgeLength = Edge.Length();
+			if (EdgeLength <= UE_DOUBLE_SMALL_NUMBER)
+			{
+				return false;
+			}
+
+			const FVector3d Pa = Mesh.GetVertex(Va);
+			const FVector3d Pb = Mesh.GetVertex(Vb);
+			const FVector3d Pc = Mesh.GetVertex(Vc);
+			const double ToA = (Pc - Pa).Length() * InvTexel;
+			const double ToB = (Pc - Pb).Length() * InvTexel;
+
+			const FVector2d Dir = Edge / EdgeLength;
+			const FVector2d Perp(-Dir.Y, Dir.X);
+
+			const double Along = (ToA * ToA - ToB * ToB + EdgeLength * EdgeLength) / (2.0 * EdgeLength);
+			const double Across = FMath::Sqrt(FMath::Max(ToA * ToA - Along * Along, 0.0));
+
+			// Away from the triangle we came from, or the strip folds back over itself.
+			const FVector2d FromOffset = UVForVertex[VFrom] - A;
+			const double FromSide = Dir.X * FromOffset.Y - Dir.Y * FromOffset.X;
+			const FVector2d Unfolded = A + Dir * Along + Perp * (FromSide >= 0.0 ? -Across : Across);
+
+			bool bExpandable = true;
+			int32 ElementC = INDEX_NONE;
+
+			if (VertexStamp[Vc] != Stamp)
+			{
+				ElementC = PlaceVertex(Vc, Unfolded);
+			}
+			else
+			{
+				const double Tolerance = ReuseToleranceCm * InvTexel;
+				const FVector2d Existing = UVForVertex[Vc];
+				if (FMath::Abs((Existing - A).Length() - ToA) <= Tolerance
+					&& FMath::Abs((Existing - B).Length() - ToB) <= Tolerance)
+				{
+					ElementC = ElementForVertex[Vc];
+				}
+				else
+				{
+					// The cut. The triangle keeps its exact shape and stays welded along the edge it
+					// arrived over; what gives is the loop, which is where a cylinder has to open.
+					ElementC = UVs.AppendElement(ToElement(Unfolded));
+					bExpandable = false;
+				}
+			}
+
+			FIndex3i Elements;
+			Elements[FarCorner] = ElementC;
+			Elements[(FarCorner + 1) % 3] = ElementForVertex[Va];
+			Elements[(FarCorner + 2) % 3] = ElementForVertex[Vb];
+			UVs.SetTriangle(Tid, Elements);
+
+			TriState[Tid] = bExpandable ? 1 : 2;
+			return bExpandable;
+		}
+
+		/**
+		 * Grows one flat patch outward from a seed, and returns when it can reach no further.
+		 *
+		 * Arrival order, deliberately plain. Expanding across the flattest edges first was tried, on
+		 * the reasoning that it would spend the traversal's freedom on the flat parts and leave the
+		 * sharpest edges to close the loops over - aiming the cut at a fold instead of letting it land
+		 * anywhere. It does reduce the total cut count slightly, and it moves MORE of them onto flat
+		 * surface, not fewer: 6,236 against 2,463 over the reference flat. The reason is that a cut
+		 * does not fall on the edge a triangle arrives over at all - it falls on the two edges at the
+		 * vertex where the loop failed to close - so ordering the arrivals does not steer it.
+		 *
+		 * Placing these deliberately means choosing the cut PATH, which is a different piece of work.
+		 * Until then this stays simple, and the residue is measured rather than assumed away.
+		 */
+		void GrowPatch(int32 SeedTid)
+		{
+			++Stamp;
+
+			// The seed lies in its own plane by definition, so projecting it into its own frame is
+			// exact - and keeps the patch anchored to world position rather than to an arbitrary origin.
+			const FChartFrame SeedFrame = MakeChartFrame(Mesh.GetTriNormal(SeedTid));
+			const FIndex3i SeedTri = Mesh.GetTriangle(SeedTid);
+
+			FIndex3i Elements;
+			for (int32 Corner = 0; Corner < 3; ++Corner)
+			{
+				Elements[Corner] = PlaceVertex(SeedTri[Corner],
+					SeedFrame.Project(Mesh.GetVertex(SeedTri[Corner]), InvTexel));
+			}
+			UVs.SetTriangle(SeedTid, Elements);
+			TriState[SeedTid] = 1;
+
+			Queue.Reset();
+			Queue.Add(SeedTid);
+			while (Queue.Num() > 0)
+			{
+				const int32 Current = Queue.Pop();
+				const FIndex3i Neighbours = Mesh.GetTriNeighbourTris(Current);
+				for (int32 i = 0; i < 3; ++i)
+				{
+					const int32 Neighbour = Neighbours[i];
+					if (Neighbour == FDynamicMesh3::InvalidID || TriState[Neighbour] != 0
+						|| ChartForTri[Neighbour] != ChartForTri[Current])
+					{
+						continue;
+					}
+
+					if (PlaceTriangle(Neighbour, Current))
+					{
+						Queue.Add(Neighbour);
+					}
+				}
+			}
+		}
+
+		void UnfoldChart(const TArray<int32>& ChartTris)
+		{
+			// The first seed is the chart's largest triangle: the biggest area is the least likely to
+			// be a sliver whose normal is numerical noise, and it anchors the patch where it matters.
+			int32 Seed = INDEX_NONE;
+			double BestArea = -1.0;
+			for (const int32 Tid : ChartTris)
+			{
+				const double Area = Mesh.GetTriArea(Tid);
+				if (Area > BestArea)
+				{
+					BestArea = Area;
+					Seed = Tid;
+				}
+			}
+
+			int32 Cursor = 0;
+			while (Seed != INDEX_NONE)
+			{
+				GrowPatch(Seed);
+
+				// Anything a cut left stranded starts a patch of its own. In list order, so the same
+				// mesh always unwraps the same way.
+				Seed = INDEX_NONE;
+				for (; Cursor < ChartTris.Num(); ++Cursor)
+				{
+					if (TriState[ChartTris[Cursor]] == 0)
+					{
+						Seed = ChartTris[Cursor];
+						break;
+					}
+				}
+			}
+		}
+
+		/**
+		 * Lays a chart flat that CANNOT be laid flat, and pays for it in scale rather than in seams.
+		 *
+		 * A doubly-curved chart - a cushion, a knob dome, a lofted basin, the rounded corner of a soft
+		 * box - has angle defect, so no isometry exists. The unfolder above answers that by cutting:
+		 * every cycle that fails to close takes a fresh element, every triangle stranded behind a cut
+		 * seeds a fresh patch, and the boundary of every patch is a seam. The cut count is then
+		 * proportional to the chart's CURVATURE rather than to its topology, and the cuts land wherever
+		 * the traversal happened to arrive - including straight across flat sub-regions of the chart.
+		 * Measured on the reference flat that was 29,107 tangent creases on edges the normals had
+		 * deliberately welded smooth, 382 of them on one 672-triangle sofa cushion. A cushion needs one
+		 * seam at most, and needs it at the welt.
+		 *
+		 * A discrete exponential map has no interior seams at all: it allocates exactly one UV element
+		 * per chart vertex, so nothing inside the chart can be split, and the invariant this file is
+		 * built on - a UV0 seam is always a normal seam - holds by construction rather than by luck.
+		 * It preserves geodesic distance from its seed exactly and shears gradually away from it, so
+		 * world scale becomes approximate here instead of exact.
+		 *
+		 * THAT TRADE IS THE RIGHT WAY ROUND, and it is worth being explicit about why. A few percent of
+		 * scale drift across a 15 cm cushion is a fraction of a millimetre of texture slide that no
+		 * camera resolves. A tangent crease is a hard line across a surface under any normal map, at
+		 * any distance, forever. The channel's promise is that a millimetre of texture is a millimetre
+		 * of wall; a curved surface cannot keep that promise exactly, and the honest response is to
+		 * keep it on average rather than to shatter the surface trying to keep it pointwise.
+		 *
+		 * The frame is the chart's own gravity-aligned mean frame, the same one a planar chart would
+		 * get, so a curved surface's texture runs the same way up as the flat one it adjoins.
+		 */
+		bool ParameteriseSmoothly(const TArray<int32>& ChartTris, const FChartFrame& Frame)
+		{
+			FVector3d Centroid = FVector3d::Zero();
+			double TotalArea = 0.0;
+			for (const int32 Tid : ChartTris)
+			{
+				const double Area = Mesh.GetTriArea(Tid);
+				Centroid += Mesh.GetTriCentroid(Tid) * Area;
+				TotalArea += Area;
+			}
+			if (TotalArea <= UE_DOUBLE_SMALL_NUMBER)
+			{
+				return false;
+			}
+			Centroid /= TotalArea;
+
+			FDynamicMeshUVEditor Editor(&Mesh, &UVs);
+
+			const double TexelSizeCm = 1.0 / InvTexel;
+			const bool bMapped = Editor.SetTriangleUVsFromExpMap(
+				ChartTris,
+				[](const FVector3d& P) { return P; },
+				FFrame3d(Centroid, Frame.U, Frame.V, Frame.N),
+				FVector2d(TexelSizeCm, TexelSizeCm));
+
+			if (!bMapped)
+			{
+				// Some vertex the map could not reach, which leaves triangles with no UV at all. Worse
+				// than a seam by a long way, so the exact unfolder gets it back - cuts and all.
+				UVs.ClearElements(ChartTris);
+				return false;
+			}
+
+			for (const int32 Tid : ChartTris)
+			{
+				TriState[Tid] = 1;
+			}
+			return true;
+		}
+	};
+
+	/**
+	 * The two things a UV channel here can be asked for, and they are not the same thing.
+	 *
+	 *   - Isometric is what UV0 needs: a millimetre of UV is a millimetre of wall on every triangle,
+	 *     and seams cost tangent continuity, so charts follow the surface however far it curves and
+	 *     curved ones are unfolded rather than projected.
+	 *   - FlatIslands is what UV1 needs: every island must lie flat WITHOUT FOLDING OVER ITSELF,
+	 *     because a lightmap addresses one texture with these coordinates and two bits of surface
+	 *     landing on the same texels light each other. Scale fidelity only has to be good enough to
+	 *     apportion texels between islands, which the packer then renormalises anyway.
+	 *
+	 * A chamfered box is the case that separates them. Its bevel skirt is one continuous smooth run
+	 * of facets and junction polygons all the way round the solid - twelve arrises stitched at eight
+	 * corners, never turning more than 40 degrees at any single edge. Unfolded that is right, and it
+	 * is why a chamfer no longer breaks the texture. Packed as one lightmap island it is a spiral of
+	 * card wrapped round a box, and it overlaps itself on the second face.
+	 */
+	enum class EChartRule
+	{
+		Isometric,
+		FlatIslands
+	};
+
+	/** Fills a UV overlay with the chart unwrap. See FWorldScaleUnwrapper for what changed and why. */
+	void FillWorldScaleProjection(FDynamicMesh3& Mesh, FDynamicMeshUVOverlay& UVs, double TexelSizeCm,
+		double HardEdgeAngleDegrees, EChartRule Rule)
+	{
+		UVs.ClearElements();
+
+		const bool bIsometric = Rule == EChartRule::Isometric;
+
+		TArray<TArray<int32>> Charts;
+		TArray<int32> ChartForTri;
+		BuildCharts(Mesh, HardEdgeAngleDegrees, bIsometric, Charts, ChartForTri);
+
+		FWorldScaleUnwrapper Unwrapper(Mesh, UVs, ChartForTri, 1.0 / TexelSizeCm);
+
+		// Scratch for the developability test, allocated once for the whole mesh rather than per
+		// chart. InChartTriCount is left at zero by every call, so it needs no clearing between them.
+		TArray<double> AngleSum;
+		TArray<int32> InChartTriCount;
+		TArray<int32> TouchedVerts;
+		AngleSum.SetNumZeroed(Mesh.MaxVertexID());
+		InChartTriCount.SetNumZeroed(Mesh.MaxVertexID());
+
+		for (const TArray<int32>& ChartTris : Charts)
+		{
+			if (ChartTris.Num() == 0)
+			{
+				continue;
+			}
+
+			FVector3d MeanNormal = FVector3d::Zero();
+			for (const int32 Tid : ChartTris)
+			{
+				MeanNormal += Mesh.GetTriNormal(Tid) * Mesh.GetTriArea(Tid);
+			}
+
+			// A flat island is projected along its own dominant axis rather than along its mean. The
+			// mean would be a better fit and a worse guarantee: two triangles in one axis bucket can
+			// be 109 degrees apart, so a mean-fitted plane can leave one of them past the fold, and a
+			// folded lightmap island lights part of a surface with another part's bounce. Measured
+			// from the axis instead, nothing in the bucket is more than 55 degrees off it, ever.
+			const FChartFrame Frame = bIsometric
+				? MakeChartFrame(MeanNormal)
+				: MakeChartFrame(AxisDirection(SignedDominantAxis(MeanNormal)));
+
+			// Planar to within a rounding error, which every flat face is by construction. Anything
+			// else - a tube, a dome, a cove arc - has no single plane to be projected into without
+			// foreshortening, and gets unfolded instead.
+			bool bPlanar = true;
+			if (bIsometric)
+			{
+				for (const int32 Tid : ChartTris)
+				{
+					FVector3d TriNormal = Mesh.GetTriNormal(Tid);
+					if (!TriNormal.Normalize(UE_DOUBLE_SMALL_NUMBER) || TriNormal.Dot(Frame.N) < 1.0 - 1e-8)
+					{
+						bPlanar = false;
+						break;
+					}
+				}
+			}
+
+			if (bPlanar)
+			{
+					Unwrapper.ProjectPlanarChart(ChartTris, Frame);
+				continue;
+			}
+
+			// CURVATURE DECIDES THE METHOD. TOPOLOGY DOES NOT, AND TRYING TO MAKE IT WAS A MISTAKE
+			// WORTH RECORDING HERE SO IT IS NOT REPEATED.
+			//
+			// Angle defect at an interior vertex means no isometry exists, by Gauss-Bonnet, so a chart
+			// carrying any goes to the seamless parameterisation and pays in scale. A chart with none
+			// is developable and unfolds EXACTLY, however many cuts its topology costs.
+			//
+			// The obvious refinement - unfold, count the cuts, and hand an expensive one to the
+			// parameterisation as well - is wrong, and measurably so. A chamfer band has no interior
+			// vertices at all: every vertex it owns sits on the boundary it shares with the flat faces.
+			// So it scores exactly zero defect while being a surface spread over the solid's whole edge
+			// graph, with one independent loop per cycle in that graph. It genuinely needs about ten
+			// cuts, and they fall across 2 mm strips where nothing can see them. Handed to the
+			// parameterisation instead, that band unwraps as a long spiral and world scale fails by
+			// 235 cm on a chamfered box and 5.6 cm round a barrel - the channel's whole promise, lost
+			// buying back seams nobody could have seen.
+			//
+			// So cuts on a developable chart are topology, paid for in the right currency. What they
+			// still cost is that nothing chooses WHERE along a band the cut falls, which is measured
+			// and recorded as open by HouseForge.Flat.NoElementCreasesItsOwnTangents.
+			constexpr double DevelopableDefectRadians = 1e-4;
+
+			const double Defect = ChartTotalAngleDefect(Mesh, ChartTris, ChartForTri,
+				ChartForTri[ChartTris[0]], AngleSum, InChartTriCount, TouchedVerts);
+
+			if (Defect > DevelopableDefectRadians && Unwrapper.ParameteriseSmoothly(ChartTris, Frame))
+			{
+				continue;
+			}
+
+			Unwrapper.UnfoldChart(ChartTris);
+		}
+
+		// A bowtie vertex - two fans of this chart's triangles meeting at a single point - would
+		// otherwise share one element and read as connected, which is not an island the packer can lay
+		// out. The values do not change; only the connectivity does.
+		UVs.SplitBowties();
 	}
 
 	/**
@@ -1570,14 +2237,12 @@ void FHFMeshOps::ApplyWorldScaleUVs(FDynamicMesh3& Mesh, double TexelSizeCm)
 	{
 		return;
 	}
-	// Project each triangle along its dominant axis rather than using the UV editor's box
-	// projection: that one atlases the six faces into a cube-cross layout, so UVs no longer
-	// correspond to world distance. Here UV is simply world position over texel size, which means
-	// one tile really is TexelSizeCm across - the property the material panel needs in order to
-	// express tiling in millimetres.
-	FillWorldScaleProjection(Mesh, *UVs, TexelSizeCm);
+	// Charted on the same threshold the normals are about to be welded on, and in that order for a
+	// reason: the two topologies have to agree, or the tangent basis breaks where the normals are
+	// smooth. Passing the constant explicitly rather than leaning on both defaults keeps that visible.
+	FillWorldScaleProjection(Mesh, *UVs, TexelSizeCm, DefaultHardEdgeAngleDegrees, EChartRule::Isometric);
 
-	ComputeShadingNormals(Mesh);
+	ComputeShadingNormals(Mesh, DefaultHardEdgeAngleDegrees);
 }
 
 bool FHFMeshOps::BevelConvexEdges(FDynamicMesh3& Mesh, const FHFBevelParams& Params,
@@ -1822,12 +2487,15 @@ bool FHFMeshOps::BuildLightmapUVs(FDynamicMesh3& Mesh, const FHFLightmapParams& 
 		return false;
 	}
 
-	// Seeded with the same world-scale projection UV0 uses, at a texel size of 1 cm. The absolute
-	// scale is irrelevant - the packer normalises it - but the RELATIVE scale between islands is
-	// not, and starting from a world-scale unwrap is what makes a 3 m wall arrive at the packer
-	// with proportionally more area than a door handle rather than each being fitted to its own
-	// slot. Islands fall out of the welding: one per connected same-facing planar region.
-	FillWorldScaleProjection(Mesh, *Lightmap, 1.0);
+	// Seeded at a texel size of 1 cm. The absolute scale is irrelevant - the packer normalises it -
+	// but the RELATIVE scale between islands is not, and starting from a world-scale unwrap is what
+	// makes a 3 m wall arrive at the packer with proportionally more area than a door handle rather
+	// than each being fitted to its own slot.
+	//
+	// FLAT ISLANDS, not the isometric unwrap UV0 gets: a lightmap addresses one texture with these
+	// coordinates, so an island that folds over itself lights one part of the surface with another
+	// part's bounce. See EChartRule, and the chamfered box that separates the two.
+	FillWorldScaleProjection(Mesh, *Lightmap, 1.0, DefaultHardEdgeAngleDegrees, EChartRule::FlatIslands);
 
 	FDynamicMeshUVPacker Packer(Lightmap);
 	Packer.TextureResolution = FMath::Max(Params.TextureResolution, 16);

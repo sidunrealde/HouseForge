@@ -440,11 +440,20 @@ bool FHFBevelKeepsShadowGapsTest::RunTest(const FString& Parameters)
 }
 
 /**
- * UV0 is world position over texel size, and stays that way through everything above.
+ * UV0 is at real-world scale, and stays that way through everything above.
  *
- * The material panel expresses tiling in millimetres by leaning on exactly this. It is re-derived
- * here from the vertex positions rather than compared against a stored copy, so the assertion is
- * the relationship itself and not a snapshot of it.
+ * ## Asserted as the relationship, not as the formula
+ *
+ * This test used to re-derive the old projection - dominant axis, then world position onto the
+ * matching world plane - and compare UV0 against it corner by corner. That reads like the
+ * relationship and is really a copy of the implementation: it would have passed just as happily on a
+ * projection that stretched a yawed wall by 1.41, because the expected value was computed the same
+ * wrong way. It could not have caught any of the three defects the unwrap was rewritten for.
+ *
+ * What the material actually needs is that a centimetre of wall is a hundredth of a UV unit at a
+ * 100 cm texel, which is a statement about EDGE LENGTHS and says nothing about which plane anything
+ * was projected onto. Measured that way it holds on a chamfer facet, on a tube and on a wall at any
+ * yaw, none of which the old assertion could express.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFRenderFinishKeepsWorldScaleUVsTest,
 	"HouseForge.Photoreal.FinishKeepsWorldScaleUV0", HF_TEST_FLAGS)
@@ -469,8 +478,8 @@ bool FHFRenderFinishKeepsWorldScaleUVsTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const double InvTexel = 1.0 / Finish.TexelSizeCm;
 	int32 Checked = 0;
+	double WorstErrorCm = 0.0;
 
 	for (const int32 Tid : Mesh.TriangleIndicesItr())
 	{
@@ -480,34 +489,28 @@ bool FHFRenderFinishKeepsWorldScaleUVsTest::RunTest(const FString& Parameters)
 			return false;
 		}
 
-		const FIndex3i Tri = Mesh.GetTriangle(Tid);
-		const FIndex3i UVTri = UVs->GetTriangle(Tid);
-		const FVector3d Normal = Mesh.GetTriNormal(Tid);
+		FVector3d P[3];
+		Mesh.GetTriVertices(Tid, P[0], P[1], P[2]);
 
-		const double AbsX = FMath::Abs(Normal.X);
-		const double AbsY = FMath::Abs(Normal.Y);
-		const double AbsZ = FMath::Abs(Normal.Z);
+		FVector2f UV[3];
+		UVs->GetTriElements(Tid, UV[0], UV[1], UV[2]);
 
-		for (int32 Corner = 0; Corner < 3; ++Corner)
+		for (int32 i = 0; i < 3; ++i)
 		{
-			const FVector3d P = Mesh.GetVertex(Tri[Corner]);
+			const int32 j = (i + 1) % 3;
+			const double WorldEdge = (P[j] - P[i]).Length();
+			const double UVEdge = (FVector2d(UV[j].X, UV[j].Y) - FVector2d(UV[i].X, UV[i].Y)).Length();
 
-			FVector2f Expected;
-			if (AbsZ >= AbsX && AbsZ >= AbsY)	{ Expected = FVector2f(P.X * InvTexel, P.Y * InvTexel); }
-			else if (AbsX >= AbsY)				{ Expected = FVector2f(P.Y * InvTexel, P.Z * InvTexel); }
-			else								{ Expected = FVector2f(P.X * InvTexel, P.Z * InvTexel); }
-
-			if (!UVs->GetElement(UVTri[Corner]).Equals(Expected, 1e-4f))
-			{
-				AddError(FString::Printf(
-					TEXT("UV0 on triangle %d corner %d is no longer world position over texel size."), Tid, Corner));
-				return false;
-			}
+			WorstErrorCm = FMath::Max(WorstErrorCm,
+				FMath::Abs(UVEdge * Finish.TexelSizeCm - WorldEdge));
 			++Checked;
 		}
 	}
 
 	TestTrue(TEXT("Something was actually checked"), Checked > 0);
+	TestTrue(*FString::Printf(
+		TEXT("One UV unit is one texel of world on every edge, chamfers included (worst %.6f cm)"), WorstErrorCm),
+		WorstErrorCm <= 0.001);
 
 	// And the welding that makes tangents continuous. Before this, every triangle corner got its own
 	// element, so the tangent basis the component derives from UV0 broke at every triangle edge -

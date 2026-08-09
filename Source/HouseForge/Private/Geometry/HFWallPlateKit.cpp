@@ -139,7 +139,9 @@ FHFWallPlateBuild FHFWallPlateKit::BuildMirror(const FHFMirrorParams& Params)
 		FDynamicMesh3 Glass;
 		FHFMeshOps::InitialiseMesh(Glass);
 
-		if (!FHFMeshOps::AppendLoft(Glass, Rings, Heights, true, true, EHFSurfaceRole::Glass))
+		// Mirror, not Glass. The plate is silvered on its back, so it reflects rather than transmits;
+		// tagging it Glass was harmless only for as long as the Glass material transmitted nothing.
+		if (!FHFMeshOps::AppendLoft(Glass, Rings, Heights, true, true, EHFSurfaceRole::Mirror))
 		{
 			return Out;
 		}

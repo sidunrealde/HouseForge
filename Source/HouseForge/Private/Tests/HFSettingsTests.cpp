@@ -626,6 +626,16 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// to 100, and a foyer whose four flaps swung to 100 would have them lying flat out across the
 	// walkway. The same split, and the same reason, as the extract's blade pitch against the ceiling
 	// fan's.
+	// 147 rather than 146: MaterialLibrary, which names the UHFMaterialLibrary asset this project's
+	// finishes come from. NOT marked inert, and that is the assertion worth making rather than the
+	// count - it reaches every surface in the flat the moment it is set, because
+	// UHFMaterialLibrary::Get consults it before the shipped asset and before the compiled defaults.
+	// Left empty it is not inert either; it means "the shipped library", which is a real answer.
+	// 146 rather than 147: TexelSizeCm came OFF the page. A control is a promise that turning it does
+	// something coherent, and that one could not keep it - the unwrap is per element and the material
+	// side of the same number is one scalar on one instance per role, shared by all 155 of them, so
+	// two elements disagreeing about it have no answer to give the material. It is a shared constant
+	// now. Removing a control is worth more than the count it costs when the control was a trap.
 	TestEqual(TEXT("The page ships every control it did"), Controls, 146);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
@@ -892,7 +902,10 @@ bool FHFSettingsUnitsAreStatedTest::RunTest(const FString& Parameters)
 	// otherwise pass.
 	// 142 rather than 141: TiltOutFlapAngleDegrees. See the marking test for why a tilt-out gets its
 	// own figure rather than sharing the shutter's.
-	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 142);
+	// 141 rather than 142: TexelSizeCm came off the page and became a shared constant. It is the one
+	// number the unwrap and the material graph must agree on, and it was reachable from two places
+	// that could not both be right. See FHFRenderFinish::TexelSizeCm.
+	TestEqual(TEXT("Every numeric control on the page was checked"), Checked, 141);
 #endif // WITH_EDITORONLY_DATA
 
 	return true;

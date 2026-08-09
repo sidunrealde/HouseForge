@@ -127,7 +127,7 @@ namespace
 			const EHFSurfaceRole Role = FHFMeshOps::RoleForMaterialId(Slot);
 			Test.TestEqual(
 				*FString::Printf(TEXT("%s: slot %d holds the '%s' material"), What, Slot, *RoleName(Role)),
-				Component->GetMaterial(Slot), FHFMaterialLibrary::GetPlaceholder(Role));
+				Component->GetMaterial(Slot), UHFMaterialLibrary::Get()->ResolveMaterial(Role));
 		}
 	}
 }

@@ -86,6 +86,22 @@ struct FHFSoftBoxParams
 class HOUSEFORGE_API FHFMeshOps
 {
 public:
+	/**
+	 * The dihedral angle above which an edge is a real edge of the object rather than a facet seam.
+	 *
+	 * ONE NUMBER, SHARED, and the sharing is load-bearing. ComputeShadingNormals splits the normal
+	 * overlay on it and ApplyWorldScaleUVs cuts UV charts on it, so a UV seam is always a normal seam
+	 * and never the other way round. Tangents are accumulated per (UV element, normal element,
+	 * orientation) triple, so a UV split where the normals are welded smooth shades that surface
+	 * faceted under a normal map no matter how carefully its normals were welded. Two thresholds
+	 * drifting apart would reintroduce exactly that, silently.
+	 *
+	 * At 40 degrees the kit's real geometry lands the right way round: box arrises (90) and chamfer
+	 * facets (45) stay hard, while a 12-facet rail tube (30), a 16-sided knob (22.5) and a cove at
+	 * its default 8 segments (11.25) all weld smooth.
+	 */
+	static constexpr double DefaultHardEdgeAngleDegrees = 40.0;
+
 	/** Polygroup id for a role. Offset by one so group 0 never means a real role. */
 	static int32 GroupForRole(EHFSurfaceRole Role) { return static_cast<int32>(Role) + 1; }
 
@@ -102,7 +118,7 @@ public:
 	static EHFSurfaceRole RoleForMaterialId(int32 MaterialId);
 
 	/** Number of material slots a fully-dressed HouseForge component carries: one per role. */
-	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::LightSource) + 1; }
+	static int32 NumSurfaceRoles() { return static_cast<int32>(EHFSurfaceRole::Mirror) + 1; }
 
 	/**
 	 * Writes each triangle's material id from the surface role its polygroup already carries.
@@ -320,11 +336,32 @@ public:
 	static bool SubtractInPlace(UE::Geometry::FDynamicMesh3& Target, const UE::Geometry::FDynamicMesh3& Tool);
 
 	/**
-	 * Projects real-world-scale UVs onto every triangle, grouped by polygroup.
+	 * Unwraps the mesh into UV0 at real-world scale, one smoothing chart at a time.
 	 *
-	 * Box projection per group rather than per mesh, so a wall's faces and its reveals do not
-	 * share a stretched projection. TexelSizeCm is the world size one UV tile covers, which is
-	 * what lets the material panel express tiling in millimetres rather than arbitrary numbers.
+	 * TexelSizeCm is the world size one UV tile covers, and that is the whole contract: one UV unit
+	 * really is TexelSizeCm of wall, which is what lets the material express tiling in millimetres
+	 * rather than in arbitrary numbers. Exactly, on everything that can be flattened; on average,
+	 * within a few percent, on the doubly-curved surfaces that provably cannot - see below.
+	 *
+	 * ISOMETRIC WHERE AN ISOMETRY EXISTS. A chart is a connected run of triangles with no hard edge
+	 * between them - the same relation ComputeShadingNormals welds normals on, see
+	 * DefaultHardEdgeAngleDegrees. A flat chart is projected into its own gravity-aligned frame, so a
+	 * wall yawed 45 degrees carries exactly the same texture density as an axis-aligned one; a
+	 * developable curved chart is unfolded flat like a paper model, keeping every edge length, so a
+	 * rail tube and a cove arc do too. The projection this replaced picked a world axis per triangle
+	 * and stretched anything off-axis by 1/cos.
+	 *
+	 * WHERE NO ISOMETRY EXISTS, THE SCALE GIVES WAY AND THE SEAMS DO NOT. A cushion, a knob dome or a
+	 * lofted basin carries Gaussian curvature, so no flattening can keep every edge length - that is a
+	 * theorem, not an implementation limit. Such a chart is parameterised by a discrete exponential
+	 * map, which allocates one UV element per vertex and therefore cannot split a chart internally at
+	 * all. Distance from the chart's centre is exact and shear grows gradually outward from it. The
+	 * alternative, forcing an isometry and cutting wherever it fails to close, puts a tangent crease
+	 * across a surface the normals were deliberately welded smooth, in proportion to curvature rather
+	 * than to topology - which is what it used to do, 29,107 times over the reference flat.
+	 *
+	 * Polygroups are neither read nor written here. Per-polygroup projection would in any case be the
+	 * wrong unit: a wall element is one WallPaint group covering six faces pointing six ways.
 	 *
 	 * Also computes shading normals, and that is not a naming accident: a generator that unwrapped
 	 * its mesh and forgot the normals would produce geometry that is right in every measurable way
@@ -342,10 +379,10 @@ public:
 	 *
 	 * @param HardEdgeAngleDegrees Dihedral angle above which an edge stays hard. The default keeps a
 	 *        box's arrises and a chamfer's facets crisp while welding a tube, a dome and a cove arc
-	 *        smooth; see the implementation for why those particular numbers.
+	 *        smooth; see DefaultHardEdgeAngleDegrees, which UV charting cuts on as well.
 	 */
 	static void ComputeShadingNormals(UE::Geometry::FDynamicMesh3& Mesh,
-		double HardEdgeAngleDegrees = 40.0);
+		double HardEdgeAngleDegrees = DefaultHardEdgeAngleDegrees);
 
 	/**
 	 * Chamfers every convex arris the parameters ask for, with the surface roles intact.
@@ -410,11 +447,12 @@ public:
 	 * texel size, so it is deliberately shared between every surface at the same coordinates, and
 	 * two rooms' walls land on top of each other. A lightmap needs the opposite property.
 	 *
-	 * Islands are the mesh's own planar-projection regions - the same dominant-axis grouping UV0
-	 * uses - packed into the unit square by the engine's own UV packer, the one static mesh lightmap
-	 * generation uses. World-scale projection first means the islands arrive at a consistent
-	 * texel-to-world ratio before packing, so a big wall gets proportionally more lightmap than a
-	 * door handle instead of every island being scaled to fit its own slot.
+	 * Islands are the mesh's own smoothing charts - the same ones UV0 is unwrapped in - packed into
+	 * the unit square by the engine's own UV packer, the one static mesh lightmap generation uses.
+	 * Unwrapping at world scale first means the islands arrive at a consistent texel-to-world ratio
+	 * before packing, so a big wall gets proportionally more lightmap than a door handle instead of
+	 * every island being scaled to fit its own slot. Charts are also what makes this a lightmap at
+	 * all: seeded from the old per-triangle projection there were no charts to pack, only triangles.
 	 *
 	 * @return false if the mesh has no triangles or the packer could not lay the islands out, in
 	 *         which case no second layer is left half-built.

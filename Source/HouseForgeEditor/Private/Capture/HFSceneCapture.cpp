@@ -210,8 +210,10 @@ bool FHFSceneCapture::EnsureMaterialsReady(UWorld* World, const FHFCaptureReques
 	return true;
 }
 
-bool FHFSceneCapture::Render(UWorld* World, const FHFCaptureRequest& Request, FIntPoint& OutSize, FString& OutError)
+bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Request,
+	TArray<FColor>& OutPixels, FIntPoint& OutSize, FString& OutError)
 {
+	OutPixels.Reset();
 	OutSize = FIntPoint::ZeroValue;
 	OutError.Reset();
 
@@ -332,20 +334,32 @@ bool FHFSceneCapture::Render(UWorld* World, const FHFCaptureRequest& Request, FI
 		return false;
 	}
 
-	TArray<FColor> Pixels;
-	if (!Resource->ReadPixels(Pixels) || Pixels.Num() != Width * Height)
+	if (!Resource->ReadPixels(OutPixels) || OutPixels.Num() != Width * Height)
 	{
 		OutError = FString::Printf(
 			TEXT("read back %d pixels from a %dx%d render target, which is not a complete image."),
-			Pixels.Num(), Width, Height);
+			OutPixels.Num(), Width, Height);
+		OutPixels.Reset();
 		return false;
 	}
 
 	// The scene renders without a meaningful alpha channel. Left as it comes, a PNG of a perfectly
 	// good render is saved fully transparent and reads as an empty image in every viewer.
-	for (FColor& Pixel : Pixels)
+	for (FColor& Pixel : OutPixels)
 	{
 		Pixel.A = 255;
+	}
+
+	OutSize = FIntPoint(Width, Height);
+	return true;
+}
+
+bool FHFSceneCapture::Render(UWorld* World, const FHFCaptureRequest& Request, FIntPoint& OutSize, FString& OutError)
+{
+	TArray<FColor> Pixels;
+	if (!RenderToPixels(World, Request, Pixels, OutSize, OutError))
+	{
+		return false;
 	}
 
 	const FString Directory = FPaths::GetPath(Request.OutputPath);
@@ -355,15 +369,15 @@ bool FHFSceneCapture::Render(UWorld* World, const FHFCaptureRequest& Request, FI
 	}
 
 	FImage Image;
-	Image.Init(Width, Height, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+	Image.Init(OutSize.X, OutSize.Y, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
 	FMemory::Memcpy(Image.RawData.GetData(), Pixels.GetData(), Pixels.Num() * sizeof(FColor));
 
 	if (!FImageUtils::SaveImageByExtension(*Request.OutputPath, Image))
 	{
 		OutError = FString::Printf(TEXT("could not write '%s'."), *Request.OutputPath);
+		OutSize = FIntPoint::ZeroValue;
 		return false;
 	}
 
-	OutSize = FIntPoint(Width, Height);
 	return true;
 }

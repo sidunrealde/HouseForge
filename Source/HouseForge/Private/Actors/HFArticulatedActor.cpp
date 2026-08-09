@@ -449,7 +449,7 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 		// Outside the guard above, and outside the bArtistEdited check: the slot table belongs to
 		// the component, not to the mesh, so a hand-edited shutter has to be dressed too. A part
 		// that opted out of regeneration is still a part of the room being looked at.
-		FHFMaterialLibrary::ApplyPlaceholders(Component);
+		UHFMaterialLibrary::Get()->ApplyTo(Component);
 
 		// Same reasoning for collision: it belongs to the component, and what a part blocks is a
 		// property of what that part IS rather than of the mesh currently on it. A hand-modelled fan
