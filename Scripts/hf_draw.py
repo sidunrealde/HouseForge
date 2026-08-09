@@ -47,6 +47,18 @@ class Canvas:
         self.title = title
         self.ops: list[_Op] = []
 
+        # Written into BOTH backends, so a sheet carries the identity of what it was drawn from.
+        #
+        # A DRAWING THAT IS MERELY PRESENT IS NOT A DRAWING THAT IS CURRENT. The set has shipped
+        # stale twice, and neither time was detectable from the files: a sheet drawn from last
+        # month's spec is the same size, the same name and the same count as one drawn from
+        # today's. Nothing about the picture says which house it is of. So the source's digest is
+        # stamped into the sheet at generation time and the gate compares it with the spec on
+        # disk - see HouseForge.Drawings.SampleSetPresent.
+        #
+        # Keys and values must be ASCII: they go into an SVG <desc> and a PNG tEXt chunk verbatim.
+        self.metadata: dict[str, str] = {}
+
     # ------------------------------------------------------------------ primitives
 
     def line(self, p1, p2, width=1.0, color=BLACK, dash=None):
@@ -88,8 +100,13 @@ class Canvas:
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{self.width}" height="{self.height}" '
             f'viewBox="0 0 {self.width} {self.height}">',
             f'<title>{sax.escape(self.title)}</title>',
-            f'<rect width="{self.width}" height="{self.height}" fill="#ffffff"/>',
         ]
+
+        # Before the first mark on the sheet, so a truncated file still carries its provenance.
+        for key, value in sorted(self.metadata.items()):
+            out.append(f'<desc>{sax.escape(key)} {sax.escape(str(value))}</desc>')
+
+        out.append(f'<rect width="{self.width}" height="{self.height}" fill="#ffffff"/>')
 
         def dash_attr(d):
             return f' stroke-dasharray="{d}"' if d else ""
@@ -228,7 +245,19 @@ class Canvas:
 
         if s > 1:
             img = img.resize((self.width, self.height), Image.LANCZOS)
-        img.save(path)
+
+        # The PNG carries the same stamp as the SVG, and is checked separately rather than trusted
+        # to agree with it. They are written from one canvas in one run, but --svg-only writes only
+        # half the pair - so a run of that leaves the PNGs, which are the sheets Claude actually
+        # reads, older than the SVGs beside them. Two stamps, two assertions, no inference.
+        info = None
+        if self.metadata:
+            from PIL import PngImagePlugin
+            info = PngImagePlugin.PngInfo()
+            for key, value in sorted(self.metadata.items()):
+                info.add_text(key, str(value))
+
+        img.save(path, pnginfo=info)
 
     def save(self, svg_path, png_path):
         with open(svg_path, "w", encoding="utf-8") as f:

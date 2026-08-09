@@ -55,6 +55,43 @@ def load_spec(path):
         return json.load(f)
 
 
+def spec_digest(path):
+    """The identity of the spec these sheets were drawn from, as 40 hex characters.
+
+    ## Why the sheets carry this at all
+
+    THE SET HAS SHIPPED STALE TWICE AND NEITHER TIME WAS VISIBLE FROM THE FILES. A sheet drawn
+    from an older spec has the same name, the same size and the same count as one drawn from the
+    current spec; the only difference is the picture, and nothing in the gate looks at pictures.
+    So the drawing test could only ever check that files were PRESENT, and "present" is exactly
+    what a stale set is.
+
+    Stamping the source's digest into each sheet turns that into something checkable: the test
+    hashes Reference/Specs/Sample2BHK.json the same way and every sheet has to agree with it.
+    HouseForge.Model.SampleSpecFileInSync already ties that JSON to FHFSampleHouse::Make2BHK(), so
+    the chain runs code -> spec -> drawing with no link taken on trust.
+
+    ## Why SHA-1, and why CR is stripped
+
+    SHA-1 because this is a staleness check and not a security boundary - nobody is forging a
+    drawing set - and because both ends have it without a dependency: hashlib here, FSHA1 in
+    Misc/SecureHash.h there. Any collision resistance beyond "a changed layout changes the digest"
+    is unused.
+
+    The bytes are normalised by dropping CR first. .gitattributes leaves *.json to the machine's
+    core.autocrlf, which is on here, so the same spec is CRLF in the working tree and LF in the
+    object store. Hashing raw bytes would make the answer depend on how the file was checked out,
+    which is a gate that fails on a fresh clone and passes on the machine that wrote it - the
+    worst possible direction for this to be wrong in.
+    """
+    import hashlib
+
+    with open(path, "rb") as f:
+        raw = f.read()
+
+    return hashlib.sha1(raw.replace(b"\r", b"")).hexdigest()
+
+
 def pt(d):
     return (d["x"], d["y"])
 
@@ -1428,6 +1465,7 @@ def main():
     args = ap.parse_args()
 
     spec = load_spec(args.spec)
+    digest = spec_digest(args.spec)
     os.makedirs(args.out, exist_ok=True)
 
     view = PlanView(spec)
@@ -1452,6 +1490,8 @@ def main():
 
     for i, (name, build) in enumerate(sheets, start=1):
         canvas = build(i)
+        canvas.metadata["hf-spec-sha1"] = digest
+
         svg_path = os.path.join(args.out, name + ".svg")
         with open(svg_path, "w", encoding="utf-8") as f:
             f.write(canvas.to_svg())
@@ -1464,6 +1504,7 @@ def main():
             print(f"  {name}.svg + .png")
 
     print(f"\n{len(sheets)} sheets written to {args.out}")
+    print(f"drawn from {os.path.basename(args.spec)} @ {digest}")
 
 
 if __name__ == "__main__":

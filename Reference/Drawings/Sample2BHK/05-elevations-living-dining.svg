@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="2480" height="1754" viewBox="0 0 2480 1754">
 <title>Sample 2BHK - Elevations - Living / Dining</title>
+<desc>hf-spec-sha1 8099bf728a1ec40b4f1e99b0092659a548cb6f54</desc>
 <rect width="2480" height="1754" fill="#ffffff"/>
 <polygon points="30.00,30.00 2450.00,30.00 2450.00,1724.00 30.00,1724.00" fill="none" stroke="#000000" stroke-width="2.50"/>
 <polygon points="48.00,48.00 2432.00,48.00 2432.00,1706.00 48.00,1706.00" fill="none" stroke="#000000" stroke-width="1.00"/>
@@ -41,6 +42,10 @@
 <line x1="746.27" y1="666.52" x2="764.27" y2="666.52" stroke="#787878" stroke-width="1.60" stroke-linecap="round"/>
 <polygon points="833.61,374.44 1062.63,374.44 1062.63,398.55 833.61,398.55" fill="none" stroke="#464646" stroke-width="1.30"/>
 <line x1="833.61" y1="398.55" x2="1062.63" y2="398.55" stroke="#787878" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="393.67,374.44 707.05,374.44 707.05,398.55 393.67,398.55" fill="none" stroke="#464646" stroke-width="1.30"/>
+<line x1="393.67" y1="398.55" x2="707.05" y2="398.55" stroke="#787878" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="833.61,398.55 1062.63,398.55 1062.63,663.72 833.61,663.72" fill="none" stroke="#b9b9b9" stroke-width="1.00" stroke-dasharray="5 5"/>
+<polygon points="393.67,398.55 707.05,398.55 707.05,663.72 393.67,663.72" fill="none" stroke="#b9b9b9" stroke-width="1.00" stroke-dasharray="5 5"/>
 <polygon points="745.62,534.75 764.91,534.75 764.91,549.21 745.62,549.21" fill="none" stroke="#005aaa" stroke-width="1.40"/>
 <line x1="755.27" y1="534.75" x2="755.27" y2="549.21" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
 <polygon points="441.88,428.68 658.84,428.68 658.84,681.80 441.88,681.80" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>
@@ -70,6 +75,7 @@
 <polygon points="1664.47,591.40 1760.89,591.40 1760.89,681.80 1664.47,681.80" fill="none" stroke="#464646" stroke-width="1.30"/>
 <polygon points="1578.89,374.44 1600.58,374.44 1600.58,398.55 1578.89,398.55" fill="none" stroke="#464646" stroke-width="1.30"/>
 <line x1="1578.89" y1="398.55" x2="1600.58" y2="398.55" stroke="#787878" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="1578.89,398.55 1600.58,398.55 1600.58,663.72 1578.89,663.72" fill="none" stroke="#b9b9b9" stroke-width="1.00" stroke-dasharray="5 5"/>
 <polygon points="1742.81,579.35 1800.67,579.35 1800.67,681.80 1742.81,681.80" fill="none" stroke="#464646" stroke-width="1.30"/>
 <polygon points="1685.56,579.35 1739.80,579.35 1739.80,681.80 1685.56,681.80" fill="none" stroke="#464646" stroke-width="1.30"/>
 <polygon points="1775.36,631.18 1794.64,631.18 1794.64,645.64 1775.36,645.64" fill="none" stroke="#005aaa" stroke-width="1.40"/>
