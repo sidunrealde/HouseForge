@@ -25,6 +25,15 @@
 .PARAMETER EngineDir
     Engine root. Defaults to the UE 5.8 install this project is associated with.
 
+.PARAMETER MinTests
+    Absolute floor on how many tests stage 2 must run, applied only to a full-suite run. Every other
+    count check in this script is relative and is satisfied by a run of any size; this one catches a
+    whole module failing to load. A ratchet - raise it as the suite grows, lower it only in the same
+    commit that removes tests.
+
+.PARAMETER MinPixelTests
+    The same floor under stage 3, so a narrowed -PixelFilter cannot silently run nothing.
+
 .EXAMPLE
     .\hf-validate.ps1
     .\hf-validate.ps1 -SkipBuild -TestFilter HouseForge.Foundation
@@ -33,8 +42,45 @@
 param(
     [switch] $SkipBuild,
     [string] $TestFilter = 'HouseForge',
-    [string] $PixelFilter = 'HouseForge.Materials',
-    [string] $EngineDir  = 'd:\EpicGames\Engine\UE_5.8'
+
+    # WHAT STAGE 3 RE-RUNS WITH A RENDERER, AND WHY IT IS THREE FILTERS RATHER THAN ONE.
+    #
+    # This was 'HouseForge.Materials' alone, which made the HF_UNMEASURED mechanism a mechanism with
+    # one participant: the sentinel was emitted by a single test in the whole suite, and the stage
+    # that exists to refuse it could only ever see that one. Two other tests skip their measurement
+    # for exactly the same reason - no renderer, no Slate - and both now say so with the sentinel:
+    #
+    #   HouseForge.Editor.Panel.*  - including SurfacesEditReachesTheRenderer, the ONLY test that
+    #                                proves a panel edit reaches the rendered material.
+    #   HouseForge.Capture.*       - including APlanIsOrientedTheWayItSays, whose orientation-message
+    #                                assertion is skipped whenever the capture cannot draw.
+    #
+    # A sentinel nothing greps for is decoration. `+` is how the automation runner separates filters
+    # (AutomationCommandline.cpp parses the string on it).
+    [string] $PixelFilter = 'HouseForge.Materials+HouseForge.Editor.Panel+HouseForge.Capture',
+    [string] $EngineDir  = 'd:\EpicGames\Engine\UE_5.8',
+
+    # THE FLOOR UNDER THE WHOLE SUITE, and the reason it exists.
+    #
+    # Every other count check in this script is RELATIVE: the summary is cross-checked against the
+    # per-test list, notRun must be zero, every state must be Success. All of those are satisfied,
+    # perfectly and self-consistently, by a run of any size. If the HouseForgeEditor module failed to
+    # load, or a `#if WITH_DEV_AUTOMATION_TESTS` block were switched off, or a filter typo narrowed
+    # the run, the report would be internally flawless at a fraction of the suite and this script
+    # would print GATE PASSED - and the merge commit would then record that fraction as its evidence.
+    # Given that the counter arithmetic in this very script has already been wrong once, the absence
+    # of an absolute floor is the same class of hole one level up.
+    #
+    # It is a ratchet, not a target: adding tests never trips it, and lowering it is a deliberate edit
+    # with a diff. Only applied when the gate is running the whole suite - a deliberately narrow
+    # -TestFilter is a developer iterating, not the gate.
+    [int] $MinTests = 440,
+
+    # THE SAME FLOOR UNDER STAGE 3, which needs its own because it runs its own filter. A typo in
+    # -PixelFilter, or a renamed test category, narrows the renderer stage to nothing while stage 2
+    # still passes - and stage 3 is the only stage that can measure a pixel, so silently running none
+    # of it is exactly the hole that put an unmeasured tiling assertion through a green gate.
+    [int] $MinPixelTests = 28
 )
 
 # Deliberately NOT 'Stop'. Windows PowerShell 5.1 wraps a native executable's stderr in an
@@ -103,7 +149,13 @@ function Invoke-TestStage {
         [string]   $Filter,
         [string]   $Reports,
         [string[]] $RhiArgs,
-        [switch]   $RequireMeasured
+        [switch]   $RequireMeasured,
+
+        # Absolute floor on how many tests must have run. Zero disables it, for a narrow filter.
+        [int]      $Minimum = 0,
+
+        # Tests that MUST appear in the report by name, one per module. See the note at the call.
+        [string[]] $Canaries = @()
     )
 
     Write-Stage $Label
@@ -173,8 +225,33 @@ function Invoke-TestStage {
 
         if ($Total -eq 0) {
             Write-Host ''
-            Write-Host "GATE FAILED: no tests matched '$TestFilter'. An empty suite is not a pass." -ForegroundColor Red
+            Write-Host "GATE FAILED: no tests matched '$Filter'. An empty suite is not a pass." -ForegroundColor Red
             exit 1
+        }
+
+        # AN INTERNALLY CONSISTENT REPORT OF THE WRONG SIZE. Every check around this one is relative -
+        # the summary against the list, notRun against zero, each state against Success - and all of
+        # them are satisfied by a run of any size at all. Losing a whole module, or a
+        # WITH_DEV_AUTOMATION_TESTS block, or narrowing the filter by a typo, produces a perfectly
+        # self-consistent report at a fraction of the suite and a confident GATE PASSED, and the merge
+        # commit then records that fraction as its evidence.
+        if ($Minimum -gt 0 -and $Total -lt $Minimum) {
+            Write-Host ''
+            Write-Host "GATE FAILED: only $Total test(s) ran, and the suite is at least $Minimum. A report can be perfectly self-consistent and still be missing an entire module - that is what this floor is for. If tests were deliberately removed, lower -MinTests in the same commit." -ForegroundColor Red
+            exit 1
+        }
+
+        # AND THE FLOOR ALONE CANNOT SAY WHICH TESTS THEY WERE. A count is satisfied by any 372 tests,
+        # so one named test per module is required by name as well: if HouseForgeEditor fails to load,
+        # its canary is simply absent and the count could still be met by the runtime module growing.
+        # These are ordinary tests, not markers - they are named here because losing them means losing
+        # everything beside them.
+        foreach ($Canary in $Canaries) {
+            if (-not ($Report.tests | Where-Object { $_.fullTestPath -eq $Canary })) {
+                Write-Host ''
+                Write-Host "GATE FAILED: '$Canary' is not in the report. It is named here as the canary for its module, so its absence means that module's tests did not run at all." -ForegroundColor Red
+                exit 1
+            }
         }
         if ($Report.failed -gt 0) {
             Write-Host ''
@@ -249,10 +326,27 @@ function Invoke-TestStage {
     }
 }
 
+# The floor and the canaries only apply when the gate is running the whole suite. A narrow
+# -TestFilter is a developer iterating on one area, and failing that for being small would just teach
+# everyone to pass -SkipBuild and ignore the exit code.
+$FullSuite = $TestFilter -eq 'HouseForge'
+
+# ONE CANARY PER MODULE, and each is a real test that measures something structural:
+#   HouseForge      (Runtime) - the sample spec against the code that defines it.
+#   HouseForgeEditor(Editor)  - the whole flat built and walked from the front door.
+# If either module fails to load, its canary vanishes from the report while everything else about
+# that report stays consistent. That is the failure the count alone cannot name.
+$Canaries = @(
+    'HouseForge.Model.SampleSpecFileInSync',
+    'HouseForge.Flat.EveryRoomIsReachableFromTheFrontDoor'
+)
+
 Invoke-TestStage -Label "Stage 2/3  Test  automation filter '$TestFilter'" `
                  -Filter  $TestFilter `
                  -Reports $ReportDir `
-                 -RhiArgs @('-nullrhi')
+                 -RhiArgs @('-nullrhi') `
+                 -Minimum $(if ($FullSuite) { $MinTests } else { 0 }) `
+                 -Canaries $(if ($FullSuite) { $Canaries } else { @() })
 
 # A REAL RHI, AND NOT A WINDOW. -AllowCommandletRendering gives an unattended process a working
 # renderer without a visible editor, which is what lets the gate assert the one thing -nullrhi can
@@ -261,6 +355,7 @@ Invoke-TestStage -Label "Stage 3/3  Test  pixel measurements, with a renderer ('
                  -Filter  $PixelFilter `
                  -Reports $PixelReportDir `
                  -RhiArgs @('-AllowCommandletRendering') `
+                 -Minimum $MinPixelTests `
                  -RequireMeasured
 
 Write-Host ''
