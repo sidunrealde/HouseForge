@@ -23,6 +23,12 @@
     Afterwards it runs hf_lumen_measure.py, outside the editor, because reading PNGs needs numpy and
     the editor's embedded python does not have it.
 
+    THIS SCRIPT ASSERTS, and exits non-zero when it fails. It is the third of the milestone's three
+    tests - that indirect light on a shadowed surface is measurably higher baked than unbaked - and it
+    lives here rather than in the HouseForge.* suite because that suite runs under -nullrhi, where
+    nothing can be drawn, and its only capture instrument would measure an ambient cubemap. The other
+    two assertions are automation tests, because they assert a mechanism rather than light.
+
 .PARAMETER SkipRender
     Measure the images already in Saved/Review/lumen-baked without re-rendering them.
 
