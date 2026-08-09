@@ -108,9 +108,35 @@ struct HOUSEFORGE_API FHFBakedPart
 	 * unbake would put a frozen blade back across a third of the sweep as a wall - a defect that
 	 * exists nowhere in the articulation code and would have been introduced entirely by the bake.
 	 * Whatever the source declared is also what the baked component gets, for the same reason.
+	 *
+	 * ## THE INVARIANT: this is never written from a suppressed component
+	 *
+	 * NoCollision is not a value any generator declares. Only two ever reach a bake source -
+	 * QueryAndPhysics from AHFElementActor's constructor and QueryOnly for a rotor from
+	 * AHFArticulatedActor::ApplyPartCollision - and NoCollision is written to a source by exactly
+	 * one thing: AHFElementActor::ApplyRenderMode, suppressing it while baked.
+	 *
+	 * So every write to this field is guarded on the source not currently reading NoCollision. Drop
+	 * the guard and a RE-BAKE records the suppression as the thing to restore: the next unbake
+	 * hands back "blocks nothing", and the element is left visible, live, editable and completely
+	 * passable in both modes with nothing logged. A whole flat loses its collision the first time a
+	 * misread is corrected after baking, and the only symptom is a walkthrough falling out of the
+	 * building. Guarded by HouseForge.Bake.RebakingKeepsTheCollisionUnbakeRestores and
+	 * HouseForge.Bake.RebakingKeepsEachPartsOwnCollision.
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
 	TEnumAsByte<ECollisionEnabled::Type> SourceCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+
+	/**
+	 * The source component held no triangles, so there is deliberately no asset for this part.
+	 *
+	 * Without it, one degenerate element - a wall whose openings have eaten all of it, which the
+	 * validator warns about but does not forbid - would report a failed bake, and "Bake all" over a
+	 * flat would come back red because of a wall nobody can see either way. An empty part is baked
+	 * correctly by producing nothing.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
+	bool bSourceWasEmpty = false;
 };
 
 /**

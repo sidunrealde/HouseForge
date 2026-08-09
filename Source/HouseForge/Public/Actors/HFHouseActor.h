@@ -145,6 +145,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Geometry", meta = (ClampMin = "1.0"))
 	double SlabThickness = 15.0;
 
+	/**
+	 * Where this house's baked static meshes are written.
+	 *
+	 * Empty until the first bake, which resolves it to /Game/HouseForge/Baked/<LevelName> and writes
+	 * it back here. Written back rather than recomputed every time so that RENAMING THE LEVEL LATER
+	 * DOES NOT SCATTER THE ASSETS: the second half of a flat would otherwise land in a new folder and
+	 * the orphan scan would report the first half as unowned.
+	 *
+	 * Under /Game and never plugin content. Rule 01: levels and everything generated into them are
+	 * user output, not plugin source, and the plugin repo does not carry them.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Bake")
+	FString BakedAssetFolder;
+
 	// -------------------------------------------------------------------- preview appearance
 
 	/**

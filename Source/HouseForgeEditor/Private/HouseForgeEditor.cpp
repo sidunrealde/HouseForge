@@ -2,6 +2,7 @@
 
 #include "HouseForgeEditor.h"
 
+#include "Bake/HFBakeService.h"
 #include "DesktopPlatformModule.h"
 #include "Editor.h"
 #include "HAL/IConsoleManager.h"
@@ -181,6 +182,12 @@ void FHouseForgeEditorModule::StartupModule()
 			TEXT("ToolsetRegistry is unavailable; HouseForge will not be reachable over MCP."));
 	}
 
+	// The runtime element actors reach asset creation through exactly one static delegate, bound
+	// here. Package creation is unreachable from a runtime module and making HouseForge depend on
+	// UnrealEd to fix that would be far worse. Unbound, nothing can bake - which is the correct
+	// behaviour in a cooked build rather than a link error.
+	FHFBakeService::Register();
+
 	UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateStatic(&RegisterMenus));
 
@@ -203,6 +210,8 @@ void FHouseForgeEditorModule::ShutdownModule()
 {
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(TEXT("HouseForge"));
+
+	FHFBakeService::Unregister();
 
 	if (FSlateApplication::IsInitialized())
 	{

@@ -17,6 +17,38 @@ class UStaticMesh;
 class UStaticMeshComponent;
 
 /**
+ * Lifts a dynamic mesh component's editable flag for the duration of OUR OWN write, and puts it back.
+ *
+ * WITHOUT THIS A BAKED ELEMENT CANNOT REGENERATE AT ALL, and it fails silently.
+ * AHFElementActor::ApplyRenderMode marks the dynamic component non-editable in Baked mode, which is
+ * doing real work - UDynamicMeshComponentToolTargetFactory::CanBuildTarget tests IsEditable()
+ * explicitly, so it is what drops the live mesh out of the Modeling Tools' candidate list and gets
+ * the count down to the one candidate a single-selection tool requires. But
+ * UDynamicMeshComponent::SetMesh checks the same flag (DynamicMeshComponent.cpp:186) and refuses
+ * with an ensure, so generation - which goes through SetMesh - is refused too.
+ *
+ * The symptom is nasty: MeshRevision still bumps, the re-bake still runs, and the element comes out
+ * "baked and current" holding the PREVIOUS plan's geometry. The viewport, and any capture taken of
+ * it, then quietly disagree with the spec. Found by
+ * HouseForge.Bake.RegenerateWhileBakedRebakes, not by reading.
+ *
+ * The same shape as AHFElementActor::bGenerating: a narrow, scoped statement that this particular
+ * write is the plugin's own.
+ */
+struct HOUSEFORGE_API FHFEditableWriteScope
+{
+	explicit FHFEditableWriteScope(UDynamicMeshComponent* InComponent);
+	~FHFEditableWriteScope();
+
+	FHFEditableWriteScope(const FHFEditableWriteScope&) = delete;
+	FHFEditableWriteScope& operator=(const FHFEditableWriteScope&) = delete;
+
+private:
+	UDynamicMeshComponent* Component = nullptr;
+	bool bWasEditable = true;
+};
+
+/**
  * Base for every generated element.
  *
  * Each element actor owns its own parameter struct and regenerates its mesh when that struct
@@ -213,8 +245,10 @@ public:
 	 * @param SourceComponentName NAME_None for the root mesh
 	 * @param InBakedMesh         the asset, or null to drop this part's bake
 	 * @param AtRevision          MeshRevision the asset was built from
+	 * @param bSourceWasEmpty     the source held no triangles, so producing nothing was correct
 	 */
-	void AdoptBakedMesh(int32 PartIndex, FName SourceComponentName, UStaticMesh* InBakedMesh, int32 AtRevision);
+	void AdoptBakedMesh(int32 PartIndex, FName SourceComponentName, UStaticMesh* InBakedMesh, int32 AtRevision,
+		bool bSourceWasEmpty = false);
 
 	/**
 	 * Makes BakedParts match the current source components, destroying components for parts that no

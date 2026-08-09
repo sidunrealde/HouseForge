@@ -14,6 +14,24 @@
 
 using namespace UE::Geometry;
 
+FHFEditableWriteScope::FHFEditableWriteScope(UDynamicMeshComponent* InComponent)
+	: Component(InComponent)
+	, bWasEditable(InComponent == nullptr || InComponent->IsEditable())
+{
+	if (Component != nullptr && !bWasEditable)
+	{
+		Component->SetIsEditable(true);
+	}
+}
+
+FHFEditableWriteScope::~FHFEditableWriteScope()
+{
+	if (Component != nullptr && !bWasEditable)
+	{
+		Component->SetIsEditable(false);
+	}
+}
+
 AHFElementActor::AHFElementActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -170,6 +188,11 @@ void AHFElementActor::CommitMesh(FDynamicMesh3&& Generated)
 	// Our own write must not look like an artist edit.
 	TGuardValue<bool> Guard(bGenerating, true);
 
+	// And it must not be REFUSED by the editable flag the bake sets. See FHFEditableWriteScope: a
+	// baked element that could not regenerate would come back "baked and current" holding the
+	// previous plan's geometry, with nothing said about it.
+	FHFEditableWriteScope Editable(Mesh);
+
 	// The composing layer's single pass over generated geometry: chamfer the arrises, re-project
 	// UV0 over the facets that produced, and lay out the lightmap channel. Here rather than in the
 	// generators because a bevel is the one operation in this plugin that is NOT idempotent, and a
@@ -247,21 +270,39 @@ bool AHFElementActor::HasAllBakedAssets() const
 		return false;
 	}
 
+	bool bAnyReal = false;
+
 	for (const FHFBakedPart& Part : BakedParts)
 	{
-		if (Part.BakedMesh == nullptr)
+		if (Part.BakedMesh != nullptr)
+		{
+			bAnyReal = true;
+			continue;
+		}
+
+		// A part whose source held no triangles was baked correctly by producing nothing. See
+		// FHFBakedPart::bSourceWasEmpty - the alternative is one degenerate wall turning "Bake all"
+		// over a whole flat red.
+		if (!Part.bSourceWasEmpty)
 		{
 			return false;
 		}
 	}
-	return true;
+
+	// Every part empty is not a baked element, it is an element with no geometry. Switching such a
+	// thing to Baked would be a switch with nothing on either side of it.
+	return bAnyReal;
 }
 
 bool AHFElementActor::IsBakeStale() const
 {
 	for (const FHFBakedPart& Part : BakedParts)
 	{
-		if (Part.BakedMesh != nullptr && Part.BakedAtMeshRevision != MeshRevision)
+		// Empty parts count. A wall that had eaten itself and has since been given its geometry back
+		// has a part that baked to nothing at an older revision, and that part is exactly the one that
+		// needs re-baking.
+		const bool bBaked = Part.BakedMesh != nullptr || Part.bSourceWasEmpty;
+		if (bBaked && Part.BakedAtMeshRevision != MeshRevision)
 		{
 			return true;
 		}
@@ -374,7 +415,8 @@ int32 AHFElementActor::SyncBakedPartsToSources(TArray<FSoftObjectPath>* OutOrpha
 	return Dropped;
 }
 
-void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentName, UStaticMesh* InBakedMesh, int32 AtRevision)
+void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentName, UStaticMesh* InBakedMesh, int32 AtRevision,
+	bool bInSourceWasEmpty)
 {
 	TArray<UDynamicMeshComponent*> Sources;
 	GetBakeSourceComponents(Sources);
@@ -394,10 +436,16 @@ void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentNam
 	Part.SourceComponentName = InSourceComponentName;
 	Part.BakedMesh = InBakedMesh;
 	Part.BakedAssetPath = (InBakedMesh != nullptr) ? FSoftObjectPath(InBakedMesh) : FSoftObjectPath();
-	Part.BakedAtMeshRevision = (InBakedMesh != nullptr) ? AtRevision : INDEX_NONE;
+	Part.bSourceWasEmpty = bInSourceWasEmpty;
+	Part.BakedAtMeshRevision = (InBakedMesh != nullptr || bInSourceWasEmpty) ? AtRevision : INDEX_NONE;
 
 	if (InBakedMesh == nullptr)
 	{
+		// An empty part still has a component to switch off, if a previous bake left one there.
+		if (BakedParts[PartIndex].Component != nullptr)
+		{
+			BakedParts[PartIndex].Component->SetStaticMesh(nullptr);
+		}
 		return;
 	}
 
@@ -411,9 +459,16 @@ void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentNam
 	// Captured while the dynamic side is still live, which is the only moment it can be read
 	// correctly. See FHFBakedPart::SourceCollisionEnabled - a fan rotor is QueryOnly on purpose and
 	// must not come back from a bake as a wall.
+	//
+	// Guarded exactly as ApplyRenderMode guards it, and for the same reason: on a RE-BAKE this runs
+	// while the element is already baked, so the source is sitting at the NoCollision this feature
+	// put there. Recording that would make unbake restore "blocks nothing".
 	if (IsValid(Source))
 	{
-		Part.SourceCollisionEnabled = Source->GetCollisionEnabled();
+		if (Source->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+		{
+			Part.SourceCollisionEnabled = Source->GetCollisionEnabled();
+		}
 		Component->SetCollisionProfileName(Source->GetCollisionProfileName());
 	}
 
@@ -433,6 +488,19 @@ void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
 	// and says so through bBakeAssetMissing, rather than leaving a hole in the flat.
 	bBakeAssetMissing = bWantsBaked && !bBaked;
 
+	// AN ELEMENT THAT HAS NEVER BEEN BAKED IS NOT TOUCHED AT ALL.
+	//
+	// This is called at the end of every generation path, so it runs on all 150-odd elements of a
+	// flat whether or not anybody has ever baked anything. Restoring collision from a record that
+	// does not exist would mean restoring a DEFAULT - and a fan rotor is QueryOnly on purpose
+	// (AHFArticulatedActor::ApplyPartCollision), so a default of QueryAndPhysics would turn every
+	// rotor in the flat into a frozen blade a pawn walks into.
+	if (BakedParts.IsEmpty() && !bBaked)
+	{
+		RenderMode = EHFRenderMode::Dynamic;
+		return;
+	}
+
 	TArray<UDynamicMeshComponent*> Sources;
 	GetBakeSourceComponents(Sources);
 
@@ -444,16 +512,49 @@ void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
 			continue;
 		}
 
+		// WHAT THIS PART BLOCKS IS RECORDED BEFORE ANYTHING IS SWITCHED, and only ever from a
+		// component that is currently showing its own collision rather than ours.
+		//
+		// NoCollision is never something a generator declares. Exactly two values reach a bake
+		// source - QueryAndPhysics from AHFElementActor's constructor, and QueryOnly for a rotor
+		// from AHFArticulatedActor::ApplyPartCollision - and NoCollision is written to a source by
+		// precisely one thing: this function, suppressing it while baked. So the guard below is not
+		// a heuristic, it is the exact complement of our own write.
+		//
+		// Without it, a RE-BAKE reads the source while the element is already baked, records
+		// "blocks nothing" as the value to restore, and the next unbake hands that back faithfully.
+		// The element is then visible, live, editable, correct-looking in both modes - and
+		// completely passable, with nothing logged and nothing to see. A whole flat loses its
+		// collision the first time a misread is corrected after baking. Found by
+		// HouseForge.Bake.RebakingKeepsTheCollisionUnbakeRestores, not by reading.
+		//
+		// Recording in both modes rather than only on the way in is what keeps the record current
+		// when a regeneration re-declares a part: AHFArticulatedActor::ApplyPartCollision writes the
+		// fresh value onto the dynamic component, and this reads it on the way past.
+		if (BakedParts.IsValidIndex(Index) && Source->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+		{
+			BakedParts[Index].SourceCollisionEnabled = Source->GetCollisionEnabled();
+		}
+
 		Source->SetVisibility(!bBaked);
 		Source->SetHiddenInGame(bBaked);
 
 		// COLLISION SWITCHES WITH VISIBILITY. Leaving both on double-traces every wall in the flat
 		// and leaves complex-as-simple collision sitting under a mesh the user believes is the only
 		// thing there.
-		const ECollisionEnabled::Type Declared = BakedParts.IsValidIndex(Index)
-			? BakedParts[Index].SourceCollisionEnabled.GetValue()
-			: ECollisionEnabled::QueryAndPhysics;
-		Source->SetCollisionEnabled(bBaked ? ECollisionEnabled::NoCollision : Declared);
+		//
+		// Restored only from what was actually RECORDED at bake time. A part with no baked twin -
+		// one the parameters have just grown, say - is left exactly as its generator set it up,
+		// because this code has no idea what that part is meant to block.
+		const bool bRecorded = BakedParts.IsValidIndex(Index) && BakedParts[Index].Component != nullptr;
+		if (bBaked)
+		{
+			Source->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+		else if (bRecorded)
+		{
+			Source->SetCollisionEnabled(BakedParts[Index].SourceCollisionEnabled.GetValue());
+		}
 
 		// UDynamicMeshComponentToolTargetFactory::CanBuildTarget tests IsEditable() explicitly
 		// (DynamicMeshComponentToolTarget.cpp:279), so this correctly drops the dynamic mesh out of
@@ -552,12 +653,22 @@ void AHFElementActor::ReconcileBakeState()
 
 void AHFElementActor::FlushPendingRebake()
 {
-	if (RenderMode != EHFRenderMode::Baked || !bAutoRebakeOnRegenerate)
+	// Read BEFORE re-applying, because ApplyRenderMode falls back to Dynamic when a part has appeared
+	// that has no asset yet - and that is precisely the case that needs a re-bake rather than a
+	// silent demotion.
+	const EHFRenderMode Desired = RenderMode;
+
+	// Regeneration can create components. A wardrobe that has just grown a drawer has a brand new
+	// dynamic component, visible and editable, and nothing else would ever tell it that this element
+	// is currently showing baked geometry - so it would draw straight through its baked neighbours.
+	ApplyRenderMode(Desired);
+
+	if (Desired != EHFRenderMode::Baked || !bAutoRebakeOnRegenerate)
 	{
 		return;
 	}
 
-	if (!IsBakeStale())
+	if (!IsBakeStale() && !bBakeAssetMissing)
 	{
 		return;
 	}

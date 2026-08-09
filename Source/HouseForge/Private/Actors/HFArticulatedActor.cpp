@@ -459,6 +459,10 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 			// Our own write must not read as an artist edit.
 			TGuardValue<bool> Guard(bGenerating, true);
 
+			// Nor be refused by the editable flag a bake set on this part. Same reasoning as
+			// AHFElementActor::CommitMesh; see FHFEditableWriteScope.
+			FHFEditableWriteScope Editable(Component);
+
 			// The same render finish the fixed shell gets. A part that missed it would be the one
 			// piece of the flat with sharp arrises and no lightmap channel, which is every shutter,
 			// every drawer front and every door leaf in the room - the things closest to camera.
