@@ -514,6 +514,16 @@ bool FHFCapturePlanOrientationTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("The result says which way the image is oriented"),
 			Result.Message.Contains(TEXT("mirrored")) && Result.Message.Contains(TEXT("+Y")));
 	}
+	else
+	{
+		// A CAPTURE THAT DID NOT HAPPEN IS NOT A CAPTURE THAT WAS ORIENTED CORRECTLY. This branch
+		// used to end the test with no assertion and no trace of it: under -nullrhi the capture
+		// cannot succeed, so the one test guarding the mirrored-plan warning silently asserted
+		// nothing in the only stage anybody ran. Sentinel, so the renderer stage refuses it.
+		AddWarning(FString::Printf(
+			TEXT("HF_UNMEASURED: the capture did not succeed, so the orientation message was NOT checked: %s"),
+			*Result.Message));
+	}
 
 	return true;
 }

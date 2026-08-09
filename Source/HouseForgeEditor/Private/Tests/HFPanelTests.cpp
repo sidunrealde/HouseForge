@@ -53,8 +53,15 @@ bool FHFPanelTabSpawnsTest::RunTest(const FString& Parameters)
 	if (!FSlateApplication::IsInitialized())
 	{
 		// A run with no Slate cannot construct a widget, and failing here would report a missing
-		// panel where the truth is a headless harness. Said out loud rather than passing silently.
-		AddInfo(TEXT("Slate is not initialised in this run, so the panel widget was not constructed."));
+		// panel where the truth is a headless harness.
+		//
+		// HF_UNMEASURED RATHER THAN AddInfo, which is the whole difference between saying so and
+		// being heard. An AddInfo skip is a green test that asserted nothing, printed among two
+		// thousand other info lines - the exact shape of every defect this suite has shipped. The
+		// sentinel is what hf-validate.ps1 greps for, so a stage that exists to take this measurement
+		// fails rather than reporting a pass it did not earn. See the note at
+		// HFMaterialFinishTests.cpp's CanRender branch.
+		AddWarning(TEXT("HF_UNMEASURED: Slate is not initialised in this run, so the panel widget was NOT constructed and nothing here was asserted."));
 		return true;
 	}
 
@@ -184,7 +191,9 @@ bool FHFPanelEditReachesTheRendererTest::RunTest(const FString& Parameters)
 {
 	if (!FSlateApplication::IsInitialized())
 	{
-		AddInfo(TEXT("Slate is not initialised in this run, so the panel was not constructed."));
+		// THIS IS THE ONLY TEST THAT PROVES A PANEL EDIT REACHES THE RENDERED MATERIAL, so a silent
+		// skip here leaves that claim guarded by nothing at all. Sentinel, not AddInfo - see above.
+		AddWarning(TEXT("HF_UNMEASURED: Slate is not initialised in this run, so the panel was NOT constructed and no edit was driven through it."));
 		return true;
 	}
 
