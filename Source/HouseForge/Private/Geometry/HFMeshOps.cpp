@@ -205,7 +205,12 @@ namespace
 	 * carefully ComputeShadingNormals welded it. Charts drawn on the normals' own relation cannot.
 	 *
 	 * The one seam a chart may still carry is the cut a closed loop forces - a tube has to be opened
-	 * somewhere before it can lie flat - and that is topology, not a choice. See UnfoldChart.
+	 * somewhere before it can lie flat - and that is topology, not a choice. Only a DEVELOPABLE chart
+	 * gets away with that few, though, and saying otherwise was this file's own worst comment: a
+	 * doubly-curved chart has no isometry at all, and unfolding one rigidly cuts it in proportion to
+	 * its curvature. Those charts are parameterised instead of unfolded, with no interior seams and a
+	 * little scale drift in place of the cuts. See ChartTotalAngleDefect for how the two are told
+	 * apart, UnfoldChart for the first, ParameteriseSmoothly for the second.
 	 *
 	 * BY DOMINANT AXIS is the one UV1 uses, and it answers a different question: which triangles can
 	 * share ONE plane without any of them turning more than 55 degrees away from it, which is what
@@ -294,6 +299,75 @@ namespace
 	}
 
 	/**
+	 * The total angle defect a chart carries at its interior vertices, in radians.
+	 *
+	 * GAUSS-BONNET DECIDES THIS, NOT A GUESS ABOUT WHETHER SOMETHING "LOOKS CURVED". Unfolding a
+	 * triangle rigidly against the edge it arrived over preserves all three of its edge lengths, so a
+	 * cycle of such unfoldings closes exactly when the angles it encircles sum to a full turn - and
+	 * the amount by which it fails to close IS the angle defect it encircles. A chart with no defect
+	 * at any interior vertex is developable: every contractible cycle in it closes, and the only cut
+	 * left is the one a non-contractible loop forces, which is topology rather than a choice. A chart
+	 * with defect cannot be flattened isometrically at any resolution by any algorithm.
+	 *
+	 * That is why this is computed rather than discovered afterwards as a cut count. It answers
+	 * exactly the question the unfolder is about to be asked, before any element has been written.
+	 *
+	 * Only vertices whose WHOLE one-ring is in this chart count. A vertex on the chart's rim has no
+	 * closed cycle around it to fail to close, so its defect is not the unfolder's problem, and
+	 * charging it would send every merely-folded surface - which unfolds perfectly - down the lossy
+	 * path.
+	 */
+	double ChartTotalAngleDefect(const FDynamicMesh3& Mesh, const TArray<int32>& ChartTris,
+		const TArray<int32>& ChartForTri, int32 ChartId, TArray<double>& AngleSum,
+		TArray<int32>& InChartTriCount, TArray<int32>& TouchedVerts)
+	{
+		TouchedVerts.Reset();
+
+		for (const int32 Tid : ChartTris)
+		{
+			const FIndex3i Tri = Mesh.GetTriangle(Tid);
+			const FVector3d P[3] = { Mesh.GetVertex(Tri.A), Mesh.GetVertex(Tri.B), Mesh.GetVertex(Tri.C) };
+
+			for (int32 Corner = 0; Corner < 3; ++Corner)
+			{
+				FVector3d E1 = P[(Corner + 1) % 3] - P[Corner];
+				FVector3d E2 = P[(Corner + 2) % 3] - P[Corner];
+				if (!E1.Normalize(UE_DOUBLE_SMALL_NUMBER) || !E2.Normalize(UE_DOUBLE_SMALL_NUMBER))
+				{
+					continue;
+				}
+
+				const int32 Vid = Tri[Corner];
+				if (InChartTriCount[Vid] == 0)
+				{
+					TouchedVerts.Add(Vid);
+					AngleSum[Vid] = 0.0;
+				}
+				++InChartTriCount[Vid];
+				AngleSum[Vid] += FMath::Acos(FMath::Clamp(E1.Dot(E2), -1.0, 1.0));
+			}
+		}
+
+		double Total = 0.0;
+		for (const int32 Vid : TouchedVerts)
+		{
+			// A closed fan of this chart's triangles, and nothing else touching the vertex. Anything
+			// less is a rim vertex; anything on a mesh boundary is one by definition.
+			const bool bInterior = !Mesh.IsBoundaryVertex(Vid)
+				&& InChartTriCount[Vid] == Mesh.GetVtxTriangleCount(Vid);
+
+			if (bInterior)
+			{
+				Total += FMath::Abs(UE_DOUBLE_TWO_PI - AngleSum[Vid]);
+			}
+
+			InChartTriCount[Vid] = 0;
+		}
+
+		return Total;
+	}
+
+	/**
 	 * Unwraps a mesh into UV0 at real-world scale, one chart at a time.
 	 *
 	 * ## What this replaced, and why every part of it was wrong
@@ -323,11 +397,15 @@ namespace
 	 *     TexelSizeCm of world along every edge, at any orientation, with no foreshortening left to
 	 *     measure. It stays a pure function of world position, so two elements sharing a plane share a
 	 *     tile module and the material can keep expressing tiling in millimetres.
-	 *   - A CURVED CHART is UNFOLDED instead: laid out flat by walking the triangles and placing each
-	 *     one rigidly against the edge it arrived over, the way a paper model unrolls. Every triangle
-	 *     keeps all three of its edge lengths exactly, so world scale holds on a tube and a cove arc
-	 *     as well as it does on a wall - which a plane can never do - and the four projection-axis
-	 *     seams that used to run down every curved surface become the single cut its topology forces.
+	 *   - A DEVELOPABLE CURVED CHART - a tube, a cove arc, a chamfer skirt, an extrusion - is UNFOLDED:
+	 *     laid out flat by walking the triangles and placing each one rigidly against the edge it
+	 *     arrived over, the way a paper model unrolls. Every triangle keeps all three of its edge
+	 *     lengths exactly, so world scale holds on a tube as well as it does on a wall - which a plane
+	 *     can never do - and the four projection-axis seams that used to run down every curved surface
+	 *     become the single cut its topology forces.
+	 *   - A DOUBLY-CURVED CHART - a cushion, a knob dome, a lofted basin, the corner of a soft box -
+	 *     is PARAMETERISED, because for that one there is no isometry to find and unfolding it rigidly
+	 *     shatters it. See ParameteriseSmoothly.
 	 *
 	 * Neither path reads or writes a polygroup, so surface roles pass through untouched.
 	 */
@@ -352,11 +430,11 @@ namespace
 		/**
 		 * How far a reused vertex may sit from where the unfold wants it, in centimetres of world.
 		 *
-		 * Tight on purpose. This is the only place UV0 can stop being isometric, so the tolerance IS
-		 * the world-scale guarantee: past it the triangle gets its own element and stays exact, at the
-		 * price of a seam. Doubly-curved surfaces - a knob dome, a sanitary loft - cannot be flattened
-		 * without either distortion or cuts, and cuts are the honest half of that trade when the whole
-		 * point of the channel is that a millimetre of texture is a millimetre of wall.
+		 * Tight on purpose. Only developable charts are unfolded, so an unfold that fails to close has
+		 * met a genuine topological loop rather than accumulated curvature, and this tolerance only has
+		 * to absorb float drift along the traversal. Past it the triangle gets its own element and
+		 * stays exact, at the price of a seam - which for a tube is the one column of facets it has to
+		 * be opened along.
 		 */
 		static constexpr double ReuseToleranceCm = 0.005;
 
@@ -517,7 +595,20 @@ namespace
 			return bExpandable;
 		}
 
-		/** Grows one flat patch outward from a seed, and returns when it can reach no further. */
+		/**
+		 * Grows one flat patch outward from a seed, and returns when it can reach no further.
+		 *
+		 * Arrival order, deliberately plain. Expanding across the flattest edges first was tried, on
+		 * the reasoning that it would spend the traversal's freedom on the flat parts and leave the
+		 * sharpest edges to close the loops over - aiming the cut at a fold instead of letting it land
+		 * anywhere. It does reduce the total cut count slightly, and it moves MORE of them onto flat
+		 * surface, not fewer: 6,236 against 2,463 over the reference flat. The reason is that a cut
+		 * does not fall on the edge a triangle arrives over at all - it falls on the two edges at the
+		 * vertex where the loop failed to close - so ordering the arrivals does not steer it.
+		 *
+		 * Placing these deliberately means choosing the cut PATH, which is a different piece of work.
+		 * Until then this stays simple, and the residue is measured rather than assumed away.
+		 */
 		void GrowPatch(int32 SeedTid)
 		{
 			++Stamp;
@@ -593,6 +684,75 @@ namespace
 				}
 			}
 		}
+
+		/**
+		 * Lays a chart flat that CANNOT be laid flat, and pays for it in scale rather than in seams.
+		 *
+		 * A doubly-curved chart - a cushion, a knob dome, a lofted basin, the rounded corner of a soft
+		 * box - has angle defect, so no isometry exists. The unfolder above answers that by cutting:
+		 * every cycle that fails to close takes a fresh element, every triangle stranded behind a cut
+		 * seeds a fresh patch, and the boundary of every patch is a seam. The cut count is then
+		 * proportional to the chart's CURVATURE rather than to its topology, and the cuts land wherever
+		 * the traversal happened to arrive - including straight across flat sub-regions of the chart.
+		 * Measured on the reference flat that was 29,107 tangent creases on edges the normals had
+		 * deliberately welded smooth, 382 of them on one 672-triangle sofa cushion. A cushion needs one
+		 * seam at most, and needs it at the welt.
+		 *
+		 * A discrete exponential map has no interior seams at all: it allocates exactly one UV element
+		 * per chart vertex, so nothing inside the chart can be split, and the invariant this file is
+		 * built on - a UV0 seam is always a normal seam - holds by construction rather than by luck.
+		 * It preserves geodesic distance from its seed exactly and shears gradually away from it, so
+		 * world scale becomes approximate here instead of exact.
+		 *
+		 * THAT TRADE IS THE RIGHT WAY ROUND, and it is worth being explicit about why. A few percent of
+		 * scale drift across a 15 cm cushion is a fraction of a millimetre of texture slide that no
+		 * camera resolves. A tangent crease is a hard line across a surface under any normal map, at
+		 * any distance, forever. The channel's promise is that a millimetre of texture is a millimetre
+		 * of wall; a curved surface cannot keep that promise exactly, and the honest response is to
+		 * keep it on average rather than to shatter the surface trying to keep it pointwise.
+		 *
+		 * The frame is the chart's own gravity-aligned mean frame, the same one a planar chart would
+		 * get, so a curved surface's texture runs the same way up as the flat one it adjoins.
+		 */
+		bool ParameteriseSmoothly(const TArray<int32>& ChartTris, const FChartFrame& Frame)
+		{
+			FVector3d Centroid = FVector3d::Zero();
+			double TotalArea = 0.0;
+			for (const int32 Tid : ChartTris)
+			{
+				const double Area = Mesh.GetTriArea(Tid);
+				Centroid += Mesh.GetTriCentroid(Tid) * Area;
+				TotalArea += Area;
+			}
+			if (TotalArea <= UE_DOUBLE_SMALL_NUMBER)
+			{
+				return false;
+			}
+			Centroid /= TotalArea;
+
+			FDynamicMeshUVEditor Editor(&Mesh, &UVs);
+
+			const double TexelSizeCm = 1.0 / InvTexel;
+			const bool bMapped = Editor.SetTriangleUVsFromExpMap(
+				ChartTris,
+				[](const FVector3d& P) { return P; },
+				FFrame3d(Centroid, Frame.U, Frame.V, Frame.N),
+				FVector2d(TexelSizeCm, TexelSizeCm));
+
+			if (!bMapped)
+			{
+				// Some vertex the map could not reach, which leaves triangles with no UV at all. Worse
+				// than a seam by a long way, so the exact unfolder gets it back - cuts and all.
+				UVs.ClearElements(ChartTris);
+				return false;
+			}
+
+			for (const int32 Tid : ChartTris)
+			{
+				TriState[Tid] = 1;
+			}
+			return true;
+		}
 	};
 
 	/**
@@ -631,6 +791,14 @@ namespace
 		BuildCharts(Mesh, HardEdgeAngleDegrees, bIsometric, Charts, ChartForTri);
 
 		FWorldScaleUnwrapper Unwrapper(Mesh, UVs, ChartForTri, 1.0 / TexelSizeCm);
+
+		// Scratch for the developability test, allocated once for the whole mesh rather than per
+		// chart. InChartTriCount is left at zero by every call, so it needs no clearing between them.
+		TArray<double> AngleSum;
+		TArray<int32> InChartTriCount;
+		TArray<int32> TouchedVerts;
+		AngleSum.SetNumZeroed(Mesh.MaxVertexID());
+		InChartTriCount.SetNumZeroed(Mesh.MaxVertexID());
 
 		for (const TArray<int32>& ChartTris : Charts)
 		{
@@ -673,12 +841,41 @@ namespace
 
 			if (bPlanar)
 			{
-				Unwrapper.ProjectPlanarChart(ChartTris, Frame);
+					Unwrapper.ProjectPlanarChart(ChartTris, Frame);
+				continue;
 			}
-			else
+
+			// CURVATURE DECIDES THE METHOD. TOPOLOGY DOES NOT, AND TRYING TO MAKE IT WAS A MISTAKE
+			// WORTH RECORDING HERE SO IT IS NOT REPEATED.
+			//
+			// Angle defect at an interior vertex means no isometry exists, by Gauss-Bonnet, so a chart
+			// carrying any goes to the seamless parameterisation and pays in scale. A chart with none
+			// is developable and unfolds EXACTLY, however many cuts its topology costs.
+			//
+			// The obvious refinement - unfold, count the cuts, and hand an expensive one to the
+			// parameterisation as well - is wrong, and measurably so. A chamfer band has no interior
+			// vertices at all: every vertex it owns sits on the boundary it shares with the flat faces.
+			// So it scores exactly zero defect while being a surface spread over the solid's whole edge
+			// graph, with one independent loop per cycle in that graph. It genuinely needs about ten
+			// cuts, and they fall across 2 mm strips where nothing can see them. Handed to the
+			// parameterisation instead, that band unwraps as a long spiral and world scale fails by
+			// 235 cm on a chamfered box and 5.6 cm round a barrel - the channel's whole promise, lost
+			// buying back seams nobody could have seen.
+			//
+			// So cuts on a developable chart are topology, paid for in the right currency. What they
+			// still cost is that nothing chooses WHERE along a band the cut falls, which is measured
+			// and recorded as open by HouseForge.Flat.NoElementCreasesItsOwnTangents.
+			constexpr double DevelopableDefectRadians = 1e-4;
+
+			const double Defect = ChartTotalAngleDefect(Mesh, ChartTris, ChartForTri,
+				ChartForTri[ChartTris[0]], AngleSum, InChartTriCount, TouchedVerts);
+
+			if (Defect > DevelopableDefectRadians && Unwrapper.ParameteriseSmoothly(ChartTris, Frame))
 			{
-				Unwrapper.UnfoldChart(ChartTris);
+				continue;
 			}
+
+			Unwrapper.UnfoldChart(ChartTris);
 		}
 
 		// A bowtie vertex - two fans of this chart's triangles meeting at a single point - would

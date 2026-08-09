@@ -7,6 +7,7 @@
 #include "HouseForge.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/PackageName.h"
 #include "Model/HFSettings.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -80,6 +81,11 @@ namespace
 			F.GroutRoughness = Rough; return *this;
 		}
 		FFinishBuilder& ShadeVariation(float V) { F.TileShadeVariation = V; return *this; }
+		FFinishBuilder& Speckle(float Amount, float MM, float R, float G, float B)
+		{
+			F.SpeckleAmount = Amount; F.SpeckleSizeMM = MM;
+			F.SpeckleColor = FHFSurfaceFinish::FromSRGB(R, G, B); return *this;
+		}
 		FFinishBuilder& Glazed(float InOpacity)
 		{
 			F.Shading = EHFFinishShading::Glazed; F.Opacity = InOpacity; return *this;
@@ -154,11 +160,18 @@ namespace
 
 			// CounterStone. A SPECKLE, NOT A VEIN, and that is a deliberate refusal: procedural
 			// Statuario veining is camouflage every time, while a speckle genuinely is statistical.
+			//
+			// The speckle is ADDED, and it had to become its own mechanism before the intent could be
+			// delivered at all. It was 11% of MacroAlbedoAmount at a 15 mm wavelength, which on a base
+			// of 0.0222 linear came to +/-0.0024 - invisible - and the role rendered as grey powder-
+			// coated metal. A bronzite fleck is bright grain ON black, so it is added light at a grain
+			// size, and the macro drift goes back to being the slow sheen wash it is everywhere else.
 			T.Add(FFinishBuilder(TEXT("Speckled granite - Black Galaxy or Steel Grey - polished but not ")
 				TEXT("mirror. The coat carries the polish; the base carries the stone."),
 				0.161f, 0.161f, 0.176f, 0.30f)
 				.Spec(0.60f).Tiling(400.0f).Coat(0.5f, 0.09f)
-				.Macro(0.050f, 0.110f, 15.0f).Bump(0.010f, 1.5f));
+				.Macro(0.050f, 0.010f, 900.0f).Speckle(0.075f, 5.0f, 0.827f, 0.784f, 0.706f)
+				.Bump(0.010f, 1.5f));
 
 			// Glass. THE ONE TRANSMISSIVE ROLE. A pane drawn opaque reads as a boarded-up hole; drawn
 			// as flat translucency it reads as a plastic film.
@@ -271,6 +284,15 @@ FString UHFMaterialLibrary::ShippedAssetPath()
 	return FString::Printf(TEXT("%s/DA_HF_MaterialLibrary.DA_HF_MaterialLibrary"), MaterialFolder());
 }
 
+FString UHFMaterialLibrary::MasterPathForShading(EHFFinishShading Shading)
+{
+	const TCHAR* const Name = (Shading == EHFFinishShading::Glazed)
+		? TEXT("M_HF_SurfaceGlazed")
+		: TEXT("M_HF_Surface");
+
+	return FString::Printf(TEXT("%s/%s.%s"), MaterialFolder(), Name, Name);
+}
+
 UHFMaterialLibrary* UHFMaterialLibrary::Get()
 {
 	if (const UHFSettings* Settings = GetDefault<UHFSettings>())
@@ -338,6 +360,38 @@ const FHFSurfaceFinish& UHFMaterialLibrary::FinishForRole(EHFSurfaceRole Role) c
 	return DefaultFinishForRole(Role);
 }
 
+FString UHFMaterialLibrary::InstancePathForRole(EHFSurfaceRole Role) const
+{
+	const FString Name = InstanceNameForRole(Role);
+
+	// A LIBRARY OWNS THE INSTANCES BESIDE IT, and only the shipped library owns the shipped ones.
+	//
+	// The path used to be the plugin's own Materials folder unconditionally, whichever library was
+	// resolving. That made the header's promise - a job's own finishes, in the job's own project -
+	// half true at best: the VALUES were per project and the assets they rendered through were one
+	// shared set inside the plugin, on last-writer-wins. It also meant every colour tweak dirtied
+	// files in the plugin's own git repository, which Rule 01 keeps separate from user output for
+	// exactly this reason.
+	//
+	// Falling back to the shipped folder matters as much as looking beside the library first: a
+	// project that points at its own library without having authored eighteen instances next to it
+	// still renders, through the plugin's set, rather than turning the flat grey.
+	if (const UPackage* Package = GetOutermost())
+	{
+		const FString Folder = FPackageName::GetLongPackagePath(Package->GetName());
+		if (!Folder.IsEmpty() && Folder != MaterialFolder())
+		{
+			const FString Beside = FString::Printf(TEXT("%s/%s.%s"), *Folder, *Name, *Name);
+			if (FPackageName::DoesPackageExist(FString::Printf(TEXT("%s/%s"), *Folder, *Name)))
+			{
+				return Beside;
+			}
+		}
+	}
+
+	return AssetPathForRole(Role);
+}
+
 UMaterialInterface* UHFMaterialLibrary::ResolveMaterial(EHFSurfaceRole Role) const
 {
 	const int32 Index = FHFMeshOps::MaterialIdForRole(Role);
@@ -345,6 +399,20 @@ UMaterialInterface* UHFMaterialLibrary::ResolveMaterial(EHFSurfaceRole Role) con
 	if (Index < 0 || Index >= Count)
 	{
 		return nullptr;
+	}
+
+	// WHICH LIBRARY FILLED THE CACHE IS NOW PART OF THE CACHE, because which instance a role resolves
+	// to depends on it - see InstancePathForRole. Keyed by role alone, switching a project to its own
+	// library would have gone on rendering through the previous one's instances until a restart.
+	if (const UPackage* Package = GetOutermost())
+	{
+		static FString CacheOwner;
+		if (CacheOwner != Package->GetName())
+		{
+			CacheOwner = Package->GetName();
+			GRoleMaterials.Reset();
+			GWarnedRoles.Reset();
+		}
 	}
 
 	if (GRoleMaterials.Num() != Count)
@@ -357,7 +425,7 @@ UMaterialInterface* UHFMaterialLibrary::ResolveMaterial(EHFSurfaceRole Role) con
 		return GRoleMaterials[Index].Get();
 	}
 
-	const FString Path = AssetPathForRole(Role);
+	const FString Path = InstancePathForRole(Role);
 	UMaterialInterface* Loaded = LoadObject<UMaterialInterface>(nullptr, *Path);
 
 	if (Loaded == nullptr)
@@ -541,6 +609,10 @@ namespace
 		Sink.Scalar(TEXT("DetailBumpStrength"), Finish.DetailBumpStrength);
 		Sink.Scalar(TEXT("DetailBumpMM"), Finish.DetailBumpMM);
 
+		Sink.Scalar(TEXT("SpeckleAmount"), Finish.SpeckleAmount);
+		Sink.Scalar(TEXT("SpeckleSizeMM"), Finish.SpeckleSizeMM);
+		Sink.Vector(TEXT("SpeckleColor"), Finish.SpeckleColor);
+
 		Sink.Scalar(TEXT("GroutWidthMM"), Finish.GroutWidthMM);
 		Sink.Vector(TEXT("GroutColor"), Finish.GroutColor);
 		Sink.Scalar(TEXT("GroutRoughness"), Finish.GroutRoughness);
@@ -592,6 +664,26 @@ bool UHFMaterialLibrary::PushFinish(EHFSurfaceRole Role, EHFMaterialPush Mode) c
 
 		Instance->RecacheUniformExpressions(/*bRecreateUniformBuffer*/ false);
 		return true;
+	}
+
+	// THE PARENT FIRST, BECAUSE EVERY PARAMETER BELOW IS MEANINGLESS AGAINST THE WRONG ONE.
+	//
+	// Shading is an editable property, so a user can turn FloorFinish from Opaque to Glazed in the
+	// panel. WriteNumericParameters then stops writing CoatWeight and CoatRoughness and starts
+	// writing Opacity, IndexOfRefraction and GlassThicknessMM - parameters the opaque master has no
+	// pins for. Left unreparented, that click removed the clear coat from the single most important
+	// surface in the flat and put nothing in its place, with no message and nothing to see until the
+	// next render. See MasterPathForShading.
+	//
+	// Commit only. Reparenting rebuilds the static permutation and compiles shaders, which is exactly
+	// what must never happen inside a drag - and Shading is a combo box, so it only ever arrives here.
+	if (UMaterialInterface* const Wanted =
+		LoadObject<UMaterialInterface>(nullptr, *MasterPathForShading(Finish.Shading)))
+	{
+		if (Instance->Parent != Wanted)
+		{
+			Instance->SetParentEditorOnly(Wanted, /*bRecacheShaders*/ true);
+		}
 	}
 
 	{

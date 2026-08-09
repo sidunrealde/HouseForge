@@ -137,6 +137,15 @@ FHFOperationResult UHFEditorSubsystem::SetSurfaceFinish(EHFSurfaceRole Role,
 		// one transaction per mouse-move fills the undo buffer with a hundred steps nobody wants to
 		// walk back through a frame at a time. The library is still written, so a drag abandoned by
 		// clicking elsewhere leaves the library saying what the viewport is showing.
+		//
+		// The first push of a gesture keeps what was there. Nothing else can: from here on the
+		// library holds dragged values, so the commit that ends the gesture has no way left to find
+		// out what the user started from. See UHFEditorSubsystem::PreGestureFinishes.
+		if (!PreGestureFinishes.Contains(Role))
+		{
+			PreGestureFinishes.Add(Role, Library->FinishForRole(Role));
+		}
+
 		Library->Finishes.Add(Role, Finish);
 		Library->PushFinish(Role, EHFMaterialPush::Interactive);
 		return FHFOperationResult::Ok(FString::Printf(TEXT("Previewing the %s finish."), *RoleName));
@@ -145,8 +154,21 @@ FHFOperationResult UHFEditorSubsystem::SetSurfaceFinish(EHFSurfaceRole Role,
 	{
 		// THE DECISION. Transacted so it undoes as one step, and Modify before the write so the
 		// transaction captures the finish that was there rather than the one replacing it.
+		//
+		// "What was there" means BEFORE THE DRAG, not before this call. Modify() snapshots the object
+		// as it stands, and after a drag it stands at the dragged value - so the pre-gesture finish
+		// goes back in for the instant the snapshot is taken. Undo then lands where the user reached
+		// for the slider rather than where they let go of it.
+		FHFSurfaceFinish PreGesture;
+		const bool bWasDragged = PreGestureFinishes.RemoveAndCopyValue(Role, PreGesture);
+
 		const FScopedTransaction Transaction(
 			FText::Format(LOCTEXT("SetSurfaceFinish", "Change the {0} finish"), FText::FromString(RoleName)));
+
+		if (bWasDragged)
+		{
+			Library->Finishes.Add(Role, PreGesture);
+		}
 
 		Library->Modify();
 		Library->Finishes.Add(Role, Finish);

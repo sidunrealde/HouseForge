@@ -208,24 +208,32 @@ HF_BUMP_HLSL = r"""
 // the tangent frame the shader will light it in, rather than a world-space slope reinterpreted as
 // one.
 //
-// BUMPSTRENGTH IS A SURFACE SLOPE, and giving it that meaning is what makes it safe. The samples sit
-// HF_BUMP_STEP apart in noise space, so dividing the difference by that step turns it into a real
-// gradient; multiplying by BumpStrength then makes the number the tangent of the steepest slope the
-// surface ever reaches. 0.03 is about 1.7 degrees.
+// BUMPSTRENGTH IS THE TANGENT OF THE RMS SURFACE SLOPE, and it took two corrections to get a claim
+// here that is actually true. Dividing the finite difference by HF_BUMP_STEP turns it into a
+// gradient of the noise field - but a gradient OF THE FIELD is not a slope until you know how steep
+// the field itself gets, and this one is not normalised: it is V(p) + 0.5*V(2p) over lattice values
+// drawn uniformly from -1..1, whose gradient has an rms of about 1.6 and reaches 8.4.
 //
-// It used to be an arbitrary factor of sixteen on an undivided difference, which is dimensionless,
-// unrelated to the feature size, and roughly a hundred times too strong. At a 2 mm feature size that
-// still read as a fine tooth and looked fine; at the 30-60 mm of powder-coat orange peel and ceiling
-// trowel it turned into centimetre-wide dents, and every gloss surface in the flat came back looking
-// like hammered metal. Real orange peel is tens of MICRONS deep over tens of millimetres - a slope of
-// well under a thousandth - so the honest values here are far smaller than they look.
+// So the header used to say "the tangent of the steepest slope the surface ever reaches, 0.03 is
+// about 1.7 degrees" while delivering up to eight times that. Fabric at 0.045 read as popcorn rather
+// than weave, and every one of the flat's 19 door leaves came back pebbled. Dividing by the measured
+// rms makes the parameter mean exactly one thing that can be checked:
+//
+//     BumpStrength = tan(rms slope).  0.03 really is 1.7 degrees now, on average, with peaks about
+//     five times steeper - which is what a rough surface is.
+//
+// MEASURED, NOT DERIVED. Scripts/measure_noise_gradient.py replicates ValueNoise3D_ALU and the level
+// accumulation in Common.ush and samples four million points. The last correction of this same
+// constant was reasoned rather than measured and landed an order of magnitude short; this one is a
+// number that came back from an experiment.
 if (BumpStrength <= 1e-6)
 {
     return float3(0.0, 0.0, 1.0);
 }
 
-float Dx = ((NoiseX - NoiseC) / HF_BUMP_STEP) * BumpStrength;
-float Dy = ((NoiseY - NoiseC) / HF_BUMP_STEP) * BumpStrength;
+float Scale = BumpStrength / (HF_BUMP_STEP * HF_BUMP_GRADIENT_RMS);
+float Dx = (NoiseX - NoiseC) * Scale;
+float Dy = (NoiseY - NoiseC) * Scale;
 return normalize(float3(-Dx, -Dy, 1.0));
 """
 
@@ -233,6 +241,21 @@ return normalize(float3(-Dx, -Dy, 1.0));
 # the difference is a local gradient rather than a chord across a whole feature, large enough that
 # the value noise has actually changed between them.
 HF_BUMP_STEP = 0.25
+
+# Root-mean-square magnitude of that finite-difference gradient, over the noise field the bump node
+# is actually fed: two levels of ValueNoise3D_ALU at a level scale of 2, sampled HF_BUMP_STEP apart.
+#
+# MEASURED, by Scripts/measure_noise_gradient.py, over four million samples:
+#
+#     mean 1.388   rms 1.613   median 1.273   p90 2.541   p99 3.563   max 8.399
+#
+# Dividing by the rms is what lets DetailBumpStrength be quoted as a slope. Note the tail: the peak
+# gradient is five times the rms, so a surface at 0.03 has occasional facets near 8 degrees. That is
+# correct - a real rough surface is not uniformly sloped - but it is why the honest figure to put in
+# the table is the typical slope and not the worst one.
+#
+# Re-measure if the level count, the level scale or the step ever changes. All three are inputs to it.
+HF_BUMP_GRADIENT_RMS = 1.613
 
 
 # =================================================================================================
@@ -721,6 +744,37 @@ def build_detail(g, frame, tri):
                         macro_cm, -2200, 1060)
     macro_noise = g.noise(macro_pos, macro_width, -2000, 960, levels=3)
 
+    # ---- the speckle, in world space --------------------------------------------------------------
+    #
+    # ADDITIVE, AND THAT IS THE WHOLE POINT OF IT BEING A SEPARATE BLOCK.
+    #
+    # MacroAlbedoAmount above is a multiply: albedo * (1 + noise * amount). That is exactly right for
+    # a pale surface, where a roller-sheen drift really is a percentage of what is there. It cannot
+    # describe a fleck. Black Galaxy's bronzite is a BRIGHT GRAIN ON A BLACK GROUND, and CounterStone's
+    # base albedo is 0.0222 linear: +/-11% of near-black is +/-0.0024 linear, which is nothing. The
+    # role rendered as grey powder-coated metal, and the library's own comment - "a speckle, not a
+    # vein... a speckle genuinely is statistical" - described something the mechanism could not draw.
+    # Multiplying cannot add light to a surface that has none. Adding can.
+    #
+    # Shaped rather than used raw. saturate() throws away the half of the noise below zero, and the
+    # fourth power pulls what is left down to isolated bright peaks over roughly a tenth of the area -
+    # which is what a fleck is, as against a mottle. The exponent is fixed because it controls the
+    # CHARACTER of the grain, not its amount, and one more dial pointed at the same effect is a dial
+    # nobody can set.
+    speckle_amount = g.scalar("SpeckleAmount", 0.0, -2600, 1540, GROUP_DETAIL, 6)
+    speckle_mm = g.scalar("SpeckleSizeMM", 6.0, -2600, 1660, GROUP_DETAIL, 7)
+    speckle_colour = g.vector("SpeckleColor", unreal.LinearColor(1.0, 0.95, 0.85, 1.0),
+                              -2600, 1780, GROUP_DETAIL, 8)
+
+    speckle_cm = g.div(speckle_mm, frame["mm_per_cm"], -2400, 1660)
+    speckle_pos = g.div(frame["world_pos"], speckle_cm, -2200, 1660)
+    speckle_width = g.div(g.mul(frame["raw_width"], frame["uv_world_cm"], -2400, 1780),
+                          speckle_cm, -2200, 1780)
+    speckle_noise = g.noise(speckle_pos, speckle_width, -2000, 1700, levels=2)
+
+    grains = g.power(g.clamp(speckle_noise, -1800, 1700), g.const(4.0, -1800, 1820), -1600, 1740)
+    speckle = g.mul(g.mul(grains, speckle_amount, -1400, 1740), speckle_colour, -1200, 1780)
+
     # ---- the fine bump, in UV space -------------------------------------------------------------
     #
     # Independent of TilingMM on purpose: a plaster tooth is a property of the plaster, not of the
@@ -785,10 +839,15 @@ def build_detail(g, frame, tri):
     bump.set_editor_property("code", HF_BUMP_HLSL)
     bump.set_editor_property("description", "HFDetailNormal")
 
-    step_define = unreal.CustomDefine()
-    step_define.set_editor_property("define_name", "HF_BUMP_STEP")
-    step_define.set_editor_property("define_value", repr(HF_BUMP_STEP))
-    bump.set_editor_property("additional_defines", [step_define])
+    def define(name, value):
+        d = unreal.CustomDefine()
+        d.set_editor_property("define_name", name)
+        d.set_editor_property("define_value", repr(value))
+        return d
+
+    bump.set_editor_property("additional_defines",
+                             [define("HF_BUMP_STEP", HF_BUMP_STEP),
+                              define("HF_BUMP_GRADIENT_RMS", HF_BUMP_GRADIENT_RMS)])
 
     bump.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
     bump.set_editor_property("inputs",
@@ -806,7 +865,7 @@ def build_detail(g, frame, tri):
                          g.add(g.mul(macro_noise, macro_albedo, -700, 1180), shade, -500, 1200),
                          -300, 1120)
 
-    return dict(grout_mask=tile, detail_normal=bump,
+    return dict(grout_mask=tile, detail_normal=bump, speckle=speckle,
                 rough_delta=rough_delta, albedo_scale=albedo_scale, grout_mm=grout_mm)
 
 
@@ -847,9 +906,13 @@ def build_common_surface(g):
 
     varied = g.mul(albedo, detail["albedo_scale"], 2000, -1500)
 
+    # The drift scales what is there; the speckle adds what is not. Both, in that order, because a
+    # fleck of mica is not shaded by the sheen of the stone around it. See build_detail.
+    flecked = g.add(varied, detail["speckle"], 2100, -1400)
+
     # Grout is lerped over the FINISHED albedo rather than mixed into the base colour, so a user who
     # assigns a real tile albedo still gets their joint drawn on top of it at the right width.
-    final_colour = g.lerp(varied, grout_colour, detail["grout_mask"], 2200, -1500,
+    final_colour = g.lerp(flecked, grout_colour, detail["grout_mask"], 2200, -1500,
                           alpha_out="")
 
     # ---- roughness ------------------------------------------------------------------------------
@@ -904,7 +967,7 @@ def build_common_surface(g):
 
     return dict(frame=frame, base_colour=base_colour, colour=final_colour, rough=final_rough,
                 metal=final_metal, spec=specular, ao=final_ao, normal=final_normal,
-                emissive=emissive)
+                emissive=emissive, grout_mask=detail["grout_mask"])
 
 
 def attach(g, pins, extra, colour=None):
@@ -963,7 +1026,20 @@ def build_opaque_master(name):
     coat = g.scalar("CoatWeight", 0.0, -2600, 2140, GROUP_SURFACE, 4)
     coat_rough = g.scalar("CoatRoughness", 0.06, -2600, 2260, GROUP_SURFACE, 5)
 
-    attach(g, pins, {"ClearCoat": (coat, ""), "ClearCoatRoughness": (coat_rough, "")})
+    # THE GROUT IS NOT UNDER THE GLAZE, AND THIS IS THE LINE THAT SAYS SO.
+    #
+    # A glazed body is fired with the glaze on it; the cement raked into the joint afterwards is not.
+    # Wired straight through, a 0.6-weight coat sat over the joint exactly as it sat over the tile,
+    # and FHFSurfaceFinish::GroutRoughness - whose own header says the joint reads by its sheen far
+    # more than by its colour - could only change the BASE lobe, whose contribution the coat's Fresnel
+    # then buried. Measured on the delivered render that left a 15% albedo step reading as four to
+    # eight sRGB levels: a 600 mm grid that was provably there and invisible.
+    #
+    # lerp(coat, 0, mask) rather than a multiply so it reads as what it is: full coat on the tile,
+    # none on the joint, and the same mask that draws the joint everywhere else in the graph.
+    coated = g.lerp(coat, g.const(0.0, -2400, 2200), pins["grout_mask"], -2200, 2140)
+
+    attach(g, pins, {"ClearCoat": (coated, ""), "ClearCoatRoughness": (coat_rough, "")})
     return finish(material, name)
 
 

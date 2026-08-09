@@ -350,6 +350,21 @@ public:
 	virtual void Deinitialize() override;
 
 private:
+	/**
+	 * What each role's finish was before the drag currently in progress on it started.
+	 *
+	 * THE UNDO BUFFER CANNOT SEE THE START OF A GESTURE WITHOUT THIS. Interactive pushes deliberately
+	 * open no transaction - one per mouse-move would fill the buffer with a hundred steps nobody
+	 * wants to walk back through - but they DO write the library, so by the time the commit on mouse-
+	 * up calls Modify(), the object it snapshots already holds the dragged value. Undo then restored
+	 * the value the user had just dragged to, which is to say it did nothing at all. Typing a number
+	 * undid correctly and dragging one did not, which is a worse bug than neither working.
+	 *
+	 * Filled on the FIRST interactive push of a gesture and consumed by the commit that ends it,
+	 * which puts the pre-drag value back into the library for the instant Modify() looks at it.
+	 */
+	TMap<EHFSurfaceRole, FHFSurfaceFinish> PreGestureFinishes;
+
 	/** Bound to UHFSettings::OnSettingChanged so an edit on the settings page reaches the level. */
 	void HandleSettingsChanged(UObject* Settings, struct FPropertyChangedEvent& Event);
 

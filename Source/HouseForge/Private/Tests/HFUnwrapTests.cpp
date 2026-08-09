@@ -58,6 +58,53 @@ namespace HouseForgeUnwrap
 		return Mesh;
 	}
 
+	/**
+	 * A cushion: the case every primitive in this file used to miss.
+	 *
+	 * A box, a barrel, a cove strip and a chamfered box are ALL DEVELOPABLE - each one unrolls flat
+	 * with no distortion, so an isometric unfold handles them perfectly and a suite made only of them
+	 * cannot tell a working unwrap from one that shatters on curvature. The reference flat is full of
+	 * doubly-curved surfaces: sofa and bed cushions, knob domes, lofted sanitaryware, soft-box arms.
+	 * Those carry Gaussian curvature, no isometry exists for them, and that is precisely where the
+	 * old unfolder cut - 382 times on one 672-triangle cushion.
+	 *
+	 * Rolled on all three axes so the corners are genuine sphere octants rather than lozenges, which
+	 * is what makes the curvature two-dimensional rather than a bent strip.
+	 */
+	FDynamicMesh3 MakeCushion()
+	{
+		FHFSoftBoxParams Params;
+		Params.CornerRadius = 8.0;
+		Params.TopRadius = 6.0;
+		Params.BottomRadius = 4.0;
+		Params.CornerSteps = 5;
+		Params.RollSteps = 4;
+
+		FDynamicMesh3 Mesh;
+		FHFMeshOps::InitialiseMesh(Mesh);
+		FHFMeshOps::AppendSoftBox(Mesh, FVector3d(-30.0, -30.0, -8.0), FVector3d(30.0, 30.0, 8.0),
+			Params, EHFSurfaceRole::Fabric);
+		return Mesh;
+	}
+
+	/** A dome: a revolved profile closing to a zero radius, so its apex is a curvature singularity. */
+	FDynamicMesh3 MakeDome()
+	{
+		TArray<FVector2D> Profile;
+		const int32 Steps = 8;
+		for (int32 i = 0; i <= Steps; ++i)
+		{
+			const double Angle = (UE_DOUBLE_PI * 0.5) * static_cast<double>(i) / static_cast<double>(Steps);
+			Profile.Add(FVector2D(3.0 * FMath::Sin(Angle), 3.0 * FMath::Cos(Angle)));
+		}
+
+		FDynamicMesh3 Mesh;
+		FHFMeshOps::InitialiseMesh(Mesh);
+		FHFMeshOps::AppendRevolvedProfile(Mesh, Profile, FVector3d::Zero(), FVector3d::UnitZ(), 16,
+			EHFSurfaceRole::MetalHardware);
+		return Mesh;
+	}
+
 	const FDynamicMeshUVOverlay* UVsOf(const FDynamicMesh3& Mesh)
 	{
 		return Mesh.HasAttributes() ? Mesh.Attributes()->PrimaryUV() : nullptr;
@@ -127,7 +174,7 @@ bool FHFUnwrapSharesElementsTest::RunTest(const FString& Parameters)
 {
 	using namespace HouseForgeUnwrap;
 
-	auto CheckMesh = [this](const TCHAR* What, FDynamicMesh3& Mesh)
+	auto CheckMesh = [this](const TCHAR* What, FDynamicMesh3& Mesh, int32 MaxSeams)
 	{
 		FHFMeshOps::ApplyWorldScaleUVs(Mesh, 100.0);
 
@@ -176,25 +223,52 @@ bool FHFUnwrapSharesElementsTest::RunTest(const FString& Parameters)
 			return;
 		}
 
-		// Every smooth edge but the cut a closed loop forces. A barrel is a cylinder: it cannot be
-		// laid flat without opening it somewhere, and that somewhere is one column of its facets.
-		const int32 Allowed = FMath::Max(2, Smooth / 8);
+		AddInfo(FString::Printf(TEXT("%s: %d smooth interior edges, %d welded, %d seams inside welded "
+			TEXT("normals (allowed %d)")), What, Smooth, SmoothAndWelded, UVSeamsAtSmoothNormals,
+			MaxSeams));
+
+		// AN ABSOLUTE COUNT, STATED PER MESH, NOT A FRACTION OF THE MESH.
+		//
+		// This was Smooth/8 - up to 12.5% of a mesh's smooth edges could be UV seams. That is not a
+		// bound derived from anything: it is large enough to admit a total failure, and the reference
+		// flat measured 12.6%, so run flat-wide the assertion would have passed on geometry that was
+		// visibly broken. A bound tuned to the failure rate is not a bound.
+		//
+		// The honest bound is topological, and it differs per shape, so each caller states its own
+		// and says why. A closed loop has to be opened somewhere; nothing else may be cut at all.
 		TestTrue(*FString::Printf(
 			TEXT("%s welds UV0 across %d of its %d smooth edges"), What, SmoothAndWelded, Smooth),
-			SmoothAndWelded >= Smooth - Allowed);
+			SmoothAndWelded >= Smooth - MaxSeams);
 		TestTrue(*FString::Printf(
-			TEXT("%s leaves at most the topological cut as a UV seam inside welded normals (%d)"),
-			What, UVSeamsAtSmoothNormals),
-			UVSeamsAtSmoothNormals <= Allowed);
+			TEXT("%s leaves at most the topological cut as a UV seam inside welded normals: %d of %d, "
+				 "allowed %d"), What, UVSeamsAtSmoothNormals, Smooth, MaxSeams),
+			UVSeamsAtSmoothNormals <= MaxSeams);
 	};
 
-	// A box: the only smooth edges are the six face diagonals, and they must weld.
+	// A box: every chart is planar and none of them closes on itself, so NOTHING may be cut.
 	FDynamicMesh3 Box = MakeBox(FVector3d(50.0, 30.0, 20.0));
-	CheckMesh(TEXT("A box"), Box);
+	CheckMesh(TEXT("A box"), Box, 0);
 
 	// A barrel: 32 facet seams that ComputeShadingNormals welds smooth, and UV0 must not undo it.
+	// Developable, so the unfold is exact - but a cylinder is a closed loop and has to be opened
+	// along one column of facets, which is the only cut allowed here.
+	// Measured: 64 smooth interior edges, exactly 1 seam. That 1 is the cut, and 2 is the headroom
+	// for a retriangulation moving where it falls - not room for a second mechanism to appear.
 	FDynamicMesh3 Barrel = MakeBarrel();
-	CheckMesh(TEXT("A revolved barrel"), Barrel);
+	CheckMesh(TEXT("A revolved barrel"), Barrel, 2);
+
+	// A CUSHION AND A DOME: doubly curved, and the class that had no test at all.
+	//
+	// No isometry exists for either, so the unfolder cannot lay them flat and used to cut instead -
+	// in proportion to curvature, anywhere the traversal happened to close, including straight across
+	// flat sub-regions. Both are parameterised now, which allocates one UV element per vertex and
+	// therefore cannot cut internally: zero, not "few". If either ever regresses to the unfolder this
+	// is the assertion that says so.
+	FDynamicMesh3 Cushion = MakeCushion();
+	CheckMesh(TEXT("A rolled cushion"), Cushion, 0);
+
+	FDynamicMesh3 Dome = MakeDome();
+	CheckMesh(TEXT("A revolved dome"), Dome, 0);
 
 	// And a chamfered box, where the chamfer facets are the geometry the projection used to break.
 	FDynamicMesh3 Chamfered = MakeBox(FVector3d(50.0, 30.0, 20.0));

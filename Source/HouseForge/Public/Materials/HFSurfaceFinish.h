@@ -223,12 +223,19 @@ struct HOUSEFORGE_API FHFSurfaceFinish
 	float MacroVariationMM = 1500.0f;
 
 	/**
-	 * Steepest slope of the procedural bump, as a tangent. NOT AN AMPLITUDE.
+	 * TYPICAL slope of the procedural bump, as a tangent. NOT AN AMPLITUDE, AND NOT THE STEEPEST.
 	 *
 	 * It is a slope because that is the only thing a normal perturbation can honestly be: 0.02 means
-	 * the surface tilts about a degree at its steepest, whatever the feature size. Read as an
-	 * amplitude it was once about a hundred times too strong, which was invisible at a 2 mm plaster
-	 * tooth and turned every 30-60 mm orange-peel surface in the flat into hammered metal.
+	 * the surface tilts about a degree on average, whatever the feature size. Read as an amplitude it
+	 * was once about a hundred times too strong, which was invisible at a 2 mm plaster tooth and
+	 * turned every 30-60 mm orange-peel surface in the flat into hammered metal.
+	 *
+	 * "On average" is the part that took a second correction. This said STEEPEST until the noise
+	 * field's gradient was actually measured, and that field is not normalised - its rms gradient is
+	 * 1.6 and its peak 8.4, so the delivered slope was up to eight times the number quoted here and
+	 * Fabric read as popcorn. It is now divided by the measured rms, so this really is the typical
+	 * slope, with peaks about five times steeper as any rough surface has. See
+	 * Scripts/measure_noise_gradient.py, which is where the constant came from.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "04 Procedural Detail",
 		meta = (ClampMin = "0.0", ClampMax = "0.5"))
@@ -238,6 +245,31 @@ struct HOUSEFORGE_API FHFSurfaceFinish
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "04 Procedural Detail",
 		meta = (ClampMin = "0.1"))
 	float DetailBumpMM = 2.0f;
+
+	/**
+	 * Brightness of an ADDED mineral fleck, in linear albedo. Zero on every role but the stones.
+	 *
+	 * SEPARATE FROM MacroAlbedoAmount BECAUSE ADDING AND MULTIPLYING ARE NOT THE SAME PICTURE.
+	 * MacroAlbedoAmount scales what is already there, which is exactly right for the roller-sheen
+	 * drift on a pale wall. A fleck of bronzite in Black Galaxy is not a percentage of the black
+	 * around it - it is a bright grain sitting on it. CounterStone's base is 0.0222 linear, so the
+	 * 11% drift it used to carry came to +/-0.0024 and the granite rendered as flat grey metal.
+	 *
+	 * 0.06 puts a fleck about three times the brightness of the ground on roughly a tenth of the
+	 * area, which is what a polished speckled granite looks like at arm's length.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "04 Procedural Detail",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SpeckleAmount = 0.0f;
+
+	/** Grain size of that fleck, in millimetres. Granite reads at 4-8; a quartz composite finer. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "04 Procedural Detail",
+		meta = (ClampMin = "0.1"))
+	float SpeckleSizeMM = 6.0f;
+
+	/** Colour of the fleck, LINEAR. Warm off-white for feldspar and mica; grey for a quartz chip. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "04 Procedural Detail")
+	FLinearColor SpeckleColor = FLinearColor(1.0f, 0.95f, 0.85f, 1.0f);
 
 	/**
 	 * Compile the procedural bump out entirely rather than multiply it by a zero.

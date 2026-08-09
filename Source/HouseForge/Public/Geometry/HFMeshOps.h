@@ -339,15 +339,26 @@ public:
 	 * Unwraps the mesh into UV0 at real-world scale, one smoothing chart at a time.
 	 *
 	 * TexelSizeCm is the world size one UV tile covers, and that is the whole contract: one UV unit
-	 * really is TexelSizeCm of wall, along every edge of every triangle, which is what lets the
-	 * material express tiling in millimetres rather than in arbitrary numbers.
+	 * really is TexelSizeCm of wall, which is what lets the material express tiling in millimetres
+	 * rather than in arbitrary numbers. Exactly, on everything that can be flattened; on average,
+	 * within a few percent, on the doubly-curved surfaces that provably cannot - see below.
 	 *
-	 * ISOMETRIC, NOT MERELY SCALED. A chart is a connected run of triangles with no hard edge between
-	 * them - the same relation ComputeShadingNormals welds normals on, see DefaultHardEdgeAngleDegrees.
-	 * A flat chart is projected into its own gravity-aligned frame, so a wall yawed 45 degrees carries
-	 * exactly the same texture density as an axis-aligned one; a curved chart is unfolded flat like a
-	 * paper model, keeping every edge length, so a rail tube and a cove arc do too. The projection this
-	 * replaced picked a world axis per triangle and stretched anything off-axis by 1/cos.
+	 * ISOMETRIC WHERE AN ISOMETRY EXISTS. A chart is a connected run of triangles with no hard edge
+	 * between them - the same relation ComputeShadingNormals welds normals on, see
+	 * DefaultHardEdgeAngleDegrees. A flat chart is projected into its own gravity-aligned frame, so a
+	 * wall yawed 45 degrees carries exactly the same texture density as an axis-aligned one; a
+	 * developable curved chart is unfolded flat like a paper model, keeping every edge length, so a
+	 * rail tube and a cove arc do too. The projection this replaced picked a world axis per triangle
+	 * and stretched anything off-axis by 1/cos.
+	 *
+	 * WHERE NO ISOMETRY EXISTS, THE SCALE GIVES WAY AND THE SEAMS DO NOT. A cushion, a knob dome or a
+	 * lofted basin carries Gaussian curvature, so no flattening can keep every edge length - that is a
+	 * theorem, not an implementation limit. Such a chart is parameterised by a discrete exponential
+	 * map, which allocates one UV element per vertex and therefore cannot split a chart internally at
+	 * all. Distance from the chart's centre is exact and shear grows gradually outward from it. The
+	 * alternative, forcing an isometry and cutting wherever it fails to close, puts a tangent crease
+	 * across a surface the normals were deliberately welded smooth, in proportion to curvature rather
+	 * than to topology - which is what it used to do, 29,107 times over the reference flat.
 	 *
 	 * Polygroups are neither read nor written here. Per-polygroup projection would in any case be the
 	 * wrong unit: a wall element is one WallPaint group covering six faces pointing six ways.

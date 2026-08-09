@@ -133,6 +133,31 @@ public:
 	static FString ShippedAssetPath();
 
 	/**
+	 * Object path of the instance THIS library renders a role through.
+	 *
+	 * Beside the library's own asset when one is authored there, and the plugin's shipped instance
+	 * otherwise. That is what makes a project-specific library actually specific to the project
+	 * rather than a second set of numbers pointed at one shared set of assets - and what stops a
+	 * finish edit in a job dirtying files inside the plugin's own git repository.
+	 */
+	FString InstancePathForRole(EHFSurfaceRole Role) const;
+
+	/**
+	 * Object path of the master a given shading model instances from.
+	 *
+	 * TWO MASTERS, AND WHICH ONE A ROLE WANTS IS ITS SHADING MODEL. They do not carry the same
+	 * parameters and could not: the opaque one has ClearCoat pins and the glazed one has Opacity,
+	 * IndexOfRefraction and GlassThicknessMM, because a blend mode and a shading model are baked into
+	 * a material rather than switchable on an instance of it.
+	 *
+	 * Published so PushFinish can REPARENT when the two disagree. Without that, changing a role's
+	 * Shading rewrote the parameters for the other master onto an instance still pointing at this
+	 * one, and every parameter written went nowhere: the surface silently lost its coat and gained no
+	 * glass. Silent, one click, and invisible until somebody rendered it.
+	 */
+	static FString MasterPathForShading(EHFFinishShading Shading);
+
+	/**
 	 * The library this project builds with. Three places, in order, and never null.
 	 *
 	 *   1. THE ASSET NAMED BY UHFSettings::MaterialLibrary. A job's own finishes, in the job's own

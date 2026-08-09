@@ -285,10 +285,15 @@ bool FHFTilingIsInMillimetresTest::RunTest(const FString& Parameters)
 	FString WhyNot;
 	if (!FHFSceneCapture::CanRender(WhyNot))
 	{
+		// HF_UNMEASURED is a sentinel the gate greps for, not decoration. hf-validate.ps1 runs a
+		// second, renderer-enabled stage precisely so this branch is not the only one anybody ever
+		// executes, and it FAILS if this token appears in that stage's report. A test that quietly
+		// asserts nothing in the only invocation anybody runs is the same class of defect as a
+		// capture that renders the wrong material without saying so.
 		AddWarning(FString::Printf(
-			TEXT("Tiling was NOT measured in pixels: %s Everything up to the sampler is covered by ")
-			TEXT("HouseForge.Materials.TilingMillimetresMatchTheUnwrap; the pattern itself needs a ")
-			TEXT("renderer, so run this suite without -nullrhi to assert it."), *WhyNot));
+			TEXT("HF_UNMEASURED: tiling was NOT measured in pixels: %s Everything up to the sampler ")
+			TEXT("is covered by HouseForge.Materials.TilingMillimetresMatchTheUnwrap; the pattern ")
+			TEXT("itself needs a renderer, so run this suite without -nullrhi to assert it."), *WhyNot));
 		return true;
 	}
 
