@@ -559,8 +559,24 @@ struct HOUSEFORGE_API FHFSofaBuild
 	 * ONE CUSHION, NOT A ROW OF THEM, and that is what a chaise is: an uninterrupted 1100 mm run to
 	 * put your legs along. Divided into seat-sized pieces with shadow gaps between them it would be
 	 * two more seats facing the wrong way, which is a corner sofa and a different object.
+	 *
+	 * It is the seat only. ChaiseBackCushion is the one above it, and there IS one - see there.
 	 */
 	UE::Geometry::FDynamicMesh3 ChaiseCushion;
+
+	/**
+	 * The back cushion over the chaise. Empty unless the sofa is a sectional.
+	 *
+	 * OMITTING IT LEFT 180 mm OF BARE DECK ALONG THE BACK OF THE RETURN, which the first render of the
+	 * sectional showed as a flat tan strip between the chaise's cushion and the back panel - about a
+	 * fifth of the chaise's own area, in the part of the sofa the eye lands on first. It was omitted
+	 * on the reasoning that a chaise has "nothing at its far end", which is true of the END and says
+	 * nothing about the BACK: the back panel runs the whole width of an L, so the cushions do too.
+	 * Every two-seater-plus-chaise anybody sells has three back cushions.
+	 *
+	 * Wider than the others, because the section it covers is wider: 720 against 540.
+	 */
+	UE::Geometry::FDynamicMesh3 ChaiseBackCushion;
 
 	/**
 	 * The parameters actually used, after clamping - INCLUDING the design that was actually built.

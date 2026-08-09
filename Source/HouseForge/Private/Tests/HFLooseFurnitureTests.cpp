@@ -1245,6 +1245,56 @@ bool FHFSofaDesignsTest::RunTest(const FString& Parameters)
 			AddError(FString::Printf(TEXT("%s built no seat cushions"), Case.Name));
 		}
 
+		// ---------------------------------------------------- EVERY SEAT IS BACKED, ACROSS THE WHOLE WIDTH
+		//
+		// The general form of the defect the sectional shipped with, asserted on all four so it
+		// cannot come back on a design that grows a second return later. Wherever there is
+		// something to sit ON there is something to lean AGAINST, and the span of one measured
+		// against the span of the other says so in centimetres.
+		//
+		// It is the ends that are checked and not the area, because that is how the failure
+		// presented: the seating ran the full 2020 mm arm to arm while the backing stopped at
+		// 1285 where the chaise began, leaving 720 mm of deck in front of a bare panel.
+		{
+			double SeatX0 = TNumericLimits<double>::Max();
+			double SeatX1 = -TNumericLimits<double>::Max();
+			double BackX0 = TNumericLimits<double>::Max();
+			double BackX1 = -TNumericLimits<double>::Max();
+
+			auto Span = [](const FDynamicMesh3& Mesh, double& X0, double& X1)
+			{
+				if (Mesh.TriangleCount() > 0)
+				{
+					const FAxisAlignedBox3d B = Mesh.GetBounds();
+					X0 = FMath::Min(X0, B.Min.X);
+					X1 = FMath::Max(X1, B.Max.X);
+				}
+			};
+
+			for (const FDynamicMesh3& Cushion : Built.SeatCushions)
+			{
+				Span(Cushion, SeatX0, SeatX1);
+			}
+			Span(Built.ChaiseCushion, SeatX0, SeatX1);
+
+			for (const FDynamicMesh3& Cushion : Built.BackCushions)
+			{
+				Span(Cushion, BackX0, BackX1);
+			}
+			Span(Built.ChaiseBackCushion, BackX0, BackX1);
+
+			// Two gaps: one cushion inset at each end, and the seam between the run and a return
+			// is two gaps wide where a cushion-to-cushion seam is one.
+			const double Slack = P.CushionGap * 2.0 + 0.1;
+
+			TestTrue(FString::Printf(TEXT("%s: the seating is backed to its -X end (seat from %.1f, "
+				"back from %.1f cm)"), Case.Name, SeatX0, BackX0),
+				FMath::Abs(BackX0 - SeatX0) < Slack);
+			TestTrue(FString::Printf(TEXT("%s: and to its +X end (seat to %.1f, back to %.1f cm)"),
+				Case.Name, SeatX1, BackX1),
+				FMath::Abs(BackX1 - SeatX1) < Slack);
+		}
+
 		// ------------------------------------------------------------------ NOTHING FOLDS BACK ON ITSELF
 		//
 		// The assertion that caught the defect this kit was built around - AppendSoftBox flooring its
@@ -1264,6 +1314,7 @@ bool FHFSofaDesignsTest::RunTest(const FString& Parameters)
 		if (P.IsSectional())
 		{
 			SoftParts.Emplace(TEXT("chaise cushion"), &Built.ChaiseCushion);
+			SoftParts.Emplace(TEXT("chaise back cushion"), &Built.ChaiseBackCushion);
 		}
 		for (int32 Index = 0; Index < Built.Arms.Num(); ++Index)
 		{
@@ -1474,6 +1525,41 @@ bool FHFSofaDesignSilhouettesTest::RunTest(const FString& Parameters)
 		TestTrue(FString::Printf(TEXT("Which is nearly twice a seat cushion (%.1f vs %.1f cm)"),
 			ChaiseLength, SeatLength), ChaiseLength > SeatLength * 1.6);
 
+		// ------------------------------------------------- AND THE DECK BEHIND IT IS NOT BARE
+		//
+		// The measurement that catches what this design shipped without. With no cushion over the
+		// chaise, the deck between the back of the chaise's own cushion and the face of the back
+		// panel was exposed for the whole 720 mm of the return, BackRake + BackCushionThickness
+		// deep - 180 mm on these figures. The render showed it as a flat tan band across the part
+		// of the sofa nearest the eye, about a fifth of the chaise's own area.
+		//
+		// Asserted as EXPOSED DEPTH IN CENTIMETRES and not as "a mesh is present", because a
+		// cushion of any size whatever would satisfy the second one. What should be left behind
+		// the chaise is what is left behind every other seat: one CushionGap of shadow line.
+		TestTrue(TEXT("The chaise has a back cushion over it"),
+			Sectional.ChaiseBackCushion.TriangleCount() > 0);
+
+		const FAxisAlignedBox3d ChaiseBack = Sectional.ChaiseBackCushion.GetBounds();
+		const FAxisAlignedBox3d RunBack = Sectional.BackCushions[0].GetBounds();
+		const double ExposedDeck = ChaiseBack.Min.Y - Chaise.Max.Y;
+
+		TestTrue(FString::Printf(TEXT("Leaving a shadow line of deck behind it and not a strip "
+			"(%.2f cm exposed, against a %.2f cm gap)"), ExposedDeck, P.CushionGap),
+			ExposedDeck > 0.0 && ExposedDeck < P.CushionGap + 0.5);
+
+		// One cushion over the whole return, like the seat under it - and lined up with the run's,
+		// so the tops read as one line across the sofa rather than as a step at the corner.
+		TestTrue(FString::Printf(TEXT("Its top lines up with the run's back cushions (%.2f vs %.2f cm)"),
+			ChaiseBack.Max.Z, RunBack.Max.Z),
+			FMath::IsNearlyEqual(ChaiseBack.Max.Z, RunBack.Max.Z, 0.05));
+
+		// Wider than a seat's, because the section it covers is wider: the 720 mm chaise against a
+		// 540 mm seat. A back cushion the same width as the run's would have left the rest bare.
+		const double ChaiseBackWidth = ChaiseBack.Max.X - ChaiseBack.Min.X;
+		const double RunBackWidth = RunBack.Max.X - RunBack.Min.X;
+		TestTrue(FString::Printf(TEXT("And wider than one of the run's (%.1f vs %.1f cm)"),
+			ChaiseBackWidth, RunBackWidth), ChaiseBackWidth > RunBackWidth * 1.2);
+
 		// AND THE PLAN IS AN L, measured where it matters: at the front of the drawn box only the
 		// return is there, and the other end of the sofa is 500 mm behind it. A rectangle would fill
 		// the whole width at every depth.
@@ -1523,6 +1609,7 @@ bool FHFSofaDesignSilhouettesTest::RunTest(const FString& Parameters)
 	{
 		TestFalse(TEXT("A square-arm sofa is not a sectional"), Square.Used.IsSectional());
 		TestEqual(TEXT("It has no chaise cushion"), Square.ChaiseCushion.TriangleCount(), 0);
+		TestEqual(TEXT("Nor a back cushion for one"), Square.ChaiseBackCushion.TriangleCount(), 0);
 		TestEqual(TEXT("A 2100 box with no return is a three-seater"), Square.SeatCushions.Num(), 3);
 		TestTrue(TEXT("It stands on legs"), Square.Legs.TriangleCount() > 0);
 	}

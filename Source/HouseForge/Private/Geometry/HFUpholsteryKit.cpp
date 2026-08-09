@@ -335,6 +335,7 @@ FHFSofaBuild FHFUpholsteryKit::BuildSofa(const FHFSofaParams& Params)
 	FHFMeshOps::InitialiseMesh(Out.Base);
 	FHFMeshOps::InitialiseMesh(Out.Back);
 	FHFMeshOps::InitialiseMesh(Out.ChaiseCushion);
+	FHFMeshOps::InitialiseMesh(Out.ChaiseBackCushion);
 
 	const FHFSofaParams P = SanitiseSofa(Params);
 	Out.Used = P;
@@ -677,16 +678,39 @@ FHFSofaBuild FHFUpholsteryKit::BuildSofa(const FHFSofaParams& Params)
 	// gaps between them it would be two more seats facing across the sofa, which is a corner unit.
 	//
 	// Its back edge lines up with every other seat cushion's, so the seam across the sofa reads as
-	// one line rather than as a step, and it has NO back cushion behind it - what is behind a chaise
-	// is the same back panel the run has, and what is at its far end is nothing at all.
+	// one line rather than as a step.
+	//
+	// AND IT HAS A BACK CUSHION LIKE EVERY OTHER SEAT DOES. The first version of this reasoned that a
+	// chaise has "nothing behind it", which confused the END of the return with its BACK: the back
+	// PANEL is built arm to arm, across the chaise as well as the run, so the deck in front of that
+	// panel runs the whole width too. Leaving it bare exposed a strip of upholstered deck exactly
+	// BackRake + BackCushionThickness deep - 180 mm on this design - along the full 720 mm of the
+	// chaise, and the render showed it as a flat tan band across the part of the sofa nearest the eye.
+	// It is one cushion rather than a row of them for the same reason the seat below it is one.
 	if (P.IsSectional())
 	{
+		// The seam between the run and the return, front to back in one line. Both cushions are inset
+		// by a gap from ChaiseSeatX0, and the run's last cushion stops a gap short of it, so the joint
+		// is two gaps wide where a cushion-to-cushion seam is one. That is right: this is the seam
+		// between the two PIECES of a sectional, and it is wider on every one anybody sells.
+		const double ChaiseX0 = P.ChaiseSeatX0() + P.CushionGap;
+		const double ChaiseX1 = P.ChaiseSeatX1() - P.CushionGap;
+
 		AppendSoft(Out.ChaiseCushion,
-			FVector3d(P.ChaiseSeatX0() + P.CushionGap, P.ChaiseCushionFrontY(), DeckZ),
-			FVector3d(P.ChaiseSeatX1() - P.CushionGap, SeatBackY, P.SeatHeight),
+			FVector3d(ChaiseX0, P.ChaiseCushionFrontY(), DeckZ),
+			FVector3d(ChaiseX1, SeatBackY, P.SeatHeight),
 			SeatSoft, EHFSurfaceRole::Fabric);
 
 		FHFMeshOps::ApplyWorldScaleUVs(Out.ChaiseCushion);
+
+		// Set out from exactly the figures the run's back cushions use, so the tops line up across the
+		// sofa and the lean matches. Only the X span differs, because the section it covers is wider.
+		AppendSoft(Out.ChaiseBackCushion,
+			FVector3d(ChaiseX0, BackCushionY0, P.SeatHeight),
+			FVector3d(ChaiseX1, BackCushionY1, P.BackCushionTopZ()),
+			BackSoft, EHFSurfaceRole::Fabric);
+
+		FHFMeshOps::ApplyWorldScaleUVs(Out.ChaiseBackCushion);
 	}
 
 	// ------------------------------------------------------------------------------------ shell
@@ -708,6 +732,7 @@ FHFSofaBuild FHFUpholsteryKit::BuildSofa(const FHFSofaParams& Params)
 		FHFMeshOps::AppendPreservingRoles(Out.Shell, Cushion);
 	}
 	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.ChaiseCushion);
+	FHFMeshOps::AppendPreservingRoles(Out.Shell, Out.ChaiseBackCushion);
 
 	Out.bValid = Out.Shell.TriangleCount() > 0;
 	return Out;
