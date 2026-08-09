@@ -18,6 +18,7 @@
 #include "EngineUtils.h"
 #include "HAL/FileManager.h"
 #include "HFEditorSubsystem.h"
+#include "HFRenderSettings.h"
 #include "ImageUtils.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInterface.h"
@@ -384,6 +385,13 @@ bool FHFCaptureNeedsNoViewportTest::RunTest(const FString& Parameters)
 	IFileManager::Get().Delete(*ViewPath, false, true, true);
 
 	constexpr int32 Resolution = 512;
+
+	// THE SUBJECT HERE IS THE ABSENCE OF A VIEWPORT, not the light in the picture. The stand-in flat
+	// is seven unbaked elements, so the Lumen guard refuses the lit view on sight - correctly, and
+	// beside the point, because this test never looks at a pixel's brightness. Switched off narrowly
+	// rather than by baking the stand-in, which would put a 350-asset write into a test about whether
+	// a capture needs a window. See FHFLumenGuardScope.
+	const FHFLumenGuardScope NotJudgedOnItsLight(EHFLumenGuard::Off);
 
 	FString PlanOut;
 	const FHFOperationResult Plan = Editor->CaptureTopDown(PlanName, Resolution, 0.0, PlanOut);

@@ -127,3 +127,49 @@ public:
 	/** The settings, or the compiled-in defaults if the CDO does not exist yet. */
 	static FHFRenderPolicy Policy();
 };
+
+/**
+ * Forces the Lumen guard to one value for the duration of a scope.
+ *
+ * ## Why this exists, and why it is not a hole in the guard
+ *
+ * Not every render is a render of the lighting. Two tests in the suite draw a real frame with a real
+ * renderer to measure something that has nothing to do with bounce:
+ *
+ *   HouseForge.Capture.NoViewportIsNeededAndNoneIsAskedFor  - that a capture needs no viewport
+ *   HouseForge.Materials.TilingIsInMillimetres              - that a 600 mm tile measures 600 mm
+ *
+ * Both build a seven-element stand-in and photograph it. Both were correctly refused the moment the
+ * guard went in, which is the guard working: those flats are not in the Lumen scene. But neither test
+ * is asking a question the Lumen scene can answer - one is counting texels across a floor - and the
+ * two ways to make them pass are to bake the stand-in, or to say out loud that this particular
+ * picture is not being judged on its light.
+ *
+ * Baking them would be worse than it looks. HouseForge.Materials.TilingIsInMillimetres exists to
+ * check the UVs of the LIVE geometry the material panel edits; putting a bake in the middle of it
+ * would make it a test of tiling on baked geometry instead, and the millimetre promise would lose
+ * its only direct measurement.
+ *
+ * So the opt-out is explicit, narrow and per-scope, exactly like FHFBakeSaveScope - and exactly like
+ * the plan capture, which sets EHFLumenGuard::Off inline because an orthographic section with the sky
+ * switched off has no indirect light in it to get wrong.
+ *
+ * WHAT THIS MUST NEVER BE USED FOR is a capture whose subject is the lighting. The test that proves
+ * the guard fires - HouseForge.Lumen.TheCaptureRefusesAnUnbakedLitView - does not use it, and would
+ * be meaningless if it did.
+ *
+ * A scope guard rather than a bare flag because a test that failed early and left the guard switched
+ * off would silently change what every capture after it was allowed to draw.
+ */
+struct HOUSEFORGEEDITOR_API FHFLumenGuardScope
+{
+	explicit FHFLumenGuardScope(EHFLumenGuard InGuard);
+	~FHFLumenGuardScope();
+
+	FHFLumenGuardScope(const FHFLumenGuardScope&) = delete;
+	FHFLumenGuardScope& operator=(const FHFLumenGuardScope&) = delete;
+
+private:
+	bool bPreviousHasOverride = false;
+	EHFLumenGuard PreviousGuard = EHFLumenGuard::Refuse;
+};

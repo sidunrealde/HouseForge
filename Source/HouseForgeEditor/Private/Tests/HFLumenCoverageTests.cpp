@@ -19,6 +19,7 @@
 //   * a bake that could never work is caught, not counted    AnAssetWithNoDistanceFieldIsCaught
 //   * a project that cannot build DFs fails even when baked  ProjectSettingsThatDefeatTheBakeFail
 //   * a non-Lumen project is not nagged                      AProjectNotUsingLumenIsNotGuarded
+//   * the narrow opt-out gives the guard back                TheGuardScopeGivesBackWhatItTook
 //
 // AnAssetWithNoDistanceFieldIsCaught and ProjectSettingsThatDefeatTheBakeFail are the two to keep.
 // Both describe a flat that has been baked perfectly and is STILL invisible to Lumen - the state
@@ -41,6 +42,7 @@
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
+#include "HFRenderSettings.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "Model/HFSampleHouse.h"
@@ -659,6 +661,72 @@ bool FHFLumenNotLumenTest::RunTest(const FString& Parameters)
 	// But it must still be able to SAY the absences are there, or "the check does not apply" and
 	// "the check passed" become the same answer and the day Lumen is switched on nobody is told.
 	TestTrue(TEXT("The absences are still counted and reportable"), Report.Absent > 0);
+
+	return true;
+}
+
+// ============================================================================================
+// The opt-out, and the thing that stops it becoming a hole
+//
+// Two pixel tests render an unbaked stand-in for reasons that have nothing to do with light - one
+// counts texels across a floor, the other checks a capture needs no viewport - and both are refused
+// by the guard until they say so. FHFLumenGuardScope is how they say so.
+//
+// The whole safety of that arrangement rests on the scope being a SCOPE. A bare flag left switched
+// off by a test that returned early would silently license every capture after it, and the guard
+// would be off in exactly the runs nobody is watching. So the restore is asserted, including through
+// nesting, rather than trusted to the destructor being obviously correct.
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFLumenGuardScopeTest,
+	"HouseForge.Lumen.TheGuardScopeGivesBackWhatItTook", HF_TEST_FLAGS)
+
+bool FHFLumenGuardScopeTest::RunTest(const FString& Parameters)
+{
+	const EHFLumenGuard Before = UHFRenderSettings::Policy().LumenGuard;
+
+	{
+		const FHFLumenGuardScope Off(EHFLumenGuard::Off);
+		TestEqual(TEXT("The scope wins over the project page"),
+			UHFRenderSettings::Policy().LumenGuard, EHFLumenGuard::Off);
+
+		{
+			// Nested, because a test that opts out and then calls a helper which opts out again must
+			// come back to Off rather than to the project value - otherwise the inner scope silently
+			// re-arms the guard in the middle of the outer one.
+			const FHFLumenGuardScope Warn(EHFLumenGuard::Warn);
+			TestEqual(TEXT("The inner scope wins while it is open"),
+				UHFRenderSettings::Policy().LumenGuard, EHFLumenGuard::Warn);
+		}
+
+		TestEqual(TEXT("The outer scope is restored, not the project value"),
+			UHFRenderSettings::Policy().LumenGuard, EHFLumenGuard::Off);
+	}
+
+	TestEqual(TEXT("The project value is back once every scope has closed"),
+		UHFRenderSettings::Policy().LumenGuard, Before);
+
+	// And the point of all of it: with no scope open, an unbaked lit view is still refused. If this
+	// ever passes, the two opt-outs above have leaked and nothing is being guarded.
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	using namespace HFLumenTest;
+
+	const FCVarScope Lumen(TEXT("r.DynamicGlobalIlluminationMethod"), 1);
+
+	AHFHouseActor* House = BuildReferenceFlat(World);
+	if (!TestNotNull(TEXT("The reference flat builds"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->ClearGeometry(); House->Destroy(); } };
+
+	FString WhyNot;
+	TestFalse(TEXT("Outside every scope, an unbaked lit view is still refused"),
+		FHFSceneCapture::EnsureLumenCoverage(World, LitView(), WhyNot));
 
 	return true;
 }

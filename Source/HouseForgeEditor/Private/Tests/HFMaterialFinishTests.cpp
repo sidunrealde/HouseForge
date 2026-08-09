@@ -13,6 +13,7 @@
 #include "Engine/World.h"
 #include "Geometry/HFMeshOps.h"
 #include "Geometry/HFRenderFinish.h"
+#include "HFRenderSettings.h"
 #include "Materials/HFMaterialLibrary.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -296,6 +297,14 @@ bool FHFTilingIsInMillimetresTest::RunTest(const FString& Parameters)
 			TEXT("itself needs a renderer, so run this suite without -nullrhi to assert it."), *WhyNot));
 		return true;
 	}
+
+	// THIS TEST COUNTS TEXELS ACROSS A FLOOR, and the floor is a live dynamic mesh on purpose - the
+	// millimetre promise is about the UVs the material panel edits, and baking one to satisfy the
+	// Lumen guard would turn the only direct measurement of that promise into a measurement of baked
+	// geometry instead. So the guard is switched off for this picture, explicitly and narrowly. See
+	// FHFLumenGuardScope for why this is not a hole in it: the test that proves the guard fires,
+	// HouseForge.Lumen.TheCaptureRefusesAnUnbakedLitView, does not use this and must not.
+	const FHFLumenGuardScope NotJudgedOnItsLight(EHFLumenGuard::Off);
 
 	AHFRoomActor* Floor = SpawnFloor(World);
 	if (!TestNotNull(TEXT("A floor spawns"), Floor))

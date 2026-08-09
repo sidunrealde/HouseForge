@@ -2,6 +2,13 @@
 
 #include "HFRenderSettings.h"
 
+namespace
+{
+	/** Set only inside an FHFLumenGuardScope. See the comment on that struct. */
+	bool GHasGuardOverride = false;
+	EHFLumenGuard GGuardOverride = EHFLumenGuard::Refuse;
+}
+
 UHFRenderSettings::UHFRenderSettings()
 {
 	// Project Settings > Plugins > HouseForge Rendering, beside the HouseForge page rather than
@@ -26,5 +33,26 @@ FHFRenderPolicy UHFRenderSettings::Policy()
 		Out.BakeOnBuild = Settings->BakeOnBuild;
 	}
 
+	// Applied after the settings are read, so a scope wins over the project page rather than being
+	// silently overwritten by it.
+	if (GHasGuardOverride)
+	{
+		Out.LumenGuard = GGuardOverride;
+	}
+
 	return Out;
+}
+
+FHFLumenGuardScope::FHFLumenGuardScope(EHFLumenGuard InGuard)
+	: bPreviousHasOverride(GHasGuardOverride)
+	, PreviousGuard(GGuardOverride)
+{
+	GHasGuardOverride = true;
+	GGuardOverride = InGuard;
+}
+
+FHFLumenGuardScope::~FHFLumenGuardScope()
+{
+	GHasGuardOverride = bPreviousHasOverride;
+	GGuardOverride = PreviousGuard;
 }
