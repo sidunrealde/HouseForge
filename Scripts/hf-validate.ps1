@@ -74,12 +74,20 @@ param(
     # It is a ratchet, not a target: adding tests never trips it, and lowering it is a deliberate edit
     # with a diff. Only applied when the gate is running the whole suite - a deliberately narrow
     # -TestFilter is a developer iterating, not the gate.
+    #
+    # FALSIFIED. Run as the full suite against a filter matching 4 tests: the report was internally
+    # flawless - 4 passed, 0 failed, 0 not run, every state Success, summary matching the list - and
+    # every relative check in this script passed it. Only this floor stopped it:
+    #   "GATE FAILED: only 4 test(s) ran, and the suite is at least 440."
     [int] $MinTests = 440,
 
     # THE SAME FLOOR UNDER STAGE 3, which needs its own because it runs its own filter. A typo in
     # -PixelFilter, or a renamed test category, narrows the renderer stage to nothing while stage 2
     # still passes - and stage 3 is the only stage that can measure a pixel, so silently running none
     # of it is exactly the hole that put an unmeasured tiling assertion through a green gate.
+    #
+    # FALSIFIED. Narrowing -PixelFilter to 'HouseForge.Capture' alone:
+    #   "GATE FAILED: only 6 test(s) ran, and the suite is at least 28."
     [int] $MinPixelTests = 28
 )
 
@@ -295,6 +303,14 @@ function Invoke-TestStage {
         # THE POINT OF THE RENDERER STAGE. A test that could not take its measurement reported a warning
         # and passed, which is right under -nullrhi and completely wrong here: this stage exists to run
         # exactly those measurements, so one that skipped is a stage that did nothing.
+        #
+        # FALSIFIED, as an A/B on one run each, stage 3 forced onto -nullrhi so all three sentinel
+        # tests genuinely skip. Same three skips both times; the only difference is how they say so:
+        #   with the sentinel  - "GATE FAILED: 3 measurement(s) were skipped in the stage that exists
+        #                        to take them", naming Capture.APlanIsOrientedTheWayItSays,
+        #                        Editor.Panel.SurfacesEditReachesTheRenderer and Editor.Panel.TabSpawns.
+        #   with the AddInfo   - "Every pixel measurement was actually taken", GATE PASSED, exit 0.
+        # That second line is what this gate printed for ten milestones.
         if ($RequireMeasured) {
             $Unmeasured = @()
             foreach ($t in $Report.tests) {
@@ -336,6 +352,12 @@ $FullSuite = $TestFilter -eq 'HouseForge'
 #   HouseForgeEditor(Editor)  - the whole flat built and walked from the front door.
 # If either module fails to load, its canary vanishes from the report while everything else about
 # that report stays consistent. That is the failure the count alone cannot name.
+#
+# FALSIFIED, and this is the case the floor above cannot catch. Run as the full suite against
+# 'HouseForge.Model' - the runtime module alone, the editor module contributing nothing, which is
+# exactly what losing HouseForgeEditor looks like. 34 tests, all Success, report self-consistent,
+# and with -MinTests lowered enough to clear the floor the only thing that stopped it was:
+#   "GATE FAILED: 'HouseForge.Flat.EveryRoomIsReachableFromTheFrontDoor' is not in the report."
 $Canaries = @(
     'HouseForge.Model.SampleSpecFileInSync',
     'HouseForge.Flat.EveryRoomIsReachableFromTheFrontDoor'

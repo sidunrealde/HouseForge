@@ -316,6 +316,14 @@ bool FHFDrawingSetPresentTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	// FALSIFIED AGAIN THIS MILESTONE, not just when it was written. One byte appended to
+	// Reference/Specs/Sample2BHK.json and the set left alone - a plan that moved and a drawing set
+	// nobody regenerated, which is the defect that shipped twice:
+	//   "01-blank-layout.svg was drawn from spec 5da375c7..., but the committed spec is 10ecd7fa...".
+	//   "22 sheet file(s) are stale and 0 carry no stamp, out of 11 sheets."
+	// All 22 files named, both halves of every pair. And the thing the OLD test measured was
+	// untouched throughout: 22 files present, 11 sheets, every name and every size as expected. A
+	// count cannot tell a current drawing from last month's. Spec restored after.
 	if (Stale > 0 || Unstamped > 0)
 	{
 		AddError(FString::Printf(

@@ -61,6 +61,16 @@ bool FHFPanelTabSpawnsTest::RunTest(const FString& Parameters)
 		// sentinel is what hf-validate.ps1 greps for, so a stage that exists to take this measurement
 		// fails rather than reporting a pass it did not earn. See the note at
 		// HFMaterialFinishTests.cpp's CanRender branch.
+		//
+		// FALSIFIED as an A/B, with this branch forced and stage 3 run on -nullrhi so both panel
+		// tests genuinely skip. Sentinel: "GATE FAILED: 3 measurement(s) were skipped in the stage
+		// that exists to take them", naming TabSpawns and SurfacesEditReachesTheRenderer. The AddInfo
+		// this replaced, same run, same skips: "Every pixel measurement was actually taken", exit 0.
+		//
+		// WORTH KNOWING: neither the gate's stage 2 nor its stage 3 reaches this branch today, because
+		// Slate IS initialised under UnrealEditor-Cmd -nullrhi. It had to be forced to be falsified at
+		// all. So this guards a headless harness that does not currently exist rather than one that
+		// does - which is the honest status of it, and better than assuming it fires.
 		AddWarning(TEXT("HF_UNMEASURED: Slate is not initialised in this run, so the panel widget was NOT constructed and nothing here was asserted."));
 		return true;
 	}

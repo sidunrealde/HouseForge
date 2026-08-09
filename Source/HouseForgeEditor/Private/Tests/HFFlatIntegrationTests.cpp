@@ -400,6 +400,20 @@ namespace HouseForgeFlat
 	 * Kept separate from FKnownObstruction deliberately. That list says "this part cannot travel its
 	 * whole range"; this one says "these two cannot both be open". They are different claims about
 	 * different things, and merging them would let an entry written for one loosen the other.
+	 *
+	 * ## FALSIFIED, AND IT IS THE PROOF THAT GAP 2 WAS REAL
+	 *
+	 * Deleting the D_Main.Leaf / F_ShoeRack row - so the foyer conflict is an unrecorded foul again -
+	 * turns this test red at four pose combinations:
+	 *
+	 *   "'D_Main.Leaf at 100% open' stands 0.72 cm inside 'F_ShoeRack.Shutter_0_0_0 at 100% open'
+	 *    (about 65 cm3), at (106.3, 404.2, 21.9)."
+	 *   "Expected 'Pose combinations where two open elements meet' to be 0, but it was 4."
+	 *
+	 * And in the SAME run, on the SAME flat, HouseForge.Flat.EveryMovingPartClearsTheFlatThroughIts-
+	 * Range passed. That is the whole argument for this test in one line: the single-fixture sweep is
+	 * green on a defect that is really there, because it drives one thing against a world where
+	 * everything else is shut, and no amount of resolution in that sweep would ever find it.
 	 */
 	struct FKnownPairConflict
 	{
@@ -479,6 +493,16 @@ namespace HouseForgeFlat
 	 * list and can only be reached through a bathroom FAILS, and a room on this list that stops being
 	 * bathroom-only fails too, so the day somebody moves that door the gate makes them delete the row
 	 * rather than letting the record quietly become a licence.
+	 *
+	 * ## FALSIFIED, BOTH DIRECTIONS, which is the only way a record like this is worth anything
+	 *
+	 * Adding a row for R_Kitchen (reachable perfectly well without a bathroom) and a row for a room
+	 * that does not exist:
+	 *   "Expected ''R_Kitchen' (Kitchen) is recorded as bathroom-only and still is - if this has been
+	 *    fixed, delete its row from FKnownBathroomOnly' to be false."
+	 *   "Expected 'FKnownBathroomOnly's row for 'R_NoSuchRoom' names a room this flat actually has'
+	 *    to be not null."
+	 * So a row cannot outlive its defect, and cannot be written for a room nobody will ever look at.
 	 */
 	struct FKnownBathroomOnly
 	{
@@ -1192,6 +1216,16 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 		// A point on a part is at most its swept distance from where it started - exactly, for a
 		// slide; conservatively for a hinge, whose arc is longer than the chord it subtends. Plus a
 		// centimetre for the chamfer on every arris.
+		//
+		// NOT FALSIFIED, AND SAID PLAINLY. Reinstating the superseded reach - the host's own widest
+		// plan dimension - failed NOTHING: all eleven HouseForge.Flat tests stayed green. In this
+		// flat the old rule is mostly the WIDER of the two (it took the pair sweep below from 235
+		// pairs to 317), so reverting it loses no foul that exists here today. The travel-based reach
+		// is still the correct rule - it is the only one that stays correct for a part travelling
+		// further than its host is wide, which the curtains do - but it is a correctness argument and
+		// not a guarded one, and nothing in this suite would notice if it were reverted. Closing that
+		// needs a fixture placed inside a long part's travel and outside its host's footprint; there
+		// is no such pair in this flat, so there is no test here pretending to check it.
 		Reach = Reach.ExpandBy(Widest + 1.0);
 
 		TArray<FHFScanSurface> Neighbourhood;
@@ -1272,6 +1306,12 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 	// sweep excluded every opening in the flat while its header advertised door leaves as the case it
 	// was for. A filter that quietly narrows what is measured is the failure this whole file guards
 	// against, so the breadth of the sweep is now itself measured.
+	//
+	// FALSIFIED by reinstating `!FixtureIds.Contains(Articulated->ElementId)` on the loop above:
+	//   "Expected 'Every doorway and window in the flat is in the sweep - 0 of them' to be true."
+	// It was the ONLY assertion in this test that failed. 242 parts still swept, 743 poses still
+	// taken, no foul, no obstruction record disturbed - the sweep reported a full day's work with
+	// every door in the building missing from it. That is precisely how this survived ten milestones.
 	TestTrue(*FString::Printf(
 		TEXT("Every doorway and window in the flat is in the sweep - %d of them"), Doors),
 		Doors >= 10);
@@ -1280,6 +1320,12 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 	// comment. A step longer than the thinnest obstruction is a leaf that can be on one side of a
 	// partition at one sample and the other side at the next, which is precisely the failure the
 	// header says this test exists for.
+	//
+	// FALSIFIED by reinstating the fixed six positions over the whole range:
+	//   "Expected 'No part steps further than the 11.5 cm it must not skip over (worst step 29.90 cm)'
+	//    to be true."
+	// Nearly three times the partition it must not skip, against 5.73 cm derived. Sole failure again:
+	// six samples found no foul, which is what "close enough at any hinge radius in this flat" meant.
 	TestTrue(*FString::Printf(
 		TEXT("No part steps further than the %.1f cm it must not skip over (worst step %.2f cm)"),
 		Thinnest, WorstChordCm),
@@ -1502,6 +1548,11 @@ bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
 	// A RUN THAT COMPARED NOTHING WOULD PASS BY HAVING ASKED NOTHING, and that is the exact failure
 	// mode this test was written to close - the sweep above reported parts swept while its
 	// neighbourhood had been clipped to empty. So the breadth is asserted, not reported.
+	//
+	// NOT FALSIFIED. These two floors are the same instrument as the doorway count above, and unlike
+	// it neither has been made to fail: nothing tried moved the flat below 235 pairs / 3760 pose
+	// combinations. They guard a future narrowing rather than a past one. The SUBSTANCE of this test
+	// is falsified at FKnownPairConflict below; that is where the evidence for it is.
 	TestTrue(*FString::Printf(TEXT("There are pairs close enough to compare - %d of them"), Pairs),
 		Pairs >= 20);
 	TestTrue(*FString::Printf(TEXT("Pose combinations actually compared - %d"), Comparisons),
@@ -2638,6 +2689,17 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 		// AND YOU CAN GET TO IT FROM THE FRONT DOOR. The sealed foyer, on built geometry. Every room,
 		// unconditionally: there is no record and no exemption here, because there is nothing in this
 		// flat a person cannot walk to and the day there is, this is the line that says so.
+		//
+		// FALSIFIED against a deliberately-sealed flat - D_Living deleted from the spec, so the wall
+		// builds solid across the living room's only doorway. Seven of the twelve rooms go:
+		//   "Expected ''R_MBed' (Master Bedroom) is reachable from the front door - 0.00 sq m of it'
+		//    to be true."  (and R_Bed2, R_Corridor, R_CBath, R_MBath, R_BalconyN, R_BalconyE)
+		// The floor splits into two pieces of 23.12 and 16.75 sq m with the front door in the smaller.
+		//
+		// AND THE ASSERTION THIS REPLACED PASSED ON THAT SAME FLAT. `SquareMetres > 0.0` is happy:
+		// R_MBed reports 7.59 sq m of standable floor, R_Bed2 4.19, R_Corridor 4.06 - none of it
+		// reachable from the front door by any route. A sealed flat with floor in every room of it is
+		// exactly the shape of the defect this project shipped, and counting floor cannot see it.
 		const bool bReached = ReachedPerRoom[Room] > 0;
 
 		TestTrue(*FString::Printf(
@@ -2685,6 +2747,14 @@ bool FHFFlatWalkabilityTest::RunTest(const FString& Parameters)
 		// Asked of the REACHED floor, so it means "somewhere to be once you are in", and therefore
 		// only asked of a room you can get into. Asking it of a stranded room would measure the shape
 		// of floor nobody can be standing on.
+		//
+		// FALSIFIED against a pinhole: R_Bed2's standable floor cut to a single 5 cm cell at its
+		// threshold, 1676 cells cleared, which is a bedroom furnished solid but for one foothold.
+		//   "Expected ''R_Bed2' (Bedroom 2) has somewhere a person can stand and step out of in any
+		//    direction - 0 such position(s)' to be true."
+		// Sole failure. The room still has floor, so `SquareMetres > 0.0` passes; the one cell is
+		// still connected to the fill, so the reachability assertion above passes too. 15.12 sq m of
+		// bedroom reduced to 0.0025 and only this line notices.
 		if (bReached)
 		{
 			TestTrue(*FString::Printf(

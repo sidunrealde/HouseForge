@@ -624,6 +624,14 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Every sliding part blocks at every open amount"), MissedSomewhere, 0);
 
 	// THE CHECK BELOW IS ONLY MEANINGFUL IF SOMETHING QUALIFIED FOR IT. See TravelledClear.
+	//
+	// FALSIFIED by suppressing the counter, which reinstates the flat as it was for most of this
+	// milestone - 86 sliding parts traced, not one of them travelling clear of its own shut bounds:
+	//   "Expected 'Something in the flat travels clear of where it started, so 'left its collision
+	//    behind' is a question that was actually asked - 0 part(s)' to be true."
+	// Sole failure. "Every sliding part blocks at every open amount" passed, and so did "No sliding
+	// part left its collision behind" - the latter by never once executing the branch that could
+	// increment it. A zero-valued counter reported as evidence is not evidence.
 	TestTrue(*FString::Printf(
 		TEXT("Something in the flat travels clear of where it started, so 'left its collision behind' is a question that was actually asked - %d part(s)"),
 		TravelledClear),
