@@ -60,6 +60,12 @@ void AHFCurtainActor::ApplyDrop(double TrackToFloor, double FloorClearance)
 	Curtain = FHFCurtainKit::Sanitise(Curtain);
 }
 
+void AHFCurtainActor::ApplyDropToSill(double TrackToSill, double BelowSill)
+{
+	Curtain.Drop = FMath::Max(TrackToSill + FMath::Max(BelowSill, 0.0), 1.0);
+	Curtain = FHFCurtainKit::Sanitise(Curtain);
+}
+
 bool AHFCurtainActor::DrawLeaf(int32 LeafIndex, double OpenAmount)
 {
 	if (LeafIndex < 0 || LeafIndex >= Curtain.LeafCount())

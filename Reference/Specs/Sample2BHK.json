@@ -4833,6 +4833,196 @@
 				"diameter": 0,
 				"gangCount": 0
 			}
+		},
+		{
+			"id": "F_Pelmet_LivBalc",
+			"roomId": "R_Living",
+			"type": "Pelmet",
+			"label": "Curtain pelmet",
+			"position":
+			{
+				"x": 2100,
+				"y": 180
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 2600,
+				"y": 180
+			},
+			"height": 200,
+			"baseZ": 2350,
+			"anchorWallId": "W_South",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Curtain_Living",
+			"roomId": "R_Living",
+			"type": "Curtain",
+			"label": "Curtain",
+			"position":
+			{
+				"x": 5400,
+				"y": 180
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1900,
+				"y": 180
+			},
+			"height": 2200,
+			"baseZ": 150,
+			"anchorWallId": "W_South",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Curtain_LivBalc",
+			"roomId": "R_Living",
+			"type": "Curtain",
+			"label": "Curtain",
+			"position":
+			{
+				"x": 2100,
+				"y": 180
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 2600,
+				"y": 180
+			},
+			"height": 2200,
+			"baseZ": 150,
+			"anchorWallId": "W_South",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Curtain_MBed",
+			"roomId": "R_MBed",
+			"type": "Curtain",
+			"label": "Curtain",
+			"position":
+			{
+				"x": 7500,
+				"y": 8220
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 2200,
+				"y": 180
+			},
+			"height": 2200,
+			"baseZ": 150,
+			"anchorWallId": "W_North",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
+		},
+		{
+			"id": "F_Curtain_Bed2",
+			"roomId": "R_Bed2",
+			"type": "Curtain",
+			"label": "Curtain",
+			"position":
+			{
+				"x": 8700,
+				"y": 180
+			},
+			"rotationDegrees": 0,
+			"footprint":
+			{
+				"x": 1900,
+				"y": 180
+			},
+			"height": 2200,
+			"baseZ": 150,
+			"anchorWallId": "W_South",
+			"params":
+			{
+				"shutterCount": 0,
+				"drawerCount": 0,
+				"shelfCount": 0,
+				"bHasLoft": false,
+				"loftHeight": 60,
+				"plinthHeight": 10,
+				"handleStyle": "Bar",
+				"shutterMotion": "SideHung",
+				"loftShutterMotion": "SideHung",
+				"bHasHangingRail": false,
+				"bHasGlassInsert": false,
+				"upstandHeight": 0,
+				"corniceHeight": 0,
+				"diameter": 0,
+				"gangCount": 0
+			}
 		}
 	]
 }

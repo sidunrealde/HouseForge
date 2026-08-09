@@ -1151,6 +1151,110 @@ namespace
 	}
 
 	/**
+	 * The opening a pelmet was drawn over, or null.
+	 *
+	 * Its SILL is the only thing wanted here, and it is the figure that decides a curtain's length
+	 * where the room has put something under the window. Matched on the wall and the run rather than
+	 * by an id, for the reason PelmetOver matches on the footprint: a pelmet is drawn over a window
+	 * because it is over the window, and a second statement of that would only go stale.
+	 */
+	const FHFOpening* OpeningUnderPelmet(const FHFHouseSpec& Spec, const FHFFixture& Pelmet)
+	{
+		const FHFWall* Wall = Spec.FindWall(Pelmet.AnchorWallId);
+		if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER)
+		{
+			return nullptr;
+		}
+
+		const FVector2D Direction = (Wall->End - Wall->Start) / Wall->Length();
+		const double Centre = FVector2D::DotProduct(Pelmet.Position - Wall->Start, Direction);
+		const double Half = Pelmet.Footprint.X * 0.5;
+
+		const FHFOpening* Best = nullptr;
+		double BestOverlap = 0.0;
+
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			if (Opening.WallId != Wall->Id)
+			{
+				continue;
+			}
+
+			const double Overlap =
+				FMath::Min(Centre + Half, Opening.OffsetAlongWall + Opening.Width * 0.5) -
+				FMath::Max(Centre - Half, Opening.OffsetAlongWall - Opening.Width * 0.5);
+
+			if (Overlap > BestOverlap)
+			{
+				BestOverlap = Overlap;
+				Best = &Opening;
+			}
+		}
+
+		return Best;
+	}
+
+	/**
+	 * True when something is standing under this curtain, high enough for the cloth to hang into it.
+	 *
+	 * ASKED OF THE DRAWN FOOTPRINTS, which is the right instrument for this one question even though
+	 * it is the wrong one for reporting a clash. A curtain's footprint is the plane the cloth sweeps
+	 * along the wall, and anything whose footprint reaches into it is standing where the cloth wants
+	 * to be - whether or not their solids happen to touch at the moment. That is what a curtain-maker
+	 * looks at before deciding a length, and deciding it on the exact solids instead would give a
+	 * floor-length curtain wherever the bed happened to sit 5 mm clear.
+	 *
+	 * 20 cm of height, so a rug or a floor box does not shorten a curtain, and a bed frame does.
+	 */
+	bool SomethingStandsUnder(const FHFFixtureContext& C, const FHFFixture& Curtain)
+	{
+		if (C.Fixtures == nullptr)
+		{
+			return false;
+		}
+
+		for (const FHFFixture& Other : *C.Fixtures)
+		{
+			if (Other.Id == Curtain.Id || Other.Type == EHFFixtureType::Pelmet
+				|| Other.Type == EHFFixtureType::Curtain || Other.IsCeilingMounted())
+			{
+				continue;
+			}
+
+			if (Other.BaseZ + Other.Height < 20.0)
+			{
+				continue;
+			}
+
+			// Sampled on the OTHER fixture's corners and its centre. A footprint test either way round
+			// misses the case where one box is wholly inside the other, and a bed against a window
+			// wall is exactly that case seen from the curtain's side.
+			bool bReaches = FHFFixturePlacement::FootprintContains(Curtain, Other.Position, 0.0);
+
+			const double Radians = FMath::DegreesToRadians(Other.RotationDegrees);
+			const double CosR = FMath::Cos(Radians);
+			const double SinR = FMath::Sin(Radians);
+
+			for (int32 Corner = 0; Corner < 4 && !bReaches; ++Corner)
+			{
+				const double LocalX = ((Corner == 0 || Corner == 3) ? -0.5 : 0.5) * Other.Footprint.X;
+				const double LocalY = ((Corner < 2) ? -0.5 : 0.5) * Other.Footprint.Y;
+
+				bReaches = FHFFixturePlacement::FootprintContains(Curtain,
+					Other.Position + FVector2D(LocalX * CosR - LocalY * SinR,
+						LocalX * SinR + LocalY * CosR), 0.0);
+			}
+
+			if (bReaches)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * A curtain, hung on the track of the pelmet it was drawn under.
 	 *
 	 * EVERY DIMENSION THAT MATTERS COMES FROM SOMETHING ELSE, which is why this is one of the longer
@@ -1206,9 +1310,30 @@ namespace
 		const FTransform Hung(PelmetTransform.GetRotation(),
 			PelmetTransform.TransformPosition(GliderLine));
 
-		// THE DROP IS MEASURED, not drawn. Floor to glider line, less the air the hem keeps off the
-		// tiles - see AHFCurtainActor::ApplyDrop.
-		Actor.ApplyDrop(Hung.GetLocation().Z - C.FloorZ());
+		// THE DROP IS MEASURED, not drawn - floor to glider line, less the air the hem keeps off the
+		// tiles.
+		//
+		// AND THE LENGTH IS CHOSEN BY WHAT IS UNDER THE WINDOW. Floor length wants clear floor, and
+		// half the windows in this flat do not have any: a bed stands against the window wall in both
+		// bedrooms, and hung to the floor the cloth sweeps through it at every open amount. The
+		// curtain-maker's answer is apron length - hem 120 mm below the sill - and it is decided here
+		// because only this layer can see what the room has been arranged with. See
+		// AHFCurtainActor::ApplyDropToSill.
+		const double TrackToFloor = Hung.GetLocation().Z - C.FloorZ();
+
+		const FHFOpening* Opening = (C.Spec != nullptr)
+			? OpeningUnderPelmet(*C.Spec, *PelmetFixture) : nullptr;
+
+		const bool bClearFloor = !SomethingStandsUnder(C, *C.Fixture);
+
+		if (bClearFloor || Opening == nullptr || Opening->SillHeight <= 0.0)
+		{
+			Actor.ApplyDrop(TrackToFloor);
+		}
+		else
+		{
+			Actor.ApplyDropToSill(TrackToFloor - Opening->SillHeight);
+		}
 
 		Actor.SetActorTransform(Hung);
 	}

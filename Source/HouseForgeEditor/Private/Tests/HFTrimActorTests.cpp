@@ -674,6 +674,17 @@ bool FHFTrimFoulsNothingTest::RunTest(const FString& Parameters)
 				continue;
 			}
 
+			// A CURTAIN IS INSIDE ITS PELMET BY DESIGN, which is the one thing a bounding box cannot
+			// tell from a collision. The cloth hangs from a track in the pelmet's slot, so the top
+			// 157 mm of it is within the box in all three axes on purpose - that is what a pelmet is
+			// for. The exact question is asked of the built solids, at every open amount, by
+			// HouseForge.Flat.NothingStandsInsideAnythingElse; asking it of boxes here would report
+			// the fitting working as three failures.
+			if (Other.Type == EHFFixtureType::Curtain)
+			{
+				continue;
+			}
+
 			AHFElementActor* OtherActor = ElementFor(House, Other.Id);
 			if (OtherActor == nullptr || OtherActor == Trim)
 			{

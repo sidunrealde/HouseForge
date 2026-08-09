@@ -564,12 +564,37 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 				++MissedSomewhere;
 			}
 
-			// Fully open, the shut position must be clear - as long as the leaf actually travelled
-			// further than its own width, which is what a two-track slider does by construction.
+			// Fully open, the shut position must be clear - as long as the part actually travelled
+			// further than its own width, which no leaf of a two-track slider does and every fold of
+			// a drawn curtain does.
+			//
+			// TRACED WHERE THE PART USED TO BE, which is the whole content of this check and is not
+			// what ProbeHits does. ProbeHits aims at the part's OWN triangles, so it follows the part
+			// wherever the part has gone - handed the shut box it still traced the open position and
+			// still hit, and the branch reported "never moved" about every body that had. No slider
+			// in the flat travelled far enough for the branch to fire, so the fault sat here until a
+			// curtain fold arrived that travels six times its own width.
 			const FBox OpenBounds = Component->Bounds.GetBox();
-			if (!OpenBounds.Intersect(ShutBounds) && ProbeHits(Component, ShutBounds))
+			if (!OpenBounds.Intersect(ShutBounds))
 			{
-				++BodiesThatNeverMoved;
+				const FVector Extent = ShutBounds.GetExtent();
+
+				int32 Thinnest = 0;
+				for (int32 Axis = 1; Axis < 3; ++Axis)
+				{
+					Thinnest = Extent[Axis] < Extent[Thinnest] ? Axis : Thinnest;
+				}
+
+				FVector Along = FVector::ZeroVector;
+				Along[Thinnest] = FMath::Max(Extent[Thinnest] * 4.0, 10.0);
+
+				const FVector Where = ShutBounds.GetCenter();
+
+				FHitResult Hit;
+				if (Component->LineTraceComponent(Hit, Where - Along, Where + Along, TraceParams))
+				{
+					++BodiesThatNeverMoved;
+				}
 			}
 
 			Articulated->SetPartOpenAmount(Part.PartId, 0.0);
