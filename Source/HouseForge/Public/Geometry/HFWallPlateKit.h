@@ -359,9 +359,16 @@ struct HOUSEFORGE_API FHFPelmetParams
 	 *
 	 * What a curtain hangs in. Too small and the heading fouls the fascia every time it is drawn; too
 	 * large and the curtain hangs away from the window with a light gap behind it.
+	 *
+	 * 65 mm, not the 35 this carried while nothing hung on the track. Fabric hangs CENTRED on its
+	 * gliders and a curtain at 2.0 fullness on a 140 mm repeat is 116 mm deep, so at 35 mm of setback
+	 * its front folds stood 10 mm through the fascia - a clash invisible in every plan and section of
+	 * the pelmet, because the pelmet was right and the thing it was built for did not exist yet. At
+	 * 65 the track sits close enough to the middle of an 180 mm pelmet for the folds to clear the
+	 * fascia by 20 mm and the plaster by 26. See FHFCurtainParams and ConcealedCurtainDepth.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
-	double TrackSetback = 3.5;
+	double TrackSetback = 6.5;
 
 	/** Radius rolled onto the fascia's bottom arris. The line the room actually sees. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Softness", meta = (ClampMin = "0.0"))
@@ -387,6 +394,46 @@ struct HOUSEFORGE_API FHFPelmetParams
 
 	/** The drawn box IS the object: nothing on a pelmet stands above its own top board. */
 	double BuiltHeight() const { return Height; }
+
+	/**
+	 * Y of the track's centreline, relative to the pelmet's own origin. WHERE A CURTAIN HANGS.
+	 *
+	 * The pelmet's origin is the centre of its drawn footprint with +Y running back into the wall,
+	 * so this is negative for a track forward of centre. It is the one number a curtain needs from
+	 * the pelmet and it is stated here rather than recomputed by the composing layer, because the
+	 * setback, the board and the section width all move it and all three are editable.
+	 */
+	double TrackCentreY() const
+	{
+		return -Depth * 0.5 + BoardThickness + TrackSetback + TrackWidth * 0.5;
+	}
+
+	/**
+	 * Z of the track's underside above the fascia's bottom edge: what the gliders hang from.
+	 *
+	 * Identical to ConcealedHeadingHeight by construction, and both are kept because they answer
+	 * different questions - one is how much heading is hidden, the other is where the cloth starts.
+	 */
+	double TrackSoffitZ() const { return ConcealedHeadingHeight(); }
+
+	/**
+	 * The deepest curtain this pelmet can hide, front to back, at a given clearance.
+	 *
+	 * TWICE THE SMALLER of the two gaps either side of the track, because fabric hangs CENTRED on
+	 * its gliders: a track pushed forward in the slot does not buy a deeper curtain, it buys a
+	 * curtain that touches the fascia sooner. This is the figure FHFCurtainParams::MaxFoldDepth is
+	 * seeded with, and it is what says whether a drawing's pelmet is deep enough for the curtain it
+	 * was drawn to hide.
+	 *
+	 * @param Clearance Air left between the cloth and the fascia, and between the cloth and the
+	 *        plaster. A curtain that brushes either drags every time it is drawn.
+	 */
+	double ConcealedCurtainDepth(double Clearance = 1.0) const
+	{
+		const double ToFascia = TrackCentreY() - (-Depth * 0.5 + BoardThickness) - Clearance;
+		const double ToWall = Depth * 0.5 - TrackCentreY() - Clearance;
+		return FMath::Max(2.0 * FMath::Min(ToFascia, ToWall), 0.0);
+	}
 
 	bool IsValid() const
 	{

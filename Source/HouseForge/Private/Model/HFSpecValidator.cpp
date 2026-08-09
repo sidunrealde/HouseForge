@@ -117,11 +117,37 @@ namespace
 	 * written and did not actually allow, because until the loose furniture was built there were no
 	 * chairs in the flat to test it with. A chair that does not overlap its table is not tucked in -
 	 * it is standing 150 mm away from it - so the overlap is the correct state, not a tolerance.
+	 *
+	 * AND A CURTAIN IN ITS PELMET, which is the same relationship again and the strongest case of it:
+	 * on a plan the two are one line. The cloth hangs from a track inside the box, so their drawn
+	 * footprints are identical by construction - see FHFCurtainKit and AHFHouseActor's PelmetOver,
+	 * which finds a curtain's pelmet by exactly that coincidence.
 	 */
 	bool IsExpectedOverlap(EHFFixtureType A, EHFFixtureType B)
 	{
 		return (IsInsetFitting(A) && IsCabinetRun(B)) || (IsCabinetRun(A) && IsInsetFitting(B))
-			|| (A == EHFFixtureType::Chair && IsTable(B)) || (IsTable(A) && B == EHFFixtureType::Chair);
+			|| (A == EHFFixtureType::Chair && IsTable(B)) || (IsTable(A) && B == EHFFixtureType::Chair)
+			|| (A == EHFFixtureType::Curtain && B == EHFFixtureType::Pelmet)
+			|| (A == EHFFixtureType::Pelmet && B == EHFFixtureType::Curtain);
+	}
+
+	/**
+	 * True for a fixture that is SUPPOSED to stand across an opening, and is pushed aside to pass.
+	 *
+	 * A curtain, and only a curtain. Both of the opening rules below judge a fixture on the plan area
+	 * it takes out of a window or a doorway, and both are right about everything rigid: a wardrobe
+	 * across a window is a wardrobe across a window, and a fridge in front of a door is a door that
+	 * does not open. A curtain covers 100% of its window at 0% open, on purpose, and covers a balcony
+	 * slider the same way; it is soft, it hangs on a track, and getting past it is what the track is
+	 * for. Reported, both rules would fire on every correctly placed curtain in the flat and would
+	 * teach whoever read the report to stop reading it.
+	 *
+	 * A blind or a roman shade would join it if either were ever built. Nothing else does: a pelmet
+	 * is rigid and sits above the head, which is why it needs no exemption and has never had one.
+	 */
+	bool IsDrawnAsideToPass(EHFFixtureType Type)
+	{
+		return Type == EHFFixtureType::Curtain;
 	}
 
 	/** The four corners of a fixture's footprint after rotation, in plan. */
@@ -1158,7 +1184,7 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 				// from the floor, so its height range cannot be compared with a sill without the room
 				// it hangs in. Nothing that hangs from a ceiling stands in front of a window anyway.
 				if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0 || Fixture.Height <= 0.0
-					|| Fixture.IsCeilingMounted())
+					|| Fixture.IsCeilingMounted() || IsDrawnAsideToPass(Fixture.Type))
 				{
 					continue;
 				}

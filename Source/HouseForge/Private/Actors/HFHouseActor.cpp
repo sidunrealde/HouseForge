@@ -5,6 +5,7 @@
 #include "Actors/HFArticulatedActor.h"
 #include "Actors/HFCasedGoodsActor.h"
 #include "Actors/HFCounterActor.h"
+#include "Actors/HFCurtainActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFFittingActors.h"
 #include "Actors/HFFurnitureActors.h"
@@ -1060,6 +1061,32 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::OnWallTop(Run, C.FloorZ(), C.AnchorWall));
 	}
 
+	/**
+	 * The finished soffit over a fixture, resolved the way the ceiling fit resolves it.
+	 *
+	 * THE CEILING DECIDES THE HEIGHT, NOT THE DRAWING. Asked over the whole FOOTPRINT rather than at
+	 * the centre - a 2.2 m pelmet in a 60 cm band routinely spans a level change, and the one that
+	 * matters is the lowest soffit anywhere over it, not whichever happens to be over its middle.
+	 * That is the same question FHFCeilingFit::Fit asks, asked through the same function, so the
+	 * resolver and the placement cannot come to different answers.
+	 *
+	 * Takes the fixture separately from the context because a curtain has to ask this about the
+	 * PELMET it hangs in rather than about itself: the two have to arrive at one number, and a
+	 * curtain resolving its own soffit would be a second answer to the same question.
+	 */
+	double SoffitZOver(const FHFFixtureContext& C, const FHFFixture& Fixture)
+	{
+		if (C.Room != nullptr && C.Spec != nullptr)
+		{
+			return FHFCeilingFit::LowestSoffitZOver(Fixture, *C.Room, C.Spec->FalseCeilings);
+		}
+		if (C.Room != nullptr)
+		{
+			return C.Room->FloorZ + C.Room->CeilingHeight - C.SoffitDrop;
+		}
+		return 0.0;
+	}
+
 	void SeedPelmet(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFPelmetActor& Actor = static_cast<AHFPelmetActor&>(Element);
@@ -1067,23 +1094,123 @@ namespace
 		Actor.ApplyProjectDefaults();
 		Actor.ApplyFixture(*C.Fixture);
 
-		// THE CEILING DECIDES THE HEIGHT, NOT THE DRAWING. Asked over the whole footprint rather than
-		// at the centre - a 2.2 m pelmet in a 60 cm band routinely spans a level change, and the one
-		// that matters is the lowest soffit anywhere over it, not whichever happens to be over its
-		// middle. That is the same question FHFCeilingFit::Fit asks, asked through the same function,
-		// so the resolver and the placement cannot come to different answers.
-		double SoffitZ = 0.0;
+		Actor.SetActorTransform(
+			FHFFixturePlacement::UnderSoffit(*C.Fixture, SoffitZOver(C, *C.Fixture), C.AnchorWall));
+	}
 
-		if (C.Room != nullptr && C.Spec != nullptr)
+	/**
+	 * How far the hooks hang below the track, in centimetres.
+	 *
+	 * A glider is a runner in the channel with an eye under it, and a hook through the eye. 10 mm is
+	 * the drop of the two together, and it is the difference between cloth that starts at the track
+	 * and cloth that hangs from it. Small, and not nothing: it is what keeps the heading clear of
+	 * the aluminium it runs in.
+	 */
+	constexpr double CurtainGliderDrop = 1.0;
+
+	/**
+	 * The pelmet a curtain hangs in, or null for a curtain on a bare pole.
+	 *
+	 * FOUND RATHER THAN DECLARED, and that is deliberate. A drawing marks a pelmet and marks a
+	 * curtain in the same place because they are the same line on the plan; making the curtain carry
+	 * an id would be a second statement of a fact the geometry already makes, and one that goes
+	 * stale the moment either is moved. The pelmet whose footprint the curtain's centre falls inside
+	 * is the pelmet it hangs in, and there is never a second candidate - two pelmets over one point
+	 * would be a defect the overlap rule reports on its own.
+	 */
+	const FHFFixture* PelmetOver(const FHFFixtureContext& C)
+	{
+		if (C.Fixtures == nullptr || C.Fixture == nullptr)
 		{
-			SoffitZ = FHFCeilingFit::LowestSoffitZOver(*C.Fixture, *C.Room, C.Spec->FalseCeilings);
-		}
-		else if (C.Room != nullptr)
-		{
-			SoffitZ = C.Room->FloorZ + C.Room->CeilingHeight - C.SoffitDrop;
+			return nullptr;
 		}
 
-		Actor.SetActorTransform(FHFFixturePlacement::UnderSoffit(*C.Fixture, SoffitZ, C.AnchorWall));
+		const FHFFixture* Best = nullptr;
+		double BestDistance = TNumericLimits<double>::Max();
+
+		for (const FHFFixture& Other : *C.Fixtures)
+		{
+			if (Other.Type != EHFFixtureType::Pelmet || Other.RoomId != C.Fixture->RoomId)
+			{
+				continue;
+			}
+			if (!FHFFixturePlacement::FootprintContains(Other, C.Fixture->Position, 5.0))
+			{
+				continue;
+			}
+
+			const double Distance = FVector2D::Distance(Other.Position, C.Fixture->Position);
+			if (Distance < BestDistance)
+			{
+				BestDistance = Distance;
+				Best = &Other;
+			}
+		}
+
+		return Best;
+	}
+
+	/**
+	 * A curtain, hung on the track of the pelmet it was drawn under.
+	 *
+	 * EVERY DIMENSION THAT MATTERS COMES FROM SOMETHING ELSE, which is why this is one of the longer
+	 * seeds. The track's length is the pelmet's CLEAR width, not its drawn one; the depth the folds
+	 * may hang to is what the pelmet's slot has left with a track in it; the height of the glider
+	 * line is where the pelmet ended up under a ceiling whose depth is a project setting; and the
+	 * drop is that height less the floor. A curtain that took its drawn box instead would be the
+	 * length of the pelmet's outside, as deep as it liked, and hung at a stale 2350.
+	 *
+	 * Same argument as the railing's parapet and the sink's counter - see the seeds above - and the
+	 * same shape of answer: the composing layer measures, and the generator stays pure.
+	 */
+	void SeedCurtain(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFCurtainActor& Actor = static_cast<AHFCurtainActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		const FHFFixture* PelmetFixture = PelmetOver(C);
+		if (PelmetFixture == nullptr)
+		{
+			// Nothing to hang on. The drawn box is all there is to go on, which is the honest answer
+			// for a curtain on a pole - and better than inventing a pelmet nobody drew.
+			Actor.SetActorTransform(
+				FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+			return;
+		}
+
+		// The pelmet EXACTLY AS IT IS BUILT, project board included. Reading its drawn footprint
+		// alone would give a track two board thicknesses too long and a slot that has never had the
+		// current board taken out of it - see AHFPelmetActor::ApplyProjectDefaults, which is the
+		// order this mirrors.
+		FHFPelmetParams Pelmet = AHFPelmetActor::ParamsFor(*PelmetFixture);
+		Pelmet.BoardThickness = FHFBuildDefaults::FromProjectSettings().Joinery.CarcassBoardThickness;
+		Pelmet = FHFWallPlateKit::SanitisePelmet(Pelmet);
+
+		Actor.ApplyPelmet(Pelmet);
+
+		// Where the pelmet itself lands, through the same call its own seed makes and about the same
+		// fixture - so the cloth cannot end up hanging at a height the box it hangs in is not at.
+		const FHFWall* PelmetWall = (C.Spec != nullptr)
+			? C.Spec->FindWall(PelmetFixture->AnchorWallId) : nullptr;
+
+		const FTransform PelmetTransform = FHFFixturePlacement::UnderSoffit(
+			*PelmetFixture, SoffitZOver(C, *PelmetFixture), PelmetWall);
+
+		// The glider line, in the pelmet's own frame: centred on the run, on the track's centreline,
+		// a hook's drop below the track's underside.
+		const FVector GliderLine(0.0, Pelmet.TrackCentreY(),
+			Pelmet.TrackSoffitZ() - CurtainGliderDrop);
+
+		const FTransform Hung(PelmetTransform.GetRotation(),
+			PelmetTransform.TransformPosition(GliderLine));
+
+		// THE DROP IS MEASURED, not drawn. Floor to glider line, less the air the hem keeps off the
+		// tiles - see AHFCurtainActor::ApplyDrop.
+		Actor.ApplyDrop(Hung.GetLocation().Z - C.FloorZ());
+
+		Actor.SetActorTransform(Hung);
 	}
 
 	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
@@ -1222,6 +1349,11 @@ namespace
 				TEXT("Railing"), &SeedRailing },
 			{ EHFFixtureType::Pelmet, AHFPelmetActor::StaticClass(),
 				TEXT("Pelmet"), &SeedPelmet },
+
+			// AND THE CLOTH THAT HANGS IN IT, which is a fixture of its own rather than a part of
+			// the pelmet. See AHFCurtainActor for why the two are not one actor.
+			{ EHFFixtureType::Curtain, AHFCurtainActor::StaticClass(),
+				TEXT("Curtain"), &SeedCurtain },
 
 			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
 				TEXT("Fan"), &SeedCeilingFan },

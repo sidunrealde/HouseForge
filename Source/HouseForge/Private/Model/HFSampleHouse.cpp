@@ -1511,6 +1511,80 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		AddPelmet(TEXT("F_Pelmet_Living"), TEXT("R_Living"), FVector2D(5400.0, 180.0), FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
 		AddPelmet(TEXT("F_Pelmet_MBed"),   TEXT("R_MBed"),   FVector2D(7500.0, 8220.0), FVector2D(2200.0, 180.0), 0.0, TEXT("W_North"));
 		AddPelmet(TEXT("F_Pelmet_Bed2"),   TEXT("R_Bed2"),   FVector2D(8700.0, 180.0), FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
+
+		// THE FOURTH, AND THE ONE THE FLAT MOST OBVIOUSLY WANTED. D_Balcony is an 1800 sliding unit
+		// standing in the living room's south wall with nothing over it: the widest sheet of glass in
+		// the flat, facing south, straight onto the seating. Every other pelmet in this drawing is
+		// over a 1500 window and this one was over nothing.
+		//
+		// 2600, and the width is the whole design decision. A pelmet has to be wider than its opening
+		// by the STACK the drawn-back curtain occupies at each end, or the curtain that is supposed to
+		// clear the glass parks itself over it - see FHFCurtainParams::StackWidth, which answers that
+		// in centimetres before anything is built. A pair on a 2600 pelmet leaves 1854 of clear
+		// aperture over an 1800 opening; on a 2200 one it would leave 1564 and cover 120 mm of glass
+		// at each jamb.
+		//
+		// It fits: COL_SW's east face is at 225 and F_Pelmet_Living starts at 4450, so the run has
+		// 4225 of clear wall in it and this takes 2600 of the middle of it.
+		AddPelmet(TEXT("F_Pelmet_LivBalc"), TEXT("R_Living"), FVector2D(2100.0, 180.0), FVector2D(2600.0, 180.0), 0.0, TEXT("W_South"));
+	}
+
+	// ----------------------------------------------------------------- and the curtains in them
+	//
+	// FOUR CURTAINS, NOT NINE, AND THE COUNT IS THE DECISION. The flat has eleven openings; these are
+	// the four that a curtain belongs on, and every exclusion below is a measurement rather than a
+	// taste.
+	//
+	//   Win_Living, Win_Bed2_S, Win_MBed_N   habitable rooms, south and north facing, each already
+	//                                        drawn with a pelmet. A bedroom window without a curtain
+	//                                        is a bedroom somebody can see into.
+	//   D_Balcony                            the living room's balcony slider, on the new pelmet
+	//                                        above. Full drop, floor length.
+	//
+	// And the seven that get nothing:
+	//
+	//   Vent_CBath      a 600 x 350 ventilator sitting on a door head at 2100, into a corridor. There
+	//                   is nothing to screen and nowhere to hang it.
+	//   Win_Kitchen     1200 x 900 on a 1200 sill, directly over the worktop with wall units either
+	//                   side of it. Cloth over a working counter is a grease trap and there is no
+	//                   pelmet, no room for one, and a blind is what a kitchen window takes.
+	//   Win_Utility     600 wide, over the washing machine, in the one room in the flat nobody sits
+	//                   in.
+	//   D_BalcE         the master bathroom's door onto its own service balcony.
+	//   Win_Bed2_E      THE ONE WORTH THE ARITHMETIC. A 900 window with 1360 of wall to hang over:
+	//                   COL_SE's north face is at 115 and the wardrobe starts at 1500. A single-draw
+	//                   curtain on a 1360 pelmet stacks 354 mm, so 900 of opening needs 1254 of clear
+	//                   track plus its boards - 1670 of pelmet, and there is 1360. It would park a
+	//                   sixth of itself over the glass whichever end it stacked at. A roller blind is
+	//                   what that window takes and this plugin does not build one yet.
+	//   D_BalcN         the same sum on the master bedroom's north wall. 4085 of clear wall carries
+	//                   F_Pelmet_MBed's 2200 over the window, leaving 1885 for an 1800 door: 335 short
+	//                   of the 2220 a pair needs to clear it, and the door is hard against the east
+	//                   corner so the stack has nowhere else to go. One curtain's stack allowance fits
+	//                   on that wall and not two, and the window is the one that wants it.
+	//   D_Main          a front door.
+	//
+	// The curtain's drawn box is the pelmet's, because on a plan they are the same line. Everything
+	// that decides how the cloth is actually built - the track's clear length, the depth the folds may
+	// hang to, the height of the glider line, the drop - is measured off the pelmet and the room by
+	// AHFHouseActor's SeedCurtain. See AHFCurtainActor::ApplyPelmet.
+	{
+		auto AddCurtain = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
+			const FVector2D& Footprint, double Rotation, const FName& AnchorWall)
+		{
+			// BaseZ 150 and 2200 of drop puts the head exactly on the pelmet's own 2350 soffit, so the
+			// drawn box reads as cloth in a pelmet rather than cloth through one. Both figures are
+			// nominal and both are replaced on build: the drop is the measured floor-to-track height,
+			// which is the same argument the pelmet's own stale 2350 makes.
+			FHFFixture& Curtain = B.AddFixture(Id, RoomId, EHFFixtureType::Curtain,
+				TEXT("Curtain"), Position, Footprint, 2200.0, Rotation, 150.0);
+			Curtain.AnchorWallId = AnchorWall;
+		};
+
+		AddCurtain(TEXT("F_Curtain_Living"),  TEXT("R_Living"), FVector2D(5400.0, 180.0),  FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
+		AddCurtain(TEXT("F_Curtain_LivBalc"), TEXT("R_Living"), FVector2D(2100.0, 180.0),  FVector2D(2600.0, 180.0), 0.0, TEXT("W_South"));
+		AddCurtain(TEXT("F_Curtain_MBed"),    TEXT("R_MBed"),   FVector2D(7500.0, 8220.0), FVector2D(2200.0, 180.0), 0.0, TEXT("W_North"));
+		AddCurtain(TEXT("F_Curtain_Bed2"),    TEXT("R_Bed2"),   FVector2D(8700.0, 180.0),  FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
 	}
 
 	// ------------------------------------------------------------------- resolve the templates
