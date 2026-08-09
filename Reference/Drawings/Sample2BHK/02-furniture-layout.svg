@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="2480" height="1754" viewBox="0 0 2480 1754">
 <title>Sample 2BHK - Furniture Layout Plan</title>
-<desc>hf-spec-sha1 8099bf728a1ec40b4f1e99b0092659a548cb6f54</desc>
+<desc>hf-spec-sha1 5da375c76abe701627dcd3619831923990f4367a</desc>
 <rect width="2480" height="1754" fill="#ffffff"/>
 <polygon points="30.00,30.00 2450.00,30.00 2450.00,1724.00 30.00,1724.00" fill="none" stroke="#000000" stroke-width="2.50"/>
 <polygon points="48.00,48.00 2432.00,48.00 2432.00,1706.00 48.00,1706.00" fill="none" stroke="#000000" stroke-width="1.00"/>
@@ -431,7 +431,7 @@
 <polygon points="1075.07,1212.60 1262.57,1212.60 1262.57,1194.83 1075.07,1194.83" fill="none" stroke="#464646" stroke-width="1.00" stroke-dasharray="10 7"/>
 <polygon points="1267.51,419.17 1484.62,419.17 1484.62,401.40 1267.51,401.40" fill="none" stroke="#464646" stroke-width="1.00" stroke-dasharray="10 7"/>
 <polygon points="1400.73,1212.60 1588.24,1212.60 1588.24,1194.83 1400.73,1194.83" fill="none" stroke="#464646" stroke-width="1.00" stroke-dasharray="10 7"/>
-<polygon points="714.87,1212.60 971.45,1212.60 971.45,1194.83 714.87,1194.83" fill="none" stroke="#464646" stroke-width="1.00" stroke-dasharray="10 7"/>
+<polygon points="754.34,1212.60 931.98,1212.60 931.98,1194.83 754.34,1194.83" fill="none" stroke="#464646" stroke-width="1.00" stroke-dasharray="10 7"/>
 <line x1="1075.07" y1="1203.72" x2="1090.70" y2="1196.71" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1090.70" y1="1196.71" x2="1106.32" y2="1201.34" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1106.32" y1="1201.34" x2="1121.95" y2="1209.91" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
@@ -444,18 +444,18 @@
 <line x1="1215.70" y1="1203.48" x2="1231.32" y2="1196.68" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1231.32" y1="1196.68" x2="1246.95" y2="1201.56" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1246.95" y1="1201.56" x2="1262.57" y2="1210.02" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="714.87" y1="1203.72" x2="736.25" y2="1196.71" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="736.25" y1="1196.71" x2="757.63" y2="1201.34" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="757.63" y1="1201.34" x2="779.01" y2="1209.91" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="779.01" y1="1209.91" x2="800.40" y2="1208.20" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="800.40" y1="1208.20" x2="821.78" y2="1199.05" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="821.78" y1="1199.05" x2="843.16" y2="1197.64" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="843.16" y1="1197.64" x2="864.54" y2="1206.32" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="864.54" y1="1206.32" x2="885.92" y2="1210.67" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="885.92" y1="1210.67" x2="907.31" y2="1203.48" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="907.31" y1="1203.48" x2="928.69" y2="1196.68" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="928.69" y1="1196.68" x2="950.07" y2="1201.56" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
-<line x1="950.07" y1="1201.56" x2="971.45" y2="1210.02" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="754.34" y1="1203.72" x2="769.15" y2="1196.71" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="769.15" y1="1196.71" x2="783.95" y2="1201.34" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="783.95" y1="1201.34" x2="798.75" y2="1209.91" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="798.75" y1="1209.91" x2="813.55" y2="1208.20" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="813.55" y1="1208.20" x2="828.36" y2="1199.05" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="828.36" y1="1199.05" x2="843.16" y2="1197.64" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="843.16" y1="1197.64" x2="857.96" y2="1206.32" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="857.96" y1="1206.32" x2="872.77" y2="1210.67" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="872.77" y1="1210.67" x2="887.57" y2="1203.48" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="887.57" y1="1203.48" x2="902.37" y2="1196.68" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="902.37" y1="1196.68" x2="917.17" y2="1201.56" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
+<line x1="917.17" y1="1201.56" x2="931.98" y2="1210.02" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1267.51" y1="410.28" x2="1285.60" y2="403.28" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1285.60" y1="403.28" x2="1303.69" y2="407.90" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
 <line x1="1303.69" y1="407.90" x2="1321.79" y2="416.48" stroke="#787878" stroke-width="1.20" stroke-linecap="round"/>
