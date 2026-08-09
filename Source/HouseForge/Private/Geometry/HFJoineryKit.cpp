@@ -644,6 +644,55 @@ EHFHandleEdge FHFJoineryKit::ShutterLeadingEdge(const FHFShutterParams& Params)
 	return Params.Hinge == EHFShutterHinge::Left ? EHFHandleEdge::MaxX : EHFHandleEdge::MinX;
 }
 
+EHFHandleEdge FHFJoineryKit::ShutterHandleEdge(const FHFShutterParams& Params)
+{
+	// A SLIDING LEAF IS THE ONE CASE WHERE THE HANDLE IS NOT ON THE LEADING EDGE, and putting it
+	// there is what milestone 9 found on the master bedroom's 2400 wardrobe: "the sliding groove is
+	// routed into the lapped edge so it is both invisible and unreachable".
+	//
+	// The leading edge of a sliding leaf laps its partner. On the back track it spends its whole
+	// travel under the front leaf, one leaf thickness and a running clearance away, so a channel
+	// routed there cannot be seen and cannot be reached; on the front track it is the edge that
+	// covers the other leaf, and a hand at it is a hand over the joint. The JAMB edge is exposed on
+	// both tracks at every open amount, which is where a real sliding wardrobe carries its vertical
+	// profile, and it is where the hand goes to push the leaf across.
+	//
+	// Everything that swings keeps the leading edge, because for a swinging leaf the two are the
+	// same edge.
+	if (Params.IsSliding())
+	{
+		return Params.Hinge == EHFShutterHinge::Left ? EHFHandleEdge::MinX : EHFHandleEdge::MaxX;
+	}
+
+	return ShutterLeadingEdge(Params);
+}
+
+FHFHandleParams FHFJoineryKit::ShutterHandle(const FHFShutterParams& Leaf, EHFHandleStyle Style)
+{
+	FHFHandleParams Handle;
+	Handle.Style = Style;
+	Handle.PanelBox = ShutterPanelBox(Leaf);
+
+	// A constant, not a derivation. Every leaf this kit generates carries its board on +Y of its own
+	// pivot, so the face that looks out of the cupboard is the plane Y = 0 for both hands, and a run
+	// of shutters is exactly where a hand-derived flip gets applied to five leaves and forgotten on
+	// the sixth.
+	Handle.Facing = EHFPanelFacing::NegativeY;
+	Handle.Edge = ShutterHandleEdge(Leaf);
+
+	// A sliding run has a leaf passing over this one at TrackGap, so the section it carries has to
+	// duck under that. Applied to every leaf of the run rather than only the back one: the front
+	// leaf has nothing over it and could take the full projection, and a run whose two leaves stood
+	// proud by different amounts is not a wardrobe anybody makes.
+	if (Leaf.IsSliding())
+	{
+		Handle.ProfileProjection = FMath::Clamp(
+			Leaf.TrackGap - MinSlidingProfileClearance, 0.0, Handle.ProfileProjection);
+	}
+
+	return Handle;
+}
+
 FTransform FHFJoineryKit::ShutterPivotTransform(const FHFShutterParams& Params)
 {
 	const bool bLeft = Params.Hinge == EHFShutterHinge::Left;
@@ -767,6 +816,33 @@ namespace
 
 	/** Thinner than this is not stock, it is wire. */
 	constexpr double MinHandleStock = 0.1;
+
+	/**
+	 * Where a knob's section stops being its stem, as a fraction of the projection.
+	 *
+	 * Named rather than written into the profile array because it is the knob's grip: everything
+	 * below this height is clear neck, and it is what finger and thumb close on behind the head.
+	 * FHFHandleParams::GripClearanceCm reads the same figure, so the number a caller can measure and
+	 * the number the mesh is built from cannot drift.
+	 */
+	constexpr double KnobNeckFraction = 0.45;
+
+	/** Where the flare reaches full head diameter, and where the head starts closing again. */
+	constexpr double KnobFlareFraction = 0.62;
+	constexpr double KnobShoulderFraction = 0.80;
+	constexpr double KnobDomeFraction = 0.94;
+
+	/**
+	 * Break on the arrises of a fitted section that are on show. Small; see the conventions.
+	 *
+	 * Held under a third of the stock rather than half of it, so the two breaks at either end of the
+	 * return's outer face cannot meet: at exactly half they land on the same point, and floating
+	 * point decides whether that comes out as a clean bevel or as a zero-length edge in the section.
+	 */
+	double ProfileArrisBreak(const FHFHandleParams& P)
+	{
+		return FMath::Min(FMath::Max(P.LipChamfer, 0.0), P.ProfileStock * 0.35);
+	}
 
 	/**
 	 * The panel a handle is fitted to, resolved once into the axes the handle is built on.
@@ -924,12 +1000,17 @@ namespace
 		// Stem, a cone out to the head, a short barrel, then a dome closing on the axis. The dome is
 		// the point of doing this as a revolve at all: a knob capped with a flat disc reads as a
 		// bottle top under any light, and closing on an apex costs one triangle fan.
+		//
+		// The first segment is the GRIP, and it is why the fractions are named. Everything below
+		// KnobNeckFraction is clear neck at stem radius, so a fingertip and a thumb tip meet behind
+		// the head there; the shoulder they pull on is KnobUndercutCm of overhang. A knob whose head
+		// began at the face would be a boss, not a knob, and the difference does not show in a still.
 		const TArray<FVector2D> Profile = {
 			FVector2D(-P.Embed, StemRadius),
-			FVector2D(L * 0.45, StemRadius),
-			FVector2D(L * 0.62, HeadRadius),
-			FVector2D(L * 0.80, HeadRadius),
-			FVector2D(L * 0.94, HeadRadius * 0.72),
+			FVector2D(L * KnobNeckFraction, StemRadius),
+			FVector2D(L * KnobFlareFraction, HeadRadius),
+			FVector2D(L * KnobShoulderFraction, HeadRadius),
+			FVector2D(L * KnobDomeFraction, HeadRadius * 0.72),
 			FVector2D(L, 0.0)
 		};
 
@@ -966,28 +1047,39 @@ namespace
 
 		if (P.Style == EHFHandleStyle::JProfile)
 		{
-			// The corner comes off: out through the edge and out through the face, with a chamfer
-			// on EACH of the two arrises the cut creates. That break-out is the whole character of a
-			// J-profile - it is what makes a run of fronts read as one continuous shadow gap.
+			// The corner comes off: out through the edge and out through the face. That break-out is
+			// the whole character of a J-profile - it is what makes a run of fronts read as one
+			// continuous shadow gap rather than a row of separate boards.
 			//
-			// Both lips, and the outer one is the one that matters most. The cut leaves two convex
-			// arrises: the inner one where the recess wall meets the panel face, and the outer one
-			// where the recess floor runs out through the edge - and that outer arris IS the grip
-			// lip, at hand height on every front in the flat and the most prominent edge the profile
-			// produces. Breaking only the inner one leaves the other mathematically sharp, which
-			// reads as CG under any lighting; the handleless groove below breaks both of its lips
-			// for exactly this reason. See .claude/rules/04-conventions.md.
-			//
-			// The outer break is taken by leaving material rather than by cutting deeper: the floor
-			// runs out and up to meet the edge, so the recess is never deeper than RecessDepth and
-			// the web behind it is untouched. Halved against the profile height so a very shallow
-			// profile cannot fold the section through itself.
-			const double Lip = FMath::Min(C, H * 0.5);
-
+			// The INNER lip - where the channel wall meets the panel face - is broken with a chamfer
+			// in both cases. It is board, it is on show whatever else is fitted, and a fingertip runs
+			// straight over it on the way into the channel. See .claude/rules/04-conventions.md.
 			Push(-H, -D);
-			Push(-Lip, -D);
-			Push(0.0, -D + Lip);
-			Push(O, -D + Lip);
+
+			if (P.HasReturnProfile())
+			{
+				// A plain rebate, because the section fitted into it supplies the outer arris. The
+				// old break-out chamfer left a sliver of board exactly where the section's wall
+				// stands, and the two would have shared a volume.
+				Push(O, -D);
+			}
+			else
+			{
+				// No section: the board itself is the profile, so the outer arris is board too, and
+				// it is the most prominent edge the cut produces. Left mathematically sharp it reads
+				// as CG under any lighting.
+				//
+				// The break is taken by leaving material rather than by cutting deeper: the floor
+				// runs out and up to meet the edge, so the recess is never deeper than RecessDepth
+				// and the web behind it is untouched. Halved against the profile height so a very
+				// shallow profile cannot fold the section through itself.
+				const double Lip = FMath::Min(C, H * 0.5);
+
+				Push(-Lip, -D);
+				Push(0.0, -D + Lip);
+				Push(O, -D + Lip);
+			}
+
 			Push(O, O);
 			Push(-H - C, O);
 			Push(-H - C, 0.0);
@@ -1016,6 +1108,160 @@ namespace
 
 		return Section;
 	}
+
+	/**
+	 * Cross-section of the aluminium section fitted into a routed channel. THE HANDLE ITSELF.
+	 *
+	 * Same frame as MakeRecessSection - (distance out along the edge, distance out of the face),
+	 * negative inside the board - so the two are authored against each other and the signs are
+	 * carried by the handle frame rather than repeated here.
+	 *
+	 * It traces a J. Along the channel floor, up the outer wall, out past the panel face by
+	 * ProfileProjection, then back over the mouth by ReturnLip - and that last leg is the return a
+	 * fingertip hooks under. The two figures that make it a handle are stated on the params and read
+	 * back by FingerApertureCm and FingerDepthCm; nothing here invents a dimension.
+	 *
+	 * The buried faces sink ProfileBed into the board so no face of the section is coplanar with a
+	 * face of the channel it sits in. Coincident faces z-fight through every frame of a walkthrough
+	 * and are invisible in a still, which is exactly why the bar's fixing pads carry an Embed.
+	 */
+	TArray<FVector2D> MakeProfileSection(const FHFHandleParams& P)
+	{
+		const double D = P.RecessDepth;
+		const double H = P.ProfileHeight;
+		const double S = P.ProfileStock;
+		const double L = P.ReturnLip;
+		const double Proud = P.ProfileProjection;
+		const double Bed = FHFJoineryKit::ProfileBed;
+		const double K = ProfileArrisBreak(P);
+
+		TArray<FVector2D> Section;
+		auto Push = [&Section](double U, double V)
+		{
+			const FVector2D Point(U, V);
+			if (Section.IsEmpty() || !Section.Last().Equals(Point, UE_KINDA_SMALL_NUMBER))
+			{
+				Section.Add(Point);
+			}
+		};
+
+		// Where the outer wall stands, and where the channel's far end is. A J-profile's channel
+		// breaks out through the panel edge, so its wall stands ON that edge at U = 0 and the board's
+		// own pocket wall closes the far end. A groove keeps GrooveEdgeMargin of board outside it,
+		// so both ends of its channel are the section's own - which is why the gola is a C in section
+		// and the J is not, and why their apertures differ by one wall thickness.
+		const bool bBreaksOut = (P.Style == EHFHandleStyle::JProfile);
+		const double WallOuter = bBreaksOut ? 0.0 : -P.GrooveEdgeMargin + Bed;
+		const double FarOuter = bBreaksOut ? -H - Bed : -(P.GrooveEdgeMargin + H) - Bed;
+
+		const double FloorBottom = -D - Bed;
+		const double FloorTop = FloorBottom + S;
+		const double WallInner = WallOuter - S;
+		const double HookUnder = Proud - S;
+
+		// Floor lining, outward along the channel to the wall.
+		Push(FarOuter, FloorBottom);
+		Push(WallOuter, FloorBottom);
+
+		// Up the outer wall and out past the panel face. The two arrises at the top of it are the
+		// most looked-at edges on a handleless run - they are the shadow line - so both get a break.
+		Push(WallOuter, Proud - K);
+		Push(WallOuter - K, Proud);
+
+		// Back over the mouth: the return.
+		Push(WallOuter - L + K, Proud);
+		Push(WallOuter - L, Proud - K);
+		Push(WallOuter - L, HookUnder + K);
+		Push(WallOuter - L + K, HookUnder);
+
+		// The underside of the return, back to the inside of the wall, then down it to the floor.
+		Push(WallInner, HookUnder);
+		Push(WallInner, FloorTop);
+
+		// The far end. A J stops here - the board carries on from FarOuter as the pocket wall it was
+		// routed against. A groove has no board inside its far lip, so the section closes it with a
+		// wall of its own, up to the panel face.
+		if (bBreaksOut)
+		{
+			Push(FarOuter, FloorTop);
+		}
+		else
+		{
+			Push(FarOuter + S, FloorTop);
+			Push(FarOuter + S, 0.0);
+			Push(FarOuter, 0.0);
+		}
+
+		if (Section.Num() > 1 && Section.Last().Equals(Section[0], UE_KINDA_SMALL_NUMBER))
+		{
+			Section.Pop();
+		}
+
+		return Section;
+	}
+}
+
+// -------------------------------------------------------------------------- what the void measures
+//
+// Read off the same figures the sections above are built from, so the number a caller can measure
+// and the number the mesh actually has cannot drift. All of them assume sanitised parameters - which
+// is what SanitiseHandle is public for.
+
+double FHFHandleParams::FingerApertureCm() const
+{
+	if (!IsRecessed())
+	{
+		return 0.0;
+	}
+	if (!HasReturnProfile())
+	{
+		// No section fitted: the channel is the bare routed slot, open the whole way across. Wider
+		// than the one below, and worth nothing, because there is no lip in it to pull on.
+		return FMath::Max(0.0, ProfileHeight);
+	}
+
+	// Between the inner end of the return and the far side of the channel. A J's far side is the
+	// board's own pocket wall; a groove's is the section's far wall, one stock thickness in.
+	const double Bed = FHFJoineryKit::ProfileBed;
+	const double Far = (Style == EHFHandleStyle::JProfile) ? 0.0 : ProfileStock - 2.0 * Bed;
+
+	return FMath::Max(0.0, ProfileHeight - ReturnLip - Far);
+}
+
+double FHFHandleParams::FingerDepthCm() const
+{
+	if (!IsRecessed())
+	{
+		return 0.0;
+	}
+	if (!HasReturnProfile())
+	{
+		return FMath::Max(0.0, RecessDepth);
+	}
+
+	// The board gives up RecessDepth less the floor lining; the section gives up everything it
+	// stands proud, less the return's own wall. That second term is the whole reason a 19 mm shutter
+	// can carry a handle deeper than 19 mm at all.
+	return FMath::Max(0.0,
+		ProfileProjection + RecessDepth + FHFJoineryKit::ProfileBed - 2.0 * ProfileStock);
+}
+
+double FHFHandleParams::ReturnOverhangCm() const
+{
+	return HasReturnProfile() ? FMath::Max(0.0, ReturnLip - ProfileStock) : 0.0;
+}
+
+double FHFHandleParams::GripClearanceCm() const
+{
+	if (Style == EHFHandleStyle::Bar)
+	{
+		return FMath::Max(0.0, Projection - BarDiameter);
+	}
+	if (Style == EHFHandleStyle::Knob)
+	{
+		return FMath::Max(0.0, Projection * KnobNeckFraction);
+	}
+	return 0.0;
 }
 
 bool FHFJoineryKit::IsRecessedHandle(EHFHandleStyle Style)
@@ -1040,12 +1286,24 @@ FHFHandleParams FHFJoineryKit::SanitiseHandle(const FHFHandleParams& Params)
 
 	Out.BarDiameter = FMath::Max(Out.BarDiameter, MinHandleStock);
 	Out.KnobDiameter = FMath::Max(Out.KnobDiameter, MinHandleStock);
-	Out.KnobStemDiameter = FMath::Clamp(Out.KnobStemDiameter, MinHandleStock, Out.KnobDiameter);
 
-	// A bar has to clear the face by more than its own stock, or there is nowhere for fingers to go
-	// and the standoffs come out with a negative length.
+	// A stem as fat as the head is a bollard. The head has to overhang it by MinKnobUndercut all
+	// round or there is no shoulder for finger and thumb to close behind, and a knob you can only
+	// press is a knob that does not open anything.
+	Out.KnobStemDiameter = FMath::Clamp(Out.KnobStemDiameter, MinHandleStock,
+		FMath::Max(MinHandleStock, Out.KnobDiameter - 2.0 * FHFJoineryKit::MinKnobUndercut));
+
+	// HOW MUCH AIR THERE IS BEHIND THE GRIP, which is the handle. The old floor was
+	// BarDiameter * 1.5, and on the standard 12 mm stock that allowed a bar standing 18 mm off the
+	// face with 6 mm behind it - fully modelled, correctly lit, and impossible to get a hand round.
+	// A bar flush to a shutter is a decoration.
+	//
+	// A knob is pinched rather than gripped, so its floor is the smaller one: enough clear neck for a
+	// fingertip and a thumb tip to meet under the head. Both are read back by GripClearanceCm.
 	Out.Projection = FMath::Max(Out.Projection,
-		Out.Style == EHFHandleStyle::Knob ? MinHandleStock * 2.0 : Out.BarDiameter * 1.5);
+		Out.Style == EHFHandleStyle::Knob
+			? FHFJoineryKit::MinKnobNeck / KnobNeckFraction
+			: Out.BarDiameter + FHFJoineryKit::MinGripClearance);
 
 	const double LongestBar = FMath::Max(MinHandleStock, Frame.RunSpan - 2.0 * Out.BarDiameter);
 	Out.BarLength = FMath::Clamp(Out.BarLength, Out.BarDiameter, LongestBar);
@@ -1064,14 +1322,30 @@ FHFHandleParams FHFJoineryKit::SanitiseHandle(const FHFHandleParams& Params)
 	Out.LipChamfer = FMath::Max(Out.LipChamfer, 0.0);
 	Out.MinWeb = FMath::Clamp(Out.MinWeb, 0.0, Frame.Thickness * 0.5);
 
+	Out.ProfileProjection = FMath::Max(Out.ProfileProjection, 0.0);
+	Out.ProfileStock = FMath::Clamp(Out.ProfileStock, 0.0, FMath::Max(0.0, Out.ProfileHeight * 0.25));
+	Out.ReturnLip = FMath::Clamp(Out.ReturnLip, 0.0, FMath::Max(0.0, Out.ProfileHeight * 0.5));
+
 	// A recess deeper than the board would rout the panel in two. Leaving the web is the honest
 	// clamp: the request was a mistake, and a shallower groove gives the caller something to look at
 	// and a dimension to notice it by, rather than a shutter with a slot straight through it.
-	Out.RecessDepth = FMath::Clamp(Out.RecessDepth, 0.0, FMath::Max(0.0, Frame.Thickness - Out.MinWeb));
+	//
+	// The bed comes out of the same allowance, because a fitted section sinks that far past the
+	// channel floor. Charged here rather than forgotten: without it the web really left behind is
+	// MinWeb less the bed, which is the reserve quietly not being kept.
+	const double BedInUse = Out.HasReturnProfile() ? FHFJoineryKit::ProfileBed : 0.0;
+	Out.RecessDepth = FMath::Clamp(Out.RecessDepth, 0.0,
+		FMath::Max(0.0, Frame.Thickness - Out.MinWeb - BedInUse));
 
 	if (Out.Style == EHFHandleStyle::HandlelessGroove)
 	{
-		Out.GrooveEdgeMargin = FMath::Clamp(Out.GrooveEdgeMargin, 0.0, Frame.EdgeSpan * 0.5);
+		// A section fitted into the groove sinks its outer wall a bed into the near lip, so there has
+		// to be a lip to sink it into. Below one wall thickness the wall stands in fresh air outside
+		// the panel, which is a gola hanging off the edge of the shutter it is fitted to.
+		const double SmallestMargin = Out.HasReturnProfile()
+			? FMath::Min(Out.ProfileStock + FHFJoineryKit::ProfileBed, Frame.EdgeSpan * 0.5) : 0.0;
+
+		Out.GrooveEdgeMargin = FMath::Clamp(Out.GrooveEdgeMargin, SmallestMargin, Frame.EdgeSpan * 0.5);
 		Out.LipChamfer = FMath::Min(Out.LipChamfer, Out.GrooveEdgeMargin * 0.5);
 	}
 	else
@@ -1177,6 +1451,42 @@ FDynamicMesh3 FHFJoineryKit::GenerateHandleRecessCutter(const FHFHandleParams& P
 	return Mesh;
 }
 
+FDynamicMesh3 FHFJoineryKit::GenerateHandleProfile(const FHFHandleParams& Params)
+{
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	const FHFHandleParams P = SanitiseHandle(Params);
+	if (!P.IsValid() || !P.HasReturnProfile()
+		|| P.ProfileHeight <= UE_KINDA_SMALL_NUMBER || P.FingerApertureCm() <= UE_KINDA_SMALL_NUMBER)
+	{
+		return Mesh;
+	}
+
+	const FHandleFrame Frame = MakeHandleFrame(P);
+	if (!Frame.bValid)
+	{
+		return Mesh;
+	}
+
+	const TArray<FVector2D> Section = MakeProfileSection(P);
+	if (Section.Num() < 3)
+	{
+		return Mesh;
+	}
+
+	// EXACTLY the run, with no overshoot at either end - the opposite of the cutter beside it, and
+	// for the opposite reason. A cutter has to break out past the faces it cuts; a fitted section is
+	// a part somebody sees, and one running past the end of the panel it is fitted to is an
+	// extrusion hanging in mid-air over the next unit along. Continuous along the run and stopping
+	// dead at both ends is what a real profile does.
+	FHFMeshOps::AppendExtrudedSection(Mesh, Section, Frame.RunStartCorner, Frame.EdgeDir, Frame.RunDir,
+		Frame.RunSpan, P.HandleRole);
+
+	FHFMeshOps::ApplyWorldScaleUVs(Mesh);
+	return Mesh;
+}
+
 bool FHFJoineryKit::ApplyHandle(FDynamicMesh3& PanelMesh, const FHFHandleParams& Params)
 {
 	if (Params.Style == EHFHandleStyle::None)
@@ -1208,6 +1518,30 @@ bool FHFJoineryKit::ApplyHandle(FDynamicMesh3& PanelMesh, const FHFHandleParams&
 	{
 		const FDynamicMesh3 Cutter = GenerateHandleRecessCutter(P);
 		bApplied = Cutter.TriangleCount() > 0 && FHFMeshOps::SubtractInPlace(PanelMesh, Cutter);
+
+		// And then the handle goes in. Routing alone leaves a channel and nothing to pull on: on a
+		// 19 mm shutter keeping a 5 mm web that channel is 13.5 mm deep, open on every side, with no
+		// lip - which is a wide shadow at the edge of a leaf, and a wide shadow at the edge of a leaf
+		// is what the 3 mm reveal beside it already is. Hence the fixtures milestone's verdict that
+		// every recessed style read as the reveal gap.
+		//
+		// The section is what a J-profile or a gola actually is. It carries the depth the board
+		// cannot and it returns over the mouth, and those two things are the handle.
+		//
+		// Appended straight into the panel's own mesh rather than joined afterwards, for the reason
+		// the applied styles are built in place: an append that renumbered polygroups would strip the
+		// section of its surface role, and untagged geometry cannot be re-materialled at all.
+		if (bApplied && P.HasReturnProfile())
+		{
+			const FHandleFrame Frame = MakeHandleFrame(P);
+			const TArray<FVector2D> Section = MakeProfileSection(P);
+
+			if (Frame.bValid && Section.Num() >= 3)
+			{
+				bApplied = FHFMeshOps::AppendExtrudedSection(PanelMesh, Section, Frame.RunStartCorner,
+					Frame.EdgeDir, Frame.RunDir, Frame.RunSpan, P.HandleRole);
+			}
+		}
 	}
 	else
 	{

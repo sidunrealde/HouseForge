@@ -675,11 +675,31 @@ enum class EHFHandleEdge : uint8
  *
  * The panel is part of the parameters rather than something the caller reconciles afterwards,
  * because a handle only exists relative to one: a bar sits a fixed distance in from an edge and
- * runs parallel to it, and a routed profile is a hole in a panel and nothing whatsoever on its own.
+ * runs parallel to it, and a routed profile is a channel in a panel and nearly nothing on its own.
  *
  * Everything is in the panel's own local space and in centimetres. Defaults are the standard Indian
- * cabinet fittings: a 128 mm bar in 12 mm round stock, a 30 mm knob, a 38 mm profile with a 12 mm
- * finger recess.
+ * cabinet fittings: a 128 mm bar in 12 mm round stock, a 30 mm knob, and a 38 mm aluminium edge
+ * profile with a 10 mm return.
+ *
+ * ## A HANDLE IS A THING YOU CAN GET A HAND INTO
+ *
+ * Every figure below that looks cosmetic is actually dimensioning a void, and the void is the
+ * handle. A pull is not the bar - it is the 20 mm of air behind the bar that four fingers go into.
+ * A gola is not the shadow line - it is the channel behind the line, and the lip that stops a
+ * fingertip sliding straight back out of it.
+ *
+ * The routed styles shipped without either. They were a rebate and a slot cut into a 19 mm board,
+ * and a 19 mm board cannot contain a finger: with a 5 mm web reserved the deepest possible cut was
+ * 14 mm, open on every side, with no lip to pull on. What that produced was a wide shadow at the
+ * edge of a shutter, which is exactly what the reveal between two shutters already is - hence the
+ * fixtures milestone's verdict that "every recessed style reads as the reveal gap".
+ *
+ * So the routed styles are no longer only routed. Each one now routs its channel AND fits the
+ * aluminium section that a real J-profile or gola IS - a thin extrusion, continuous along the run,
+ * that lines the channel, stands ProfileProjection proud of the face, and returns ReturnLip back
+ * across the mouth. The section carries the depth the board cannot, and the return is the part a
+ * hand actually pulls on. FingerApertureCm and FingerDepthCm state what that leaves, in
+ * centimetres, and HouseForge.Joinery.HandleGrip measures both on the built mesh.
  */
 USTRUCT(BlueprintType)
 struct HOUSEFORGE_API FHFHandleParams
@@ -741,7 +761,13 @@ struct HOUSEFORGE_API FHFHandleParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double KnobStemDiameter = 1.0;
 
-	/** How far the handle stands proud of the face. Its outermost point sits exactly here. */
+	/**
+	 * How far an applied handle stands proud of the face. Its outermost point sits exactly here.
+	 *
+	 * The gap a hand goes into is this LESS the stock in the way, so 3.2 on a 12 mm bar leaves 20 mm
+	 * of clear air behind it - which is a pull. SanitiseHandle will not let it fall below what
+	 * MinGripClearance needs, because a bar screwed flat to a shutter is a decoration.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double Projection = 3.2;
 
@@ -755,13 +781,54 @@ struct HOUSEFORGE_API FHFHandleParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double Embed = 0.2;
 
-	/** Height of a routed profile up the panel face. 3.8 is the gola profile. */
+	/**
+	 * How far a routed profile reaches back across the panel face, along the edge it serves.
+	 *
+	 * The channel's width in elevation, and therefore the band the eye reads. 3.8 is the gola
+	 * profile. Most of it is the finger aperture: the return takes ReturnLip off one end and the
+	 * section's own wall takes its stock off the other, and FingerApertureCm is what is left.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
 	double ProfileHeight = 3.8;
 
 	/** How deep a routed profile cuts in. Clamped to leave MinWeb of board behind it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
-	double RecessDepth = 1.2;
+	double RecessDepth = 1.4;
+
+	/**
+	 * How far the fitted section stands proud of the panel face.
+	 *
+	 * THE SHADOW THAT MAKES A HANDLELESS RUN VISIBLE, and half of the depth a finger gets. The board
+	 * can only give up RecessDepth before it is routed in two; the section is what carries the rest,
+	 * and it carries it forward into the room where there is nothing in the way.
+	 *
+	 * 10 mm is what an edge profile or a gola actually projects. Zero is a real answer - it asks for
+	 * the bare routed channel, with no section fitted and no return - and it is the shape this kit
+	 * used to produce for every recessed handle in the flat.
+	 *
+	 * A sliding run has to keep this under its own TrackGap or the leaf in front grinds over it;
+	 * FHFWardrobeKit does that clamp, because the leaf is the only thing that knows its track.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double ProfileProjection = 1.0;
+
+	/**
+	 * How far the section returns back across the mouth of its channel.
+	 *
+	 * THE PART A HAND PULLS ON. Without it the channel is a slot: fingers go in and slide straight
+	 * out again, and the whole thing is a shadow line with nothing behind it. With it the section is
+	 * a J - down the channel, up the far side, and back over - and a fingertip hooks under the
+	 * return exactly as it does on the real extrusion.
+	 *
+	 * 10 mm, of which the outer ProfileStock is the return's own wall, leaving ReturnOverhangCm of
+	 * usable purchase. Zero asks for a channel with no lip.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double ReturnLip = 1.0;
+
+	/** Wall thickness of the fitted section. 2 mm, which is what the extrusion is. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
+	double ProfileStock = 0.2;
 
 	/**
 	 * Chamfer on the lip of a routed profile.
@@ -809,6 +876,53 @@ struct HOUSEFORGE_API FHFHandleParams
 	{
 		return Style == EHFHandleStyle::Bar || Style == EHFHandleStyle::Knob;
 	}
+
+	/**
+	 * True when a recessed style also gets the aluminium section that turns it into a handle.
+	 *
+	 * False leaves the bare routed channel: no lip, no projection, nothing to hook. That shape is
+	 * still reachable on purpose - a finger groove routed straight out of the board is a real, if
+	 * poor, detail - but it is not what any of the four styles asks for by default.
+	 */
+	bool HasReturnProfile() const
+	{
+		return IsRecessed() && ProfileStock > 0.0 && ReturnLip > ProfileStock
+			&& (ProfileProjection > 0.0 || RecessDepth > 0.0);
+	}
+
+	/**
+	 * Clear width of the channel mouth, along the edge served: the slot a finger passes through.
+	 *
+	 * Measured between the return's inner end and the far wall of the channel, which are the two
+	 * things a finger touches on the way in. Compare it against RevealGap on the shutter beside it -
+	 * a handle that does not beat that figure several times over is a shadow line, which is exactly
+	 * what the recessed styles used to be.
+	 */
+	double FingerApertureCm() const;
+
+	/**
+	 * Clear depth of the channel, from the underside of the return down to the lining's floor.
+	 *
+	 * Where the projection earns its keep. The board contributes RecessDepth less the lining, and
+	 * the section contributes everything it stands proud - which is why a 19 mm shutter can carry a
+	 * 20 mm deep handle at all.
+	 */
+	double FingerDepthCm() const;
+
+	/** How far the return actually overhangs the channel: the purchase a fingertip pulls on. */
+	double ReturnOverhangCm() const;
+
+	/**
+	 * Clear air between an applied handle's grip and the panel face - what the hand goes into.
+	 *
+	 * A bar's is the projection less its own stock. A knob's is the height of its neck, which is
+	 * where finger and thumb meet behind the head. Zero for the routed styles, which state their
+	 * void with FingerApertureCm and FingerDepthCm instead.
+	 */
+	double GripClearanceCm() const;
+
+	/** Radial undercut behind a knob's head: how much of a shoulder there is to pinch. */
+	double KnobUndercutCm() const { return FMath::Max(0.0, (KnobDiameter - KnobStemDiameter) * 0.5); }
 
 	/** False when the parameters describe no handle, or no panel to put one on. */
 	bool IsValid() const
@@ -1227,6 +1341,62 @@ public:
 	 */
 	static constexpr double MinHangingClearance = 90.0;
 
+	// ---------------------------------------------------------------------------- handle clearances
+	//
+	// The three figures below are what separates a handle from a moulding. They are floors rather
+	// than targets: SanitiseHandle raises anything under them, so a fixture that asks for a decorative
+	// pull gets an operable one back and can read the difference off the parameters.
+
+	/**
+	 * Clear air a hand needs behind an applied grip, in centimetres.
+	 *
+	 * Four fingers curled behind a bar want 20 mm. Less and the hand cannot close on it: the fingers
+	 * touch the shutter before they are round the stock, and the pull becomes something you press
+	 * rather than something you grip. The old floor was BarDiameter * 1.5, which on standard 12 mm
+	 * stock allowed a bar with 6 mm behind it - fully modelled, correctly lit, and useless.
+	 */
+	static constexpr double MinGripClearance = 2.0;
+
+	/**
+	 * Clear neck under a knob's head, in centimetres.
+	 *
+	 * A knob is pinched rather than gripped, so it does not need the four-finger figure above - it
+	 * needs somewhere for a fingertip and a thumb tip to meet behind the head. 10 mm is that.
+	 */
+	static constexpr double MinKnobNeck = 1.0;
+
+	/** How far a knob's head must overhang its stem, radially, for the pinch to have a shoulder. */
+	static constexpr double MinKnobUndercut = 0.6;
+
+	/**
+	 * Clear width of a routed channel's mouth, in centimetres.
+	 *
+	 * A fingertip is about 18 mm across at the first joint, so 20 mm is the slot it passes through.
+	 * This is also the figure that settles "reads as the reveal gap": a shutter reveal is 3 mm, so a
+	 * channel at this floor is nearly seven times the gap beside it and cannot be mistaken for one.
+	 */
+	static constexpr double MinFingerAperture = 2.0;
+
+	/**
+	 * Clear depth of a routed channel, mouth to floor, in centimetres.
+	 *
+	 * Far enough for a fingertip to be inside the channel rather than resting on its lip, which is
+	 * what makes the return worth having. Unreachable by routing alone - a 19 mm shutter keeping a
+	 * 5 mm web can give up 13.5 mm - so a channel that meets this has a section fitted, by
+	 * construction.
+	 */
+	static constexpr double MinFingerDepth = 1.6;
+
+	/**
+	 * How far a fitted section sinks into the board behind it, in centimetres.
+	 *
+	 * Half a millimetre, and its whole job is to stop the section's buried faces from being coplanar
+	 * with the routed ones they sit against. Two coincident faces z-fight through every frame of a
+	 * walkthrough and show nothing in a still - the same reason a bar's fixing pads carry an Embed.
+	 * Counted against the web, so a channel that is already at its clamp does not eat into it.
+	 */
+	static constexpr double ProfileBed = 0.05;
+
 	// --------------------------------------------------------------------------------- shutters
 	//
 	// A shutter moves, so unlike the plinth it is never appended into a carcass mesh. It comes back
@@ -1313,6 +1483,52 @@ public:
 	 * pushes.
 	 */
 	static EHFHandleEdge ShutterLeadingEdge(const FHFShutterParams& Params);
+
+	/**
+	 * The edge of that box a handle goes on. The leading edge for everything that swings.
+	 *
+	 * NOT the same question, and the difference is a whole sliding wardrobe. A hinged leaf's leading
+	 * edge is the one furthest from its hinge, and it is both the edge you pull and the edge on show
+	 * - so one answer serves both and ShutterLeadingEdge is it.
+	 *
+	 * A SLIDING LEAF LAPS ITS PARTNER, and the edge it leads with is the edge that goes UNDER the
+	 * other leaf. Milestone 9 found the consequence on the master bedroom's 2400 wardrobe: "the
+	 * sliding groove is routed into the lapped edge so it is both invisible and unreachable". The
+	 * back-track leaf's leading edge is behind 29 mm of the front leaf for the whole of its travel,
+	 * and a channel there is a channel nobody can see or put a finger in.
+	 *
+	 * Its JAMB edge is exposed on both tracks, at every open amount, and that is where the handle
+	 * goes - which is also where the vertical profile on a real sliding wardrobe is, for the same
+	 * reason. The leaf still runs the other way; a handle is where the hand is, not where the leaf
+	 * is going.
+	 */
+	static EHFHandleEdge ShutterHandleEdge(const FHFShutterParams& Params);
+
+	/**
+	 * The handle for one leaf, in that leaf's own local space: box, facing, edge and clearances.
+	 *
+	 * Every carcass generator in the plugin wants exactly this, and each one used to write it out -
+	 * identically, with a comment on each copy pointing at the other. Stated once here because the
+	 * answer stopped being four obvious lines: a sliding leaf takes its handle on a different edge
+	 * from the one it leads with, and it cannot carry a section as proud as a hinged leaf's, and a
+	 * kit that got either wrong would look right in every still of a closed wardrobe.
+	 *
+	 * Nothing in it is conditional on how the leaf is HUNG - both hands present their outward face
+	 * at local Y = 0 - which is why the handedness is asked of ShutterHandleEdge rather than written
+	 * out by the caller. Everything else stays at FHFHandleParams' own defaults, so the fixture's
+	 * parameter struct is still where somebody changes the pull on one particular wardrobe.
+	 */
+	static FHFHandleParams ShutterHandle(const FHFShutterParams& Leaf, EHFHandleStyle Style);
+
+	/**
+	 * Clear air a fitted section must leave between its face and a leaf running past it, in cm.
+	 *
+	 * Only a sliding run has anything running past. Its gear gives 10 mm between one track's leaf
+	 * face and the next one's, and a gola standing the full 10 mm proud would be ground off by the
+	 * leaf in front the first time either moved - which is exactly why FHFWardrobeKit refuses a bar
+	 * on a sliding run in the first place. Three millimetres is what is left over as clearance.
+	 */
+	static constexpr double MinSlidingProfileClearance = 0.3;
 
 	/**
 	 * Where the leaf's own origin sits, in the module frame. A pure translation, every kind.
@@ -1450,6 +1666,22 @@ public:
 	 * Empty for the applied styles and for None.
 	 */
 	static UE::Geometry::FDynamicMesh3 GenerateHandleRecessCutter(const FHFHandleParams& Params);
+
+	/**
+	 * The aluminium section that lines a routed channel, in the panel's own local space.
+	 *
+	 * A closed solid, swept the exact length of the run - continuous along it, and stopping flush
+	 * with both ends of the panel so a bank of drawers reads as one line and a leaf's section shows
+	 * its own profile at top and bottom.
+	 *
+	 * This is the half of a recessed handle that a hand touches. The cutter takes the channel out of
+	 * the board; this puts the J back in it. Its section runs down the channel floor, up the outer
+	 * wall, out past the panel face by ProfileProjection, and back over the mouth by ReturnLip -
+	 * which is a J, and the return is the whole point of one.
+	 *
+	 * Empty for the applied styles, for None, and when HasReturnProfile is false.
+	 */
+	static UE::Geometry::FDynamicMesh3 GenerateHandleProfile(const FHFHandleParams& Params);
 
 	/**
 	 * Puts the handle on the panel, in the panel's own local space.
