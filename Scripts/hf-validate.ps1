@@ -103,8 +103,20 @@ $UProject   = Join-Path $ProjectDir 'HouseBuilder.uproject'
 
 $Ubt        = Join-Path $EngineDir 'Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe'
 $EditorCmd  = Join-Path $EngineDir 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
-$ReportDir      = Join-Path $PluginDir 'Saved\TestReports'
-$PixelReportDir = Join-Path $PluginDir 'Saved\TestReportsPixels'
+# ONE REPORT DIRECTORY PER RUN, because two gates on one machine shared these and it is not a
+# tidiness problem. Each stage begins by deleting its report directory and ends by reading index.json
+# back out of it, so a second gate starting mid-run deletes the first one's evidence underneath it.
+#
+# Seen: a full-suite run reached HouseForge.Editor.Surfaces and then died with "no test report
+# written to ...\Saved\TestReports", because a concurrent run had just cleared it.
+#
+# That failure is loud. The one that is not: the two runs overlap the other way and a gate reads an
+# index.json written by somebody ELSE'S suite - a different filter, a different tree, possibly a
+# different commit - and reports those counts as its own. The merge commit then records, as its
+# evidence, a run that never happened on that code. Every count check in this script is honest about
+# the file it was handed and none of them can tell whose file it is.
+$ReportDir      = Join-Path $PluginDir "Saved\TestReports-$PID"
+$PixelReportDir = Join-Path $PluginDir "Saved\TestReportsPixels-$PID"
 
 function Write-Stage([string] $Text) {
     Write-Host ''
