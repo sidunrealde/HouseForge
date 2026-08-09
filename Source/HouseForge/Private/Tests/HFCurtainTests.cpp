@@ -700,6 +700,16 @@ bool FHFCurtainFoldsDoNotTouchTest::RunTest(const FString& Parameters)
 	TestTrue(*FString::Printf(TEXT("There is a hairline between folds (%.2f mm)"), Gap * 10.0),
 		Gap > 0.02);
 
+	// AND IT IS NARROWER THAN THE CLOTH IS THICK, which is the rule that keeps the seam a slot rather
+	// than a window. At 1.5 mm through 1.2 mm of fabric every seam was a light path, and a drawn
+	// curtain rendered as a dashed vertical line of daylight at each of its forty folds - a venetian
+	// blind, in the one state a curtain is supposed to be opaque in. Nothing above could see it: the
+	// aperture is the widest UNBROKEN clear run, and forty separate slots leave that at zero.
+	TestTrue(*FString::Printf(
+		TEXT("The parting (%.2f mm) is narrower than the cloth is thick (%.2f mm), so the seam is a slot"),
+		Gap * 10.0, Build.Used.FabricThickness * 10.0),
+		Gap < Build.Used.FabricThickness);
+
 	// Measured on the built mesh: one fold's own extent along the track is its pitch less the gap,
 	// EXACTLY. That exactness is the whole point of cutting the fold at its crest - see FoldSection.
 	// The first build cut at the zero crossings instead, where the cloth's thickness projects along

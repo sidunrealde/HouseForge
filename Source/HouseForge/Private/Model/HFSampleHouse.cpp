@@ -1517,16 +1517,27 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		// the flat, facing south, straight onto the seating. Every other pelmet in this drawing is
 		// over a 1500 window and this one was over nothing.
 		//
-		// 2600, and the width is the whole design decision. A pelmet has to be wider than its opening
-		// by the STACK the drawn-back curtain occupies at each end, or the curtain that is supposed to
-		// clear the glass parks itself over it - see FHFCurtainParams::StackWidth, which answers that
-		// in centimetres before anything is built. A pair on a 2600 pelmet leaves 1854 of clear
-		// aperture over an 1800 opening; on a 2200 one it would leave 1564 and cover 120 mm of glass
-		// at each jamb.
+		// 1800 - THE DOOR'S OWN WIDTH - AND THAT IS THE SECOND ANSWER TO THIS ONE.
 		//
-		// It fits: COL_SW's east face is at 225 and F_Pelmet_Living starts at 4450, so the run has
-		// 4225 of clear wall in it and this takes 2600 of the middle of it.
-		AddPelmet(TEXT("F_Pelmet_LivBalc"), TEXT("R_Living"), FVector2D(2100.0, 180.0), FVector2D(2600.0, 180.0), 0.0, TEXT("W_South"));
+		// It was drawn 2600 first, on the rule every other pelmet here follows: a pelmet is wider than
+		// its opening by the STACK the drawn-back curtain occupies at each end, or the curtain parks
+		// itself over the glass it was hung to clear. On length alone 2600 fits, and the arithmetic
+		// said so - COL_SW's east face is at 225 and F_Pelmet_Living starts at 4450, so there is 4225
+		// of clear wall to take 2600 out of the middle of.
+		//
+		// CLEAR WALL WAS THE WRONG MEASUREMENT. What matters to a curtain is not how much wall is free
+		// but what is standing against it, and both ends of that run are joinery 450 deep: F_TVUnit_W
+		// is 1800 tall and reaches 1140, F_TVUnit_E starts at 3200. A curtain hangs in the outer 250
+		// of the 180 mm pelmet, so a 2600 track puts 311 mm of cloth inside a tall unit at one end and
+		// 171 inside a console at the other - which the whole-flat sweep measured and no length
+		// calculation could ever have seen.
+		//
+		// So the track is fitted to the OPENING and the stack goes over the glass, which is what a
+		// maker does when there is nowhere beside a window to stack on. It costs aperture: 1216 clear
+		// of 1780 rather than 1854 of 2564, so the drawn-back pair covers about 280 mm of glass at
+		// each jamb. That is the real trade this wall forces, and the alternative was no curtain over
+		// the largest sheet of glass in the flat.
+		AddPelmet(TEXT("F_Pelmet_LivBalc"), TEXT("R_Living"), FVector2D(2100.0, 180.0), FVector2D(1800.0, 180.0), 0.0, TEXT("W_South"));
 	}
 
 	// ----------------------------------------------------------------- and the curtains in them
@@ -1582,7 +1593,7 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		};
 
 		AddCurtain(TEXT("F_Curtain_Living"),  TEXT("R_Living"), FVector2D(5400.0, 180.0),  FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
-		AddCurtain(TEXT("F_Curtain_LivBalc"), TEXT("R_Living"), FVector2D(2100.0, 180.0),  FVector2D(2600.0, 180.0), 0.0, TEXT("W_South"));
+		AddCurtain(TEXT("F_Curtain_LivBalc"), TEXT("R_Living"), FVector2D(2100.0, 180.0),  FVector2D(1800.0, 180.0), 0.0, TEXT("W_South"));
 		AddCurtain(TEXT("F_Curtain_MBed"),    TEXT("R_MBed"),   FVector2D(7500.0, 8220.0), FVector2D(2200.0, 180.0), 0.0, TEXT("W_North"));
 		AddCurtain(TEXT("F_Curtain_Bed2"),    TEXT("R_Bed2"),   FVector2D(8700.0, 180.0),  FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
 	}

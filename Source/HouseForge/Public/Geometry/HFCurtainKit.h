@@ -226,12 +226,27 @@ struct HOUSEFORGE_API FHFCurtainParams
 	 * Hairline between one fold part and the next, along the track.
 	 *
 	 * Every fold is its own solid, so consecutive folds present two end faces to each other. Butted,
-	 * those faces are coincident planes - the flashing FHFCoplanarScan exists to catch - so they are
-	 * parted by a millimetre and a half. Below anything a camera resolves at curtain distance, and it
-	 * is a real feature of the object anyway: made-up curtains have a seam every width or two.
+	 * those faces are coincident planes - the flashing FHFCoplanarScan exists to catch - so they have
+	 * to be parted by something.
+	 *
+	 * A MILLIMETRE AND A HALF WAS TOO MUCH, and the claim that it was "below anything a camera
+	 * resolves at curtain distance" was simply wrong. A drawn curtain rendered from 3 m showed a
+	 * dashed vertical line of daylight at EVERY seam, down the full drop, in both bedrooms and over
+	 * the balcony - which reads as a row of vertical blinds rather than as a curtain, and is the one
+	 * thing a drawn curtain must not do. The aperture tests could not see it: they measure the widest
+	 * UNBROKEN run of clear track, and forty separate 1.5 mm slots leave that at zero.
+	 *
+	 * THE PARTING MUST BE NARROWER THAN THE CLOTH IS THICK. That is the whole rule, and it is
+	 * geometry rather than taste: the seam is a slot through a wall of fabric, so while it is wider
+	 * than the wall is thick it is a window and light crosses it at any angle. At 0.4 mm through
+	 * 1.2 mm of cloth the slot is three times deeper than it is wide and passes light only within
+	 * about 18 degrees of dead-on, which no wall-hung curtain is ever viewed at.
+	 *
+	 * Still comfortably clear of FHFCoplanarScan's 0.5 mm plane tolerance, and still a real feature
+	 * of the object: made-up curtains have a seam every width or two.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Fabric", meta = (ClampMin = "0.0"))
-	double FoldGap = 0.15;
+	double FoldGap = 0.04;
 
 	/**
 	 * How far each successive fold in a stack fans back in depth, so the bundle reads as a bundle.

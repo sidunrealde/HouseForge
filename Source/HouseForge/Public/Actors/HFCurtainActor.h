@@ -76,40 +76,31 @@ public:
 	void ApplyPelmet(const FHFPelmetParams& Pelmet);
 
 	/**
-	 * How far the hem finishes above the floor it hangs over. FLOOR LENGTH.
+	 * Where the hem finishes, as a height above the floor the curtain hangs over.
 	 *
 	 * A DROP IS A MEASUREMENT, NOT A DRAWING FIGURE, and it is the same argument the pelmet's own
 	 * height makes: the track's height depends on the false ceiling, which is a project setting, so
 	 * a drop taken from the drawing is stale the moment anybody changes the ceiling. The composing
 	 * layer knows where the track ended up and where the floor is, and subtracts.
 	 *
+	 * ## The second argument is the LENGTH, and it is not a tolerance
+	 *
+	 * Left at its default it is floor length - 15 mm of air so the hem does not sweep the tiles. Given
+	 * a real height it is whatever length that height makes: SILL LENGTH is this same call with the
+	 * sill plus a clearance, and that is what a window with something standing under it takes. Both
+	 * bedrooms in the reference flat are that case, and hung to the floor the cloth sweeps THROUGH the
+	 * bed at every open amount, because the folds travel along the wall the bed is against.
+	 *
+	 * Which one a curtain gets is decided by the composing layer, out of what the room has been
+	 * arranged with - the same shape of answer as AHFCasedGoodsActor::bBankAtRunStart, which asks what
+	 * is beside a run before deciding which end its bank of drawers goes. See AHFHouseActor's
+	 * SeedCurtain, and note that it takes the SILL as its datum rather than the obstruction's own
+	 * drawn top: 'F_MBed_Bed' declares a height of 600 and builds a headboard to 900.
+	 *
 	 * @param TrackToFloor Clear height from the glider line to the finished floor.
-	 * @param FloorClearance Air left under the hem. 15 mm, so it does not sweep the tiles.
+	 * @param FloorClearance Where the hem finishes above that floor. 15 mm is floor length.
 	 */
 	void ApplyDrop(double TrackToFloor, double FloorClearance = 1.5);
-
-	/**
-	 * The other length a curtain is made to: hem below the SILL rather than at the floor.
-	 *
-	 * ## Not a style choice. It is what a window with something under it takes
-	 *
-	 * A floor-length curtain wants clear floor under it, and half the windows in a flat do not have
-	 * any: the master bedroom's bed stands against its window wall and bedroom 2's does the same. Hung
-	 * to the floor, the cloth hangs THROUGH the bed - and it does so at every open amount, because the
-	 * folds sweep along the wall the bed is against. The whole-flat sweep measured 71 mm of curtain
-	 * inside 'F_MBed_Bed' and 70 inside 'F_Bed2_Bed' the first time these were built.
-	 *
-	 * A curtain-maker's answer to that is not a shorter floor-length curtain, it is APRON LENGTH: the
-	 * hem finishes 100-150 mm below the sill, which covers the sill line and the frame under it and
-	 * stops well clear of whatever the room has put there. So the choice is made by what is standing
-	 * under the window rather than by a flag in the drawing - the same shape of answer as
-	 * AHFCasedGoodsActor::bBankAtRunStart, which asks what is beside a run before deciding which end
-	 * its bank of drawers goes.
-	 *
-	 * @param TrackToSill Clear height from the glider line down to the top of the sill.
-	 * @param BelowSill How far the hem hangs past the sill. 120 mm is apron length.
-	 */
-	void ApplyDropToSill(double TrackToSill, double BelowSill = 12.0);
 
 	/** What a curtain of this size comes out as before anything else touches it. */
 	static FHFCurtainParams ParamsFor(const FHFFixture& Fixture);

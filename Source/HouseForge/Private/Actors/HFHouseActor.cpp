@@ -18,6 +18,7 @@
 #include "Actors/HFWardrobeActor.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
+#include "Geometry/HFBedKit.h"
 #include "Geometry/HFGenerators.h"
 #include "HouseForge.h"
 #include "Model/HFBuildDefaults.h"
@@ -1109,6 +1110,16 @@ namespace
 	constexpr double CurtainGliderDrop = 1.0;
 
 	/**
+	 * Air left between a sill-length hem and the sill it finishes over, in centimetres.
+	 *
+	 * Not a modelling tolerance. A curtain swings, so a hem that finishes level with a headboard
+	 * brushes it every time the door opens, and one that finishes below it is simply inside it -
+	 * which is what the whole-flat sweep measured in both bedrooms, at 2.2 and 3.0 cm. 50 mm is also
+	 * what a maker leaves, and it is what keeps the hem off the sill's own nosing.
+	 */
+	constexpr double CurtainStandoff = 5.0;
+
+	/**
 	 * The pelmet a curtain hangs in, or null for a curtain on a bare pole.
 	 *
 	 * FOUND RATHER THAN DECLARED, and that is deliberate. A drawing marks a pelmet and marks a
@@ -1195,7 +1206,31 @@ namespace
 	}
 
 	/**
-	 * True when something is standing under this curtain, high enough for the cloth to hang into it.
+	 * How high a fixture actually STANDS, which is not always how high it is drawn.
+	 *
+	 * A drawn box states where a fixture is and how much floor it takes, and for almost everything it
+	 * also states how tall it is. A BED IS THE EXCEPTION IN THIS FLAT, and the drawn figure is not
+	 * wrong - it is the MATTRESS TOP, which is exactly what AHFFurnitureActor reads it as
+	 * (`P.MattressTopZ = Fixture.Height`). The headboard is the bed kit's own dimension and stands
+	 * 450 mm above it, so 'F_MBed_Bed' declares 600 and builds to 1050.
+	 *
+	 * Read off FHFBedParams rather than restated here, so the two cannot drift.
+	 */
+	double StandingTopOf(const FHFFixture& Fixture)
+	{
+		const double Drawn = Fixture.BaseZ + Fixture.Height;
+
+		if (Fixture.Type == EHFFixtureType::Bed)
+		{
+			return FMath::Max(Drawn, Fixture.BaseZ + FHFBedParams().HeadboardHeight);
+		}
+
+		return Drawn;
+	}
+
+	/**
+	 * How high the tallest thing standing under this curtain reaches, or a negative number if the
+	 * floor under it is clear.
 	 *
 	 * ASKED OF THE DRAWN FOOTPRINTS, which is the right instrument for this one question even though
 	 * it is the wrong one for reporting a clash. A curtain's footprint is the plane the cloth sweeps
@@ -1204,13 +1239,22 @@ namespace
 	 * looks at before deciding a length, and deciding it on the exact solids instead would give a
 	 * floor-length curtain wherever the bed happened to sit 5 mm clear.
 	 *
+	 * THE HEIGHT IS THE ANSWER, NOT A YES OR NO, and that correction came from the whole-flat sweep.
+	 * A bare "something is there" can only choose between two drawn lengths, and apron length - hem
+	 * 120 mm BELOW the sill - is the wrong one whenever the obstruction reaches the sill: both beds
+	 * in this flat have headboards that top out level with their window sills, so the apron hem
+	 * finished 120 mm inside the headboard and the sweep measured 2.2 to 3.0 cm of cloth in both.
+	 * A length that clears what it hangs over needs to know how high that is.
+	 *
 	 * 20 cm of height, so a rug or a floor box does not shorten a curtain, and a bed frame does.
 	 */
-	bool SomethingStandsUnder(const FHFFixtureContext& C, const FHFFixture& Curtain)
+	double TallestUnder(const FHFFixtureContext& C, const FHFFixture& Curtain)
 	{
+		double Tallest = -1.0;
+
 		if (C.Fixtures == nullptr)
 		{
-			return false;
+			return Tallest;
 		}
 
 		for (const FHFFixture& Other : *C.Fixtures)
@@ -1221,7 +1265,8 @@ namespace
 				continue;
 			}
 
-			if (Other.BaseZ + Other.Height < 20.0)
+			const double Top = StandingTopOf(Other);
+			if (Top < 20.0 || Top <= Tallest)
 			{
 				continue;
 			}
@@ -1247,11 +1292,11 @@ namespace
 
 			if (bReaches)
 			{
-				return true;
+				Tallest = Top;
 			}
 		}
 
-		return false;
+		return Tallest;
 	}
 
 	/**
@@ -1313,26 +1358,42 @@ namespace
 		// THE DROP IS MEASURED, not drawn - floor to glider line, less the air the hem keeps off the
 		// tiles.
 		//
-		// AND THE LENGTH IS CHOSEN BY WHAT IS UNDER THE WINDOW. Floor length wants clear floor, and
-		// half the windows in this flat do not have any: a bed stands against the window wall in both
-		// bedrooms, and hung to the floor the cloth sweeps through it at every open amount. The
-		// curtain-maker's answer is apron length - hem 120 mm below the sill - and it is decided here
-		// because only this layer can see what the room has been arranged with. See
-		// AHFCurtainActor::ApplyDropToSill.
+		// AND THE LENGTH IS CHOSEN BY WHAT IS UNDER THE WINDOW, because only this layer can see what
+		// the room has been arranged with. Three standard lengths, and the choice between them is
+		// arithmetic:
+		//
+		//   FLOOR  hem 15 mm off the finished floor. What clear floor takes, and the only length a
+		//          DOOR can take - you walk through it, so it goes to the floor, and anything standing
+		//          in the way is a placement error to be fixed where it was placed.
+		//   SILL   hem clear ABOVE the sill. What a window takes when the room has put something under
+		//          it, which is both bedrooms here.
+		//
+		// THE SILL IS THE DATUM RATHER THAN THE OBSTRUCTION'S OWN TOP, and that is the correction the
+		// whole-flat sweep forced. Apron length - hem 120 mm BELOW the sill - was the first answer, and
+		// it left 2.2 to 3.0 cm of cloth inside both headboards. Lifting the hem to clear the drawn
+		// obstruction instead did not fix it either: 'F_MBed_Bed' DECLARES a height of 600 and BUILDS a
+		// headboard to 900, so the box this layer can see understates the solid the sweep measures by
+		// 300 mm. A drawn box is a reliable statement of where a fixture is and an unreliable one of
+		// how tall it turns out; the sill is neither guess - it is the line the window itself is set
+		// out from, and anything standing under a window is standing beside it.
+		//
+		// TallestUnder is still the trigger and still returns a height, because a fixture that tops out
+		// ABOVE the sill has to lift the hem further than the sill would.
 		const double TrackToFloor = Hung.GetLocation().Z - C.FloorZ();
 
 		const FHFOpening* Opening = (C.Spec != nullptr)
 			? OpeningUnderPelmet(*C.Spec, *PelmetFixture) : nullptr;
 
-		const bool bClearFloor = !SomethingStandsUnder(C, *C.Fixture);
+		const double Tallest = TallestUnder(C, *C.Fixture);
 
-		if (bClearFloor || Opening == nullptr || Opening->SillHeight <= 0.0)
+		if (Tallest < 0.0 || Opening == nullptr || Opening->SillHeight <= 0.0)
 		{
 			Actor.ApplyDrop(TrackToFloor);
 		}
 		else
 		{
-			Actor.ApplyDropToSill(TrackToFloor - Opening->SillHeight);
+			Actor.ApplyDrop(TrackToFloor,
+				FMath::Max(Opening->SillHeight, Tallest) + CurtainStandoff);
 		}
 
 		Actor.SetActorTransform(Hung);

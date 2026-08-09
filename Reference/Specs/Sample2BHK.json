@@ -4847,7 +4847,7 @@
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2600,
+				"x": 1800,
 				"y": 180
 			},
 			"height": 200,
@@ -4923,7 +4923,7 @@
 			"rotationDegrees": 0,
 			"footprint":
 			{
-				"x": 2600,
+				"x": 1800,
 				"y": 180
 			},
 			"height": 2200,

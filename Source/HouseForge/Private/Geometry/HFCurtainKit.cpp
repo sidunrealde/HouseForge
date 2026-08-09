@@ -363,7 +363,12 @@ FHFCurtainParams FHFCurtainKit::Sanitise(const FHFCurtainParams& Params)
 	P.HeadingHeight = FMath::Clamp(P.HeadingHeight, 0.0, FMath::Max(P.Drop * 0.25, 0.0));
 	P.HemHeight = FMath::Clamp(P.HemHeight, 0.0, FMath::Max(P.Drop * 0.25, 0.0));
 
-	P.FoldGap = FMath::Clamp(P.FoldGap, 0.0, FMath::Max(P.BuiltFoldPitch() * 0.1, 0.0));
+	// NARROWER THAN THE CLOTH IS THICK, always. A parting wider than the fabric is a window rather
+	// than a slot, and forty of them down a drawn curtain read as a venetian blind - see
+	// FHFCurtainParams::FoldGap, which was measured off a render rather than reasoned about. Clamped
+	// structurally so no caller can reintroduce it by setting the figure back.
+	P.FoldGap = FMath::Clamp(P.FoldGap, 0.0,
+		FMath::Max(FMath::Min(P.BuiltFoldPitch() * 0.1, P.FabricThickness * 0.5), 0.0));
 
 	// The fan is capped at a quarter of whatever depth the pelmet allows, so it stays a hint that
 	// the bundle has body rather than something that decides the fold depth.
