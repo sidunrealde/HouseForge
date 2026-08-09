@@ -298,14 +298,6 @@ bool FHFTilingIsInMillimetresTest::RunTest(const FString& Parameters)
 		return true;
 	}
 
-	// THIS TEST COUNTS TEXELS ACROSS A FLOOR, and the floor is a live dynamic mesh on purpose - the
-	// millimetre promise is about the UVs the material panel edits, and baking one to satisfy the
-	// Lumen guard would turn the only direct measurement of that promise into a measurement of baked
-	// geometry instead. So the guard is switched off for this picture, explicitly and narrowly. See
-	// FHFLumenGuardScope for why this is not a hole in it: the test that proves the guard fires,
-	// HouseForge.Lumen.TheCaptureRefusesAnUnbakedLitView, does not use this and must not.
-	const FHFLumenGuardScope NotJudgedOnItsLight(EHFLumenGuard::Off);
-
 	AHFRoomActor* Floor = SpawnFloor(World);
 	if (!TestNotNull(TEXT("A floor spawns"), Floor))
 	{
@@ -341,6 +333,20 @@ bool FHFTilingIsInMillimetresTest::RunTest(const FString& Parameters)
 	Request.Height = Pixels;
 	Request.ShowOnly = { Floor };
 	Request.bShowSky = false;
+
+	// THIS PICTURE IS NOT JUDGED ON ITS LIGHT. It is an orthographic top-down of a single floor with
+	// the sky switched off, and what is counted in it is the world period of a joint pattern - the
+	// same grounds on which the plan capture opts out. The floor is a live dynamic mesh deliberately:
+	// the millimetre promise is about the UVs the material panel edits, and baking one to satisfy the
+	// guard would turn the suite's only direct measurement of that promise into a measurement of
+	// baked geometry.
+	//
+	// Set on the REQUEST rather than through FHFLumenGuardScope, and the difference matters. The
+	// capture reads Request.LumenGuard and nothing else; the policy is consulted only by
+	// UHFEditorSubsystem::CaptureView, which is the caller that builds a request on someone's behalf.
+	// A request constructed here carries the struct default, so a scope around it does nothing at all
+	// - which is exactly what the first attempt at this fix did, and the gate said so.
+	Request.LumenGuard = EHFLumenGuard::Off;
 
 	const int32 FloorSlot = FHFMeshOps::MaterialIdForRole(EHFSurfaceRole::FloorFinish);
 
