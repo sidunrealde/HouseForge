@@ -27,6 +27,12 @@ struct FHFBakeReport
 	/** One line per failure or skip, naming the element. */
 	TArray<FString> Messages;
 
+	/** Assets written or rewritten by this operation, in the order they were produced. */
+	TArray<TWeakObjectPtr<UStaticMesh>> Written;
+
+	/** How many packages actually reached disk. Less than Written.Num() means something failed. */
+	int32 PackagesSaved = 0;
+
 	/**
 	 * Assets whose part stopped existing during this operation.
 	 *
@@ -36,6 +42,37 @@ struct FHFBakeReport
 	TArray<FSoftObjectPath> Orphaned;
 
 	FString Summary() const;
+};
+
+/**
+ * Forces the save-to-disk decision for the duration of a scope, either way.
+ *
+ * ## The default is "save, unless this is an automation run"
+ *
+ * Baking has to write its packages in the real editor - see FHFBakeService::SaveBakedAssets for
+ * why leaving it to the next Ctrl+S is not good enough. But the suite bakes real elements to real
+ * assets dozens of times per gate run, and rule 01 is explicit that generated output belongs to
+ * the user: a gate that left a drift of SM_Wall_W_Survive behind in the project's Content folder
+ * on every pass would be writing user output as a side effect of testing.
+ *
+ * So the default is taken from GIsAutomationTesting, and this scope is how either side opts out of
+ * it - HouseForge.Bake.BakedAssetsAreWrittenToDisk turns saving back ON deliberately so the
+ * durability promise is actually exercised, and cleans up after itself.
+ *
+ * A scope guard rather than a bare flag because a test that failed early and left the flag set
+ * would silently change what every test after it was measuring.
+ */
+struct FHFBakeSaveScope
+{
+	explicit FHFBakeSaveScope(bool bInAllowSave);
+	~FHFBakeSaveScope();
+
+	FHFBakeSaveScope(const FHFBakeSaveScope&) = delete;
+	FHFBakeSaveScope& operator=(const FHFBakeSaveScope&) = delete;
+
+private:
+	bool bPreviousHasOverride = false;
+	bool bPreviousAllow = false;
 };
 
 /**
@@ -128,6 +165,34 @@ public:
 	 * belongs to a level that is not open and whose elements cannot be asked.
 	 */
 	static void FindOrphans(UWorld* World, TArray<FAssetData>& OutOrphans);
+
+	/**
+	 * Writes the packages a bake produced, so the bake survives closing the editor.
+	 *
+	 * ## Why this is not left to the user's next Ctrl+S
+	 *
+	 * A baked element holds a HARD reference to its UStaticMesh. Saving the LEVEL does not save the
+	 * asset packages the level references - UEditorLoadingAndSavingUtils::SaveMap saves the map -
+	 * and in the interactive editor the gap is covered by the Save Content dialog listing the
+	 * dependencies. THERE IS NO DIALOG HERE. HouseForge is driven over MCP by a model, so the bake
+	 * and the level save both happen with nobody at a prompt.
+	 *
+	 * Unsaved, the next editor start finds no asset, ReconcileBakeState falls the element back to
+	 * Dynamic, and the flat quietly leaves the Lumen scene. That degradation is graceful in the
+	 * sense that nothing renders as a hole - and deceptive in exactly the way the Lumen measurement
+	 * showed is worst, because the broken configuration renders BRIGHTER than the correct one. A
+	 * render taken the morning after a bake would look bright, cheerful and wrong.
+	 *
+	 * bOnlyDirty is false: an asset that was updated in place and has already been saved once is
+	 * still the asset this bake is promising is on disk.
+	 *
+	 * @param FromIndex First entry of Report.Written to consider. NOT decoration: one report is
+	 *                  shared across a whole bulk bake, so a call that always started at 0 would
+	 *                  re-save every package produced so far on every element - about 11,000 package
+	 *                  writes over a 150-element flat instead of 150.
+	 * @return how many packages were written.
+	 */
+	static int32 SaveBakedAssets(FHFBakeReport& Report, int32 FromIndex, FString& OutError);
 
 	/** Deletes the assets a FindOrphans result named. Not undoable; the caller confirms. */
 	static int32 DeleteOrphans(const TArray<FAssetData>& Orphans, FString& OutError);

@@ -44,8 +44,11 @@
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "Geometry/HFMeshOps.h"
+#include "HAL/FileManager.h"
 #include "MeshDescription.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "Model/HFSampleHouse.h"
 #include "StaticMeshAttributes.h"
 #include "TargetInterfaces/DynamicMeshCommitter.h"
@@ -1229,6 +1232,113 @@ bool FHFBakeHouseRebuildTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * THE FOURTH COMBINATION: hand-edited AND baked, through a house rebuild.
+ *
+ * bArtistEdited and RenderMode are orthogonal, and the rebuild sorts elements into two buckets by
+ * asking about the first - Preserved for hand-edited, PreservedForBake for the rest. An element
+ * that is both lands in the first bucket, and the question this asks is whether it keeps the
+ * SECOND property on the way through.
+ *
+ * Both losses are silent and both are bad in different ways. Lose the sculpt and an afternoon of
+ * modelling is gone. Keep the sculpt but lose the bake and the element drops out of the Lumen
+ * scene while every neighbour stays in it - so the flat renders with one wall letting sky through,
+ * brighter and wronger, which is the failure mode the Lumen measurement showed is hardest to see.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeEditedAndBakedRebuildTest,
+	"HouseForge.Editor.Bake.HouseRebuildKeepsAnElementThatIsBothEditedAndBaked", HF_TEST_FLAGS)
+
+bool FHFBakeEditedAndBakedRebuildTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFHouseActor* House = World->SpawnActor<AHFHouseActor>();
+	if (!TestNotNull(TEXT("A house spawns"), House))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ if (IsValid(House)) { House->Destroy(); } };
+
+	FHFHouseSpec Spec;
+	Spec.Name = TEXT("BakeEditedRebuild");
+	Spec.Units = EHFUnits::Centimeters;
+
+	FHFWall& Wall = Spec.Walls.AddDefaulted_GetRef();
+	Wall.Id = TEXT("W1");
+	Wall.Start = FVector2D(0.0, 0.0);
+	Wall.End = FVector2D(400.0, 0.0);
+	Wall.Thickness = 20.0;
+	Wall.Height = 300.0;
+
+	House->SetSpec(Spec);
+
+	AHFWallActor* Element = nullptr;
+	for (AActor* Actor : House->ElementActors)
+	{
+		if (AHFWallActor* Typed = Cast<AHFWallActor>(Actor))
+		{
+			Element = Typed;
+			break;
+		}
+	}
+	if (!TestNotNull(TEXT("The house built a wall"), Element))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ HFBakeTest::ForgetAssets(Element); };
+
+	// Sculpted first, then baked - so the asset holds the sculpted form, which is the order that
+	// makes the bake worth preserving at all.
+	HFBakeTest::SculptFirstVertex(Element->GetMeshComponent(), FVector3d(0.0, 0.0, 23.0));
+	if (!TestTrue(TEXT("The sculpt registered as a hand edit"), Element->bArtistEdited))
+	{
+		return false;
+	}
+
+	FHFBakeReport Report;
+	if (!TestTrue(TEXT("A hand-edited element bakes"), FHFBakeService::BakeElement(Element, Report)))
+	{
+		AddError(Report.Summary());
+		return false;
+	}
+
+	const HFBakeTest::FMeshPrint Sculpted = HFBakeTest::Print(Element->GetMeshComponent());
+	const FSoftObjectPath AssetPath = Element->BakedParts[0].BakedAssetPath;
+
+	// The everyday loop: the spec is corrected and the house rebuilds underneath it.
+	Spec.Walls[0].Height = 270.0;
+	House->SetSpec(Spec);
+
+	if (!TestTrue(TEXT("The element survives the rebuild"), IsValid(Element)))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("It is still marked hand-edited"), Element->bArtistEdited);
+	TestTrue(TEXT("Its sculpt is untouched - a rebuild never regenerates over modelling work"),
+		Sculpted == HFBakeTest::Print(Element->GetMeshComponent()));
+	TestNotEqual(TEXT("And it kept the sculpted height rather than taking the spec's"),
+		Element->Wall.Height, 270.0);
+
+	// The half that is easy to lose: the bake.
+	TestEqual(TEXT("It is still showing baked geometry, so it stays in the Lumen scene with its neighbours"),
+		static_cast<int32>(Element->RenderMode), static_cast<int32>(EHFRenderMode::Baked));
+	TestTrue(TEXT("It still owns its asset, so nothing was orphaned"), Element->HasAllBakedAssets());
+	TestEqual(TEXT("And it is the same asset"), Element->BakedParts[0].BakedAssetPath, AssetPath);
+	TestFalse(TEXT("Which is not stale, because nothing regenerated"), Element->IsBakeStale());
+
+	// And it can still be switched back, which is the whole promise.
+	FHFBakeService::UnbakeElement(Element, Report);
+	TestTrue(TEXT("Unbaking after a rebuild still gives back the sculpted form exactly"),
+		Sculpted == HFBakeTest::Print(Element->GetMeshComponent()));
+
+	return true;
+}
+
+/**
  * Bulk bake and unbake over a whole level, and the tally that reports it.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeBulkTest,
@@ -1309,6 +1419,132 @@ bool FHFBakeBulkTest::RunTest(const FString& Parameters)
 			static_cast<int32>(Wall->RenderMode), static_cast<int32>(EHFRenderMode::Dynamic));
 		TestTrue(TEXT("And kept its asset, so switching back is free"), Wall->HasAllBakedAssets());
 	}
+
+	return true;
+}
+
+// ================================================================================ durability
+
+/**
+ * A BAKE REACHES DISK, or it is a promise for one session only.
+ *
+ * A baked element holds a hard reference to its UStaticMesh, and saving the LEVEL does not save
+ * the asset packages the level references. In the interactive editor the Save Content dialog
+ * covers that gap by listing dependencies. There is no dialog on the path this plugin is driven
+ * down: a model bakes over MCP and saves the level, with nobody at a prompt.
+ *
+ * Unsaved, the next editor start finds no asset, ReconcileBakeState falls the element back to
+ * Dynamic, and the flat silently leaves the Lumen scene - which by the measurement behind this
+ * milestone renders BRIGHTER than the truth rather than obviously broken. The morning's render
+ * looks bright, cheerful and wrong.
+ *
+ * This is the one test that opts saving back ON during automation, and it removes the file it
+ * wrote afterwards so the gate leaves nothing in the user's Content folder.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeSavesToDiskTest,
+	"HouseForge.Editor.Bake.BakedAssetsAreWrittenToDisk", HF_TEST_FLAGS)
+
+bool FHFBakeSavesToDiskTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	AHFWallActor* Wall = World ? HFBakeTest::SpawnWall(World, TEXT("W_Durable")) : nullptr;
+	if (!TestNotNull(TEXT("A wall spawns"), Wall))
+	{
+		return false;
+	}
+
+	FString WrittenFile;
+	ON_SCOPE_EXIT
+	{
+		// The gate must not deposit user output. Removed whether the test passed or failed.
+		if (!WrittenFile.IsEmpty())
+		{
+			IFileManager::Get().Delete(*WrittenFile, /*RequireExists*/ false, /*EvenReadOnly*/ true);
+
+			// And the folder the save created, but ONLY if it is empty - non-recursive on purpose.
+			// This path is where a user's real baked assets live, so the one thing this cleanup must
+			// never do is take a directory that has anything in it.
+			IFileManager::Get().DeleteDirectory(*FPaths::GetPath(WrittenFile),
+				/*RequireExists*/ false, /*Tree*/ false);
+		}
+		HFBakeTest::ForgetAssets(Wall);
+		if (IsValid(Wall)) { Wall->Destroy(); }
+	};
+
+	FHFBakeReport Report;
+	{
+		// Deliberately opting back in to the thing automation otherwise switches off.
+		FHFBakeSaveScope AllowSave(true);
+		if (!TestTrue(TEXT("The wall bakes"), FHFBakeService::BakeElement(Wall, Report)))
+		{
+			AddError(Report.Summary());
+			return false;
+		}
+	}
+
+	AddInfo(Report.Summary());
+
+	if (!TestTrue(TEXT("The bake produced an asset"), Wall->HasAllBakedAssets()))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("The bake reports having written at least one package"), Report.PackagesSaved > 0);
+
+	UPackage* Package = Wall->BakedParts[0].BakedMesh->GetOutermost();
+	if (!TestNotNull(TEXT("The asset has a package"), Package))
+	{
+		return false;
+	}
+
+	WrittenFile = FPackageName::LongPackageNameToFilename(
+		Package->GetName(), FPackageName::GetAssetPackageExtension());
+
+	AddInfo(FString::Printf(TEXT("Expected on disk at %s"), *WrittenFile));
+
+	// THE ASSERTION THAT MATTERS: the file exists. A dirty flag cleared in memory would satisfy
+	// every other check here and still be gone in the morning.
+	TestTrue(TEXT("The baked asset is on disk, so the bake survives closing the editor"),
+		FPaths::FileExists(WrittenFile));
+	TestFalse(TEXT("And its package is no longer dirty"), Package->IsDirty());
+
+	return true;
+}
+
+/**
+ * And the suite as a whole does NOT write, which is the other half of the same decision.
+ *
+ * Rule 01: what lands in the project's Content folder is the user's output. A validation gate that
+ * deposited a fresh set of test assets on every pass would be generating user output as a side
+ * effect of testing, and the drift would be indistinguishable from a real bake.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeAutomationDoesNotWriteTest,
+	"HouseForge.Editor.Bake.AutomationDoesNotLeaveAssetsBehind", HF_TEST_FLAGS)
+
+bool FHFBakeAutomationDoesNotWriteTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	AHFWallActor* Wall = World ? HFBakeTest::SpawnWall(World, TEXT("W_NotOnDisk")) : nullptr;
+	if (!TestNotNull(TEXT("A wall spawns"), Wall))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ HFBakeTest::ForgetAssets(Wall); if (IsValid(Wall)) { Wall->Destroy(); } };
+
+	// No scope: exactly what every other test in this file gets.
+	FHFBakeReport Report;
+	if (!TestTrue(TEXT("The wall bakes"), FHFBakeService::BakeElement(Wall, Report)))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("An ordinary automation bake writes no packages at all"), Report.PackagesSaved, 0);
+
+	const FString File = FPackageName::LongPackageNameToFilename(
+		Wall->BakedParts[0].BakedMesh->GetOutermost()->GetName(),
+		FPackageName::GetAssetPackageExtension());
+
+	TestFalse(TEXT("So nothing was left in the project's Content folder"), FPaths::FileExists(File));
 
 	return true;
 }

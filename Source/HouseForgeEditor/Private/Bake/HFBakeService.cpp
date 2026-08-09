@@ -35,6 +35,22 @@ namespace
 	/** /Game/HouseForge/Baked is where generated USER OUTPUT goes. Never plugin content - rule 01. */
 	const TCHAR* GBakedRoot = TEXT("/Game/HouseForge/Baked");
 
+	/** Set only inside an FHFBakeSaveScope. See the comment on that struct. */
+	bool GHasSaveOverride = false;
+	bool GSaveOverride = false;
+
+	/**
+	 * Whether a bake writes its packages.
+	 *
+	 * On everywhere a person or a model is driving the editor; off during an automation run, so the
+	 * gate does not deposit test assets in the user's Content folder on every pass. A test that
+	 * wants to prove the durability promise opts back in with FHFBakeSaveScope.
+	 */
+	bool ShouldSaveBakedAssets()
+	{
+		return GHasSaveOverride ? GSaveOverride : !GIsAutomationTesting;
+	}
+
 	/** "AHFWallActor" -> "Wall". Short, readable, and unique enough to keep two categories apart. */
 	FString KindTagFor(const AHFElementActor* Element)
 	{
@@ -124,11 +140,30 @@ namespace
 	}
 }
 
+FHFBakeSaveScope::FHFBakeSaveScope(bool bInAllowSave)
+	: bPreviousHasOverride(GHasSaveOverride)
+	, bPreviousAllow(GSaveOverride)
+{
+	GHasSaveOverride = true;
+	GSaveOverride = bInAllowSave;
+}
+
+FHFBakeSaveScope::~FHFBakeSaveScope()
+{
+	GHasSaveOverride = bPreviousHasOverride;
+	GSaveOverride = bPreviousAllow;
+}
+
 FString FHFBakeReport::Summary() const
 {
 	FString Text = FString::Printf(
 		TEXT("%d element(s) baked (%d part(s)), %d unbaked, %d skipped, %d failed."),
 		ElementsBaked, PartsBaked, ElementsUnbaked, ElementsSkipped, ElementsFailed);
+
+	if (PackagesSaved > 0)
+	{
+		Text += FString::Printf(TEXT(" %d package(s) written."), PackagesSaved);
+	}
 
 	if (!Orphaned.IsEmpty())
 	{
@@ -187,6 +222,12 @@ FString FHFBakeService::ResolveBakedAssetFolder(AHFHouseActor* House, UWorld* Wo
 		// WRITTEN BACK on first use. Recomputing it every time would scatter a flat's assets across
 		// two folders the moment somebody renamed the level halfway through baking it, and the orphan
 		// scan would then report the first half as unclaimed.
+		//
+		// Modify() rather than a bare assignment, because the write only does that job if it SURVIVES
+		// the session. Without marking the actor dirty the field is never saved with the level, the
+		// next session recomputes it from the level name, and a rename scatters the assets exactly as
+		// if the field had never existed.
+		House->Modify();
 		House->BakedAssetFolder = Folder;
 	}
 
@@ -375,6 +416,7 @@ bool FHFBakeService::BakeElement(AHFElementActor* Element, FHFBakeReport& Report
 	}
 
 	const int32 RevisionAtBake = Element->MeshRevision;
+	const int32 WrittenStart = Report.Written.Num();
 	int32 Failures = 0;
 	int32 Parts = 0;
 
@@ -399,6 +441,7 @@ bool FHFBakeService::BakeElement(AHFElementActor* Element, FHFBakeReport& Report
 
 		if (Asset != nullptr)
 		{
+			Report.Written.Add(Asset);
 			++Parts;
 		}
 	}
@@ -417,6 +460,17 @@ bool FHFBakeService::BakeElement(AHFElementActor* Element, FHFBakeReport& Report
 	}
 
 	Element->SetRenderMode(EHFRenderMode::Baked);
+
+	// WRITTEN TO DISK HERE, not left for whoever saves the level next. See SaveBakedAssets: saving a
+	// level does not save the asset packages it references, and there is no Save Content dialog on
+	// the path this plugin is actually driven down. A failure to save is reported and does not fail
+	// the bake - the geometry is right and on screen either way.
+	FString SaveError;
+	SaveBakedAssets(Report, WrittenStart, SaveError);
+	if (!SaveError.IsEmpty())
+	{
+		Report.Messages.Add(SaveError);
+	}
 
 	++Report.ElementsBaked;
 	Report.PartsBaked += Parts;
@@ -602,6 +656,48 @@ void FHFBakeService::FindOrphans(UWorld* World, TArray<FAssetData>& OutOrphans)
 
 		OutOrphans.Add(Candidate);
 	}
+}
+
+int32 FHFBakeService::SaveBakedAssets(FHFBakeReport& Report, int32 FromIndex, FString& OutError)
+{
+	if (!ShouldSaveBakedAssets() || !Report.Written.IsValidIndex(FromIndex))
+	{
+		return 0;
+	}
+
+	TArray<UPackage*> Packages;
+	for (int32 Index = FromIndex; Index < Report.Written.Num(); ++Index)
+	{
+		if (UStaticMesh* Loaded = Report.Written[Index].Get())
+		{
+			Packages.AddUnique(Loaded->GetOutermost());
+		}
+	}
+
+	if (Packages.IsEmpty())
+	{
+		return 0;
+	}
+
+	// SavePackages rather than SavePackagesWithDialog. There is nobody at a dialog: the bake is
+	// reached from a details-panel toggle or from a model driving the editor over MCP, and a modal
+	// prompt in the second case simply hangs.
+	const bool bOk = UEditorLoadingAndSavingUtils::SavePackages(Packages, /*bOnlyDirty*/ false);
+
+	if (!bOk)
+	{
+		// Not fatal, and deliberately not a bake failure: the geometry is correct and in memory, and
+		// the element is showing it. What is at risk is only durability, so it is said plainly and the
+		// caller decides.
+		OutError = FString::Printf(
+			TEXT("%d baked asset package(s) could not be written to disk. The bake is correct in this session but will not survive closing the editor."),
+			Packages.Num());
+		UE_LOG(LogHouseForgeEditor, Warning, TEXT("%s"), *OutError);
+		return 0;
+	}
+
+	Report.PackagesSaved += Packages.Num();
+	return Packages.Num();
 }
 
 int32 FHFBakeService::DeleteOrphans(const TArray<FAssetData>& Orphans, FString& OutError)
