@@ -224,17 +224,56 @@ void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
     for (FHFBakedPart& P : BakedParts)
     {
         if (!P.Component) continue;
-        if (bBaked && !P.Component->IsRegistered()) P.Component->RegisterComponent();
         P.Component->SetVisibility(bBaked);
         P.Component->SetHiddenInGame(!bBaked);
         P.Component->SetCollisionEnabled(bBaked ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-        if (!bBaked && P.Component->IsRegistered()) P.Component->UnregisterComponent();
+        // THE TOOL TARGET FIX. Measured, not assumed - see below.
+        P.Component->SetStaticMesh(bBaked ? P.BakedMesh : nullptr);
     }
     RenderMode = bBaked ? EHFRenderMode::Baked : EHFRenderMode::Dynamic;
 }
 ```
 
-Two non-obvious requirements. **Collision switches with visibility** â€” leaving both on double-traces every wall and leaves complex-as-simple dynamic collision under a mesh the user believes is the only thing there. **The baked component is unregistered while Dynamic**, not merely hidden: a hidden-but-registered `UStaticMeshComponent` is a candidate `UStaticMeshComponentToolTarget`, and an artist starting a Modeling Tool on what they believe is the live wall must not silently edit a baked asset instead. Unregistering removes the candidate entirely. (In Baked mode the hazard reverses and is acceptable: the switch is visibly on, the dynamic mesh is untouched, and any edit to the baked asset is discarded by the next rebake â€” the panel says so in the stale row.)
+Two non-obvious requirements. **Collision switches with visibility** - leaving both on double-traces
+every wall and leaves complex-as-simple dynamic collision under a mesh the user believes is the only
+thing there.
+
+**The baked component's `UStaticMesh` is cleared while Dynamic.** This paragraph used to say
+"unregistered", and that was wrong. `HouseForge.Bake.Probe.ToolTargetSelection` builds an actor with
+both components and asks a `UToolTargetManager` loaded with exactly the factories
+`UModelingToolsEditorMode::Enter` loads, in its order, what a Modeling Tool would get. Measured on
+5.8:
+
+| Baked component state | Candidates | What a tool edits |
+|---|---:|---|
+| registered, visible | 2 | **the baked asset** |
+| registered, hidden | 2 | **the baked asset** |
+| **unregistered** | 2 | **the baked asset** |
+| registered, dynamic marked `SetIsEditable(false)` | 1 | the baked asset (correct, this is Baked mode) |
+| **`SetStaticMesh(nullptr)`** | 1 | the live dynamic mesh |
+| component destroyed | 1 | the live dynamic mesh |
+
+Hiding does nothing and unregistering does nothing, because
+`ToolBuilderUtil::FindAllComponents` (ToolBuilderUtil.cpp:63) resolves a selected actor through
+`AActor::GetComponents`, which walks `OwnedComponents` with no registration test
+(Actor.h:3865 `ForEachComponent_Internal`), and
+`UStaticMeshComponentToolTargetFactory::CanBuildTarget` (StaticMeshComponentToolTarget.cpp:304)
+asks only whether the component holds a writable, non-cooked `UStaticMesh`. Registration and
+visibility are never consulted. The static factory is also registered **before** the dynamic one
+(ModelingToolsEditorMode.cpp:320-322) and `BuildFirstSelectedTargetable` returns from the first
+factory that can build anything, so the static mesh wins every tie.
+
+The candidate count matters as much as the winner: `USingleSelectionMeshEditingToolBuilder::CanBuildTool`
+requires **exactly one** targetable component, so in the three two-candidate rows every
+single-selection modelling tool - PolyEdit, Sculpt, Displace - refuses to start at all. A baked
+element left that way is both dangerous and dead.
+
+Clearing the mesh is cheap and lossless: `FHFBakedPart::BakedMesh` is the hard reference that keeps
+the asset alive and loaded, so switching back is a pointer assignment, not a load.
+
+(In Baked mode the hazard reverses and is acceptable: the switch is visibly on, the dynamic mesh is
+untouched, and any edit to the baked asset is discarded by the next rebake - the panel says so in
+the stale row.)
 
 **The `FDynamicMesh3` is never read, modified, cleared or rebuilt by baking.** Bake creates an asset and flips component state. That is the entire reason unbake is instant and lossless.
 
@@ -383,7 +422,7 @@ Widget rendering is not tested. Slate render tests are expensive and brittle; th
 * **One `MeshRevision` per actor, not per part.** Editing a door leaf marks the frame stale and rebakes both. Wasted milliseconds, in exchange for a staleness rule one sentence long.
 * **`bAutoRebakeOnRegenerate` defaults on.** It makes parameter edits on baked elements slower. Off, the viewport lies about what the spec says, and `CaptureTopDown` â€” the tool Claude uses to check its own work â€” screenshots the lie.
 * **The sections stack vertically.** Right for four sections, wrong for seven. `FHFPanelSection` makes the eventual conversion to a mode strip one change in `Construct`; it does not make it free.
-* **Unresolved until ten minutes in the actual editor** (settle during step 5, all have stated fallbacks): whether `UToolTargetManager` filters candidates by registration as assumed in Â§4.4; whether `UStaticMesh` async compilation needs an explicit `FinishCompilation` before collision assertions in a `-nullrhi` run; and whether polygroups survive `CommitMeshDescription` into a readable form â€” if not, surface-role targeting on baked meshes must go through material sections, which the material library should do anyway.
+* ~~**Unresolved until ten minutes in the actual editor**~~ **SETTLED BY MEASUREMENT.** All three, and the other four, are answered in the table at the end of this document. The one that changed the design: `UToolTargetManager` does **not** filter candidates by registration or visibility, so §4.4's "unregister it" was wrong and the baked component's `UStaticMesh` is cleared instead. `FinishCompilation` is needed and exists under that name. Polygroups do survive, and material sections carry the role as well, at the role's own index.
 
 ---
 
@@ -419,10 +458,23 @@ Design 3 â€” artist-station. Build it, with the twelve grafts below. It is 
 
 Design 1 â€” task-flow, with the workflow rail deleted and ten grafts applied
 
-## Open questions on the bake, to settle in the editor
+## Open questions on the bake - ALL SEVEN NOW SETTLED BY MEASUREMENT
 
-These are the things the design agent would not assert without checking. The first is the
-dangerous one: it would silently break the artist-editable guarantee.
+`Source/HouseForgeEditor/Private/Tests/HFBakeProbeTests.cpp` answers every question below against
+the running engine. Run `Automation RunTests HouseForge.Bake.Probe`; each probe logs its numbers.
+The originals are kept verbatim underneath so the answers can be read against what was asked.
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Which component does a Modeling Tool target? | **The static mesh, in every configuration where it holds an asset.** Hiding does not help. **Unregistering does not help** - the proposed fix does not work. Clear `SetStaticMesh(nullptr)` while Dynamic instead. Two live candidates also make single-selection tools refuse to start. §4.4 rewritten. |
+| 2 | Is cooked collision available immediately in a `-nullrhi` run? | `GetBodySetup()` is valid immediately and `ContainsPhysicsTriMeshData` already returns true, but `IsCompiling()` is 1 and `GetPhysicsTriMeshData` yields nothing until `FStaticMeshCompilingManager::Get().FinishCompilation({Mesh})`. The name and availability are confirmed on 5.8. Note `UStaticMeshToolTarget::HasNonGeneratedLOD` early-outs false while compiling, so a tool target is unavailable during the compile too. |
+| 3 | What does `NewObject<UStaticMesh>` do when the name is taken? | It **reuses the object in place**: same pointer, same name, one `UStaticMesh` in the package, no rename, no leak, and a component still referencing it keeps a valid mesh. Milder than feared. It still re-runs the constructor over a live asset - `AssetUserData` goes with it and the `LightingGuid` is regenerated - so the `UHFBakedMeshUserData` stamp must be re-applied after every re-create. Prefer the update path anyway; the reason is now "it wipes our stamp", not "it duplicates". |
+| 4 | Do polygroups survive `CommitMeshDescription`? | **Yes.** `PolyTriGroups` is present with its group ids intact (`AutoGenerated`, not `Transient`, so it serialises). And the fallback is already in place and needs no lookup table: sections come out dense `0..max`, and a non-empty section's index **is** the role index, because `AssignMaterialIdsFromRoles` writes `MaterialIdForRole`. Both routes to role targeting work. |
+| 5 | `bUseBuildScale` on a scaled actor? | **Inert.** `BuildScale3D` is a property of the asset's build settings, not the actor transform, and it is identity on an asset we create. The asset holds local-space geometry; a 2/1/0.5 actor scale gives the baked component world bounds identical to the dynamic one. |
+| 6 | `bGenerateLightmapUVs` - worth it? | **No, and it must be off.** Its defaults are `SrcLightmapIndex 0 -> DstLightmapIndex 1`, so it unwraps the world-scale tiling UV0 (which by construction overlaps between rooms) and writes the result **over** the packed, gutter-sized lightmap channel milestone 10 already generated into UV1. That channel reaches the asset intact without it. Set `bGenerateLightmapUVs = false` and call `SetLightMapCoordinateIndex(1)` explicitly. Build cost was only ~1.7 ms per wall, so the reason to refuse is correctness, not time. |
+| 7 | Is there a valid `GEditor` headless? | Yes - `GEditor` is valid and `GUndo` is null in the automation run. Moot for the chosen path: `UE::AssetUtils::CreateStaticMeshAsset` nulls `GUndo` for its own duration and never calls `GEditor`, which is one more reason to prefer it over the GeometryScript wrappers. |
+
+The original questions, as asked:
 
 1. Modeling Tools target selection when one actor carries both a hidden UDynamicMeshComponent and a visible UStaticMeshComponent. I could not determine from the headers whether UToolTargetManager filters candidate components by visibility, so it is possible that starting a modelling tool on a baked element builds a UStaticMeshComponentToolTarget and edits the baked asset rather than the live mesh. The design mitigates it (SetIsEditable(false), bUnbakeOnHandEdit, a panel affordance) but this needs ten minutes in the actual editor to confirm. If it does target the static mesh component, the fix is to unregister BakedMeshComponent whenever RenderMode == Dynamic rather than merely hiding it.
 
