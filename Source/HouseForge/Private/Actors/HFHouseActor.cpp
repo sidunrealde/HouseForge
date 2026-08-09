@@ -1647,6 +1647,20 @@ void AHFHouseActor::BuildGeometry()
 	TMap<TPair<UClass*, FName>, AHFElementActor*> Preserved;
 	TArray<TObjectPtr<AActor>> Survivors;
 
+	// BAKED ELEMENTS SURVIVE A REBUILD TOO, and for a different reason from hand-edited ones.
+	//
+	// A baked element owns a UStaticMesh asset on disk. Destroying and respawning the actor would
+	// leave that asset referenced by nothing, in a folder nobody looks in, with the element it
+	// belonged to gone - one orphan per element, silently, on every rebuild of a fully baked flat.
+	// Worse, the flat would come back Dynamic, which since the Lumen measurement means it would come
+	// back INVISIBLE TO LUMEN and render brighter and wrong.
+	//
+	// Kept SEPARATE from Preserved on purpose. A hand-edited element is left completely alone,
+	// parameters included; a baked-but-generated one must still take the new parameters and rebuild,
+	// exactly as it would have if it had been respawned. So it is handed back to the spawn path
+	// rather than skipped by it, and the bake follows the geometry through FlushPendingRebake.
+	TMap<TPair<UClass*, FName>, AHFElementActor*> PreservedForBake;
+
 	// Open amounts are user state, exactly as a hand edit is. The elements themselves are respawned
 	// here, so a pose held only on the actor would die with it and every door in the flat would slam
 	// shut on a rebuild. Poses are carried across by element id and put back once the parts exist.
@@ -1668,6 +1682,14 @@ void AHFHouseActor::BuildGeometry()
 		if (IsValid(Typed) && Typed->ShouldPreserveOnRebuild())
 		{
 			Preserved.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
+			Survivors.Add(Typed);
+		}
+		else if (IsValid(Typed) && (Typed->RenderMode == EHFRenderMode::Baked || Typed->HasAnyBakedAsset()))
+		{
+			// HasAnyBakedAsset as well as the mode, so an element sitting in Dynamic with an asset
+			// still on disk - which is every element a user has ever unbaked - is not destroyed
+			// underneath its own asset either.
+			PreservedForBake.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
 			Survivors.Add(Typed);
 		}
 		else if (IsValid(Element))
@@ -1709,6 +1731,21 @@ void AHFHouseActor::BuildGeometry()
 		if (Preserved.Contains({ Class, Id }))
 		{
 			return nullptr;
+		}
+
+		// A baked element is handed BACK rather than skipped, so the caller writes the new parameters
+		// onto it and calls Regenerate exactly as it would on a fresh one. It is not artist-edited -
+		// that case went into Preserved above - so there is nothing to lose, the geometry ends up
+		// matching the spec, and FlushPendingRebake carries the bake along behind it. Skipping it
+		// instead would leave a rebuilt house showing the previous plan's baked geometry, which is
+		// precisely the silent lie bAutoRebakeOnRegenerate exists to prevent.
+		if (AHFElementActor** Existing = PreservedForBake.Find({ Class, Id }))
+		{
+			// Re-seeded exactly as a fresh one is. The house is the only thing that reads the project
+			// settings, so a preserved element that kept last run's chamfer figures would be the one
+			// element in the flat finished differently from its neighbours.
+			(*Existing)->RenderFinish = RenderDefaults;
+			return *Existing;
 		}
 
 		AActor* Actor = World->SpawnActor<AActor>(Class, FTransform::Identity, Params);

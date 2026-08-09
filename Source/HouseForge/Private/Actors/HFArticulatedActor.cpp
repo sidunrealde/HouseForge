@@ -56,6 +56,25 @@ bool AHFArticulatedActor::HasAnyArtistEdits() const
 	return false;
 }
 
+void AHFArticulatedActor::GetBakeSourceComponents(TArray<UDynamicMeshComponent*>& OutComponents) const
+{
+	// The shell first, so index 0 means the same thing on every element in the plugin and a wall's
+	// baked part 0 and a wardrobe's baked part 0 are the same kind of thing.
+	Super::GetBakeSourceComponents(OutComponents);
+
+	// Parts order, which is Parts order - the same order RegenerateParts builds and the same order
+	// the pose table is indexed by. A part with no component is skipped rather than represented by a
+	// null, because BakedParts is index-parallel to this list and a hole in it would misalign every
+	// part after it.
+	for (const TObjectPtr<UDynamicMeshComponent>& Component : PartComponents)
+	{
+		if (IsValid(Component))
+		{
+			OutComponents.Add(Component);
+		}
+	}
+}
+
 bool AHFArticulatedActor::ShouldPreserveOnRebuild() const
 {
 	// A hand-edited part is just as unrecoverable as a hand-edited shell, and a house rebuild that
@@ -331,6 +350,11 @@ void AHFArticulatedActor::Regenerate()
 
 	RegenerateParts(/*bForce*/ false);
 	ApplyOpenAmounts();
+
+	// After the parts, not after the shell. One regeneration of a wardrobe is one bake of the whole
+	// wardrobe; flushing inside CommitMesh would bake the carcass, then bake it again once per
+	// shutter as each part landed.
+	FlushPendingRebake();
 }
 
 void AHFArticulatedActor::RevertToGenerated()
@@ -339,6 +363,7 @@ void AHFArticulatedActor::RevertToGenerated()
 	CommitMesh(BuildMesh());
 	RegenerateParts(/*bForce*/ true);
 	ApplyOpenAmounts();
+	FlushPendingRebake();
 }
 
 void AHFArticulatedActor::RegenerateParts(bool bForce)
@@ -444,6 +469,12 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 			Component->SetMesh(MoveTemp(Part.Mesh));
 			Component->NotifyMeshUpdated();
 			Component->UpdateCollision(false);
+
+			// A SHUTTER REBUILDING IS A GEOMETRY CHANGE even when the carcass never moved, so the
+			// baked assets are no longer made from what is on screen. Without this a hand-edited
+			// wardrobe - whose shell skips CommitMesh entirely and therefore never bumps the revision -
+			// could regenerate every one of its leaves and still report its bake as current.
+			MarkMeshRevisionChanged();
 		}
 
 		// Outside the guard above, and outside the bArtistEdited check: the slot table belongs to
@@ -494,6 +525,12 @@ void AHFArticulatedActor::RegenerateParts(bool bForce)
 
 	Parts = MoveTemp(NewParts);
 	PartComponents = MoveTemp(NewComponents);
+
+	// The baked side follows the parts. A wardrobe that stops calling for its top drawer has just
+	// destroyed that drawer's dynamic component, and the baked component hanging off it would be left
+	// attached to nothing - drawn in world space at the actor origin, which is a baked drawer front
+	// lying in the middle of the room. This drops it, and names its asset as an orphan.
+	SyncBakedPartsToSources();
 }
 
 void AHFArticulatedActor::ApplyPartCollision(UDynamicMeshComponent* Component, EHFPartCollision Collision)
@@ -591,6 +628,20 @@ void AHFArticulatedActor::HandlePartMeshChanged(FName PartId)
 	if (bGenerating)
 	{
 		return;
+	}
+
+	// Same reasoning as AHFElementActor::HandleMeshChanged, and before the per-part early-out for the
+	// same reason: sculpting one leaf makes every baked asset on this fixture older than what is on
+	// screen. One counter per actor over-bakes a wardrobe slightly when only a shutter moved, and
+	// buys a staleness rule that is one sentence long.
+	MarkMeshRevisionChanged();
+
+	if (bUnbakeOnHandEdit && RenderMode == EHFRenderMode::Baked)
+	{
+		UE_LOG(LogHouseForge, Log,
+			TEXT("Part '%s' of '%s' was edited by hand while baked, so the fixture is showing its live mesh again."),
+			*PartId.ToString(), *GetName());
+		SetRenderMode(EHFRenderMode::Dynamic);
 	}
 
 	for (FHFPartState& Part : Parts)

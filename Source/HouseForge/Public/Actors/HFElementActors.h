@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Actors/HFBakeTypes.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "GameFramework/Actor.h"
 #include "Geometry/HFRenderFinish.h"
@@ -12,6 +13,8 @@
 
 class UDynamicMeshComponent;
 class ULightComponent;
+class UStaticMesh;
+class UStaticMeshComponent;
 
 /**
  * Base for every generated element.
@@ -96,7 +99,160 @@ public:
 
 	UDynamicMeshComponent* GetMeshComponent() const { return Mesh; }
 
+	// ================================================================================== the bake
+	//
+	// A SWITCH, NEVER A REPLACEMENT. Everything below exists to make one sentence true: "Dynamic
+	// meshes are kept. Switching back restores them exactly." Nothing here reads, writes, clears or
+	// rebuilds the FDynamicMesh3 - which is the entire reason unbake is instant and lossless, and
+	// the reason there is no confirmation dialog anywhere near it.
+
+	/**
+	 * Which of this element's two representations is currently drawing.
+	 *
+	 * Editable in the details panel, and PostEditChangeProperty routes it to SetRenderMode instead of
+	 * letting the catch-all regenerate the element - flipping a render switch must not rebuild
+	 * geometry.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
+	EHFRenderMode RenderMode = EHFRenderMode::Dynamic;
+
+	/** One per source component, index-parallel to GetBakeSourceComponents(). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
+	TArray<FHFBakedPart> BakedParts;
+
+	/**
+	 * Re-bake automatically when the geometry changes underneath a baked element.
+	 *
+	 * On by default. Off, a parameter edit leaves the viewport drawing the OLD baked geometry while
+	 * the spec says something else, and CaptureTopDown - the tool Claude uses to check its own work -
+	 * photographs the lie. That is the same silent false pass the validation gate exists to prevent.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Bake")
+	bool bAutoRebakeOnRegenerate = true;
+
+	/**
+	 * Switch back to Dynamic the moment somebody hand-edits the mesh of a baked element.
+	 *
+	 * On by default, and it is a usability guard rather than a safety one. The safety comes from
+	 * ApplyRenderMode clearing the baked component's UStaticMesh while Dynamic; this is what stops an
+	 * artist sculpting a mesh nobody can see, watching nothing change, and undoing work that in fact
+	 * applied perfectly.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Bake")
+	bool bUnbakeOnHandEdit = true;
+
+	/**
+	 * Bumped every time this element's geometry changes, by generation or by hand.
+	 *
+	 * A counter rather than a bool: it survives save/load and undo interleaving, and it can say
+	 * "baked three edits ago". One per ACTOR rather than one per part - editing a door leaf marks the
+	 * frame stale too, which over-bakes slightly and buys a staleness rule that is one sentence long.
+	 * No mesh hashing: hashing sixty meshes to rediscover something the actor already knows is pure
+	 * cost.
+	 */
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "HouseForge|Bake")
+	int32 MeshRevision = 0;
+
+	/**
+	 * Identity of this element as the owner of its baked assets.
+	 *
+	 * NonTransactional deliberately. Undoing a bake must not revert the guid, or the redo fails to
+	 * recognise the asset it just made and mints a duplicate beside it.
+	 */
+	UPROPERTY(NonTransactional, VisibleAnywhere, AdvancedDisplay, BlueprintReadOnly, Category = "HouseForge|Bake")
+	FGuid BakeOwnerGuid;
+
+	/**
+	 * Set when this element wanted to be Baked and its asset was not there.
+	 *
+	 * Transient because it is a fact about this session, not about the level. NEVER RENDER NOTHING is
+	 * the rule it serves: a missing asset falls back to Dynamic and says so, rather than leaving a
+	 * hole in the flat where a wall used to be.
+	 */
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
+	bool bBakeAssetMissing = false;
+
+	/**
+	 * Every dynamic mesh component of this element, in bake order. The root first.
+	 *
+	 * The one place the bake asks what an element is made of, so an articulated fixture answers with
+	 * its moving parts and a wall answers with itself. Overridden rather than inspected by the bake
+	 * service, because only the actor knows which of its components are geometry.
+	 */
+	virtual void GetBakeSourceComponents(TArray<UDynamicMeshComponent*>& OutComponents) const;
+
+	/**
+	 * Switches which representation draws. The whole of the user-facing bake, minus asset creation.
+	 *
+	 * Baking first if needed is NOT done here: a switch to Baked with no assets falls back to Dynamic
+	 * and sets bBakeAssetMissing. Asking for a bake is FHFBakeService's job, reached through
+	 * FHFBakeHooks.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
+	void SetRenderMode(EHFRenderMode Mode);
+
+	/** Every part has an asset to draw. False on an element that has never been baked. */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Bake")
+	bool HasAllBakedAssets() const;
+
+	/** Any baked asset was made from geometry older than what the dynamic mesh holds now. */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Bake")
+	bool IsBakeStale() const;
+
+	/** True when at least one part carries an asset, whichever mode is showing. */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Bake")
+	bool HasAnyBakedAsset() const;
+
+	/**
+	 * Takes ownership of a freshly created asset for one source component.
+	 *
+	 * The only door the editor's bake service has into this actor. It creates the component if there
+	 * is not one yet, points it at the asset, and records the revision the asset was made from.
+	 *
+	 * @param PartIndex           index into GetBakeSourceComponents()
+	 * @param SourceComponentName NAME_None for the root mesh
+	 * @param InBakedMesh         the asset, or null to drop this part's bake
+	 * @param AtRevision          MeshRevision the asset was built from
+	 */
+	void AdoptBakedMesh(int32 PartIndex, FName SourceComponentName, UStaticMesh* InBakedMesh, int32 AtRevision);
+
+	/**
+	 * Makes BakedParts match the current source components, destroying components for parts that no
+	 * longer exist.
+	 *
+	 * A wardrobe that loses a drawer loses that drawer's baked component here; the ASSET is left on
+	 * disk and becomes an orphan, which is a thing the orphan scan can offer to delete with the user
+	 * looking at it. Deleting assets silently from a regeneration path is not something this plugin
+	 * does.
+	 *
+	 * @param OutOrphaned paths of assets whose part went away
+	 * @return how many parts were dropped
+	 */
+	int32 SyncBakedPartsToSources(TArray<FSoftObjectPath>* OutOrphaned = nullptr);
+
+	/**
+	 * Settles bake state against what actually exists, and never leaves the element invisible.
+	 *
+	 * Called from PostLoad, so a level whose baked assets were deleted, moved or force-deleted while
+	 * it was closed comes back drawing its dynamic mesh with bBakeAssetMissing set, rather than
+	 * coming back as a hole in the flat.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
+	void ReconcileBakeState();
+
+	/** Ensures BakeOwnerGuid is set. Idempotent. */
+	const FGuid& EnsureBakeOwnerGuid();
+
+	/**
+	 * If this element is baked, stale and set to auto-rebake, asks the bake service to redo it.
+	 *
+	 * Called at the end of every generation path rather than from CommitMesh, so one regeneration of
+	 * an articulated fixture costs one bake of the whole fixture and not one per part.
+	 */
+	void FlushPendingRebake();
+
 	virtual void PostInitializeComponents() override;
+	virtual void PostLoad() override;
 
 	/**
 	 * Arms hand-edit detection on an element that came back from a saved level.
@@ -120,6 +276,18 @@ protected:
 	/** Pushes a generated mesh into the component and turns on collision. */
 	void CommitMesh(UE::Geometry::FDynamicMesh3&& Generated);
 
+	/**
+	 * Records that this element's geometry is not what it was.
+	 *
+	 * Bumps MeshRevision, which is the whole of the staleness model. Called from CommitMesh, from
+	 * hand-edit detection, and from the articulated actor when it writes a part mesh - a shutter
+	 * regenerating is a geometry change even though the root mesh never moved.
+	 */
+	void MarkMeshRevisionChanged();
+
+	/** Applies the mode to the components. The only place visibility or collision is touched. */
+	void ApplyRenderMode(EHFRenderMode Mode);
+
 	/** Starts watching the component so external edits set bArtistEdited. */
 	void WatchForEdits();
 
@@ -131,6 +299,9 @@ protected:
 	 * would never regenerate again.
 	 */
 	bool bGenerating = false;
+
+	/** Creates, or finds, the static mesh component that stands in for one source component. */
+	UStaticMeshComponent* EnsureBakedComponent(int32 PartIndex, UDynamicMeshComponent* Source);
 
 private:
 	bool bWatching = false;

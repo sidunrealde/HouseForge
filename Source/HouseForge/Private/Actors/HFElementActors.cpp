@@ -5,6 +5,8 @@
 #include "Components/DynamicMeshComponent.h"
 #include "Components/RectLightComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Geometry/HFGenerators.h"
 #include "Geometry/HFMeshOps.h"
 #include "HouseForge.h"
@@ -66,6 +68,17 @@ void AHFElementActor::PostRegisterAllComponents()
 	WatchForEdits();
 }
 
+void AHFElementActor::PostLoad()
+{
+	Super::PostLoad();
+
+	// A level saved in Baked mode has to come back baked, and a level whose assets went missing in
+	// the meantime has to come back VISIBLE. Both are ReconcileBakeState's job. Deferred to
+	// PostRegisterAllComponents would be too late for nothing and too early here would be too soon
+	// for the component list; PostLoad is where the actor's own serialised state is complete.
+	ReconcileBakeState();
+}
+
 void AHFElementActor::WatchForEdits()
 {
 	if (bWatching || Mesh == nullptr)
@@ -82,7 +95,36 @@ void AHFElementActor::WatchForEdits()
 
 void AHFElementActor::HandleMeshChanged()
 {
-	if (bGenerating || bArtistEdited)
+	if (bGenerating)
+	{
+		return;
+	}
+
+	// BEFORE the bArtistEdited early-out, and that ordering is the point. A second sculpt on an
+	// already-edited element still changes the geometry, so it still has to mark the bake stale -
+	// gating the revision on the flag would leave every edit after the first invisible to the bake.
+	MarkMeshRevisionChanged();
+
+	// AN INVISIBLE MESH MUST NOT BE THE THING BEING SCULPTED.
+	//
+	// In Baked mode the dynamic component is hidden, so an artist who somehow reaches it edits
+	// something they cannot see, watches nothing happen, and undoes work that in fact applied. The
+	// switch comes back to Dynamic so what they are editing is what they are looking at.
+	//
+	// Belt and braces rather than the safety mechanism: ApplyRenderMode clears the baked component's
+	// UStaticMesh while Dynamic, which is what actually keeps the Modeling Tools pointed at the live
+	// mesh (HouseForge.Bake.Probe.ToolTargetSelection). This is here for the reverse case - Baked
+	// mode, where the tools correctly target the baked asset and an edit there would be thrown away
+	// by the next re-bake.
+	if (bUnbakeOnHandEdit && RenderMode == EHFRenderMode::Baked)
+	{
+		UE_LOG(LogHouseForge, Log,
+			TEXT("'%s' was edited by hand while baked, so it is showing its live mesh again. The baked asset is kept and can be re-baked."),
+			*GetName());
+		SetRenderMode(EHFRenderMode::Dynamic);
+	}
+
+	if (bArtistEdited)
 	{
 		return;
 	}
@@ -106,12 +148,14 @@ void AHFElementActor::Regenerate()
 	}
 
 	CommitMesh(BuildMesh());
+	FlushPendingRebake();
 }
 
 void AHFElementActor::RevertToGenerated()
 {
 	bArtistEdited = false;
 	CommitMesh(BuildMesh());
+	FlushPendingRebake();
 }
 
 void AHFElementActor::CommitMesh(FDynamicMesh3&& Generated)
@@ -143,6 +187,396 @@ void AHFElementActor::CommitMesh(FDynamicMesh3&& Generated)
 	UHFMaterialLibrary::Get()->ApplyTo(Mesh);
 	Mesh->NotifyMeshUpdated();
 	Mesh->UpdateCollision(false);
+
+	// Unconditionally, and including under the bGenerating guard that stops the write above reading
+	// as a hand edit. The guard is about AUTHORSHIP; the revision is about whether the geometry is
+	// still the geometry the baked asset was made from, and a generated change breaks that just as
+	// completely as a sculpted one.
+	MarkMeshRevisionChanged();
+}
+
+// =================================================================================== the bake
+//
+// Everything from here to the end of AHFElementActor is the reversible bake. Read
+// Docs/PanelAndBakeDesign.md 4 alongside it. The one rule the whole section serves:
+//
+//     THE FDynamicMesh3 IS NEVER READ FOR ANYTHING BUT A COPY, AND NEVER WRITTEN AT ALL.
+//
+// Bake creates an asset and flips component state. Unbake flips it back. That is why unbake is
+// instant, why it is exact, and why there is no confirmation dialog anywhere near it.
+
+void AHFElementActor::GetBakeSourceComponents(TArray<UDynamicMeshComponent*>& OutComponents) const
+{
+	OutComponents.Reset();
+	if (Mesh != nullptr)
+	{
+		OutComponents.Add(Mesh);
+	}
+}
+
+const FGuid& AHFElementActor::EnsureBakeOwnerGuid()
+{
+	if (!BakeOwnerGuid.IsValid())
+	{
+		BakeOwnerGuid = FGuid::NewGuid();
+	}
+	return BakeOwnerGuid;
+}
+
+void AHFElementActor::MarkMeshRevisionChanged()
+{
+	++MeshRevision;
+}
+
+bool AHFElementActor::HasAnyBakedAsset() const
+{
+	for (const FHFBakedPart& Part : BakedParts)
+	{
+		if (Part.BakedMesh != nullptr)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool AHFElementActor::HasAllBakedAssets() const
+{
+	if (BakedParts.IsEmpty())
+	{
+		return false;
+	}
+
+	for (const FHFBakedPart& Part : BakedParts)
+	{
+		if (Part.BakedMesh == nullptr)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool AHFElementActor::IsBakeStale() const
+{
+	for (const FHFBakedPart& Part : BakedParts)
+	{
+		if (Part.BakedMesh != nullptr && Part.BakedAtMeshRevision != MeshRevision)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+UStaticMeshComponent* AHFElementActor::EnsureBakedComponent(int32 PartIndex, UDynamicMeshComponent* Source)
+{
+	if (!BakedParts.IsValidIndex(PartIndex) || !IsValid(Source))
+	{
+		return nullptr;
+	}
+
+	FHFBakedPart& Part = BakedParts[PartIndex];
+	if (IsValid(Part.Component))
+	{
+		return Part.Component;
+	}
+
+	// Created lazily rather than as a constructor default subobject, which is a deliberate departure
+	// from Docs/PanelAndBakeDesign.md 4.3. The design gave part 0 a CreateDefaultSubobject so it
+	// would exist without being made; but AHFArticulatedActor already creates every one of its mesh
+	// components this way and they round-trip through save and load perfectly well, so the subobject
+	// buys nothing except a second code path and one always-present component on all 150-odd elements
+	// of a flat that may never be baked at all.
+	const FName ComponentName = MakeUniqueObjectName(this, UStaticMeshComponent::StaticClass(),
+		*FString::Printf(TEXT("Baked_%d"), PartIndex));
+
+	UStaticMeshComponent* Component = NewObject<UStaticMeshComponent>(this, ComponentName);
+	if (Component == nullptr)
+	{
+		return nullptr;
+	}
+
+	// PARENTED TO THE COMPONENT IT STANDS IN FOR, not to the actor root. That single line is what
+	// keeps rule 04's "a bake must not weld a chest of drawers into a block" true: a baked shutter
+	// hangs off the dynamic shutter component, so it inherits that part's live articulated pose for
+	// free and opening the wardrobe still opens it.
+	Component->SetupAttachment(Source);
+
+	// MOVABLE, and this is a Lumen decision rather than a gameplay one. Mobility appears nowhere in
+	// the chain that decides Lumen scene membership - FDistanceFieldSceneData::AddPrimitive gates on
+	// eight proxy flags and mobility is not one of them, and mesh cards live on the asset - so a
+	// movable static mesh is in the Lumen scene exactly as a static one is. What mobility DOES change
+	// is the cost of moving: UStaticMeshComponent::ShouldRecreateProxyOnUpdateTransform returns true
+	// for anything that is not Movable, so a Static-mobility baked shutter would destroy and rebuild
+	// its proxy every time it opened, forcing LumenRemovePrimitive + LumenAddPrimitive and a full
+	// surface-cache re-capture. Movable re-transforms the cards and keeps the captured pages.
+	Component->SetMobility(EComponentMobility::Movable);
+
+	// The whole slot table, matching the dynamic side, so a baked element is reachable from the
+	// material panel by surface role. The bake service writes one material slot per role into the
+	// asset; this is the component-side override that a live finish change writes through.
+	Component->SetGenerateOverlapEvents(false);
+
+	Component->RegisterComponent();
+	AddInstanceComponent(Component);
+
+	Part.Component = Component;
+	Part.SourceComponentName = (Source == Mesh) ? NAME_None : Source->GetFName();
+
+	return Component;
+}
+
+int32 AHFElementActor::SyncBakedPartsToSources(TArray<FSoftObjectPath>* OutOrphaned)
+{
+	TArray<UDynamicMeshComponent*> Sources;
+	GetBakeSourceComponents(Sources);
+
+	int32 Dropped = 0;
+
+	// Parts past the end of the source list belong to geometry that no longer exists - a drawer the
+	// parameters stopped calling for, most likely. The COMPONENT goes; the ASSET is left on disk and
+	// reported as an orphan, because deleting a user's assets from inside a regeneration path is not
+	// a thing this plugin does. The orphan scan offers it with the user looking at it.
+	for (int32 Index = BakedParts.Num() - 1; Index >= Sources.Num(); --Index)
+	{
+		if (OutOrphaned != nullptr && BakedParts[Index].BakedAssetPath.IsValid())
+		{
+			OutOrphaned->Add(BakedParts[Index].BakedAssetPath);
+		}
+
+		if (IsValid(BakedParts[Index].Component))
+		{
+			RemoveInstanceComponent(BakedParts[Index].Component);
+			BakedParts[Index].Component->DestroyComponent();
+		}
+
+		BakedParts.RemoveAt(Index);
+		++Dropped;
+	}
+
+	// New parts get an empty slot, so a bake can fill it. An empty slot is not an asset, so
+	// HasAllBakedAssets() is false until it is filled and the element stays Dynamic in the meantime -
+	// which is the correct answer for a wardrobe that just grew a drawer nobody has baked.
+	while (BakedParts.Num() < Sources.Num())
+	{
+		BakedParts.AddDefaulted();
+	}
+
+	for (int32 Index = 0; Index < Sources.Num(); ++Index)
+	{
+		if (IsValid(Sources[Index]))
+		{
+			BakedParts[Index].SourceComponentName = (Sources[Index] == Mesh) ? NAME_None : Sources[Index]->GetFName();
+		}
+	}
+
+	return Dropped;
+}
+
+void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentName, UStaticMesh* InBakedMesh, int32 AtRevision)
+{
+	TArray<UDynamicMeshComponent*> Sources;
+	GetBakeSourceComponents(Sources);
+
+	if (!Sources.IsValidIndex(PartIndex))
+	{
+		return;
+	}
+
+	SyncBakedPartsToSources();
+	if (!BakedParts.IsValidIndex(PartIndex))
+	{
+		return;
+	}
+
+	FHFBakedPart& Part = BakedParts[PartIndex];
+	Part.SourceComponentName = InSourceComponentName;
+	Part.BakedMesh = InBakedMesh;
+	Part.BakedAssetPath = (InBakedMesh != nullptr) ? FSoftObjectPath(InBakedMesh) : FSoftObjectPath();
+	Part.BakedAtMeshRevision = (InBakedMesh != nullptr) ? AtRevision : INDEX_NONE;
+
+	if (InBakedMesh == nullptr)
+	{
+		return;
+	}
+
+	UDynamicMeshComponent* Source = Sources[PartIndex];
+	UStaticMeshComponent* Component = EnsureBakedComponent(PartIndex, Source);
+	if (Component == nullptr)
+	{
+		return;
+	}
+
+	// Captured while the dynamic side is still live, which is the only moment it can be read
+	// correctly. See FHFBakedPart::SourceCollisionEnabled - a fan rotor is QueryOnly on purpose and
+	// must not come back from a bake as a wall.
+	if (IsValid(Source))
+	{
+		Part.SourceCollisionEnabled = Source->GetCollisionEnabled();
+		Component->SetCollisionProfileName(Source->GetCollisionProfileName());
+	}
+
+	// The asset itself carries CTF_UseComplexAsSimple, set at creation by FHFBakeService, so
+	// collision matches the visual mesh - including on an open door, which rule 04 names explicitly.
+	// Nothing is written to the body setup from here: it belongs to the asset and is shared.
+	Component->SetStaticMesh(InBakedMesh);
+	UHFMaterialLibrary::Get()->ApplyTo(Component);
+}
+
+void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
+{
+	const bool bWantsBaked = (Mode == EHFRenderMode::Baked);
+	const bool bBaked = bWantsBaked && HasAllBakedAssets();
+
+	// NEVER RENDER NOTHING. A request to show a bake that is not there falls back to the live mesh
+	// and says so through bBakeAssetMissing, rather than leaving a hole in the flat.
+	bBakeAssetMissing = bWantsBaked && !bBaked;
+
+	TArray<UDynamicMeshComponent*> Sources;
+	GetBakeSourceComponents(Sources);
+
+	for (int32 Index = 0; Index < Sources.Num(); ++Index)
+	{
+		UDynamicMeshComponent* Source = Sources[Index];
+		if (!IsValid(Source))
+		{
+			continue;
+		}
+
+		Source->SetVisibility(!bBaked);
+		Source->SetHiddenInGame(bBaked);
+
+		// COLLISION SWITCHES WITH VISIBILITY. Leaving both on double-traces every wall in the flat
+		// and leaves complex-as-simple collision sitting under a mesh the user believes is the only
+		// thing there.
+		const ECollisionEnabled::Type Declared = BakedParts.IsValidIndex(Index)
+			? BakedParts[Index].SourceCollisionEnabled.GetValue()
+			: ECollisionEnabled::QueryAndPhysics;
+		Source->SetCollisionEnabled(bBaked ? ECollisionEnabled::NoCollision : Declared);
+
+		// UDynamicMeshComponentToolTargetFactory::CanBuildTarget tests IsEditable() explicitly
+		// (DynamicMeshComponentToolTarget.cpp:279), so this correctly drops the dynamic mesh out of
+		// the candidate list in Baked mode. It is the ONE part of the design's original mitigation
+		// that measured as doing what it claimed.
+		Source->SetIsEditable(!bBaked);
+	}
+
+	for (int32 Index = 0; Index < BakedParts.Num(); ++Index)
+	{
+		FHFBakedPart& Part = BakedParts[Index];
+		if (!IsValid(Part.Component))
+		{
+			continue;
+		}
+
+		Part.Component->SetVisibility(bBaked);
+		Part.Component->SetHiddenInGame(!bBaked);
+		Part.Component->SetCollisionEnabled(bBaked ? Part.SourceCollisionEnabled.GetValue() : ECollisionEnabled::NoCollision);
+
+		// ============================================================ THE TOOL TARGET FIX
+		//
+		// MEASURED, NOT ASSUMED, and it is the one place this implementation contradicts the design
+		// as originally written. Docs/PanelAndBakeDesign.md 4.4 said to UNREGISTER the baked
+		// component while Dynamic. HouseForge.Bake.Probe.ToolTargetSelection built an actor with both
+		// components and asked a UToolTargetManager loaded with exactly the factories
+		// UModelingToolsEditorMode::Enter loads, in its order, what a Modeling Tool would be handed:
+		//
+		//   registered + visible      2 candidates -> the BAKED ASSET
+		//   registered + hidden       2 candidates -> the BAKED ASSET
+		//   UNREGISTERED              2 candidates -> the BAKED ASSET      <- the proposed fix
+		//   SetStaticMesh(nullptr)    1 candidate  -> the live dynamic mesh
+		//   component destroyed       1 candidate  -> the live dynamic mesh
+		//
+		// Hiding does nothing and unregistering does nothing, because
+		// ToolBuilderUtil::FindAllComponents resolves a selected actor through AActor::GetComponents,
+		// which walks OwnedComponents with no registration test (Actor.h:3865), and
+		// UStaticMeshComponentToolTargetFactory::CanBuildTarget asks only whether the component holds
+		// a writable non-cooked UStaticMesh (StaticMeshComponentToolTarget.cpp:304). Neither
+		// registration nor visibility is ever consulted, and the static factory is registered first
+		// so it wins every tie.
+		//
+		// The candidate COUNT matters as much as the winner: USingleSelectionMeshEditingToolBuilder
+		// requires exactly one, so in all three two-candidate rows PolyEdit, Sculpt, Displace and
+		// Remesh refuse to start at all. A baked element left that way is both dangerous and dead.
+		//
+		// Clearing the mesh is free and lossless because FHFBakedPart::BakedMesh is a hard reference:
+		// the asset stays alive and loaded, so switching back is a pointer assignment and not a load.
+		Part.Component->SetStaticMesh(bBaked ? Part.BakedMesh.Get() : nullptr);
+
+		if (bBaked)
+		{
+			UHFMaterialLibrary::Get()->ApplyTo(Part.Component);
+		}
+	}
+
+	RenderMode = bBaked ? EHFRenderMode::Baked : EHFRenderMode::Dynamic;
+}
+
+void AHFElementActor::SetRenderMode(EHFRenderMode Mode)
+{
+	ApplyRenderMode(Mode);
+
+	if (bBakeAssetMissing)
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("'%s' was asked to show baked geometry but has no baked asset for every part, so it is showing its live mesh. Bake it first."),
+			*GetName());
+	}
+}
+
+void AHFElementActor::ReconcileBakeState()
+{
+	// The source list is authoritative. A level saved before a parameter change that dropped a part
+	// comes back with one baked part too many, and reconciling here is what stops ApplyRenderMode
+	// indexing past the end of it.
+	SyncBakedPartsToSources();
+
+	for (FHFBakedPart& Part : BakedParts)
+	{
+		// A force-deleted asset leaves a null pointer and a path that still names it, which is the
+		// only reason the path is stored separately at all.
+		if (Part.BakedMesh == nullptr && Part.BakedAssetPath.IsValid())
+		{
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("The baked asset '%s' for '%s' is missing. The element is showing its live mesh; re-bake to restore it."),
+				*Part.BakedAssetPath.ToString(), *GetName());
+		}
+	}
+
+	// ApplyRenderMode does the falling back, including setting bBakeAssetMissing. Asking for the mode
+	// the level was saved in rather than for Dynamic is what makes a level that WAS fine come back
+	// baked, and a level that is not come back visible.
+	ApplyRenderMode(RenderMode);
+}
+
+void AHFElementActor::FlushPendingRebake()
+{
+	if (RenderMode != EHFRenderMode::Baked || !bAutoRebakeOnRegenerate)
+	{
+		return;
+	}
+
+	if (!IsBakeStale())
+	{
+		return;
+	}
+
+	if (!FHFBakeHooks::CanBake())
+	{
+		// Nothing to shout about: a cooked build, or a test that never bound the hook. The element
+		// stays baked and stale, which the panel reports and RebakeStale fixes.
+		return;
+	}
+
+	FString Error;
+	if (!FHFBakeHooks::BakeElement.Execute(this, Error))
+	{
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("'%s' changed while baked and could not be re-baked: %s. It is showing its live mesh."),
+			*GetName(), *Error);
+		SetRenderMode(EHFRenderMode::Dynamic);
+	}
 }
 
 #if WITH_EDITOR
@@ -150,8 +584,46 @@ void AHFElementActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChan
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
-	// Clearing the flag by hand is a deliberate request to go back to generated geometry.
+	// FLIPPING A RENDER SWITCH MUST NOT REBUILD GEOMETRY.
+	//
+	// Intercepted before the catch-all below, which regenerates for any property declared on an
+	// element actor - and RenderMode is one. Without this, ticking the box in the details panel would
+	// regenerate the element, bump MeshRevision, and mark the bake it was just asked to show stale.
 	const FName Changed = PropertyChangedEvent.GetPropertyName();
+	const FName ChangedMember = PropertyChangedEvent.MemberProperty != nullptr
+		? PropertyChangedEvent.MemberProperty->GetFName()
+		: NAME_None;
+
+	if (Changed == GET_MEMBER_NAME_CHECKED(AHFElementActor, RenderMode)
+		|| ChangedMember == GET_MEMBER_NAME_CHECKED(AHFElementActor, RenderMode))
+	{
+		// Asking for Baked on an element that has never been baked bakes it, rather than refusing.
+		// The switch is the user's whole vocabulary here; a toggle that silently does nothing the
+		// first time it is used is not a toggle.
+		if (RenderMode == EHFRenderMode::Baked && !HasAllBakedAssets() && FHFBakeHooks::CanBake())
+		{
+			FString Error;
+			if (!FHFBakeHooks::BakeElement.Execute(this, Error))
+			{
+				UE_LOG(LogHouseForge, Warning, TEXT("'%s' could not be baked: %s"), *GetName(), *Error);
+			}
+		}
+
+		SetRenderMode(RenderMode);
+		return;
+	}
+
+	// The rest of the bake block is bookkeeping, and none of it describes geometry. Falling through
+	// to the catch-all would regenerate the element for ticking a checkbox about re-baking - which
+	// would bump MeshRevision and mark the bake stale, so a setting about staleness would create it.
+	if (Changed == GET_MEMBER_NAME_CHECKED(AHFElementActor, bAutoRebakeOnRegenerate)
+		|| Changed == GET_MEMBER_NAME_CHECKED(AHFElementActor, bUnbakeOnHandEdit)
+		|| ChangedMember == GET_MEMBER_NAME_CHECKED(AHFElementActor, BakedParts))
+	{
+		return;
+	}
+
+	// Clearing the flag by hand is a deliberate request to go back to generated geometry.
 	if (Changed == GET_MEMBER_NAME_CHECKED(AHFElementActor, bArtistEdited))
 	{
 		if (!bArtistEdited)

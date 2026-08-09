@@ -3,6 +3,8 @@
 #include "Materials/HFMaterialLibrary.h"
 
 #include "Components/DynamicMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Geometry/HFMeshOps.h"
 #include "HouseForge.h"
 #include "Materials/MaterialInstanceConstant.h"
@@ -472,6 +474,26 @@ void UHFMaterialLibrary::ApplyTo(UDynamicMeshComponent* Component) const
 	// shed the slot rather than keep a dangling one that the scene proxy would still allocate a
 	// render section for.
 	Component->ConfigureMaterialSet(Set, /*bDeleteExtraSlots*/ true);
+}
+
+void UHFMaterialLibrary::ApplyTo(UStaticMeshComponent* Component) const
+{
+	if (Component == nullptr || Component->GetStaticMesh() == nullptr)
+	{
+		return;
+	}
+
+	const TArray<UMaterialInterface*> Set = ResolveMaterialSet();
+
+	// Bounded by the asset's own slot count rather than by the role count. They are equal on anything
+	// HouseForge bakes - FHFBakeService asks for NumSurfaceRoles() slots - but a user who re-imported
+	// over the asset, or a future role added to the enum after an old bake, must not send this past
+	// the end of the material array and assert.
+	const int32 Slots = Component->GetStaticMesh()->GetStaticMaterials().Num();
+	for (int32 Index = 0; Index < Slots; ++Index)
+	{
+		Component->SetMaterial(Index, Set.IsValidIndex(Index) ? Set[Index] : nullptr);
+	}
 }
 
 void UHFMaterialLibrary::InvalidateCache()
