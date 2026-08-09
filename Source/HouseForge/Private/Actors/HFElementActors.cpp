@@ -6,6 +6,7 @@
 #include "Components/RectLightComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Geometry/HFGenerators.h"
 #include "Geometry/HFMeshOps.h"
@@ -13,6 +14,55 @@
 #include "Materials/HFMaterialLibrary.h"
 
 using namespace UE::Geometry;
+
+namespace
+{
+	/**
+	 * Puts a source component's whole collision DECLARATION onto its baked stand-in.
+	 *
+	 * The profile name alone is not the declaration, and that is the entire reason this function
+	 * exists rather than one line at the call site.
+	 *
+	 * AHFArticulatedActor::ApplyPartCollision sets a fan rotor up by calling
+	 * SetCollisionResponseToAllChannels(ECR_Ignore) and then blocking ECC_Visibility on its own. The
+	 * first of those INVALIDATES the profile name - FBodyInstance stops using a profile the moment a
+	 * response is written by hand and leaves the name reading "Custom". Copying that name across
+	 * therefore copies nothing at all: FBodyInstance::LoadProfileData takes its no-profile branch for
+	 * a name that is not a real profile (BodyInstance.cpp:4507-4533) and rebuilds the responses from
+	 * the TARGET's own array, which on a fresh UStaticMeshComponent is block-everything.
+	 *
+	 * So a baked rotor came out QueryOnly and BLOCKING where the live one blocks nothing - and
+	 * QueryOnly is quite enough to stop somebody, because character movement is a sweep and a sweep is
+	 * a query. A baked ceiling fan would halt a walkthrough pawn in mid-air at whatever azimuth its
+	 * blades happened to be frozen at: exactly the defect EHFPartCollision::TraceOnly was written to
+	 * keep out, reintroduced by the bake and by nothing else in the plugin.
+	 *
+	 * Responses are copied only when the source is actually carrying custom ones. Where the source
+	 * names a real profile the name is the better record - it keeps saying "BlockAll" in the details
+	 * panel instead of decaying to "Custom" - and copying the container would invalidate it for no
+	 * gain, since the profile sets those very responses on the way in.
+	 *
+	 * CollisionEnabled is deliberately NOT copied here: it is recorded per part in
+	 * FHFBakedPart::SourceCollisionEnabled and stamped by ApplyRenderMode, which has to run after this
+	 * because a real profile name sets CollisionEnabled as a side effect of being loaded.
+	 */
+	void CopyCollisionDeclaration(UPrimitiveComponent* To, const UPrimitiveComponent* From)
+	{
+		if (!IsValid(To) || !IsValid(From))
+		{
+			return;
+		}
+
+		const FName Profile = From->GetCollisionProfileName();
+		To->SetCollisionProfileName(Profile);
+
+		if (Profile == UCollisionProfile::CustomCollisionProfileName)
+		{
+			To->SetCollisionObjectType(From->GetCollisionObjectType());
+			To->SetCollisionResponseToChannels(From->GetCollisionResponseToChannels());
+		}
+	}
+}
 
 FHFEditableWriteScope::FHFEditableWriteScope(UDynamicMeshComponent* InComponent)
 	: Component(InComponent)
@@ -373,14 +423,111 @@ int32 AHFElementActor::SyncBakedPartsToSources(TArray<FSoftObjectPath>* OutOrpha
 	TArray<UDynamicMeshComponent*> Sources;
 	GetBakeSourceComponents(Sources);
 
-	int32 Dropped = 0;
+	// ============================================ WHY THIS MATCHES RATHER THAN TRUNCATES
+	//
+	// This used to trim BakedParts from the END until the two lists were the same length, which is
+	// correct only while parts can disappear from the end of the list and nowhere else. They cannot.
+	//
+	// A wardrobe's parts are its body leaves and then its loft leaves. Narrow it by one bay and it
+	// loses a BODY leaf - out of the MIDDLE - while every loft leaf above it stays. Truncation drops
+	// the last entry instead, so from that moment on BakedParts[i] stands for a part it was never
+	// baked from: the loft leaves inherit the body leaves' assets, one slot out, and every re-bake
+	// afterwards writes the wrong geometry into the wrong asset path. Nothing logs, and the wardrobe
+	// merely looks subtly wrong.
+	//
+	// The dropped part's baked component is worse. USceneComponent::OnComponentDestroyed re-attaches
+	// a live child to its grandparent rather than destroying it, so a baked leaf whose dynamic twin
+	// has gone comes back parented to the CARCASS - visible, frozen, and no longer moving with
+	// anything. A baked drawer front lying in the middle of the room, exactly as the note on this
+	// function has always claimed it prevents.
+	//
+	// So parts are MATCHED to sources by identity and only what matches nothing is dropped.
+	TArray<FHFBakedPart> Aligned;
+	Aligned.SetNum(Sources.Num());
 
-	// Parts past the end of the source list belong to geometry that no longer exists - a drawer the
-	// parameters stopped calling for, most likely. The COMPONENT goes; the ASSET is left on disk and
-	// reported as an orphan, because deleting a user's assets from inside a regeneration path is not
-	// a thing this plugin does. The orphan scan offers it with the user looking at it.
-	for (int32 Index = BakedParts.Num() - 1; Index >= Sources.Num(); --Index)
+	TBitArray<> Taken(false, BakedParts.Num());
+
+	// SLOT 0 IS THE SHELL, in both lists, and it is claimed outright rather than matched.
+	//
+	// Not a shortcut: it is what makes the matching below safe. When a part component is destroyed the
+	// engine re-parents its live children to the GRANDPARENT, which for a part is the shell - so at the
+	// moment this runs there may be an orphaned baked leaf hanging off Mesh, indistinguishable by
+	// attachment from the shell's own baked component. Pinning slot 0 means the orphan can never be
+	// mistaken for it, and since its old parent is gone it matches nothing else either and is dropped.
+	if (!Sources.IsEmpty() && !BakedParts.IsEmpty())
 	{
+		Aligned[0] = MoveTemp(BakedParts[0]);
+		Taken[0] = true;
+	}
+
+	// PASS 1 - BY ATTACHMENT, which is the only record that survives a reorder. A baked component is
+	// parented to the dynamic component it stands in for, so the attachment IS the statement of which
+	// part it belongs to; nothing else on the struct is more than a label.
+	for (int32 Slot = 1; Slot < Sources.Num(); ++Slot)
+	{
+		if (!IsValid(Sources[Slot]))
+		{
+			continue;
+		}
+
+		for (int32 Index = 0; Index < BakedParts.Num(); ++Index)
+		{
+			if (Taken[Index] || !IsValid(BakedParts[Index].Component))
+			{
+				continue;
+			}
+
+			if (BakedParts[Index].Component->GetAttachParent() == Sources[Slot])
+			{
+				Aligned[Slot] = MoveTemp(BakedParts[Index]);
+				Taken[Index] = true;
+				break;
+			}
+		}
+	}
+
+	// PASS 2 - BY RECORDED NAME, for a part that carries an asset but has no component to be attached
+	// by. That is a level that has just loaded, or a bake that failed after writing the asset.
+	for (int32 Slot = 1; Slot < Sources.Num(); ++Slot)
+	{
+		if (!IsValid(Sources[Slot]) || IsValid(Aligned[Slot].Component) || Aligned[Slot].BakedMesh != nullptr)
+		{
+			continue;
+		}
+
+		const FName Wanted = (Sources[Slot] == Mesh) ? NAME_None : Sources[Slot]->GetFName();
+
+		for (int32 Index = 0; Index < BakedParts.Num(); ++Index)
+		{
+			// Entries carrying nothing are skipped rather than matched, or every default-constructed
+			// slot - all of which record NAME_None - would claim the root mesh's place.
+			const bool bCarries = BakedParts[Index].BakedMesh != nullptr || BakedParts[Index].bSourceWasEmpty;
+			if (Taken[Index] || IsValid(BakedParts[Index].Component) || !bCarries)
+			{
+				continue;
+			}
+
+			if (BakedParts[Index].SourceComponentName == Wanted)
+			{
+				Aligned[Slot] = MoveTemp(BakedParts[Index]);
+				Taken[Index] = true;
+				break;
+			}
+		}
+	}
+
+	// Whatever matched no source belongs to geometry that no longer exists. The COMPONENT goes; the
+	// ASSET is left on disk and reported as an orphan, because deleting a user's assets from inside a
+	// regeneration path is not a thing this plugin does. The orphan scan offers it with the user
+	// looking at it.
+	int32 Dropped = 0;
+	for (int32 Index = 0; Index < BakedParts.Num(); ++Index)
+	{
+		if (Taken[Index])
+		{
+			continue;
+		}
+
 		if (OutOrphaned != nullptr && BakedParts[Index].BakedAssetPath.IsValid())
 		{
 			OutOrphaned->Add(BakedParts[Index].BakedAssetPath);
@@ -392,23 +539,32 @@ int32 AHFElementActor::SyncBakedPartsToSources(TArray<FSoftObjectPath>* OutOrpha
 			BakedParts[Index].Component->DestroyComponent();
 		}
 
-		BakedParts.RemoveAt(Index);
 		++Dropped;
 	}
 
-	// New parts get an empty slot, so a bake can fill it. An empty slot is not an asset, so
+	// A slot nothing matched stays empty, so a bake can fill it. An empty slot is not an asset, so
 	// HasAllBakedAssets() is false until it is filled and the element stays Dynamic in the meantime -
 	// which is the correct answer for a wardrobe that just grew a drawer nobody has baked.
-	while (BakedParts.Num() < Sources.Num())
-	{
-		BakedParts.AddDefaulted();
-	}
+	BakedParts = MoveTemp(Aligned);
 
-	for (int32 Index = 0; Index < Sources.Num(); ++Index)
+	for (int32 Slot = 0; Slot < Sources.Num(); ++Slot)
 	{
-		if (IsValid(Sources[Index]))
+		if (!IsValid(Sources[Slot]))
 		{
-			BakedParts[Index].SourceComponentName = (Sources[Index] == Mesh) ? NAME_None : Sources[Index]->GetFName();
+			continue;
+		}
+
+		BakedParts[Slot].SourceComponentName = (Sources[Slot] == Mesh) ? NAME_None : Sources[Slot]->GetFName();
+
+		// AND THE ATTACHMENT IS HEALED, not merely trusted. A part component that was destroyed and
+		// rebuilt under the same part id leaves its baked twin hanging off the shell; re-hanging it on
+		// the live source is what keeps a baked shutter riding its shutter rather than the carcass.
+		// SnapToTarget because the baked mesh is in its part's local space and sits exactly on it -
+		// KeepWorld would leave it wherever the fixture was last posed.
+		UStaticMeshComponent* Component = BakedParts[Slot].Component;
+		if (IsValid(Component) && Component->GetAttachParent() != Sources[Slot])
+		{
+			Component->AttachToComponent(Sources[Slot], FAttachmentTransformRules::SnapToTargetIncludingScale);
 		}
 	}
 
@@ -469,7 +625,10 @@ void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentNam
 		{
 			Part.SourceCollisionEnabled = Source->GetCollisionEnabled();
 		}
-		Component->SetCollisionProfileName(Source->GetCollisionProfileName());
+
+		// The WHOLE declaration, not the profile name. See CopyCollisionDeclaration: a rotor's
+		// responses are custom, so its profile name carries none of what makes it harmless.
+		CopyCollisionDeclaration(Component, Source);
 	}
 
 	// The asset itself carries CTF_UseComplexAsSimple, set at creation by FHFBakeService, so
@@ -534,6 +693,20 @@ void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
 		if (BakedParts.IsValidIndex(Index) && Source->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
 		{
 			BakedParts[Index].SourceCollisionEnabled = Source->GetCollisionEnabled();
+		}
+
+		// RE-COPIED ON EVERY SWITCH TO BAKED, not only at bake time. What a part blocks is a property
+		// of what the part IS, and a regeneration re-declares it: AHFArticulatedActor::ApplyPartCollision
+		// writes the fresh responses onto the dynamic component every time the fixture rebuilds, and a
+		// baked stand-in still carrying the previous declaration would be a rotor that has quietly
+		// become a wall, or a shutter that has quietly stopped being one. Reading it here is free and
+		// keeps the two sides one fact rather than two.
+		//
+		// Before the CollisionEnabled stamp below and before the one in the baked loop, because loading
+		// a real profile sets CollisionEnabled as a side effect.
+		if (bBaked && BakedParts.IsValidIndex(Index))
+		{
+			CopyCollisionDeclaration(BakedParts[Index].Component.Get(), Source);
 		}
 
 		Source->SetVisibility(!bBaked);

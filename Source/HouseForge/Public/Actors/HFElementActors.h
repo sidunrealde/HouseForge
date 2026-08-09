@@ -254,6 +254,12 @@ public:
 	 * Makes BakedParts match the current source components, destroying components for parts that no
 	 * longer exist.
 	 *
+	 * MATCHES, rather than truncating to length. A part can disappear from the MIDDLE of a fixture -
+	 * narrowing a wardrobe by one bay drops a body leaf while every loft leaf above it stays - and
+	 * trimming the tail instead would leave every part after it holding the previous part's asset.
+	 * Baked components are matched to their sources by attachment first and by recorded name second,
+	 * and the attachment of a survivor is repaired on the way past.
+	 *
 	 * A wardrobe that loses a drawer loses that drawer's baked component here; the ASSET is left on
 	 * disk and becomes an orphan, which is a thing the orphan scan can offer to delete with the user
 	 * looking at it. Deleting assets silently from a regeneration path is not something this plugin

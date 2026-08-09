@@ -63,9 +63,16 @@ struct HOUSEFORGE_API FHFBakedPart
 	/**
 	 * The dynamic mesh component this was baked from. NAME_None means the actor's root mesh.
 	 *
-	 * Diagnostic rather than a key: BakedParts is index-parallel to GetBakeSourceComponents(), and
-	 * a part component's object name is only unique, not stable, across a regeneration that drops and
-	 * re-adds a part. The name is what lets a report say which drawer went missing.
+	 * BakedParts is index-parallel to GetBakeSourceComponents(), so this is not the primary key -
+	 * but it is a real fallback one, and not merely a label. AHFElementActor::SyncBakedPartsToSources
+	 * re-matches parts to sources by ATTACHMENT first, because a baked component hangs off the dynamic
+	 * component it stands in for and that is the one record a reordering of the part list cannot
+	 * falsify; this name is what settles the remaining case, where an asset has been loaded from a
+	 * saved level and no component exists yet to be attached by. It is also what lets a report say
+	 * which drawer went missing.
+	 *
+	 * A part component's object name is unique but not stable across a regeneration that destroys and
+	 * re-adds the same part id, which is why it is second and not first.
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
 	FName SourceComponentName;
