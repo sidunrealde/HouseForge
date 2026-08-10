@@ -9,6 +9,28 @@ class AActor;
 class UMaterialInterface;
 class UWorld;
 
+/**
+ * What KIND of picture this is: a photograph of the flat, or a drawing of it.
+ *
+ * Not a style preference. The two want opposite things out of the renderer, and pretending
+ * otherwise is what put three review packages' worth of blown-out plans on the record - see
+ * FHFPlanDraw for the arithmetic.
+ */
+enum class EHFDrawStyle : uint8
+{
+	/** Lit, exposed, tonemapped. A view of a room, judged on how it looks. */
+	Lit,
+
+	/**
+	 * Flat tone, straight off the base-colour buffer. A plan, judged against a drawing.
+	 *
+	 * Taken before lighting, before exposure, before the tonemapper and before bloom, so none of the
+	 * four things that blew the plan out is on the path at all. A drawing has no exposure to get
+	 * wrong.
+	 */
+	Drawing
+};
+
 /** One offscreen render: where the camera is, what it sees, and how big the image is. */
 struct FHFCaptureRequest
 {
@@ -43,6 +65,16 @@ struct FHFCaptureRequest
 	 * what comes through a window is part of what is being judged.
 	 */
 	bool bShowSky = true;
+
+	/**
+	 * Photograph or drawing. Lit by default, because most captures are of a room.
+	 *
+	 * UHFEditorSubsystem::CaptureTopDown sets Drawing, and FHFPlanSection materialles the section it
+	 * builds from the matching palette. The two belong together: a drawing style over the finish
+	 * library's tones would be flat and unreadable, and the plan palette under a lit render would be
+	 * a set of greys with sun shadows across them.
+	 */
+	EHFDrawStyle DrawStyle = EHFDrawStyle::Lit;
 
 	/**
 	 * What to do when the geometry in this picture cannot contribute indirect light.

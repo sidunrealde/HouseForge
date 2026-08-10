@@ -3,6 +3,7 @@
 #include "Capture/HFSceneCapture.h"
 
 #include "Capture/HFLumenCoverage.h"
+#include "Capture/HFPlanDraw.h"
 #include "Capture/HFViewingLight.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -321,7 +322,16 @@ bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Req
 	Capture->SetWorldLocationAndRotation(Request.Location, Request.Rotation);
 
 	Capture->TextureTarget = Target;
-	Capture->CaptureSource = SCS_FinalColorLDR;
+
+	// WHERE IN THE FRAME THE PIXELS ARE TAKEN FROM, and it is the whole of the plan fix.
+	//
+	// SCS_FinalColorLDR is the end of the pipeline: lit, exposed, tonemapped, bloomed. That is what a
+	// view of a room wants and it is what was wrong with every plan this tool has ever produced.
+	// SCS_BaseColor is the deferred base-colour buffer, read before any of those four exist - so a
+	// drawing cannot be over-exposed, cannot clip, and cannot grow a halo, rather than being tuned
+	// until it currently does none of those. See FHFPlanDraw.
+	Capture->CaptureSource = (Request.DrawStyle == EHFDrawStyle::Drawing)
+		? SCS_BaseColor : SCS_FinalColorLDR;
 
 	// One frame, taken when we ask for it. Left on, this component would render every tick of the
 	// editor for as long as it existed, which for a 4096-square target is a visible cost for no
@@ -368,7 +378,19 @@ bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Req
 	// no global illumination, so the sky light lights nothing inside an enclosed room and an
 	// interior view is black for an entirely different reason. Both figures come from the
 	// placeholder rig, so a capture and the editor viewport agree.
-	FHFViewingLight::ApplyViewingSettingsTo(Capture->PostProcessSettings);
+	if (Request.DrawStyle == EHFDrawStyle::Drawing)
+	{
+		// A drawing takes none of the rig's exposure and none of its ambient fill: both are answers
+		// to "how is this lit", and a base-colour capture is not lit. Applied anyway rather than
+		// skipped, because a post-process volume in the level still reaches this camera and the
+		// bloom on it is the halo that was round the last three plans.
+		FHFPlanDraw::ApplyDrawingPostProcess(Capture->PostProcessSettings);
+	}
+	else
+	{
+		FHFViewingLight::ApplyViewingSettingsTo(Capture->PostProcessSettings);
+	}
+
 	Capture->PostProcessBlendWeight = 1.0f;
 
 	Capture->CaptureScene();

@@ -1294,6 +1294,12 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 	// the flat only makes the comparison harder.
 	Request.bShowSky = false;
 
+	// AND IT IS DRAWN, NOT PHOTOGRAPHED. A plan rendered lit is a plan exposed for an interior with
+	// its ceiling taken off, which is six stops hot and clips to white - the defect three review
+	// packages reported and FHFPlanDraw works through. Flat tone off the base-colour buffer instead,
+	// with the section poched from the same palette.
+	Request.DrawStyle = EHFDrawStyle::Drawing;
+
 	// And no Lumen guard. A plan is an orthographic section of a temporary cut copy with the sky and
 	// fog switched off, judged on where the walls are; no part of that answer comes from bounce. The
 	// guard exists to stop a LIT render being trusted, and blocking the layout tool over a bake would
