@@ -1232,6 +1232,220 @@ bool FHFWashingMachineMotionTest::RunTest(const FString&)
 	return true;
 }
 
+/**
+ * A FRONT LOADER IS SOLD BOTH WAYS ROUND, AND SO IS THIS ONE.
+ *
+ * The porthole was hung on the left, full stop. In the reference flat that put it 5.69 cm into the
+ * utility's west wall at 80% open - recorded as a known obstruction for a whole milestone, because
+ * the room is 1200 and the machine is 600 and there is nowhere to move it to. Every manufacturer
+ * sells the right-hand machine for exactly this, and EHFHingeHand is that machine.
+ *
+ * ## THE APERTURE, IN CENTIMETRES, AND NOT "IT MOVED"
+ *
+ * What a porthole is for is reaching the drum, so what is measured is how much of the drum mouth the
+ * leaf leaves clear - the distance from the mouth's own axis to the nearest point of the posed door.
+ * Shut, that distance is zero and the mouth is covered. Open, every point of the leaf must be at
+ * least the mouth's radius away, which means the whole 31.8 cm of it is reachable.
+ *
+ * A door that swung the wrong way, into the machine, would satisfy every "did it move" assertion
+ * there is and would uncover nothing at all. So would a leaf that swung out and back.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFWashingMachineHingeHandTest,
+	"HouseForge.Services.APortholeHangsOnEitherHandAndUncoversTheDrum", HF_TEST_FLAGS)
+
+bool FHFWashingMachineHingeHandTest::RunTest(const FString&)
+{
+	/** Closest the posed leaf comes to the drum's axis. Zero means the mouth is covered. */
+	const auto ClearanceFromMouth = [](const FHFMeshPart& Part, const FHFPortholeLeaf& Leaf,
+		double MouthCentreZ, double OpenAmount) -> double
+	{
+		double Closest = TNumericLimits<double>::Max();
+
+		for (const int32 Vertex : Part.Mesh.VertexIndicesItr())
+		{
+			const FVector At = PosedPoint(Part, FVector(Part.Mesh.GetVertex(Vertex)), OpenAmount);
+
+			// Distance to the drum's axis, which runs along Y through the mouth's centre. Only points
+			// IN FRONT of the machine's face can be in the way; the drum itself is behind it.
+			if (At.Y > 0.5)
+			{
+				continue;
+			}
+
+			Closest = FMath::Min(Closest,
+				FVector2D(At.X - Leaf.MouthAcross, At.Z - MouthCentreZ).Size());
+		}
+
+		return Closest;
+	};
+
+	for (const EHFHingeHand Hand : { EHFHingeHand::Left, EHFHingeHand::Right })
+	{
+		const bool bLeft = (Hand == EHFHingeHand::Left);
+		const TCHAR* Which = bLeft ? TEXT("left") : TEXT("right");
+
+		FHFWashingMachineParams Asked = MakeWasher();
+		Asked.HingeHand = Hand;
+
+		const FHFWashingMachineParams P = FHFApplianceKit::SanitiseWashingMachine(Asked);
+		const FHFPortholeLeaf Leaf = FHFApplianceKit::PortholeLeafOf(Asked);
+		const FHFApplianceBuild Built = FHFApplianceKit::BuildWashingMachine(Asked);
+
+		if (!TestTrue(FString::Printf(TEXT("A %s-hand machine describes its leaf"), Which),
+			Leaf.IsValid()))
+		{
+			continue;
+		}
+
+		const FHFMeshPart* Porthole = FindPart(Built.Parts, FHFApplianceKit::PortholePartId());
+		if (Porthole == nullptr)
+		{
+			AddError(FString::Printf(TEXT("A %s-hand machine built no porthole."), Which));
+			continue;
+		}
+
+		// ------------------------------------------------------ the hinge is where the hand says
+		//
+		// The hinge is the one end of the leaf that does not move, so it is where the two poses agree.
+		const FVector Hinge = PosedPoint(*Porthole, FVector::ZeroVector, 0.0);
+		TestEqual(FString::Printf(TEXT("The %s hinge is across the machine where the leaf says"), Which),
+			Hinge.X, Leaf.HingeAcross, 0.01);
+
+		TestTrue(FString::Printf(
+			TEXT("And that is on the %s of the drum mouth (hinge %.1f, mouth %.1f)"),
+			Which, Hinge.X, Leaf.MouthAcross),
+			bLeft ? (Hinge.X < Leaf.MouthAcross) : (Hinge.X > Leaf.MouthAcross));
+
+		// ------------------------------------------------------------- shut, the mouth is covered
+		const double Covered = ClearanceFromMouth(*Porthole, Leaf, P.PortholeCentreZ, 0.0);
+		TestTrue(FString::Printf(
+			TEXT("Shut, the %s-hand door covers the drum mouth (nearest %.2f cm of a %.2f cm radius)"),
+			Which, Covered, Leaf.MouthRadius),
+			Covered < Leaf.MouthRadius * 0.2);
+
+		// ------------------------------------------------------------ open, the whole mouth is clear
+		//
+		// THIS IS THE APERTURE. Not that the door moved - a door that swung into the machine moves
+		// exactly as far - but that all 31.8 cm of the drum can be reached through where it was.
+		const double Clear = ClearanceFromMouth(*Porthole, Leaf, P.PortholeCentreZ, 1.0);
+
+		AddInfo(FString::Printf(
+			TEXT("A %s-hand porthole opens %.0f degrees and leaves the whole %.1f cm mouth clear; the ")
+			TEXT("nearest part of the leaf is then %.1f cm from its axis."),
+			Which, Leaf.SwingDegrees, Leaf.MouthRadius * 2.0, Clear));
+
+		TestTrue(FString::Printf(
+			TEXT("Open, the %s-hand door leaves all %.1f cm of the mouth reachable (nearest %.1f cm)"),
+			Which, Leaf.MouthRadius * 2.0, Clear),
+			Clear >= Leaf.MouthRadius);
+
+		// ------------------------------------------------------------------ and it went the right way
+		const FBox Open = PosedBounds(*Porthole, 1.0);
+		const FBox Shut = PosedBounds(*Porthole, 0.0);
+
+		TestTrue(FString::Printf(TEXT("Open, the %s-hand door stands out of the machine (Y min %.1f)"),
+			Which, Open.Min.Y), Open.Min.Y < Shut.Min.Y - 2.0);
+
+		// Round to its OWN side, which is the half of the answer a mirror image would get wrong: a
+		// right-hand leaf that swung left would clear the mouth just as well and would be a left-hand
+		// machine with its hinge on the wrong end.
+		if (bLeft)
+		{
+			TestTrue(FString::Printf(TEXT("Open, the left-hand door has gone left (X max %.1f)"),
+				Open.Max.X), Open.Max.X < Leaf.MouthAcross - Leaf.MouthRadius * 0.6);
+		}
+		else
+		{
+			TestTrue(FString::Printf(TEXT("Open, the right-hand door has gone right (X min %.1f)"),
+				Open.Min.X), Open.Min.X > Leaf.MouthAcross + Leaf.MouthRadius * 0.6);
+		}
+	}
+
+	// ----------------------------------------------------------------- and the two are mirror images
+	//
+	// One machine, reversed - not two designs that happen to open opposite ways. Measured as a
+	// reflection about the machine's own centreline, because a hand that changed a dimension with it
+	// would be a different appliance wearing the same parameters.
+	{
+		FHFWashingMachineParams AskedLeft = MakeWasher();
+		FHFWashingMachineParams AskedRight = MakeWasher();
+		AskedRight.HingeHand = EHFHingeHand::Right;
+
+		const FHFPortholeLeaf L = FHFApplianceKit::PortholeLeafOf(AskedLeft);
+		const FHFPortholeLeaf R = FHFApplianceKit::PortholeLeafOf(AskedRight);
+
+		TestEqual(TEXT("Both hands reach the same distance"), R.Reach, L.Reach, 0.001);
+		TestEqual(TEXT("Both dish the same depth"), R.Dish, L.Dish, 0.001);
+		TestEqual(TEXT("Both uncover the same mouth"), R.MouthRadius, L.MouthRadius, 0.001);
+		TestEqual(TEXT("And the hinges are mirrored about the machine's centreline"),
+			R.HingeAcross - L.MouthAcross, L.MouthAcross - L.HingeAcross, 0.001);
+	}
+
+	return true;
+}
+
+/**
+ * THE LEAF THE KIT PUBLISHES IS THE LEAF THE KIT DRAWS.
+ *
+ * FHFPortholeLeaf exists so the composing layer can clear the space a porthole needs before it
+ * decides which side to hang it on. That is only worth anything while the two agree, and they are
+ * two pieces of code: one describes the leaf, the other builds it.
+ *
+ * So the description is measured back off the mesh. If BuildWashingMachine ever grows a bezel, a
+ * handle or a deeper dish without the description following, this is what says so - and the failure
+ * it prevents is a door cleared for 36 cm of swing that actually needs 40, which shows up as a
+ * machine whose door goes through a wall in a flat nobody has captured yet.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFPortholeLeafDescriptionTest,
+	"HouseForge.Services.ThePortholeLeafIsWhereTheKitSaysItIs", HF_TEST_FLAGS)
+
+bool FHFPortholeLeafDescriptionTest::RunTest(const FString&)
+{
+	for (const EHFHingeHand Hand : { EHFHingeHand::Left, EHFHingeHand::Right })
+	{
+		const TCHAR* Which = (Hand == EHFHingeHand::Left) ? TEXT("left") : TEXT("right");
+
+		FHFWashingMachineParams Asked = MakeWasher();
+		Asked.HingeHand = Hand;
+
+		const FHFPortholeLeaf Leaf = FHFApplianceKit::PortholeLeafOf(Asked);
+		const FHFApplianceBuild Built = FHFApplianceKit::BuildWashingMachine(Asked);
+
+		const FHFMeshPart* Porthole = FindPart(Built.Parts, FHFApplianceKit::PortholePartId());
+		if (Porthole == nullptr || !Leaf.IsValid())
+		{
+			AddError(FString::Printf(TEXT("A %s-hand machine built no porthole to measure."), Which));
+			continue;
+		}
+
+		const FBox Shut = PosedBounds(*Porthole, 0.0);
+
+		// ACROSS THE MACHINE: from the hinge, Reach in the hand's own direction.
+		const double Far = Leaf.HingeAcross + Leaf.HandSign * Leaf.Reach;
+
+		TestEqual(FString::Printf(TEXT("The %s leaf starts at its hinge"), Which),
+			(Leaf.HandSign > 0.0) ? Shut.Min.X : Shut.Max.X, Leaf.HingeAcross, 0.05);
+		TestEqual(FString::Printf(TEXT("And reaches exactly its declared %.2f cm"), Leaf.Reach),
+			(Leaf.HandSign > 0.0) ? Shut.Max.X : Shut.Min.X, Far, 0.05);
+
+		// THROUGH THE MACHINE: proud of the face towards the room, dished the other way to the drum.
+		// These two are the thickness the composing layer sweeps, and they are the pair that caught
+		// the reference flat's last graze - 3.6 mm of dish into a utility sink.
+		TestEqual(FString::Printf(TEXT("The %s leaf stands its declared %.2f cm proud"),
+			Which, Leaf.Proud), -Shut.Min.Y, Leaf.Proud, 0.05);
+		TestEqual(FString::Printf(TEXT("And dishes its declared %.2f cm towards the drum"), Leaf.Dish),
+			Shut.Max.Y, Leaf.Dish, 0.05);
+
+		// AND VERTICALLY it is a disc about the mouth, which is what makes its plan a line.
+		const FHFWashingMachineParams P = FHFApplianceKit::SanitiseWashingMachine(Asked);
+		TestEqual(FString::Printf(TEXT("The %s leaf is centred on the mouth"), Which),
+			(Shut.Min.Z + Shut.Max.Z) * 0.5, P.PortholeCentreZ, 0.05);
+		TestEqual(TEXT("And is as tall as it is long"), Shut.Max.Z - Shut.Min.Z, Leaf.Reach, 0.05);
+	}
+
+	return true;
+}
+
 // =============================================================================================
 //
 // Degenerate input.

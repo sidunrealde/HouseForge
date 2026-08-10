@@ -929,12 +929,236 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	/**
+	 * Is there floor here that a door leaf may swing over?
+	 *
+	 * Three ways there is not: the point is outside the room, it is inside the thickness of a wall -
+	 * a room boundary is drawn on wall CENTRELINES, so half of every wall lies inside it - or
+	 * something is standing on the floor there at the height being asked about.
+	 *
+	 * @param LowZ,HighZ  The band the swinging thing occupies, above the room floor. A fitting that
+	 *                    is entirely above or entirely below it is not in the way, which is the whole
+	 *                    difference between a wall-hung sink and a base unit.
+	 */
+	bool FloorIsClearAt(const FHFFixtureContext& C, const FVector2D& Probe, double LowZ, double HighZ)
+	{
+		if (C.Spec == nullptr)
+		{
+			return true;
+		}
+
+		if (C.Room != nullptr && !C.Room->ContainsPoint(Probe))
+		{
+			return false;
+		}
+
+		for (const FHFWall& Wall : C.Spec->Walls)
+		{
+			const FVector2D Along = Wall.End - Wall.Start;
+			const double LengthSq = Along.SizeSquared();
+			if (LengthSq <= KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const double T = FMath::Clamp(
+				FVector2D::DotProduct(Probe - Wall.Start, Along) / LengthSq, 0.0, 1.0);
+
+			if (FVector2D::Distance(Probe, Wall.Start + Along * T) < Wall.Thickness * 0.5)
+			{
+				return false;
+			}
+		}
+
+		if (C.Fixtures == nullptr)
+		{
+			return true;
+		}
+
+		for (const FHFFixture& Other : *C.Fixtures)
+		{
+			if (Other.Id == C.Fixture->Id || !AHFHouseActor::BuildsGeometryFor(Other.Type)
+				|| Other.IsCeilingMounted())
+			{
+				continue;
+			}
+
+			// Heights first, because it is the cheap test and it is the one that decides the answer
+			// here: a utility sink hung at 600 and a porthole whose top edge reaches 606 share six
+			// millimetres of height and no more.
+			if (Other.BaseZ >= HighZ || Other.BaseZ + Other.Height <= LowZ)
+			{
+				continue;
+			}
+
+			if (FHFFixturePlacement::FootprintContains(Other, Probe))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * HOW FAR A FRONT-LOADER'S PORTHOLE CAN ACTUALLY OPEN, on a given hand, in degrees.
+	 *
+	 * A door hung on the wrong side of a machine standing next to a wall is not a door. In the
+	 * reference flat the porthole reached 5.69 cm into the utility's west wall at 80% open, and no
+	 * amount of moving the machine settles it: the utility is 1200 wide, the machine is 600, and
+	 * sliding it along the wall only presents the same leaf to the same masonry from further away.
+	 *
+	 * SEEN FROM ABOVE A PORTHOLE IS A LINE, NOT A DISC. The leaf is a flat disc standing in a
+	 * vertical plane, so in plan it is a segment running 2 x RimRadius from its hinge - which is what
+	 * makes this measurable by walking the swing and probing along that segment, rather than by
+	 * reasoning about a swept volume.
+	 *
+	 * Probed rather than derived, on the same grounds as RunEndIsObstructed above: only this layer
+	 * can see what is beside the machine, and a rule of thumb about clearances would be a second
+	 * place for the answer to be wrong.
+	 *
+	 * @return The largest swing, in degrees, at which every point of the leaf is still over clear
+	 *         floor. Zero when even the first step is blocked.
+	 */
+	double ClearPortholeSwing(const FHFFixtureContext& C, const FHFWashingMachineParams& Washer,
+		EHFHingeHand Hand)
+	{
+		FHFWashingMachineParams Asked = Washer;
+		Asked.HingeHand = Hand;
+
+		const FHFWashingMachineParams P = FHFApplianceKit::SanitiseWashingMachine(Asked);
+		const FHFPortholeLeaf Leaf = FHFApplianceKit::PortholeLeafOf(Asked);
+
+		if (!Leaf.IsValid())
+		{
+			return 0.0;
+		}
+
+		// The machine's own frame, exactly as AgainstWall will place it: origin at the front-left
+		// corner of the footprint, +X across the width, +Y back into the machine.
+		const double Yaw = FHFFixturePlacement::FacingYaw(*C.Fixture, C.AnchorWall);
+		const FRotator Rotation(0.0, Yaw, 0.0);
+
+		const FVector Corner = Rotation.RotateVector(
+			FVector(-C.Fixture->Footprint.X * 0.5, -C.Fixture->Footprint.Y * 0.5, 0.0));
+		const FVector2D Origin(C.Fixture->Position.X + Corner.X, C.Fixture->Position.Y + Corner.Y);
+
+		// The band of the room the leaf sweeps through, above the machine's own base. Only what
+		// shares that band can be in its way - which is the difference between a base unit and a
+		// sink hung above the door's top edge, and the difference decides this answer.
+		const double LowZ = C.Fixture->BaseZ + P.PortholeCentreZ - Leaf.Reach * 0.5;
+		const double HighZ = C.Fixture->BaseZ + P.PortholeCentreZ + Leaf.Reach * 0.5;
+
+		// Two and a half degrees is a 1.6 cm chord at the tip of a 36 cm leaf, comfortably inside the
+		// smallest thing this has to notice - the same reasoning HouseForge.Flat's sweep uses.
+		constexpr double Step = 2.5;
+
+		double Clear = 0.0;
+
+		for (double Angle = Step; Angle <= Leaf.SwingDegrees + KINDA_SMALL_NUMBER; Angle += Step)
+		{
+			const double At = FMath::Min(Angle, Leaf.SwingDegrees);
+
+			const FVector2D Direction = Leaf.DirectionAt(At);
+			const FVector2D Normal = Leaf.NormalAt(At);
+
+			bool bBlocked = false;
+
+			// ALONG THE LEAF AND ACROSS IT. Along, because a door is longest at its tip and that is
+			// what reaches a wall first. Across, because a porthole is not a plane: the bezel stands
+			// proud of it towards the room and the glass dishes the other way towards the drum, and
+			// the graze that survived the first version of this was on the dish, 3.6 mm of it, at
+			// the very top of the swing.
+			for (const double Along : { 0.25, 0.45, 0.65, 0.85, 1.0 })
+			{
+				for (const double Across : { -Leaf.Proud, 0.0, Leaf.Dish })
+				{
+					const FVector2D Local = FVector2D(Leaf.HingeAcross, 0.0)
+						+ Direction * (Leaf.Reach * Along) + Normal * Across;
+
+					const FVector Turned = Rotation.RotateVector(FVector(Local.X, Local.Y, 0.0));
+					const FVector2D Probe(Origin.X + Turned.X, Origin.Y + Turned.Y);
+
+					if (!FloorIsClearAt(C, Probe, LowZ, HighZ))
+					{
+						bBlocked = true;
+						break;
+					}
+				}
+
+				if (bBlocked)
+				{
+					break;
+				}
+			}
+
+			if (bBlocked)
+			{
+				break;
+			}
+
+			Clear = At;
+		}
+
+		// ONE STEP BACK FROM WHAT WAS MEASURED CLEAR. The walk finds the last sampled angle that was
+		// free, and the obstruction is somewhere between that and the next sample; declaring the
+		// sample itself would put the door's end stop on the edge of the thing it just missed.
+		return FMath::Max(Clear - Step, 0.0);
+	}
+
 	void SeedWashingMachine(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFWashingMachineActor& Actor = static_cast<AHFWashingMachineActor&>(Element);
 
 		Actor.ApplyProjectDefaults();
 		Actor.ApplyFixture(*C.Fixture);
+
+		// WHICH WAY THE DOOR OPENS, DECIDED BY WHAT IS BESIDE THE MACHINE. The same shape of answer
+		// as bBankAtRunStart a few hundred lines up, and for the same reason: the appliance cannot see
+		// the wall it is standing against, the wall does not know a machine is there, and only this
+		// layer has both. Resolved AFTER ApplyFixture, which is what sizes the porthole this measures.
+		//
+		// The left-hand machine stays the default and wins a tie, because it is what a catalogue
+		// photographs and because a flat where both hands are equally free should not have its
+		// appliances quietly reversed. It is overridden only when the right-hand machine - the one
+		// every manufacturer also sells - actually opens further.
+		const double OnTheLeft = ClearPortholeSwing(C, Actor.Washer, EHFHingeHand::Left);
+		const double OnTheRight = ClearPortholeSwing(C, Actor.Washer, EHFHingeHand::Right);
+
+		Actor.Washer.HingeHand = (OnTheRight > OnTheLeft) ? EHFHingeHand::Right : EHFHingeHand::Left;
+
+		// AND THE DOOR IS BUILT TO OPEN ONLY AS FAR AS IT CAN. Choosing the better hand is half the
+		// answer; the other half is that a catalogue's 160 degrees is a figure for a machine standing
+		// in open floor, and a part whose declared travel is further than it can go is exactly what
+		// .claude/rules/04-conventions.md means by a part that does not open. The end stop goes where
+		// the room puts it, which is what a real installation does to a real machine.
+		//
+		// Only ever downwards - a room cannot give a door more swing than it was built with.
+		const double Available = FMath::Max(OnTheLeft, OnTheRight);
+		const double Built = FMath::Min(Actor.Washer.DoorSwingDegrees, Available);
+
+		if (Built < Actor.Washer.DoorSwingDegrees - 1.0)
+		{
+			// A DOOR TOO SHORT TO LOAD THROUGH IS A LAYOUT PROBLEM, NOT A PARAMETER, and it must not
+			// be settled quietly by this function. Ninety degrees is the figure: at a right angle the
+			// leaf is entirely clear of the drum mouth, so anything at or above it loads normally and
+			// anything below it is a machine somebody has to reach around.
+			UE_CLOG(Built < 90.0, LogHouseForge, Warning,
+				TEXT("'%s' has room for only %.0f degrees of porthole swing (left %.0f, right %.0f). ")
+				TEXT("Under 90 the door does not clear the drum mouth, so the machine cannot be loaded ")
+				TEXT("squarely - this is a layout to change, not a figure to accept."),
+				*C.Fixture->Id.ToString(), Built, OnTheLeft, OnTheRight);
+
+			UE_LOG(LogHouseForge, Log,
+				TEXT("'%s': porthole clears %.0f deg hung on the left and %.0f on the right; hung %s ")
+				TEXT("and built to open %.0f of its catalogue %.0f."),
+				*C.Fixture->Id.ToString(), OnTheLeft, OnTheRight,
+				Actor.Washer.HingeHand == EHFHingeHand::Left ? TEXT("left") : TEXT("right"),
+				Built, Actor.Washer.DoorSwingDegrees);
+		}
+
+		Actor.Washer.DoorSwingDegrees = Built;
+
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
