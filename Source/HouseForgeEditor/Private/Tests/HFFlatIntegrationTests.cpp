@@ -637,6 +637,124 @@ namespace HouseForgeFlat
 		return Widest;
 	}
 
+	/** Everything one element has standing still, in world space. */
+	FBox RestBoundsOf(const TArray<FHFScanSurface>& All, FName Owner)
+	{
+		FBox Box(ForceInit);
+		for (const FHFScanSurface& Surface : All)
+		{
+			if (Surface.Owner == Owner)
+			{
+				Box += WorldBoundsOf(Surface);
+			}
+		}
+		return Box;
+	}
+
+	/**
+	 * THE REACH OF AN ELEMENT: everywhere any part of it can be, in world space.
+	 *
+	 * Rest bounds expanded by the furthest any one of its parts travels, plus a centimetre for the
+	 * chamfer on every arris. A point on a part is at most its swept distance from where it started -
+	 * exactly, for a slide; conservatively for a hinge, whose arc is longer than the chord it
+	 * subtends - so this box contains the part at EVERY open amount, and that containment is the only
+	 * property either sweep may lean on when it throws a surface out of a neighbourhood.
+	 *
+	 * ## Why this is a named function rather than one line in each sweep
+	 *
+	 * Both sweeps used to derive their reach from the host's resting FOOTPRINT instead - expand by
+	 * the element's own widest plan dimension - on the premise that "a door swings its own width and
+	 * a drawer comes out its own depth". That is an assumption about the catalogue, it was never
+	 * measured, and anything travelling further than its host is wide was therefore compared against
+	 * a neighbourhood clipped to the host, found nothing, and reported its parts as swept.
+	 *
+	 * Correcting it was the easy half. The hard half is that NOTHING IN THE SUITE WOULD HAVE NOTICED
+	 * IT COMING BACK: reinstating the footprint rule failed no test, because in this particular flat
+	 * it is usually the wider of the two. A correct rule that no test defends is one edit from being
+	 * a defect again, which is the exact shape of every failure this file exists to stop.
+	 *
+	 * So the rule lives here, in one function, used by both sweeps AND by
+	 * HouseForge.Flat.AnOpenPartStaysInsideTheReachThatGathersIt - which drives every mover in the
+	 * flat through its range and measures, in centimetres, whether this box still holds it. Change
+	 * this line and that test reports the overhang.
+	 *
+	 * ## FALSIFIED, TWO WAYS, AND THEY FAIL DIFFERENTLY - WHICH IS THE POINT
+	 *
+	 * THE FOOTPRINT RULE REINSTATED, one line, this function expanding by the rest bounds' widest
+	 * plan dimension instead. Sole new failure in the whole HouseForge.Flat suite:
+	 *   "Expected 'The reach grows by at least what the parts travel - worst shortfall 62.351 cm on
+	 *    F_Kitchen_Fridge (travels 135.0 cm, reach grows 72.6 cm)' to be true."
+	 * The fridge door swings 135 cm and the fridge is 72.6 cm wide, so the footprint rule gathers
+	 * neighbours over half a metre short of where the door actually goes.
+	 *
+	 * And on that same run the CONTAINMENT assertion did not fail - "Worst overhang outside the
+	 * SUPERSEDED footprint reach: 0.000 cm". No part in this flat physically leaves the footprint
+	 * box, so measuring where the parts go could never have caught this. Only stating the rule does.
+	 * That is why this test asserts both and why the second one is the one with teeth.
+	 *
+	 * The footprint rule is also WIDER in the aggregate - it took the pair sweep from 235 pairs to
+	 * 326 - which is exactly how it survived ten milestones of tests that only ever counted work.
+	 *
+	 * THE NEIGHBOURHOOD LEFT AT REST, this function expanding by nothing, which is gap 2 as it
+	 * originally stood. Four assertions fail, in two different tests:
+	 *   "No open part leaves the reach that gathers its neighbours (worst 95.100 cm,
+	 *    'D_Foyer.Leaf at 100% open')"
+	 *   "The reach grows by at least what the parts travel - worst shortfall 149.508 cm on D_Main
+	 *    (travels 149.5 cm, reach grows 0.0 cm)"
+	 *   "There are pairs close enough to compare - 6 of them"        (235 when the rule is right)
+	 *   "Pose combinations actually compared - 96"                   (3760 when the rule is right)
+	 */
+	FBox SweptReachOf(const FBox& RestBounds, double WidestTravelCm)
+	{
+		return RestBounds.IsValid ? RestBounds.ExpandBy(WidestTravelCm + 1.0) : RestBounds;
+	}
+
+	/**
+	 * THE SUPERSEDED RULE, kept for one reason: so a test can measure what it lost.
+	 *
+	 * The element's resting bounds expanded by its own widest PLAN dimension. Not used by anything
+	 * that sweeps - it is the control arm of
+	 * HouseForge.Flat.AnOpenPartStaysInsideTheReachThatGathersIt and nothing else. Deleting it is
+	 * fine on the day that test can show the overhang some other way; leaving it in a sweep is not.
+	 */
+	FBox FootprintReachOf(const FBox& RestBounds)
+	{
+		if (!RestBounds.IsValid)
+		{
+			return RestBounds;
+		}
+
+		const FVector Size = RestBounds.GetSize();
+		return RestBounds.ExpandBy(FMath::Max(Size.X, Size.Y) + 1.0);
+	}
+
+	/** How far outside a box a point lies, in centimetres. Zero if it is inside. */
+	double DistanceOutsideCm(const FBox& Box, const FVector& Point)
+	{
+		if (!Box.IsValid)
+		{
+			return 0.0;
+		}
+
+		const FVector Over = (Box.Min - Point).ComponentMax(Point - Box.Max).ComponentMax(FVector::ZeroVector);
+		return Over.Size();
+	}
+
+	/** The furthest any vertex of a placed surface lies outside a box, in centimetres. */
+	double WorstOutsideCm(const FBox& Box, const FHFScanSurface& Surface)
+	{
+		double Worst = 0.0;
+		if (Surface.Mesh != nullptr)
+		{
+			for (const int32 V : Surface.Mesh->VertexIndicesItr())
+			{
+				const FVector World = Surface.ToWorld.TransformPosition(FVector(Surface.Mesh->GetVertex(V)));
+				Worst = FMath::Max(Worst, DistanceOutsideCm(Box, World));
+			}
+		}
+		return Worst;
+	}
+
 	/** One actor's opening parts at whatever pose it is currently holding, meshes owned alongside. */
 	struct FPosedParts
 	{
@@ -1199,34 +1317,18 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 		// wide the thing they are bolted to happens to be. Everything else in a twelve-room flat is a
 		// pair the scan would throw out on bounds anyway, and throwing it out here instead is what
 		// makes the whole flat's motion finish in a gate rather than in a quarter of an hour.
-		FBox Reach(ForceInit);
-		for (const FHFScanSurface& Surface : AtRest.All)
-		{
-			if (Surface.Owner == Articulated->ElementId)
-			{
-				Reach += WorldBoundsOf(Surface);
-			}
-		}
+		FBox Reach = RestBoundsOf(AtRest.All, Articulated->ElementId);
 
 		if (!Reach.IsValid)
 		{
 			continue;
 		}
 
-		// A point on a part is at most its swept distance from where it started - exactly, for a
-		// slide; conservatively for a hinge, whose arc is longer than the chord it subtends. Plus a
-		// centimetre for the chamfer on every arris.
-		//
-		// NOT FALSIFIED, AND SAID PLAINLY. Reinstating the superseded reach - the host's own widest
-		// plan dimension - failed NOTHING: all eleven HouseForge.Flat tests stayed green. In this
-		// flat the old rule is mostly the WIDER of the two (it took the pair sweep below from 235
-		// pairs to 317), so reverting it loses no foul that exists here today. The travel-based reach
-		// is still the correct rule - it is the only one that stays correct for a part travelling
-		// further than its host is wide, which the curtains do - but it is a correctness argument and
-		// not a guarded one, and nothing in this suite would notice if it were reverted. Closing that
-		// needs a fixture placed inside a long part's travel and outside its host's footprint; there
-		// is no such pair in this flat, so there is no test here pretending to check it.
-		Reach = Reach.ExpandBy(Widest + 1.0);
+		// SweptReachOf is the rule, and it is a shared function so that it can be defended. It was
+		// previously derived from the host's resting footprint, and reinstating that failed no test
+		// in this suite - see the note on SweptReachOf, and
+		// HouseForge.Flat.AnOpenPartStaysInsideTheReachThatGathersIt, which is what now stops it.
+		Reach = SweptReachOf(Reach, Widest);
 
 		TArray<FHFScanSurface> Neighbourhood;
 		for (const FHFScanSurface& Surface : AtRest.All)
@@ -1312,6 +1414,12 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 	// It was the ONLY assertion in this test that failed. 242 parts still swept, 743 poses still
 	// taken, no foul, no obstruction record disturbed - the sweep reported a full day's work with
 	// every door in the building missing from it. That is precisely how this survived ten milestones.
+	//
+	// RE-FALSIFIED SINCE, at the collection point instead: every AHFOpeningActor dropped out of
+	// OpeningActorsIn, which is where both sweeps get their movers. Same message, and the run
+	// reported "Swept 215 opening part(s) on 50 articulated element(s), 0 of them doorways and
+	// windows, through 412 poses in all". Excluding the doors in the loop and excluding them from
+	// the collection look identical from the outside; this assertion catches both.
 	TestTrue(*FString::Printf(
 		TEXT("Every doorway and window in the flat is in the sweep - %d of them"), Doors),
 		Doors >= 10);
@@ -1432,27 +1540,24 @@ bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
 
 	const TArray<AHFArticulatedActor*> Movers = OpeningActorsIn(House);
 
+	TSet<FName> OpeningIds;
+	for (const FHFOpening& Opening : Spec.Openings)
+	{
+		OpeningIds.Add(Opening.Id);
+	}
+
+	int32 Doors = 0;
+
 	// Each mover's swept box: where any part of it can be at any open amount.
 	TArray<FBox> Swept;
 	Swept.Reserve(Movers.Num());
 
 	for (AHFArticulatedActor* Mover : Movers)
 	{
-		FBox Box(ForceInit);
-		for (const FHFScanSurface& Surface : AtRest.All)
-		{
-			if (Surface.Owner == Mover->ElementId)
-			{
-				Box += WorldBoundsOf(Surface);
-			}
-		}
+		Doors += OpeningIds.Contains(Mover->ElementId) ? 1 : 0;
 
-		if (Box.IsValid)
-		{
-			Box = Box.ExpandBy(WidestSweptDistanceCm(Mover) + 1.0);
-		}
-
-		Swept.Add(Box);
+		const FBox Box = RestBoundsOf(AtRest.All, Mover->ElementId);
+		Swept.Add(SweptReachOf(Box, WidestSweptDistanceCm(Mover)));
 	}
 
 	// A quarter apart, ends included. Coarse on purpose - see the note above.
@@ -1542,21 +1647,51 @@ bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
 	}
 
 	AddInfo(FString::Printf(
-		TEXT("%d of %d articulated element(s) can reach each other at full travel: %d pair(s), %d pose combination(s) compared."),
-		Pairs > 0 ? Movers.Num() : 0, Movers.Num(), Pairs, Comparisons));
+		TEXT("%d of %d articulated element(s) can reach each other at full travel, %d of them doorways and windows: %d pair(s), %d pose combination(s) compared."),
+		Pairs > 0 ? Movers.Num() : 0, Movers.Num(), Doors, Pairs, Comparisons));
 
 	// A RUN THAT COMPARED NOTHING WOULD PASS BY HAVING ASKED NOTHING, and that is the exact failure
 	// mode this test was written to close - the sweep above reported parts swept while its
 	// neighbourhood had been clipped to empty. So the breadth is asserted, not reported.
 	//
-	// NOT FALSIFIED. These two floors are the same instrument as the doorway count above, and unlike
-	// it neither has been made to fail: nothing tried moved the flat below 235 pairs / 3760 pose
-	// combinations. They guard a future narrowing rather than a past one. The SUBSTANCE of this test
-	// is falsified at FKnownPairConflict below; that is where the evidence for it is.
+	// These were 20 pairs and 200 combinations against a flat that produces 235 and 3760, which is a
+	// floor that tolerates losing nine tenths of the sweep. They are now ratchets on the same terms
+	// as hf-validate.ps1's -MinTests: adding fixtures never trips them, and removing enough of the
+	// sweep to matter is a deliberate edit with a diff.
+	//
+	// FALSIFIED, AND THE RAISE IS FALSIFIED SEPARATELY FROM THE FLOOR - which matters, because a
+	// floor that only fires on a total collapse is the thing being fixed here, not the fix.
+	//
+	//   THE REACH LEFT AT REST (see SweptReachOf) collapses this flat to 6 pairs and 96 pose
+	//   combinations. Both of these fail - but so would the 20 and 200 they replaced. That arm
+	//   proves the floor, not the raise.
+	//
+	//   THE DOORS EXCLUDED FROM OpeningActorsIn - the defect this plugin actually shipped - leaves
+	//   104 pairs and 1664 combinations:
+	//     "Expected 'There are pairs close enough to compare - 104 of them' to be true."
+	//     "Expected 'Pose combinations actually compared - 1664' to be true."
+	//   104 is comfortably ABOVE the old floor of 20 and 1664 above the old 200, so the floors as
+	//   they stood would have passed a sweep with every door in the building missing from it. The
+	//   ratchet is what fails. That is the raise earning its place, on the real defect.
 	TestTrue(*FString::Printf(TEXT("There are pairs close enough to compare - %d of them"), Pairs),
-		Pairs >= 20);
+		Pairs >= 200);
 	TestTrue(*FString::Printf(TEXT("Pose combinations actually compared - %d"), Comparisons),
-		Comparisons >= 200);
+		Comparisons >= 3200);
+
+	// AND THE DOORS ARE IN THIS ONE TOO. The sweep above asserts its doorway count because excluding
+	// every door from it went unnoticed for ten milestones; this test collects its movers from the
+	// same OpeningActorsIn and had no such assertion, so the identical narrowing here would have cost
+	// only pairs - a number nothing was checking hard enough to notice.
+	//
+	// FALSIFIED by dropping every AHFOpeningActor out of OpeningActorsIn, which is the collection
+	// point both sweeps draw from:
+	//   "Expected 'Every doorway and window in the flat can be paired - 0 of them' to be true."
+	// Alongside it the sweep above reported "Swept 215 opening part(s) on 50 articulated element(s),
+	// 0 of them doorways and windows, through 412 poses in all" - a full report of a day's work with
+	// nineteen doors and windows missing from it.
+	TestTrue(*FString::Printf(
+		TEXT("Every doorway and window in the flat can be paired - %d of them"), Doors),
+		Doors >= 10);
 
 	// SAID OUT LOUD ON EVERY RUN, GREEN OR NOT. Five pairs in this flat cannot both be wide open, all
 	// of them in the two places a layout runs out of room. A limitation nobody is reminded of is a
@@ -1602,6 +1737,214 @@ bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Pose combinations where two open elements meet"), Fouls.Num(), 0);
+
+	return true;
+}
+
+/**
+ * DOES THE BOX THAT DECIDES WHAT A PART IS COMPARED AGAINST ACTUALLY CONTAIN THE PART?
+ *
+ * ## The thing this defends, and why it needed defending
+ *
+ * Both sweeps above throw surfaces away before they scan. They have to - a clash scan of every
+ * surface in a twelve-room flat against every pose of every moving part does not finish in a gate.
+ * The filter is a box per element, and its correctness is load-bearing in the worst way: a box that
+ * is too small does not report a smaller answer, it reports NO answer, and a sweep that compared a
+ * leaf against nothing looks exactly like a sweep that compared it against everything and found it
+ * clear. That is the same failure as the door exclusion, one level down.
+ *
+ * That box used to be the element's resting FOOTPRINT expanded by its own widest plan dimension, on
+ * the premise that a door swings its own width and a drawer comes out its own depth. It is now
+ * SweptReachOf: the resting bounds expanded by the furthest any of its parts actually declares it
+ * travels.
+ *
+ * The correction landed a milestone ago and it was, on its own, worth nothing - because reinstating
+ * the footprint rule failed no test in this suite. In this flat the footprint is usually the wider
+ * of the two, so a revert loses no foul that exists here TODAY, and the whole suite would have
+ * waved it through. A correct rule nothing defends is one edit away from being a defect again.
+ *
+ * ## What is asserted, and which of them can fail
+ *
+ * FIRST, the containment, measured rather than argued: every mover in the flat is driven through
+ * its range and every vertex of every opening part is measured against its own reach, in
+ * centimetres. This is the property the filter depends on and no other test takes it.
+ *
+ * SECOND, and this is the one with teeth, the rule is stated directly: the reach must extend at
+ * least as far past the resting bounds as the parts travel, on every axis. Under the footprint rule
+ * that is true only while an element's travel is smaller than its own plan size, so every element in
+ * the flat that travels further than it is wide fails it the moment the rule reverts. The count of
+ * such elements is reported on every run, because if it ever reaches zero this assertion has
+ * quietly stopped guarding anything and the report should say so rather than staying green.
+ *
+ * The footprint overhang is measured and reported alongside, as the control: it is how much of the
+ * flat's real motion the superseded rule could not see.
+ *
+ * ## Falsified
+ *
+ * Both arms are recorded in full at SweptReachOf, with the reinstated behaviour that produced them.
+ * In short: the footprint rule fails the stated rule alone, by 62.351 cm on the fridge, while the
+ * containment stays at 0.000 cm - and leaving the neighbourhood at rest fails both, by 95.100 cm of
+ * door leaf and a 149.508 cm shortfall on the front door.
+ *
+ * The third assertion, the one that checks this test can still fail, reports 18 of 69 elements
+ * travelling further than their own plan size. It has not been made to fail and would need a
+ * catalogue with no long-travel element in it, which is a change to the fixtures rather than to this
+ * file. It is here so that day is loud rather than silent.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFlatReachHoldsPartsTest,
+	"HouseForge.Flat.AnOpenPartStaysInsideTheReachThatGathersIt", HF_TEST_FLAGS)
+
+bool FHFFlatReachHoldsPartsTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeFlat;
+
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ ClearHouseForgeActors(World); };
+
+	FHFHouseSpec Spec;
+	AHFHouseActor* House = BuildReferenceFlat(World, Spec);
+	if (!TestNotNull(TEXT("The reference flat builds"), House))
+	{
+		return false;
+	}
+
+	FFlatSurfaces AtRest;
+	CollectSurfaces(House, Spec, AtRest);
+
+	// Ends and quarters. The containment claim is about every pose, so the ends matter most: a slide
+	// is furthest out at 1, and a hinge's outermost point is furthest from its rest bounds there too.
+	static constexpr double Amounts[] = { 0.0, 0.25, 0.5, 0.75, 1.0 };
+
+	int32 Elements = 0;
+	int32 PartPoses = 0;
+	int32 TravelExceedsFootprint = 0;
+
+	double WorstOutsideReach = 0.0;
+	FString WorstOutsideReachName;
+
+	double WorstOutsideFootprint = 0.0;
+	FString WorstOutsideFootprintName;
+
+	// How far short of the declared travel the reach grows, on its worst axis, over every element.
+	// Negative is headroom. Positive is a reach that does not contain what it claims to.
+	double WorstGrowthShortfallCm = -TNumericLimits<double>::Max();
+	FString WorstGrowthName;
+
+	FPosedParts Posed;
+
+	for (AHFArticulatedActor* Mover : OpeningActorsIn(House))
+	{
+		const FBox Rest = RestBoundsOf(AtRest.All, Mover->ElementId);
+		const double Travel = WidestSweptDistanceCm(Mover);
+
+		if (!Rest.IsValid || Travel <= 0.0)
+		{
+			continue;
+		}
+
+		++Elements;
+
+		const FBox Reach = SweptReachOf(Rest, Travel);
+		const FBox Footprint = FootprintReachOf(Rest);
+
+		// THE RULE, STATED. Every face of the reach must stand at least the declared travel clear of
+		// the resting bounds, or a part driven to the end of its range is outside the box that
+		// gathered its neighbours.
+		const FVector GrewMin = Rest.Min - Reach.Min;
+		const FVector GrewMax = Reach.Max - Rest.Max;
+		const double Grew = FMath::Min(GrewMin.GetMin(), GrewMax.GetMin());
+
+		if (Travel - Grew > WorstGrowthShortfallCm)
+		{
+			WorstGrowthShortfallCm = Travel - Grew;
+			WorstGrowthName = FString::Printf(TEXT("%s (travels %.1f cm, reach grows %.1f cm)"),
+				*Mover->ElementId.ToString(), Travel, Grew);
+		}
+
+		// The elements that can tell the two rules apart at all: those travelling further than their
+		// own plan size. If this count is zero the assertion below is decoration.
+		const FVector RestSize = Rest.GetSize();
+		if (Travel > FMath::Max(RestSize.X, RestSize.Y))
+		{
+			++TravelExceedsFootprint;
+		}
+
+		for (const double Amount : Amounts)
+		{
+			Mover->SetAllPartsOpenAmount(Amount);
+			CapturePosedParts(Mover, *FString::Printf(TEXT("at %.0f%% open"), Amount * 100.0), Posed);
+
+			for (const FHFScanSurface& Surface : Posed.Surfaces)
+			{
+				++PartPoses;
+
+				const double OutReach = WorstOutsideCm(Reach, Surface);
+				if (OutReach > WorstOutsideReach)
+				{
+					WorstOutsideReach = OutReach;
+					WorstOutsideReachName = Surface.Name;
+				}
+
+				const double OutFootprint = WorstOutsideCm(Footprint, Surface);
+				if (OutFootprint > WorstOutsideFootprint)
+				{
+					WorstOutsideFootprint = OutFootprint;
+					WorstOutsideFootprintName = Surface.Name;
+				}
+			}
+		}
+
+		Mover->SetAllPartsOpenAmount(0.0);
+	}
+
+	AddInfo(FString::Printf(
+		TEXT("Measured %d articulated element(s) through %d part pose(s). %d of them travel further than their own plan size."),
+		Elements, PartPoses, TravelExceedsFootprint));
+
+	AddInfo(FString::Printf(
+		TEXT("Worst overhang outside the travel-based reach: %.3f cm%s."),
+		WorstOutsideReach,
+		WorstOutsideReachName.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" ('%s')"), *WorstOutsideReachName)));
+
+	AddInfo(FString::Printf(
+		TEXT("Worst overhang outside the SUPERSEDED footprint reach: %.3f cm%s."),
+		WorstOutsideFootprint,
+		WorstOutsideFootprintName.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" ('%s')"), *WorstOutsideFootprintName)));
+
+	AddInfo(FString::Printf(TEXT("Worst reach growth shortfall: %.3f cm on %s."),
+		WorstGrowthShortfallCm, *WorstGrowthName));
+
+	// A run that measured nothing would pass by having asked nothing - the same hole as everywhere
+	// else in this file.
+	TestTrue(*FString::Printf(TEXT("There are articulated elements to measure - %d of them"), Elements),
+		Elements > 20);
+	TestTrue(*FString::Printf(TEXT("Part poses measured - %d"), PartPoses), PartPoses > 200);
+
+	// THE CONTAINMENT. Half a millimetre, on parts that travel metres.
+	TestTrue(*FString::Printf(
+		TEXT("No open part leaves the reach that gathers its neighbours (worst %.3f cm, '%s')"),
+		WorstOutsideReach, *WorstOutsideReachName),
+		WorstOutsideReach <= 0.05);
+
+	// THE RULE. This is what fails if the reach goes back to being derived from the footprint.
+	TestTrue(*FString::Printf(
+		TEXT("The reach grows by at least what the parts travel - worst shortfall %.3f cm on %s"),
+		WorstGrowthShortfallCm, *WorstGrowthName),
+		WorstGrowthShortfallCm <= 0.0);
+
+	// AND THE ASSERTION ABOVE IS STILL CAPABLE OF FAILING. If no element in the flat travels further
+	// than its own plan size, the footprint rule and the travel rule agree everywhere here and the
+	// assertion above cannot tell them apart. That is a fact about the layout, not about the code,
+	// so it is asserted rather than assumed - a catalogue that drifts into having no long-travel
+	// element should fail here and be told, not quietly stop being guarded.
+	TestTrue(*FString::Printf(
+		TEXT("Some element travels further than its own plan size, so the rule above can fail - %d of them"),
+		TravelExceedsFootprint),
+		TravelExceedsFootprint > 0);
 
 	return true;
 }
