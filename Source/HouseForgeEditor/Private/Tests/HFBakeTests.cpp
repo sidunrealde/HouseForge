@@ -51,6 +51,7 @@
 #include "Misc/Paths.h"
 #include "Model/HFSampleHouse.h"
 #include "StaticMeshAttributes.h"
+#include "StaticMeshCompiler.h"
 #include "TargetInterfaces/DynamicMeshCommitter.h"
 #include "TargetInterfaces/DynamicMeshProvider.h"
 #include "TargetInterfaces/MaterialProvider.h"
@@ -1791,6 +1792,437 @@ bool FHFBakeEmptyElementTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("And it does not claim to have baked geometry"), Wall->HasAllBakedAssets());
 	TestEqual(TEXT("So it stays on its live mesh"),
 		static_cast<int32>(Wall->RenderMode), static_cast<int32>(EHFRenderMode::Dynamic));
+
+	return true;
+}
+
+// ============================================== the sculpt that lands in the asset, not the mesh
+//
+// THE ONE HOLE MeshRevision CANNOT SEE, and the reason these three tests exist.
+//
+// HouseForge.Bake.Probe.ToolTargetSelection row D asserts it directly: in Baked mode the one thing a
+// single-selection Modeling Tool can be handed is the BAKED STATIC MESH. The engine is right to do
+// that - ApplyRenderMode deliberately marks the live mesh non-editable while it is invisible, so an
+// artist cannot sculpt something they cannot see. The consequence is that an artist's work can land
+// in the ASSET, where bArtistEdited cannot see it (it is raised by
+// UDynamicMeshComponent::OnMeshChanged, which a static-mesh edit never fires) and where MeshRevision
+// cannot see it either, so IsBakeStale stays false.
+//
+// HouseForge.Bake.HandEditWhileBakedUnbakes above proves the safety net on the path that CANNOT
+// happen - it sculpts GetMeshComponent() directly, which the tool target manager will not give a
+// real artist. These three cover the path that can.
+
+namespace HFBakeTest
+{
+	/**
+	 * Writes to a baked asset the way a Modeling Tool's Accept does: a new mesh description, committed.
+	 *
+	 * Deliberately NOT through any HouseForge path. The whole point is to be the thing HouseForge
+	 * cannot see happening.
+	 *
+	 * @return true when the asset's geometry actually changed.
+	 */
+	bool SculptTheAsset(UStaticMesh* Asset, const FVector3f& Offset)
+	{
+		if (Asset == nullptr)
+		{
+			return false;
+		}
+
+		FStaticMeshCompilingManager::Get().FinishCompilation({ Asset });
+
+		FMeshDescription* Description = Asset->GetMeshDescription(0);
+		if (Description == nullptr)
+		{
+			return false;
+		}
+
+		FStaticMeshAttributes Attributes(*Description);
+		TVertexAttributesRef<FVector3f> Positions = Attributes.GetVertexPositions();
+
+		int32 Moved = 0;
+		for (const FVertexID Vertex : Description->Vertices().GetElementIDs())
+		{
+			Positions[Vertex] = Positions[Vertex] + Offset;
+			++Moved;
+		}
+
+		Asset->Modify();
+		Asset->CommitMeshDescription(0);
+		Asset->Build(/*bInSilent*/ true);
+		Asset->PostEditChange();
+		FStaticMeshCompilingManager::Get().FinishCompilation({ Asset });
+
+		return Moved > 0;
+	}
+
+	/** The asset's own geometry, as something comparable. Positions and counts, nothing else. */
+	FString AssetPrint(UStaticMesh* Asset)
+	{
+		if (Asset == nullptr)
+		{
+			return TEXT("<none>");
+		}
+
+		FStaticMeshCompilingManager::Get().FinishCompilation({ Asset });
+
+		const FMeshDescription* Description = Asset->GetMeshDescription(0);
+		if (Description == nullptr)
+		{
+			return TEXT("<no description>");
+		}
+
+		const FStaticMeshConstAttributes Attributes(*Description);
+		TVertexAttributesConstRef<FVector3f> Positions = Attributes.GetVertexPositions();
+
+		FVector3f Sum = FVector3f::ZeroVector;
+		for (const FVertexID Vertex : Description->Vertices().GetElementIDs())
+		{
+			Sum += Positions[Vertex];
+		}
+
+		return FString::Printf(TEXT("v=%d t=%d sum=%.4f,%.4f,%.4f"),
+			Description->Vertices().Num(), Description->Triangles().Num(), Sum.X, Sum.Y, Sum.Z);
+	}
+}
+
+/**
+ * A RE-BAKE DOES NOT OVERWRITE AN ASSET SOMEBODY HAS EDITED.
+ *
+ * Rule 04: "Overwriting modelling work is a silent, unrecoverable loss." This is the one path in
+ * the whole feature where the artist's hands and the bake actually meet, and it used to lose.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeRefusesEditedAssetTest,
+	"HouseForge.Bake.ABakedAssetEditedByHandIsNotOverwritten", HF_TEST_FLAGS)
+
+bool FHFBakeRefusesEditedAssetTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFWallActor* Wall = HFBakeTest::SpawnWall(World, TEXT("W_AssetEdit"));
+	if (!TestNotNull(TEXT("A wall spawns"), Wall))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ HFBakeTest::ForgetAssets(Wall); if (IsValid(Wall)) { Wall->Destroy(); } };
+
+	FHFBakeReport First;
+	if (!TestTrue(TEXT("It bakes"), FHFBakeService::BakeElement(Wall, First)))
+	{
+		AddError(First.Summary());
+		return false;
+	}
+
+	UStaticMesh* Asset = Wall->BakedParts[0].BakedMesh;
+	if (!TestNotNull(TEXT("The bake produced an asset"), Asset))
+	{
+		return false;
+	}
+
+	TestNotEqual(TEXT("The bake recorded a content fingerprint, which is what makes the refusal possible"),
+		Wall->BakedParts[0].BakedContentHash, static_cast<int64>(0));
+
+	// A Modeling Tool's Accept, in everything but name.
+	if (!TestTrue(TEXT("The asset can be sculpted"), HFBakeTest::SculptTheAsset(Asset, FVector3f(0.0f, 0.0f, 11.0f))))
+	{
+		return false;
+	}
+
+	const FString Sculpted = HFBakeTest::AssetPrint(Asset);
+	AddInfo(FString::Printf(TEXT("The asset after the sculpt: %s"), *Sculpted));
+
+	// And now the thing that used to flatten it: an ordinary parameter change on a baked element,
+	// which regenerates and re-bakes.
+	Wall->Wall.Height = 250.0;
+	Wall->Regenerate();
+
+	FHFBakeReport Second;
+	const bool bBaked = FHFBakeService::BakeElement(Wall, Second);
+	AddInfo(Second.Summary());
+
+	TestFalse(TEXT("The re-bake does not report success, because it deliberately did not write"), bBaked);
+	TestEqual(TEXT("It names the element whose asset it refused to overwrite"), Second.HandEdited.Num(), 1);
+	TestTrue(TEXT("And the part is flagged, so the panel and every report can say so"),
+		Wall->HasHandEditedBakedAsset());
+
+	TestEqual(TEXT("THE SCULPT IS STILL THERE, vertex for vertex"),
+		HFBakeTest::AssetPrint(Asset), Sculpted);
+
+	// AND IT IS STILL ON SCREEN. Falling back to the live mesh would hide the very thing that was
+	// preserved - the element would draw generated geometry while the artist's work sat in a file
+	// nobody was looking at.
+	TestEqual(TEXT("The element stays baked, so the preserved work is what is drawn"),
+		static_cast<int32>(Wall->RenderMode), static_cast<int32>(EHFRenderMode::Baked));
+	TestTrue(TEXT("And reads as stale, which is exactly what it is"), Wall->IsBakeStale());
+
+	return true;
+}
+
+/**
+ * AND THERE IS A WAY OUT. A refusal that had no next step would just be a stuck element.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeAdoptEditedAssetTest,
+	"HouseForge.Bake.AdoptingBakedAssetEditsBringsThemIntoTheLiveMesh", HF_TEST_FLAGS)
+
+bool FHFBakeAdoptEditedAssetTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFWallActor* Wall = HFBakeTest::SpawnWall(World, TEXT("W_Adopt"));
+	if (!TestNotNull(TEXT("A wall spawns"), Wall))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ HFBakeTest::ForgetAssets(Wall); if (IsValid(Wall)) { Wall->Destroy(); } };
+
+	FHFBakeReport First;
+	if (!TestTrue(TEXT("It bakes"), FHFBakeService::BakeElement(Wall, First)))
+	{
+		AddError(First.Summary());
+		return false;
+	}
+
+	UStaticMesh* Asset = Wall->BakedParts[0].BakedMesh;
+	const HFBakeTest::FMeshPrint Before = HFBakeTest::Print(Wall->GetMeshComponent());
+
+	if (!TestTrue(TEXT("The asset can be sculpted"), HFBakeTest::SculptTheAsset(Asset, FVector3f(0.0f, 0.0f, 13.0f))))
+	{
+		return false;
+	}
+
+	// The refusal, which is what sets the flag adoption keys on.
+	FHFBakeReport Refused;
+	FHFBakeService::BakeElement(Wall, Refused);
+	if (!TestTrue(TEXT("The re-bake refused, so there is something to adopt"), Wall->HasHandEditedBakedAsset()))
+	{
+		return false;
+	}
+
+	FHFBakeReport Adopt;
+	AHFElementActor* Elements[] = { Wall };
+	const int32 Adopted = FHFBakeService::AdoptBakedAssetEdits(Elements, Adopt);
+	AddInfo(Adopt.Summary());
+
+	TestEqual(TEXT("One part was adopted"), Adopted, 1);
+
+	const HFBakeTest::FMeshPrint After = HFBakeTest::Print(Wall->GetMeshComponent());
+	AddInfo(FString::Printf(TEXT("Live mesh centroid before %s, after %s"),
+		*Before.Centroid.ToString(), *After.Centroid.ToString()));
+
+	TestFalse(TEXT("The live mesh is no longer what the generator made - the sculpt came home"),
+		Before == After);
+	TestTrue(TEXT("It moved up by the amount the asset was sculpted by"),
+		FMath::IsNearlyEqual(After.Centroid.Z - Before.Centroid.Z, 13.0, 0.01));
+
+	// THE FLAG THAT MAKES IT STICK. Without this the next regeneration would throw the adopted sculpt
+	// away, which is the same loss arriving one step later.
+	TestTrue(TEXT("The element is marked hand-edited, so it stops regenerating"), Wall->bArtistEdited);
+	TestEqual(TEXT("And it is showing the live mesh, which is now the thing that was sculpted"),
+		static_cast<int32>(Wall->RenderMode), static_cast<int32>(EHFRenderMode::Dynamic));
+	TestFalse(TEXT("Nothing is left flagged as an un-adopted edit"), Wall->HasHandEditedBakedAsset());
+
+	// And a bake now writes the sculpted form, because it IS the element's geometry.
+	FHFBakeReport Again;
+	TestTrue(TEXT("Baking again succeeds, because the asset and the element agree once more"),
+		FHFBakeService::BakeElement(Wall, Again));
+
+	return true;
+}
+
+/**
+ * AN ASSET THAT BELONGS TO ANOTHER ELEMENT IS NEVER OVERWRITTEN.
+ *
+ * The way to get here in practice is a DUPLICATED level: asset names are a function of the element id
+ * alone, so both copies want the same path, and the copy would rewrite the original's geometry in
+ * place and re-stamp it - after which the original's orphan scan cannot even see it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeForeignAssetTest,
+	"HouseForge.Bake.AnotherElementsAssetIsNotOverwritten", HF_TEST_FLAGS)
+
+bool FHFBakeForeignAssetTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	// TWO walls with the SAME element id, which is exactly what a duplicated level produces.
+	AHFWallActor* First = HFBakeTest::SpawnWall(World, TEXT("W_Twin"));
+	AHFWallActor* Second = HFBakeTest::SpawnWall(World, TEXT("W_Twin"));
+	if (!TestNotNull(TEXT("Two walls spawn"), First) || !TestNotNull(TEXT("Two walls spawn"), Second))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		HFBakeTest::ForgetAssets(First);
+		HFBakeTest::ForgetAssets(Second);
+		if (IsValid(First)) { First->Destroy(); }
+		if (IsValid(Second)) { Second->Destroy(); }
+	};
+
+	// The second one is a different shape, so overwriting would be visible rather than a no-op.
+	Second->Wall.Height = 220.0;
+	Second->Regenerate();
+
+	FHFBakeReport ReportA;
+	if (!TestTrue(TEXT("The first bakes"), FHFBakeService::BakeElement(First, ReportA)))
+	{
+		AddError(ReportA.Summary());
+		return false;
+	}
+
+	UStaticMesh* Original = First->BakedParts[0].BakedMesh;
+	const FString Untouched = HFBakeTest::AssetPrint(Original);
+	const FSoftObjectPath OriginalPath = First->BakedParts[0].BakedAssetPath;
+
+	FHFBakeReport ReportB;
+	TestTrue(TEXT("The second bakes too rather than failing - moving aside costs one asset, failing costs the whole flat"),
+		FHFBakeService::BakeElement(Second, ReportB));
+	AddInfo(ReportB.Summary());
+
+	UStaticMesh* Twin = Second->BakedParts[0].BakedMesh;
+	if (!TestNotNull(TEXT("The second element got an asset"), Twin))
+	{
+		return false;
+	}
+
+	AddInfo(FString::Printf(TEXT("First '%s', second '%s'"),
+		*OriginalPath.ToString(), *Second->BakedParts[0].BakedAssetPath.ToString()));
+
+	TestNotEqual(TEXT("The second element was given its own asset path"),
+		Second->BakedParts[0].BakedAssetPath, OriginalPath);
+	TestEqual(TEXT("And the first element's asset is untouched, vertex for vertex"),
+		HFBakeTest::AssetPrint(Original), Untouched);
+
+	return true;
+}
+
+/**
+ * REBAKE STALE REPAIRS AN ASSET THAT WAS DELETED, which is the one thing that breaks on its own.
+ *
+ * It used to require HasAnyBakedAsset(), which is FALSE precisely when the asset has gone - so the
+ * feature's one repair button skipped the elements that most needed it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeRebakeMissingTest,
+	"HouseForge.Editor.Bake.RebakeStaleRepairsAMissingAsset", HF_TEST_FLAGS)
+
+bool FHFBakeRebakeMissingTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFWallActor* Wall = HFBakeTest::SpawnWall(World, TEXT("W_Repair"));
+	if (!TestNotNull(TEXT("A wall spawns"), Wall))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ HFBakeTest::ForgetAssets(Wall); if (IsValid(Wall)) { Wall->Destroy(); } };
+
+	FHFBakeReport First;
+	if (!TestTrue(TEXT("It bakes"), FHFBakeService::BakeElement(Wall, First)))
+	{
+		AddError(First.Summary());
+		return false;
+	}
+
+	// The asset is force-deleted in the Content Browser while the level is closed: the pointer goes,
+	// the path stays. Simulated by dropping the pointer, which is exactly what the load-time
+	// reconciliation sees.
+	Wall->BakedParts[0].BakedMesh = nullptr;
+	Wall->ReconcileBakeState();
+
+	TestTrue(TEXT("The element knows its asset is missing"), Wall->bBakeAssetMissing);
+	TestFalse(TEXT("And so HasAnyBakedAsset is false, which is what used to make it invisible to the repair"),
+		Wall->HasAnyBakedAsset());
+	TestEqual(TEXT("It is showing its live mesh rather than a hole"),
+		static_cast<int32>(Wall->RenderMode), static_cast<int32>(EHFRenderMode::Dynamic));
+
+	FHFBakeReport Repair;
+	FHFBakeService::RebakeStale(World, Repair);
+	AddInfo(Repair.Summary());
+
+	TestTrue(TEXT("Rebake Stale put the asset back"), Wall->HasAllBakedAssets());
+	TestEqual(TEXT("And the element is baked again, so it is back in the Lumen scene"),
+		static_cast<int32>(Wall->RenderMode), static_cast<int32>(EHFRenderMode::Baked));
+	TestFalse(TEXT("With nothing still reported missing"), Wall->bBakeAssetMissing);
+
+	return true;
+}
+
+/**
+ * RE-BAKING RE-ASSERTS COMPLEX-AS-SIMPLE COLLISION.
+ *
+ * Collision Complexity is editable in the Static Mesh Editor, and the update path never re-declared
+ * it - so an asset a user had set to "Use Simple As Complex" kept that setting through every
+ * subsequent re-bake. The element renders exactly right and a walkthrough pawn passes through it,
+ * which is rule 04's collision requirement failing in the least visible way there is.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeRebakeTraceFlagTest,
+	"HouseForge.Bake.RebakingReassertsComplexAsSimpleCollision", HF_TEST_FLAGS)
+
+bool FHFBakeRebakeTraceFlagTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is open"), World))
+	{
+		return false;
+	}
+
+	AHFWallActor* Wall = HFBakeTest::SpawnWall(World, TEXT("W_Trace"));
+	if (!TestNotNull(TEXT("A wall spawns"), Wall))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ HFBakeTest::ForgetAssets(Wall); if (IsValid(Wall)) { Wall->Destroy(); } };
+
+	FHFBakeReport First;
+	if (!TestTrue(TEXT("It bakes"), FHFBakeService::BakeElement(Wall, First)))
+	{
+		AddError(First.Summary());
+		return false;
+	}
+
+	UStaticMesh* Asset = Wall->BakedParts[0].BakedMesh;
+	UBodySetup* Body = Asset != nullptr ? Asset->GetBodySetup() : nullptr;
+	if (!TestNotNull(TEXT("The baked asset has a body setup"), Body))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("A fresh bake is complex-as-simple, so collision matches the visual mesh"),
+		static_cast<int32>(Body->CollisionTraceFlag), static_cast<int32>(CTF_UseComplexAsSimple));
+
+	// What a user does in the Static Mesh Editor when they are trying to make something cheaper.
+	Body->CollisionTraceFlag = CTF_UseSimpleAsComplex;
+
+	Wall->Wall.Height = 260.0;
+	Wall->Regenerate();
+
+	FHFBakeReport Second;
+	FHFBakeService::BakeElement(Wall, Second);
+	AddInfo(Second.Summary());
+
+	Body = Wall->BakedParts[0].BakedMesh != nullptr ? Wall->BakedParts[0].BakedMesh->GetBodySetup() : nullptr;
+	if (!TestNotNull(TEXT("The re-baked asset still has a body setup"), Body))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("The re-bake put complex-as-simple back, so the wall is still solid"),
+		static_cast<int32>(Body->CollisionTraceFlag), static_cast<int32>(CTF_UseComplexAsSimple));
 
 	return true;
 }

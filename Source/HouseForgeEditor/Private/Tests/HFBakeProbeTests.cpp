@@ -289,6 +289,19 @@ bool FHFBakeProbeToolTargetTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("In baked mode a non-editable dynamic mesh leaves the baked asset as the only candidate"),
 		BakedMode.Count, 1);
 
+	// AND WHAT THAT ONE CANDIDATE IS. Asserted rather than recorded, which is the change this row
+	// needed: it has been printing StaticMeshComponentToolTarget in every gate run since the probe was
+	// written, and nothing read it. That is the whole hazard - in Baked mode a Modeling Tool edits the
+	// BAKED ASSET - and the plugin now depends on knowing it, because FHFBakeService refuses to
+	// overwrite an asset whose geometry has moved on and AdoptBakedAssetEdits is the way back.
+	//
+	// If a future engine version makes Baked mode target the dynamic mesh instead, this fails and the
+	// refusal machinery gets re-derived rather than quietly becoming dead weight.
+	TestEqual(TEXT("In baked mode the one candidate is the BAKED ASSET, which is why a re-bake must refuse to overwrite an edited one"),
+		BakedMode.TargetClass, FString(TEXT("StaticMeshComponentToolTarget")));
+	TestEqual(TEXT("In baked mode the target is backed by the static mesh component, not the live one"),
+		BakedMode.BackingComponent, FString(TEXT("StaticMeshComponent")));
+
 	// Recorded rather than asserted: these are the measurements the design needed.
 	AddInfo(FString::Printf(
 		TEXT("SUMMARY visible=%s/%d hidden=%s/%d unregistered=%s/%d bakedmode=%s/%d cleared=%s/%d none=%s/%d"),

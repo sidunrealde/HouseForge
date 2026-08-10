@@ -928,6 +928,22 @@ int32 FHFBakeService::AdoptBakedAssetEdits(TArrayView<AHFElementActor* const> El
 			Element->AdoptHandEditedMesh(Index, MoveTemp(Live));
 			++Adopted;
 
+			// AND THE FINGERPRINT, which is what the refusal actually keys on.
+			//
+			// AdoptHandEditedMesh clears bBakedAssetHandEdited, but the refusal in WritePart compares
+			// BakedContentHash against the asset's geometry - not the flag. Leaving the stale hash
+			// there made adoption a half-measure that read as a whole one: the element said the asset
+			// was its own again while still carrying the exact evidence that it was not, so the next
+			// bake refused all over again and the only way out was to delete the asset.
+			//
+			// The asset is the authority here, not the live mesh. Adoption converted it through
+			// FMeshDescriptionToDynamicMesh, and a round trip back out is not guaranteed bit-identical
+			// - so hash what is actually on disk rather than what a re-bake is predicted to write.
+			if (Element->BakedParts.IsValidIndex(Index))
+			{
+				Element->BakedParts[Index].BakedContentHash = ContentHashOf(Asset);
+			}
+
 			Report.Messages.Add(FString::Printf(
 				TEXT("'%s' part %d: the edits made to '%s' are now its live mesh, and it is marked hand-edited."),
 				*Element->GetName(), Index, *Asset->GetName()));

@@ -339,8 +339,17 @@ namespace HouseForgeFlat
 			{ TEXT("F_Kitchen_BaseNW.Shutter_0_0_0"), TEXT("F_Kitchen_BaseW"), 1.0,
 				TEXT("And the north run's end door sweeping back across the west run. The two are one problem and one fixture type would settle both.") },
 
-			{ TEXT("F_Util_Washer.Porthole"), TEXT("W_Kitchen_Util"), 6.0,
-				TEXT("A front-loader's porthole is hung on the left and opens about 160 degrees. This one stands 70 mm off the utility's west wall, so the door reaches it at four fifths open. The real answer is the right-hand machine every manufacturer also sells, which needs a hinge hand on FHFWashingMachineParams and a composing layer that picks it from what is beside the machine - the hinge-hand equivalent of AHFCasedGoodsActor::bBankAtRunStart. The room cannot be made wider: it is 1200 and the machine is 600.") },
+			// GONE, AND DELIBERATELY NOT LEFT HERE AS A HARMLESS ENTRY.
+			//
+			// 'F_Util_Washer.Porthole' reached 6.0 cm into 'W_Kitchen_Util', and this list carried it
+			// with its own fix written into the note: a hinge hand on FHFWashingMachineParams and a
+			// composing layer that picks it from what is beside the machine. Both now exist, the
+			// utility gets the right-hand machine every manufacturer also sells, and its swing is cut
+			// to what the room actually gives it.
+			//
+			// A stale entry here is not inert. Anything matching a recorded pair is downgraded from a
+			// foul to a warning up to the recorded depth, so leaving this one would quietly re-arm six
+			// centimetres of tolerance round that door for whatever changes next.
 		};
 
 		return Known;
