@@ -445,16 +445,61 @@ FHFOperationResult UHFEditorSubsystem::SpawnHouse(const FHFHouseSpec& Spec)
 		return FHFOperationResult::Fail(TEXT("No editor world is open."));
 	}
 
-	// One house per level. Replacing rather than adding keeps GetSpecJson unambiguous.
+	// ============================================ A RE-APPLY GOES INTO THE HOUSE THAT IS ALREADY THERE
 	//
-	// The elements go first, explicitly. AHFHouseActor::Destroyed does this too, but saying it here
-	// as well is what makes the central workflow - read drawing, build, screenshot, correct, rebuild
-	// - safe to read: without it the level ends up holding the wrong house and the right one,
-	// superimposed, while the log line reports the new house's element count and reads correct.
+	// This used to destroy every house in the level and spawn a fresh one, which took every element
+	// actor with it. Measured end to end: build the sample flat, sculpt a wall, bake it, then call
+	// apply_spec again with the same spec - which IS the documented "read drawing, build, screenshot,
+	// correct, rebuild" loop and the only tool a model has for re-applying a corrected spec. The
+	// replacement wall came back artist_edited=False, render_mode=DYNAMIC, baked_parts=0. The sculpt
+	// and the bake were gone and the returned message said nothing about either.
+	//
+	// AHFHouseActor::BuildGeometry was carefully built around exactly this: it preserves hand-edited
+	// elements, re-parameterises baked ones, carries poses across and now prunes what the new spec
+	// dropped. ModifyElement and DeleteElement already go through SetSpec and get all of it. This one
+	// route bypassed the lot.
+	//
+	// So the house is REUSED when there is one. Destroying is kept only for the case it was written
+	// for - a second house that should not be there - and for a genuinely new level, which by
+	// definition has none.
+	AHFHouseActor* Existing = nullptr;
 	for (TActorIterator<AHFHouseActor> It(World); It; ++It)
 	{
+		if (Existing == nullptr)
+		{
+			Existing = *It;
+			continue;
+		}
+
+		// One house per level. Replacing rather than adding keeps GetSpecJson unambiguous.
 		It->ClearGeometry();
 		World->DestroyActor(*It);
+	}
+
+	if (Existing != nullptr)
+	{
+		// What is about to be carried across, counted BEFORE the rebuild so it can be reported. An MCP
+		// caller cannot see a dialog, and this is the operation with the most to lose.
+		int32 HandEdited = 0;
+		int32 Baked = 0;
+		for (AActor* Element : Existing->ElementActors)
+		{
+			const AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+			if (!IsValid(Typed))
+			{
+				continue;
+			}
+			HandEdited += Typed->bArtistEdited ? 1 : 0;
+			Baked += Typed->HasAnyBakedAsset() ? 1 : 0;
+		}
+
+		Existing->Modify();
+		Existing->SetActorLabel(Spec.Name.IsEmpty() ? TEXT("HouseForge House") : Spec.Name);
+		Existing->SetSpec(Spec);
+
+		return FHFOperationResult::Ok(FString::Printf(
+			TEXT("Applied to the house already in this level, so nothing was destroyed: %d hand-edited element(s) and %d baked element(s) were carried across. Elements the new spec no longer contains were removed and their baked assets left on disk."),
+			HandEdited, Baked));
 	}
 
 	FActorSpawnParameters Params;
@@ -875,6 +920,116 @@ FHFOperationResult UHFEditorSubsystem::RebakeStale(FString& OutReport)
 	return (Report.ElementsFailed > 0)
 		? FHFOperationResult::Fail(OutReport)
 		: FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::FindBakedOrphans(FString& OutReport) const
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	TArray<FAssetData> Orphans;
+	FHFBakeService::FindOrphans(World, Orphans);
+
+	if (Orphans.IsEmpty())
+	{
+		OutReport = TEXT("No unclaimed baked assets in this level's folder.");
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	TArray<FString> Lines;
+	Lines.Reserve(Orphans.Num());
+	for (const FAssetData& Orphan : Orphans)
+	{
+		Lines.Add(Orphan.GetSoftObjectPath().ToString());
+	}
+	Lines.Sort();
+
+	OutReport = FString::Printf(
+		TEXT("%d baked asset(s) in this level's folder are claimed by no element. Nothing has been deleted; call DeleteBakedOrphans to remove them.\n  %s"),
+		Orphans.Num(), *FString::Join(Lines, TEXT("\n  ")));
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::DeleteBakedOrphans(FString& OutReport)
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	// RE-SCANNED rather than acting on a list handed in. A delete that trusted a caller's list could
+	// be handed a picture of the level from before something was baked, and would then delete an asset
+	// an element is currently drawing.
+	TArray<FAssetData> Orphans;
+	FHFBakeService::FindOrphans(World, Orphans);
+
+	if (Orphans.IsEmpty())
+	{
+		OutReport = TEXT("No unclaimed baked assets in this level's folder; nothing was deleted.");
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	FString Error;
+	const int32 Deleted = FHFBakeService::DeleteOrphans(Orphans, Error);
+
+	OutReport = FString::Printf(TEXT("Deleted %d of %d unclaimed baked asset(s).%s"),
+		Deleted, Orphans.Num(), Error.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" %s"), *Error));
+
+	return Error.IsEmpty() ? FHFOperationResult::Ok(OutReport) : FHFOperationResult::Fail(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::AdoptBakedAssetEdits(const TArray<FString>& ElementIds, FString& OutReport)
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	TSet<FName> Wanted;
+	for (const FString& Id : ElementIds)
+	{
+		Wanted.Add(FName(*Id));
+	}
+
+	TArray<AHFElementActor*> Elements;
+	FHFBakeService::GatherElements(World, Elements);
+
+	TArray<AHFElementActor*> Chosen;
+	for (AHFElementActor* Element : Elements)
+	{
+		if (IsValid(Element) && Element->HasHandEditedBakedAsset()
+			&& (Wanted.IsEmpty() || Wanted.Contains(Element->ElementId)))
+		{
+			Chosen.Add(Element);
+		}
+	}
+
+	if (Chosen.IsEmpty())
+	{
+		OutReport = TEXT("No element has a baked asset that was edited after it was baked.");
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	FHFBakeReport Report;
+	const int32 Adopted = FHFBakeService::AdoptBakedAssetEdits(Chosen, Report);
+
+	OutReport = FString::Printf(
+		TEXT("%d part(s) across %d element(s) adopted. Those elements are now hand-edited and showing their live meshes; bake them again to put the edits back on disk.%s"),
+		Adopted, Chosen.Num(), *Report.Summary());
+
+	return FHFOperationResult::Ok(OutReport);
 }
 
 FHFOperationResult UHFEditorSubsystem::CheckLumenCoverage(FString& OutReport) const

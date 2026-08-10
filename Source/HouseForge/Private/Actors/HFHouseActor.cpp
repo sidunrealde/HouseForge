@@ -2072,6 +2072,19 @@ void AHFHouseActor::BuildGeometry()
 	// rather than skipped by it, and the bake follows the geometry through FlushPendingRebake.
 	TMap<TPair<UClass*, FName>, AHFElementActor*> PreservedForBake;
 
+	// AND WHICH OF THEM THE NEW SPEC ACTUALLY ASKED FOR.
+	//
+	// Without this, preservation is a one-way ratchet. HasAnyBakedAsset() becomes true on an element's
+	// first bake and never becomes false again - unbake deliberately keeps every asset - so from then
+	// on the element is preserved on every rebuild, whether or not the spec still contains it. The
+	// primary workflow is "Claude reads a revised drawing, produces a new spec, applies it", and on a
+	// flat that had ever been baked that silently kept every fixture, wall and opening the revision
+	// DELETED, still rendering the old plan. The user's correction was not applied and nothing said so.
+	//
+	// Preserved (hand-edited) is deliberately NOT pruned: that is a user opt-out, where keeping the
+	// actor is the whole point. "Has ever been baked" is not the same bargain.
+	TSet<TPair<UClass*, FName>> ClaimedForBake;
+
 	// Open amounts are user state, exactly as a hand edit is. The elements themselves are respawned
 	// here, so a pose held only on the actor would die with it and every door in the flat would slam
 	// shut on a rebuild. Poses are carried across by element id and put back once the parts exist.
@@ -2165,6 +2178,10 @@ void AHFHouseActor::BuildGeometry()
 		// precisely the silent lie bAutoRebakeOnRegenerate exists to prevent.
 		if (AHFElementActor** Existing = PreservedForBake.Find({ Class, Id }))
 		{
+			// CLAIMED, and the record of that is what stops this preservation becoming a leak. See the
+			// prune at the end of this function.
+			ClaimedForBake.Add({ Class, Id });
+
 			// Re-seeded exactly as a fresh one is. The house is the only thing that reads the project
 			// settings, so a preserved element that kept last run's chamfer figures would be the one
 			// element in the flat finished differently from its neighbours.
@@ -2535,12 +2552,47 @@ void AHFHouseActor::BuildGeometry()
 	// rather than only when a table is set: with no table this clears table-driven overrides, which
 	// is what has to happen when somebody empties the setting and rebuilds expecting the procedural
 	// flat back.
+	// ------------------------------------------------- and what the new spec no longer contains
+	//
+	// THE PRUNE THAT MAKES PRESERVATION SAFE. Every element kept because it had been baked, or because
+	// somebody had hand-picked an asset for it, was added to Survivors before the spawn passes ran.
+	// The ones the new spec claimed came back through the Spawn lambda and were re-parameterised; the
+	// ones it did not are elements the revision DELETED, and they were staying in the level rendering
+	// the previous plan.
+	//
+	// Their assets are left on disk. That is deliberate and it is what the orphan scan is for - the
+	// element is gone, the asset is unclaimed, and FindBakedOrphans can now offer it with the user
+	// looking at it. Deleting assets from a rebuild path is not something this plugin does.
+	int32 Pruned = 0;
+	for (int32 Index = ElementActors.Num() - 1; Index >= 0; --Index)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(ElementActors[Index]);
+		if (!IsValid(Typed))
+		{
+			continue;
+		}
+
+		const TPair<UClass*, FName> Key{ Typed->GetClass(), Typed->ElementId };
+		if (!PreservedForBake.Contains(Key) || ClaimedForBake.Contains(Key))
+		{
+			continue;
+		}
+
+		UE_LOG(LogHouseForge, Log,
+			TEXT("'%s' is not in the new spec, so it has been removed. Its baked assets are left on disk and the orphan scan can offer them."),
+			*Typed->GetName());
+
+		ElementActors.RemoveAt(Index);
+		Typed->Destroy();
+		++Pruned;
+	}
+
 	RefitAssetOverrides();
 	ApplyProjectAssetMappingTable();
 
 	UE_LOG(LogHouseForge, Log,
-		TEXT("HouseForge built '%s': %d element actors, %d preserved as hand-edited."),
-		*Spec.Name, ElementActors.Num(), PreservedCount);
+		TEXT("HouseForge built '%s': %d element actors, %d preserved as hand-edited, %d removed as no longer in the spec."),
+		*Spec.Name, ElementActors.Num(), PreservedCount, Pruned);
 }
 
 int32 AHFHouseActor::ApplyProjectSettingsToCeilings()

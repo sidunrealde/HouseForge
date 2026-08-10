@@ -226,11 +226,23 @@ bool FHFSceneCapture::EnsureLumenCoverage(UWorld* World, const FHFCaptureRequest
 
 	if (Report.IsCovered())
 	{
-		// Logged on the way past rather than only on failure, so a review package carries the
-		// evidence that the flat WAS in the Lumen scene when the picture was taken. A number in the
-		// log beside the image is the difference between "this render is trustworthy" and "this
-		// render was probably fine".
-		UE_LOG(LogHouseForgeEditor, Log, TEXT("%s"), *Report.Summary());
+		// A FACT ABOUT THE LEVEL, SAID AS ONE. Not a claim about the picture that follows.
+		//
+		// This line used to read as evidence that the render was trustworthy, and that is more than a
+		// HouseForge capture can carry. Measured: the same baked flat captured three times through this
+		// path - Lumen on, r.DynamicGlobalIlluminationMethod 0, and GI plus sky light both off -
+		// produced BYTE-IDENTICAL PNGs, md5 15f7788f10d4cb0980fe8ee220afb64a, whole-frame luminance
+		// 0.377881 in all three. A USceneCaptureComponent2D runs no global illumination at all, which
+		// this file says itself a hundred lines down and FHFViewingLight says again: the light in these
+		// images is entirely the ambient cubemap the rig pins.
+		//
+		// The guard is still worth running here, because "is the flat in the Lumen scene" is a real
+		// question about the level and this is a convenient moment to ask it. But stamping a
+		// trustworthiness claim onto an image that cannot show the thing is the milestone's own failure
+		// mode reproduced inside the guard, so the wording carries the caveat.
+		UE_LOG(LogHouseForgeEditor, Log,
+			TEXT("%s (a fact about the LEVEL. This capture is an ambient-fill diagnostic view and runs no global illumination - judge lighting from a viewport HighResShot or Movie Render Queue frame, not from this image.)"),
+			*Report.Summary());
 		return true;
 	}
 

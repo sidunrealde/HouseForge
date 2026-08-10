@@ -319,6 +319,46 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
 	FHFOperationResult CheckLumenCoverage(FString& OutReport) const;
 
+	/**
+	 * Baked assets in this level's folder that no element claims any more.
+	 *
+	 * THE SCAN THAT HAD NO CALLER. FHFBakeService::FindOrphans is the stated justification for leaving
+	 * assets behind in four different places - a regeneration that drops a part, an element removed
+	 * from a revised spec, a level rebuilt, a bake refused - and until this existed nothing outside the
+	 * test suite could reach it. The consequence was visible on the development machine: 2,050 files
+	 * across five Baked folders, ~1,640 belonging to levels that no longer exist, and no way to see or
+	 * clean them except by hand.
+	 *
+	 * Scoped to the open level by the provenance stamp. An asset with no HouseForge stamp, or one
+	 * stamped for another level, is never listed however unreferenced it looks.
+	 *
+	 * @param OutReport One line per orphan, with a total.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
+	FHFOperationResult FindBakedOrphans(FString& OutReport) const;
+
+	/**
+	 * Deletes what FindBakedOrphans just listed. NOT UNDOABLE.
+	 *
+	 * LIST THEN CONFIRM, deliberately in two calls: the scan is free and reversible, the delete is
+	 * neither. Re-scans rather than trusting a list handed in, so a delete can never act on a picture
+	 * of the level from before something was baked.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
+	FHFOperationResult DeleteBakedOrphans(FString& OutReport);
+
+	/**
+	 * Takes edits made to a BAKED ASSET back into the element's live mesh, as hand edits.
+	 *
+	 * The way back from the one hazard the bake creates: in Baked mode the Modeling Tools are handed
+	 * the baked UStaticMesh, so a sculpt can land in the asset where no HouseForge flag can see it. A
+	 * re-bake refuses to overwrite such an asset; this is what turns that refusal into a workflow.
+	 *
+	 * @param ElementIds Element ids to act on. LEAVE EMPTY for every affected element.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
+	FHFOperationResult AdoptBakedAssetEdits(const TArray<FString>& ElementIds, FString& OutReport);
+
 	// ------------------------------------------------------------------ content browser assets
 	//
 	// The batch replacement pass, and the way back from it. The ASSETS panel section is a view onto

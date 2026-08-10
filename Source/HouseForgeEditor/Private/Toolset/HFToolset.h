@@ -181,6 +181,39 @@ public:
 	UFUNCTION(meta = (AICallable), Category = "HouseForge")
 	static FString CheckLumenCoverage();
 
+	/**
+	 * Lists baked static meshes in this level's folder that no element claims any more.
+	 *
+	 * The bake deliberately never deletes an asset - a regeneration that drops a wardrobe drawer, an
+	 * element the revised spec removed, a level rebuilt - so they accumulate, and this is how they are
+	 * seen. Nothing is deleted; DeleteBakedOrphans is a separate, deliberate second call.
+	 *
+	 * Scoped to the OPEN level by a provenance stamp. Assets belonging to another level, or to nobody,
+	 * are never listed however unreferenced they look from here.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString FindBakedOrphans();
+
+	/** Deletes what FindBakedOrphans lists. NOT UNDOABLE - list first and read the list. */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString DeleteBakedOrphans();
+
+	/**
+	 * Takes edits made to a BAKED ASSET back into the element's live mesh.
+	 *
+	 * While an element is baked, Unreal's Modeling Tools edit the BAKED STATIC MESH rather than the
+	 * live one - that is measured, and it is the correct thing for the engine to do, because the live
+	 * mesh is deliberately not editable while it is hidden. A re-bake therefore REFUSES to overwrite an
+	 * asset that has changed since it was baked, and reports which element.
+	 *
+	 * This is the way out of that: the asset's geometry becomes the element's live mesh, the element is
+	 * marked hand-edited and stops regenerating, and baking again writes the sculpted form back.
+	 *
+	 * @param ElementIds Comma-separated element ids. LEAVE EMPTY for every affected element.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString AdoptBakedAssetEdits(const FString& ElementIds);
+
 	// ------------------------------------------------------------------ content browser assets
 	//
 	// The replacement pass, wrapped so Claude reaches exactly the code the ASSETS panel section

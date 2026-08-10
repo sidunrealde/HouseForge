@@ -263,9 +263,33 @@ public:
 	 * @param InBakedMesh         the asset, or null to drop this part's bake
 	 * @param AtRevision          MeshRevision the asset was built from
 	 * @param bSourceWasEmpty     the source held no triangles, so producing nothing was correct
+	 * @param ContentHash         fingerprint of the asset as written; see FHFBakedPart::BakedContentHash
 	 */
 	void AdoptBakedMesh(int32 PartIndex, FName SourceComponentName, UStaticMesh* InBakedMesh, int32 AtRevision,
-		bool bSourceWasEmpty = false);
+		bool bSourceWasEmpty = false, int64 ContentHash = 0);
+
+	/** True when any part's baked asset has been written to since this element baked it. */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Bake")
+	bool HasHandEditedBakedAsset() const;
+
+	/**
+	 * THE WAY BACK FROM A SCULPT THAT LANDED IN A BAKED ASSET.
+	 *
+	 * In Baked mode the Modeling Tools target the baked UStaticMesh - measured, and correct for the
+	 * engine to do, because the live mesh is deliberately not editable while it is invisible. So an
+	 * artist's work can end up in the asset rather than in the FDynamicMesh3, where nothing regenerates
+	 * it and the next re-bake used to flatten it. FHFBakeService now refuses that overwrite; this is
+	 * how the work gets home.
+	 *
+	 * Takes the asset's geometry into the source component AS A HAND EDIT: bArtistEdited is set, the
+	 * element goes back to Dynamic, and it stops regenerating - which is exactly what would have
+	 * happened had the sculpt landed on the live mesh in the first place. Re-baking afterwards is then
+	 * an ordinary bake of the sculpted form.
+	 *
+	 * @param PartIndex index into GetBakeSourceComponents()
+	 * @param NewMesh   the asset's geometry, already converted
+	 */
+	void AdoptHandEditedMesh(int32 PartIndex, UE::Geometry::FDynamicMesh3&& NewMesh);
 
 	/**
 	 * Makes BakedParts match the current source components, destroying components for parts that no

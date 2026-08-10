@@ -201,6 +201,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Bake")
 	FString BakedAssetFolder;
 
+	/**
+	 * The level BakedAssetFolder was resolved for. What makes the folder survive being COPIED.
+	 *
+	 * A duplicated level, or one saved under a new name, carries this actor and its BakedAssetFolder
+	 * with it. Without a record of which level the folder was resolved for, the copy would carry on
+	 * baking into the ORIGINAL's folder, rewriting the original's assets in place - and re-stamping
+	 * them for the copy, so the original's orphan scan could no longer even report the damage. Both
+	 * halves are real: the folder name and the asset names are functions of the element id alone, and
+	 * they are identical in both copies.
+	 *
+	 * When this does not name the level that is open, the folder is re-resolved and this is rewritten,
+	 * so a copy quietly gets its own folder the first time it bakes.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
+	FName BakedAssetFolderLevel;
+
 	// -------------------------------------------------------------------- preview appearance
 
 	/**

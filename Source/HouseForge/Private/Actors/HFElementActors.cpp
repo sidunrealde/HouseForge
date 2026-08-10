@@ -345,6 +345,68 @@ bool AHFElementActor::HasAllBakedAssets() const
 	return bAnyReal;
 }
 
+bool AHFElementActor::HasHandEditedBakedAsset() const
+{
+	for (const FHFBakedPart& Part : BakedParts)
+	{
+		if (Part.bBakedAssetHandEdited)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void AHFElementActor::AdoptHandEditedMesh(int32 PartIndex, FDynamicMesh3&& NewMesh)
+{
+	TArray<UDynamicMeshComponent*> Sources;
+	GetBakeSourceComponents(Sources);
+
+	if (!Sources.IsValidIndex(PartIndex) || !IsValid(Sources[PartIndex]))
+	{
+		return;
+	}
+
+	// DYNAMIC FIRST, and it is not tidiness. ApplyRenderMode marks the source non-editable while
+	// baked and UDynamicMeshComponent::SetMesh refuses on that flag with an ensure, so writing before
+	// switching would fail silently and leave the sculpt in the asset with a log line saying it had
+	// been brought home. FHFEditableWriteScope covers the write itself; this covers the state after.
+	SetRenderMode(EHFRenderMode::Dynamic);
+
+	UDynamicMeshComponent* Source = Sources[PartIndex];
+
+	{
+		FHFEditableWriteScope Editable(Source);
+		Source->SetMesh(MoveTemp(NewMesh));
+		UHFMaterialLibrary::Get()->ApplyTo(Source);
+		Source->NotifyMeshUpdated();
+		Source->UpdateCollision(false);
+	}
+
+	// NOT under the bGenerating guard, deliberately. This IS an artist edit - it is the artist's
+	// sculpt, arriving by a different road - so it must read as one: the element stops regenerating
+	// and RevertToGenerated becomes the only thing allowed to discard it, exactly as rule 04 requires
+	// of work done with the Modeling Tools on a live mesh.
+	MarkMeshRevisionChanged();
+
+	if (!bArtistEdited)
+	{
+		bArtistEdited = true;
+	}
+
+	// The asset is ours again as far as refusing goes: the geometry that made this element differ from
+	// its asset is now IN the element, so a re-bake would write the same shape back rather than
+	// flattening anything.
+	if (BakedParts.IsValidIndex(PartIndex))
+	{
+		BakedParts[PartIndex].bBakedAssetHandEdited = false;
+	}
+
+	UE_LOG(LogHouseForge, Log,
+		TEXT("'%s' part %d: the edit made to its baked asset is now its live mesh, and it is marked hand-edited. Re-bake to put it back on disk."),
+		*GetName(), PartIndex);
+}
+
 bool AHFElementActor::IsBakeStale() const
 {
 	for (const FHFBakedPart& Part : BakedParts)
@@ -573,7 +635,7 @@ int32 AHFElementActor::SyncBakedPartsToSources(TArray<FSoftObjectPath>* OutOrpha
 }
 
 void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentName, UStaticMesh* InBakedMesh, int32 AtRevision,
-	bool bInSourceWasEmpty)
+	bool bInSourceWasEmpty, int64 InContentHash)
 {
 	TArray<UDynamicMeshComponent*> Sources;
 	GetBakeSourceComponents(Sources);
@@ -595,6 +657,13 @@ void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentNam
 	Part.BakedAssetPath = (InBakedMesh != nullptr) ? FSoftObjectPath(InBakedMesh) : FSoftObjectPath();
 	Part.bSourceWasEmpty = bInSourceWasEmpty;
 	Part.BakedAtMeshRevision = (InBakedMesh != nullptr || bInSourceWasEmpty) ? AtRevision : INDEX_NONE;
+
+	// THE FINGERPRINT OF WHAT WE JUST WROTE, and the flag it clears. A successful write means the
+	// asset is ours again: whatever was in it before - including a sculpt the previous bake refused to
+	// overwrite - has either been adopted into the live mesh or deliberately discarded by the user
+	// asking for this bake. See FHFBakedPart::BakedContentHash.
+	Part.BakedContentHash = InContentHash;
+	Part.bBakedAssetHandEdited = false;
 
 	if (InBakedMesh == nullptr)
 	{
@@ -987,7 +1056,21 @@ FHFAssetFitResult AHFElementActor::SetAssetOverride(const FHFAssetOverride& InOv
 		}
 	}
 
-	UHFMaterialLibrary::Get()->ApplyTo(AssetOverrideComponent);
+	// NO ROLE MATERIALS HERE, and their absence is the feature.
+	//
+	// This used to call UHFMaterialLibrary::ApplyTo on the override component. That overload writes
+	// the role set onto slot 0, 1, 2... by index, so a vendor sofa with four slots - fabric, frame,
+	// metal, cushion - came back wearing WallPaint, FloorFinish, CeilingSoffit and CoveInterior. The
+	// entire reason somebody swaps in a real asset is its authored look, and that discarded it on
+	// apply, with no way to keep it.
+	//
+	// It survived because it is invisible on a project with no material library: the role set resolves
+	// to nulls, SetMaterial(i, nullptr) falls back to the asset's own materials, and nothing looks
+	// wrong. This project has had a library since milestone 10.
+	//
+	// The slot-index-is-role-index convention is a fact about geometry HOUSEFORGE generated. An asset
+	// somebody else authored does not obey it and was never asked to. Guarded by
+	// HouseForge.Editor.Assets.AnOverrideKeepsItsOwnMaterials.
 
 	// Applied through the render-mode path rather than by setting visibility here, so there is one
 	// function that decides what draws and the bake and the override cannot disagree about it.
@@ -998,6 +1081,12 @@ FHFAssetFitResult AHFElementActor::SetAssetOverride(const FHFAssetOverride& InOv
 
 void AHFElementActor::ClearAssetOverride()
 {
+	// TRANSACTIONAL, so Ctrl+Z brings the whole override back. FHFAssetOverride carries a hand-tuned
+	// fit mode, a rotation correction and a nudge, and clearing threw all three away with no undo -
+	// which for a fixture somebody had spent ten minutes lining up is a real loss even though the
+	// geometry underneath it is untouched.
+	Modify();
+
 	AssetOverride = FHFAssetOverride();
 	LastAssetFit = FHFAssetFitResult();
 
@@ -1241,6 +1330,31 @@ void AHFElementActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChan
 		|| Changed == GET_MEMBER_NAME_CHECKED(AHFElementActor, bUnbakeOnHandEdit)
 		|| ChangedMember == GET_MEMBER_NAME_CHECKED(AHFElementActor, BakedParts))
 	{
+		return;
+	}
+
+	// TYPING AN ASSET INTO THE OVERRIDE APPLIES IT. It used to do nothing visible at all.
+	//
+	// AssetOverride is a UPROPERTY declared on this class, so picking a mesh in the details panel fell
+	// through to the catch-all Regenerate() at the bottom: the struct was filled in, no component was
+	// ever pointed at the asset, and the element rebuilt its generated geometry instead. The entry was
+	// then discarded at the next house rebuild, because BuildGeometry's preservation branch tests
+	// HasAssetOverride() - which asks the COMPONENT, correctly, and the component had nothing.
+	//
+	// So the one route an artist would reach for first was the one route that did not work, and it
+	// failed by looking like it had worked.
+	if (Changed == GET_MEMBER_NAME_CHECKED(AHFElementActor, AssetOverride)
+		|| ChangedMember == GET_MEMBER_NAME_CHECKED(AHFElementActor, AssetOverride))
+	{
+		// Through the same call the panel and the MCP tool use, so all three surfaces fit, report and
+		// revert identically. SetAssetOverride routes an empty override to ClearAssetOverride, which is
+		// what makes clearing the field in the panel put the generated mesh back.
+		const FHFAssetFitResult Result = SetAssetOverride(AssetOverride);
+
+		if (!Result.Note.IsEmpty())
+		{
+			UE_LOG(LogHouseForge, Log, TEXT("'%s': %s"), *GetName(), *Result.Note);
+		}
 		return;
 	}
 

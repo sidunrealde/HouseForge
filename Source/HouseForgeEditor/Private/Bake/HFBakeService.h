@@ -41,7 +41,37 @@ struct FHFBakeReport
 	 */
 	TArray<FSoftObjectPath> Orphaned;
 
+	/**
+	 * Elements whose baked asset had been edited since it was baked, so the bake refused to overwrite.
+	 *
+	 * The single most important line a bake report can carry, because it is the one that says work was
+	 * PRESERVED rather than written. See FHFBakedPart::BakedContentHash.
+	 */
+	TArray<TWeakObjectPtr<AHFElementActor>> HandEdited;
+
 	FString Summary() const;
+};
+
+/** What baking one part did. A struct rather than four out-parameters, because there are now five. */
+struct FHFBakePartResult
+{
+	UStaticMesh* Asset = nullptr;
+
+	/** The source held no triangles, so producing nothing was correct. Not a failure. */
+	bool bSourceWasEmpty = false;
+
+	/**
+	 * The asset at this path has been written to since HouseForge baked it, so it was left alone.
+	 *
+	 * Asset is set in this case - it is the edited asset, still the thing the element draws - and
+	 * Error carries the sentence a user needs to decide what to do about it.
+	 */
+	bool bRefusedHandEdited = false;
+
+	/** Fingerprint of the asset as written. See FHFBakedPart::BakedContentHash. */
+	int64 ContentHash = 0;
+
+	FString Error;
 };
 
 /**
@@ -135,6 +165,30 @@ public:
 	 */
 	static bool BakeElement(AHFElementActor* Element, FHFBakeReport& Report);
 
+	/**
+	 * @param bSaveNow write this element's packages before returning. False for a bulk pass, which
+	 *                 saves once at the end - 160 SavePackages round trips over a flat is most of what
+	 *                 made a whole-house bake feel like a hang.
+	 */
+	static bool BakeElement(AHFElementActor* Element, FHFBakeReport& Report, bool bSaveNow);
+
+	/**
+	 * Takes edits made to a BAKED ASSET back into the element's live mesh, as hand edits.
+	 *
+	 * THE WAY BACK FROM THE ONE HAZARD THIS FEATURE CREATES. In Baked mode the Modeling Tools are
+	 * handed the baked UStaticMesh - measured, HouseForge.Bake.Probe.ToolTargetSelection row D - and
+	 * the engine is right to do it, because the live mesh is deliberately not editable while it is
+	 * invisible. So an artist's sculpt can land in the asset, where no HouseForge flag can see it.
+	 *
+	 * BakeOnePart refuses to overwrite such an asset. This is what makes that refusal a workflow
+	 * rather than a dead end: the asset's geometry becomes the element's dynamic mesh, bArtistEdited
+	 * is set, the element goes back to Dynamic, and a subsequent bake is an ordinary bake of the
+	 * sculpted form.
+	 *
+	 * @return how many parts were adopted.
+	 */
+	static int32 AdoptBakedAssetEdits(TArrayView<AHFElementActor* const> Elements, FHFBakeReport& Report);
+
 	/** Switches one element back to its live mesh. Keeps every asset. Cannot fail. */
 	static void UnbakeElement(AHFElementActor* Element, FHFBakeReport& Report);
 
@@ -202,8 +256,7 @@ public:
 
 private:
 	/** Bakes one source component into one asset, creating or updating it. */
-	static UStaticMesh* BakeOnePart(AHFElementActor* Element, int32 PartIndex, const FString& Folder,
-		FString& OutError, bool& bOutSourceWasEmpty);
+	static FHFBakePartResult BakeOnePart(AHFElementActor* Element, int32 PartIndex, const FString& Folder);
 
 	/** SM_<Kind>_<ElementId>[_p<N>] - stable across re-bakes, which is what makes them updates. */
 	static FString AssetNameFor(const AHFElementActor* Element, int32 PartIndex);

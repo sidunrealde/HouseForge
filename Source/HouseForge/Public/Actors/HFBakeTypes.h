@@ -107,6 +107,44 @@ struct HOUSEFORGE_API FHFBakedPart
 	int32 BakedAtMeshRevision = INDEX_NONE;
 
 	/**
+	 * A fingerprint of the ASSET's own geometry as this bake left it. Zero means never taken.
+	 *
+	 * ## The one hole MeshRevision cannot see, and why this field exists
+	 *
+	 * In Baked mode the Modeling Tools are handed the BAKED ASSET, not the live mesh. That is
+	 * measured, not feared: HouseForge.Bake.Probe.ToolTargetSelection row D - the shipped Baked state
+	 * - reports one candidate and it is StaticMeshComponentToolTarget. It is also the correct answer
+	 * for the engine to give, because ApplyRenderMode deliberately marks the dynamic component
+	 * non-editable while baked so that a tool cannot edit something the artist cannot see.
+	 *
+	 * So an artist CAN sculpt a baked element, and the sculpt lands in the asset. Every guard in the
+	 * plugin was structurally unable to notice: bArtistEdited and bUnbakeOnHandEdit are both driven by
+	 * UDynamicMeshComponent::OnMeshChanged, which a static-mesh edit never raises, and MeshRevision
+	 * never moves, so IsBakeStale stays false. The next parameter change then re-baked over it - the
+	 * update path replaces the whole mesh description from the dynamic mesh - and the afternoon's work
+	 * was gone with no log line, no flag and no dialog. Exactly the loss rule 04 calls "silent,
+	 * unrecoverable".
+	 *
+	 * This is the fingerprint that closes it. FHFBakeService takes it from the asset immediately after
+	 * writing it, and re-takes it before every subsequent overwrite. A mismatch means somebody else
+	 * wrote to the asset, and the bake REFUSES rather than overwriting. See
+	 * FHFBakeService::AdoptBakedAssetEdits for the way to bring such an edit back into the live mesh.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
+	int64 BakedContentHash = 0;
+
+	/**
+	 * The asset no longer matches the fingerprint above: it has been edited outside the bake.
+	 *
+	 * Set by FHFBakeService when it declines to overwrite. The element stays BAKED and keeps showing
+	 * that edited asset, because that edit is the artist's work and showing it is the only answer that
+	 * loses nothing. Cleared by a successful bake - which means either the edit was adopted into the
+	 * live mesh, or the user explicitly discarded it.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
+	bool bBakedAssetHandEdited = false;
+
+	/**
 	 * What the SOURCE component blocked before the bake took its collision away.
 	 *
 	 * Recorded rather than assumed, and it is not pedantry: AHFArticulatedActor::ApplyPartCollision
@@ -184,6 +222,17 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = "HouseForge|Bake")
 	int32 SourceMeshRevision = INDEX_NONE;
+
+	/**
+	 * The asset's own geometry fingerprint as this bake left it. See FHFBakedPart::BakedContentHash.
+	 *
+	 * Carried on the ASSET as well as on the element because the two answer different questions. The
+	 * element's copy is what a re-bake checks; this one is what makes the check survive a level that
+	 * was duplicated, a level whose actor was deleted and re-added, and an asset found at a path some
+	 * other level's element also wants.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "HouseForge|Bake")
+	int64 ContentHash = 0;
 
 	UPROPERTY(VisibleAnywhere, Category = "HouseForge|Bake")
 	FDateTime BakedAtUtc;

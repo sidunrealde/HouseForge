@@ -404,3 +404,46 @@ FString UHFToolset::CheckLumenCoverage()
 	const FHFOperationResult Result = Editor->CheckLumenCoverage(Coverage);
 	return Report(Result);
 }
+
+FString UHFToolset::FindBakedOrphans()
+{
+	UHFEditorSubsystem* Editor = Subsystem();
+	if (Editor == nullptr)
+	{
+		return NoEditor();
+	}
+
+	FString ReportText;
+	return Report(Editor->FindBakedOrphans(ReportText));
+}
+
+FString UHFToolset::DeleteBakedOrphans()
+{
+	UHFEditorSubsystem* Editor = Subsystem();
+	if (Editor == nullptr)
+	{
+		return NoEditor();
+	}
+
+	FString ReportText;
+	return Report(Editor->DeleteBakedOrphans(ReportText));
+}
+
+FString UHFToolset::AdoptBakedAssetEdits(const FString& ElementIds)
+{
+	UHFEditorSubsystem* Editor = Subsystem();
+	if (Editor == nullptr)
+	{
+		return NoEditor();
+	}
+
+	TArray<FString> Ids;
+	ElementIds.ParseIntoArray(Ids, TEXT(","), /*InCullEmpty*/ true);
+	for (FString& Id : Ids)
+	{
+		Id.TrimStartAndEndInline();
+	}
+
+	FString ReportText;
+	return Report(Editor->AdoptBakedAssetEdits(Ids, ReportText));
+}
