@@ -344,6 +344,44 @@ function Invoke-TestStage {
     else {
         Write-Host ''
         Write-Host "GATE FAILED: no test report written to $Reports" -ForegroundColor Red
+
+        # AND SAY WHY, BECAUSE THIS MESSAGE HAS TWO VERY DIFFERENT CAUSES AND ONLY ONE OF THEM IS
+        # BENIGN. The note at $ReportDir explains the first: a concurrent gate cleared the directory
+        # underneath this one, which is a scheduling problem and nothing to do with the code.
+        #
+        # The second is that the editor CRASHED before the queue drained, which is a real defect and
+        # was being reported here as though it were the first. Seen: an access violation in
+        # UE::Geometry::FMeshBevel::ComputeUVs, reached from FHFMeshOps::BevelConvexEdges while a
+        # test built the reference flat - a hard crash in the bevel's UV path that did not reproduce
+        # on the next run. Intermittent, which is exactly the kind that gets waved through as "the
+        # gate was flaky" when nobody is shown the callstack.
+        #
+        # So the crash is surfaced here rather than left in a log nobody opens. The engine rolls its
+        # log as HouseBuilder.log, HouseBuilder_2.log and so on, and a second gate on this machine
+        # writes into the same set - so this is a POINTER at a callstack to go and read, not proof
+        # that the crash was this run's. It says so.
+        #
+        # FALSIFIED, both arms, against the log of the crash described above:
+        #   with the crash lines present - fires, naming "Fatal error!" and "Unhandled Exception:
+        #                                 EXCEPTION_ACCESS_VIOLATION reading address 0x...02".
+        #   the same log, only those lines removed - quiet, and reports the concurrent-run case.
+        # A detector that fires either way would be worse than none, so both directions were run.
+        $Crash = Get-ChildItem (Join-Path $ProjectDir 'Saved\Logs\HouseBuilder*.log') -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 5 |
+            Select-String -Pattern 'Unhandled Exception|Assertion failed|Fatal error!' |
+            Select-Object -First 3
+
+        if ($Crash) {
+            Write-Host 'An editor CRASH is in the recent logs - which is a defect, not a scheduling clash:' -ForegroundColor Red
+            foreach ($c in $Crash) {
+                Write-Host "    $(Split-Path $c.Path -Leaf): $($c.Line.Trim())" -ForegroundColor Red
+            }
+            Write-Host "    Callstack in $ProjectDir\Saved\Logs. Check the timestamp - a concurrent gate writes here too." -ForegroundColor Red
+        }
+        else {
+            Write-Host 'No crash in the recent logs, so a concurrent gate run most likely cleared the directory.' -ForegroundColor Yellow
+        }
+
         exit 1
     }
 
