@@ -696,10 +696,15 @@ enum class EHFHandleEdge : uint8
  *
  * So the routed styles are no longer only routed. Each one now routs its channel AND fits the
  * aluminium section that a real J-profile or gola IS - a thin extrusion, continuous along the run,
- * that lines the channel, stands ProfileProjection proud of the face, and returns ReturnLip back
- * across the mouth. The section carries the depth the board cannot, and the return is the part a
- * hand actually pulls on. FingerApertureCm and FingerDepthCm state what that leaves, in
- * centimetres, and HouseForge.Joinery.HandleGrip measures both on the built mesh.
+ * that lines the channel and returns ReturnLip back across its mouth, flush with the door face.
+ * THE RETURN IS THE HANDLE. Without it the channel is a slot that fingers slide out of; with it
+ * there is a lip to hook, and hooking a lip is how every handleless kitchen in the world is opened.
+ *
+ * The grip is carried by the APERTURE and the RETURN rather than by depth, because depth is the one
+ * thing a 19 mm board has not got: routed to its limit and lined, the channel is 10 mm deep. It is
+ * 27 mm across, which is nine times the reveal beside it and the whole of the "reads as the reveal
+ * gap" complaint. FingerApertureCm, FingerDepthCm and ReturnOverhangCm state all three in
+ * centimetres, and HouseForge.Joinery.HandleGrip measures them on the built mesh.
  */
 USTRUCT(BlueprintType)
 struct HOUSEFORGE_API FHFHandleParams
@@ -796,21 +801,29 @@ struct HOUSEFORGE_API FHFHandleParams
 	double RecessDepth = 1.4;
 
 	/**
-	 * How far the fitted section stands proud of the panel face.
+	 * How far the fitted section stands proud of the panel face. ZERO, and that is the whole style.
 	 *
-	 * THE SHADOW THAT MAKES A HANDLELESS RUN VISIBLE, and half of the depth a finger gets. The board
-	 * can only give up RecessDepth before it is routed in two; the section is what carries the rest,
-	 * and it carries it forward into the room where there is nothing in the way.
+	 * A HANDLELESS RUN HAS A FLAT FRONT. That is what the word means and it is the only reason
+	 * anybody specifies one, so the section is fitted flush: it lines the channel, returns across its
+	 * mouth, and its outermost face lands exactly in the plane of the door. What makes the run
+	 * legible is not a rib standing off the front, it is the 38 mm channel - a shadow band an order
+	 * of magnitude wider than the 3 mm reveal beside it.
 	 *
-	 * 10 mm is what an edge profile or a gola actually projects. Zero is a real answer - it asks for
-	 * the bare routed channel, with no section fitted and no return - and it is the shape this kit
-	 * used to produce for every recessed handle in the flat.
+	 * This was 10 mm for one gate run, and that run is the argument for the default. A centimetre of
+	 * aluminium standing off every door front is a pull rail on a kitchen sold as handleless, and it
+	 * is geometry that sweeps: HouseForge.Flat.EveryMovingPartClearsTheFlatThroughItsRange caught the
+	 * west run's blind-corner door driving 7.72 cm into W_North against a recorded 6.50, because the
+	 * proud section rides the leaf's free edge round into the masonry. At zero the section is
+	 * contained entirely within the board it is let into, so a fitted handle CANNOT enlarge a leaf's
+	 * swept envelope - the guarantee that keeps this out of every clearance in the flat.
 	 *
-	 * A sliding run has to keep this under its own TrackGap or the leaf in front grinds over it;
+	 * Non-zero is still a real answer and is why this is a parameter: a gola rail spanning a drawer
+	 * bank does stand off the fronts. Anything that swings or slides should leave it alone. A sliding
+	 * run additionally has to keep it under its own TrackGap or the leaf in front grinds over it;
 	 * FHFWardrobeKit does that clamp, because the leaf is the only thing that knows its track.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "0.0"))
-	double ProfileProjection = 1.0;
+	double ProfileProjection = 0.0;
 
 	/**
 	 * How far the section returns back across the mouth of its channel.
@@ -903,9 +916,10 @@ struct HOUSEFORGE_API FHFHandleParams
 	/**
 	 * Clear depth of the channel, from the underside of the return down to the lining's floor.
 	 *
-	 * Where the projection earns its keep. The board contributes RecessDepth less the lining, and
-	 * the section contributes everything it stands proud - which is why a 19 mm shutter can carry a
-	 * 20 mm deep handle at all.
+	 * What the board has left after it is routed and lined: RecessDepth, plus anything the section
+	 * stands proud, less the section's own floor and return. On a 19 mm leaf fitted flush that is
+	 * 10 mm, and 10 mm is all a 19 mm leaf has - see FHFJoineryKit::MinFingerDepth for why buying
+	 * more of it with ProfileProjection is a false economy.
 	 */
 	double FingerDepthCm() const;
 
@@ -1381,11 +1395,21 @@ public:
 	 * Clear depth of a routed channel, mouth to floor, in centimetres.
 	 *
 	 * Far enough for a fingertip to be inside the channel rather than resting on its lip, which is
-	 * what makes the return worth having. Unreachable by routing alone - a 19 mm shutter keeping a
-	 * 5 mm web can give up 13.5 mm - so a channel that meets this has a section fitted, by
-	 * construction.
+	 * what makes the return worth having.
+	 *
+	 * NINE MILLIMETRES BECAUSE THAT IS WHAT THE BOARD HAS. A 19 mm leaf keeping a 5 mm web and a
+	 * bed for the section can be routed 13.5 mm, and the section's own floor and return take 4 mm of
+	 * that back, so a flush-fitted handle leaves 10 mm and there is nowhere else for depth to come
+	 * from. It could be bought by standing the section proud of the door, and that is exactly what
+	 * this figure asked for when it was 16 mm - a centimetre of aluminium on the front of a
+	 * handleless kitchen, which is not the style and which swept into the north wall. See
+	 * FHFHandleParams::ProfileProjection.
+	 *
+	 * A hook is not an insertion. Ten millimetres of channel with a return over it is a fingertip
+	 * hooked under a lip, which is what a J-pull is and how every handleless kitchen is opened; the
+	 * grip is carried by MinFingerAperture and the return, not by depth.
 	 */
-	static constexpr double MinFingerDepth = 1.6;
+	static constexpr double MinFingerDepth = 0.9;
 
 	/**
 	 * How far a fitted section sinks into the board behind it, in centimetres.

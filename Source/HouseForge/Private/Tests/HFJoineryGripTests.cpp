@@ -195,12 +195,23 @@ bool FHFHandleGripTest::RunTest(const FString& Parameters)
 			Which, RevealGap, Aperture, Aperture / RevealGap),
 			Aperture >= 6.0 * RevealGap);
 
-		// And the depth is out of reach of routing alone, which is why the section exists at all. A
-		// 19 mm board keeping its web cannot give this up.
+		// THE SECTION IS CONTAINED BY THE BOARD IT IS LET INTO, which is the property that keeps a
+		// fitted handle out of every clearance in the flat: a leaf's swept envelope is the same
+		// before and after one is fitted. Bought by fitting flush - see ProfileProjection, whose one
+		// gate run at 10 mm drove the kitchen's blind-corner door 1.2 cm further into the north wall.
 		TestTrue(*FString::Printf(
-			TEXT("A %s is deeper than the board could ever be routed: %.2f cm against %.2f of board"),
-			Which, Depth, Panel.GetSize().Y - P.MinWeb),
-			Depth > Panel.GetSize().Y - P.MinWeb);
+			TEXT("A %s is contained by the leaf: it stands %.2f cm proud of the face"),
+			Which, P.ProfileProjection),
+			P.ProfileProjection <= 0.0);
+
+		// And the channel is as deep as that board can be made to give - routed to its clamp, less
+		// what the section's own floor and return take back. Stated so a change to either shows up
+		// here rather than as a handle that quietly got shallower.
+		// The bed cancels: the clamp charges it against the reserve and the section then sinks
+		// straight back into it, so what the finger gets is the board less the web and the lining.
+		const double Deepest = Panel.GetSize().Y - P.MinWeb - 2.0 * P.ProfileStock;
+		TestNearlyEqual(*FString::Printf(
+			TEXT("A %s channel is everything the board had to give"), Which), Depth, Deepest, 0.001);
 
 		// ------------------------------------------------------------------ and what it really left
 
@@ -462,21 +473,43 @@ bool FHFHandleSectionRidesWithLeafTest::RunTest(const FString& Parameters)
 
 	// A vertical section on a vertical edge runs the height of the leaf, which is what "continuous
 	// along the run" means on a wardrobe door.
+	//
+	// Depth(), not Height(). FAxisAlignedBox3d names its extents for a Y-up world: Width() is X,
+	// Height() is Y and Depth() is Z. Height() here read the section's thickness THROUGH the board -
+	// 1.40 cm, the channel and its bed - and asserted it against a 209.7 cm leaf.
 	TestNearlyEqual(TEXT("It runs the full height of the leaf"),
-		Metal.Height(), Shutter.LeafHeight(), 0.01);
+		Metal.Depth(), Shutter.LeafHeight(), 0.01);
 
-	// And it swings. Followed at the return's outer face, furthest from the hinge in the direction
-	// that matters, exactly as the bar is in HandleRidesWithPart.
+	// And it swings. Followed on the SECTION itself - a vertex carrying the handle's own role, not
+	// merely the frontmost point of the leaf. The two used to be the same thing because the section
+	// stood proud; fitted flush its face is level with the board's, so "lowest Y in the mesh" would
+	// now pick whichever board corner happened to be visited first and the assertion would be about
+	// the leaf rather than about the handle. Taken furthest from the hinge, so the swing is large
+	// enough to measure, exactly as the bar is in HandleRidesWithPart.
+	const int32 MetalGroup = FHFMeshOps::GroupForRole(P.HandleRole);
 	FVector3d Tip = FVector3d::Zero();
-	double Furthest = TNumericLimits<double>::Max();
-	for (const int32 Vid : Part.Mesh.VertexIndicesItr())
+	double Furthest = -TNumericLimits<double>::Max();
+	for (const int32 Tid : Part.Mesh.TriangleIndicesItr())
 	{
-		const FVector3d V = Part.Mesh.GetVertex(Vid);
-		if (V.Y < Furthest)
+		if (Part.Mesh.GetTriangleGroup(Tid) != MetalGroup)
 		{
-			Furthest = V.Y;
-			Tip = V;
+			continue;
 		}
+		const FIndex3i Tri = Part.Mesh.GetTriangle(Tid);
+		for (int32 Corner = 0; Corner < 3; ++Corner)
+		{
+			const FVector3d V = Part.Mesh.GetVertex(Tri[Corner]);
+			if (V.X > Furthest)
+			{
+				Furthest = V.X;
+				Tip = V;
+			}
+		}
+	}
+
+	if (!TestTrue(TEXT("There is a section vertex to follow"), Furthest > -TNumericLimits<double>::Max()))
+	{
+		return false;
 	}
 
 	FHFPartState State;
@@ -595,8 +628,9 @@ bool FHFSlidingHandleReachTest::RunTest(const FString& Parameters)
 		return FBox(Part.Mesh.GetBounds()).TransformBy(State.PoseAt(Amount));
 	};
 
-	// The back leaf's frontmost point is now its section's face. The front leaf's board runs behind
-	// its own face by its thickness; the two must not meet.
+	// Fitted flush, the back leaf's frontmost point is its own face and the running clearance is
+	// whole. That is the point rather than a weakening of it: the clamp above is what guarantees it
+	// for any projection a caller asks for, and this is what the clamp buys - the leaves pass.
 	const FBox BackShut = PosedBounds(Back, 0.0);
 	const FBox FrontShut = PosedBounds(Front, 0.0);
 
