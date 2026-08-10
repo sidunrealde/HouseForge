@@ -180,4 +180,73 @@ public:
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HouseForge")
 	static FString CheckLumenCoverage();
+
+	// ------------------------------------------------------------------ content browser assets
+	//
+	// The replacement pass, wrapped so Claude reaches exactly the code the ASSETS panel section
+	// reaches. The panel is a view onto UHFEditorSubsystem and holds no logic of its own; if these
+	// wrappers did not exist, the panel's flagship feature would be the one thing Claude could not
+	// do, and the two surfaces would drift from the day the panel was written.
+
+	/**
+	 * Lists what is in the level by fixture type, with how many of each and how many are swapped.
+	 *
+	 * Ask this first. The type names are the ones ReplaceFixtureType takes, and the counts are what
+	 * says whether a swap did anything.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString ListFixtureTypes();
+
+	/**
+	 * Replaces every generated fixture of one type with a Content Browser static mesh.
+	 *
+	 * NON-DESTRUCTIVE AND REVERSIBLE. The generated mesh is kept and hidden, its parameters are
+	 * untouched, and RevertFixturesToGenerated restores it exactly. The asset is fitted into the box
+	 * the generated fixture occupied, so it lands where the drawing put it whatever pivot its author
+	 * used.
+	 *
+	 * Fixtures somebody swapped individually are deliberately left alone.
+	 *
+	 * @param FixtureType One of the names ListFixtureTypes reports, e.g. Wardrobe, Sofa, WC.
+	 * @param AssetPath   Full object path of a UStaticMesh, e.g. /Game/Furniture/SM_Wardrobe.SM_Wardrobe.
+	 * @param FitMode     KeepAssetSize, UniformFit, StretchToFootprint or FitPlanKeepHeight.
+	 *                    UniformFit keeps the asset's proportions; StretchToFootprint fills the drawn
+	 *                    box exactly and is right for built-in joinery.
+	 * @param YawDegrees  Correction for an asset authored facing another way. Usually 0, 90, 180, 270.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString ReplaceFixtureType(const FString& FixtureType, const FString& AssetPath,
+		const FString& FitMode, float YawDegrees);
+
+	/**
+	 * What an asset would do to one fixture, without changing anything.
+	 *
+	 * An asset will never match the drawing exactly. This reports the generated size, the size the
+	 * asset would land at, how far it is being stretched and how much slack is left - so a bad fit is
+	 * something to see rather than something to discover in a render.
+	 * @param ElementId The fixture's element id, from ListElements or ListFixtureTypes.
+	 * @param AssetPath Full object path of a UStaticMesh.
+	 * @param FitMode   KeepAssetSize, UniformFit, StretchToFootprint or FitPlanKeepHeight.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString PreviewFixtureAsset(const FString& ElementId, const FString& AssetPath,
+		const FString& FitMode);
+
+	/**
+	 * THE WAY BACK. Puts generated geometry back, exactly as it was.
+	 *
+	 * The parameter structs were never discarded, so this is a switch rather than a regeneration.
+	 * @param ElementIds Comma-separated element ids. LEAVE EMPTY to revert the whole level.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString RevertFixturesToGenerated(const FString& ElementIds);
+
+	/**
+	 * Applies the project's asset mapping table across the level now.
+	 *
+	 * Every build already ends with this, so it is only needed when the table has been edited while a
+	 * house is standing.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString ApplyAssetMappingTable();
 };

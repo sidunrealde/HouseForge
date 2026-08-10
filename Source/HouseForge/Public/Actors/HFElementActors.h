@@ -463,14 +463,18 @@ protected:
 	 * guard is the exact complement of our own write. Without it, re-applying an override over an
 	 * active one would record the suppression as the thing to restore.
 	 *
-	 * Not saved. bOverrideSuppressedCollision is what says the record is meaningful, and both are
-	 * rebuilt from the components on the next apply.
+	 * SAVED, not transient, and that is load-bearing rather than tidy. An overridden element is saved
+	 * with its sources already suppressed, so a transient record would be re-taken from those
+	 * suppressed components on the next load - recording "blocks nothing" as the thing to restore.
+	 * Reverting after a save-and-reload would then hand back a fixture that is visible, editable,
+	 * correct-looking and completely passable, with nothing logged. Exactly the failure
+	 * FHFBakedPart::SourceCollisionEnabled is saved to avoid, reached by a different road.
 	 */
-	UPROPERTY(Transient)
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "HouseForge|Asset")
 	TArray<TEnumAsByte<ECollisionEnabled::Type>> PreOverrideCollision;
 
 	/** True while this override is the thing holding the source components' collision off. */
-	UPROPERTY(Transient)
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "HouseForge|Asset")
 	bool bOverrideSuppressedCollision = false;
 
 	/**

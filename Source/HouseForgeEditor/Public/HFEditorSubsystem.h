@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "Actors/HFAssetOverrideTypes.h"
 #include "CoreMinimal.h"
 #include "EditorSubsystem.h"
 #include "Materials/HFMaterialLibrary.h"
@@ -77,6 +78,50 @@ struct HOUSEFORGEEDITOR_API FHFSurfaceUsage
 	 */
 	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
 	int32 ArtistEditedElementCount = 0;
+};
+
+/**
+ * One row of the replacement panel: every generated fixture of one type, and what they are showing.
+ *
+ * GROUPED BY TYPE RATHER THAN BY ACTOR CLASS, and that distinction is the reason this struct carries
+ * the type at all. Five fixture types - a kitchen base unit, a TV console, a bedside unit, a shoe
+ * rack and a vanity - are all AHFCasedGoodsActor, so a list built from classes would offer one row
+ * for all five and a library entry chosen for a shoe rack would land on every TV console in the
+ * flat. AHFElementActor::SourceFixtureType is what makes the rows mean what they say.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGEEDITOR_API FHFFixtureGroup
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	EHFFixtureType Type = EHFFixtureType::Unknown;
+
+	/** Display name of the type, for a panel row that does not want to reflect over the enum. */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	FString TypeName;
+
+	/** Element actors of this type in the level. */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	int32 InstanceCount = 0;
+
+	/** How many of them are currently showing a Content Browser asset rather than generated geometry. */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	int32 OverriddenCount = 0;
+
+	/**
+	 * How many of those were chosen for that instance rather than placed by the mapping table.
+	 *
+	 * Shown because it is the number that says what a batch pass will and will not touch. A row
+	 * reading "2 replaced, 1 by hand" tells the user that applying a library entry here will change
+	 * one of the two and deliberately leave the other.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	int32 HandPickedCount = 0;
+
+	/** Element ids, so a panel can offer the instances individually for a subset apply. */
+	UPROPERTY(BlueprintReadOnly, Category = "HouseForge")
+	TArray<FName> ElementIds;
 };
 
 /**
@@ -273,6 +318,79 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "HouseForge|Bake")
 	FHFOperationResult CheckLumenCoverage(FString& OutReport) const;
+
+	// ------------------------------------------------------------------ content browser assets
+	//
+	// The batch replacement pass, and the way back from it. The ASSETS panel section is a view onto
+	// these and holds no logic of its own, for the same reason the material panel holds none: a swap
+	// done in the panel and the same swap done by Claude have to be the same code, or the two
+	// surfaces drift from the day the second one is written.
+	//
+	// NOTHING HERE CAN REACH A VERTEX. Every call below sets a component's mesh, transform and
+	// visibility. No FDynamicMesh3 is read or written, no Regenerate is called, and bArtistEdited is
+	// never consulted or set - which is what makes ClearAssetOverrides restore the generated mesh
+	// exactly, and what stops a swap from freezing a fixture out of future generations. Asserted by
+	// HouseForge.Editor.Assets.RevertRestoresGenerationExactly and .AnOverrideIsNotAHandEdit.
+
+	/**
+	 * What is in the level, grouped by fixture type, with how many of each and what they are showing.
+	 *
+	 * The read half of the panel: "every generated fixture in the level grouped by type with instance
+	 * counts". Also what a report reads back as, so an MCP caller can see the same list.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Assets")
+	TArray<FHFFixtureGroup> GetFixtureGroups() const;
+
+	/**
+	 * What an asset WOULD do to one element, changing nothing.
+	 *
+	 * The preview: "an asset will never match exactly and the user needs to see the mismatch before
+	 * it lands". Goes through the same FHFAssetFit::Solve the apply does, so the numbers shown are
+	 * the numbers that will happen rather than a second computation that agrees by inspection.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Assets")
+	FHFOperationResult PreviewAssetOverride(const FString& ElementId, const FHFAssetOverride& Override,
+		FHFAssetFitResult& OutFit) const;
+
+	/**
+	 * Puts an asset over every element of one fixture type.
+	 *
+	 * "Apply across all matching instances." Hand-picked overrides are left alone - see
+	 * UHFAssetMappingTable for why a batch pass must never silently revert somebody's choice.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Assets")
+	FHFOperationResult ApplyAssetToType(EHFFixtureType Type, const FHFAssetOverride& Override,
+		FString& OutReport);
+
+	/**
+	 * Puts an asset over a named set of elements and nothing else.
+	 *
+	 * "...or a hand-picked subset." These are recorded as hand-picked, so a later table pass will not
+	 * take them back.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Assets")
+	FHFOperationResult ApplyAssetToElements(const TArray<FString>& ElementIds, const FHFAssetOverride& Override,
+		FString& OutReport);
+
+	/**
+	 * THE WAY BACK, for a named set of elements. Restores the generated mesh exactly.
+	 *
+	 * An empty list clears every override in the level, table-driven and hand-picked alike. Separate
+	 * from the apply path rather than "apply a null asset" because it is the control a user reaches
+	 * for when something has gone wrong, and it should not be spelled as a special case of the thing
+	 * that went wrong.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Assets")
+	FHFOperationResult ClearAssetOverrides(const TArray<FString>& ElementIds, FString& OutReport);
+
+	/**
+	 * Applies the project's mapping table across the whole level, now.
+	 *
+	 * Every build already ends with this. It is exposed so a table edited while a house is standing
+	 * can be seen without rebuilding the flat.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Assets")
+	FHFOperationResult ApplyAssetMappingTable(FString& OutReport);
 
 	// ------------------------------------------------------------------------------ surfaces
 	//

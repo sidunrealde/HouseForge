@@ -144,7 +144,9 @@ public:
 	 *
 	 * @param Table       The table to apply, or null to clear every table-driven override.
 	 * @param OutReport   Optional. One line per type, plus what could not be loaded or has no collision.
-	 * @return how many element actors ended up with a different override than they started with.
+	 * @return how many elements the pass acted on - applied an override to, or cleared one from.
+	 *         NOT how many changed appearance: a re-run over an unchanged table re-fits every one of
+	 *         them, deliberately, because the box an asset was fitted into may have moved.
 	 */
 	int32 ApplyAssetMappingTable(const class UHFAssetMappingTable* Table, TArray<FString>* OutReport = nullptr);
 

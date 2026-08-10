@@ -3,6 +3,7 @@
 #include "HFEditorSubsystem.h"
 
 #include "Actors/HFHouseActor.h"
+#include "Assets/HFAssetMappingTable.h"
 #include "Bake/HFBakeService.h"
 #include "Capture/HFLumenCoverage.h"
 #include "Capture/HFPlanSection.h"
@@ -485,6 +486,338 @@ AHFHouseActor* UHFEditorSubsystem::FindHouseActor() const
 		return *It;
 	}
 	return nullptr;
+}
+
+// ============================================================ content browser asset replacement
+//
+// Every call here sets a component's mesh, transform and visibility. Nothing reads or writes an
+// FDynamicMesh3, calls Regenerate, or touches bArtistEdited - which is what makes the revert exact.
+
+namespace
+{
+	/** The display name of a fixture type, for a panel row and for a report line. */
+	FString FixtureTypeName(EHFFixtureType Type)
+	{
+		const UEnum* Enum = StaticEnum<EHFFixtureType>();
+		return Enum != nullptr ? Enum->GetNameStringByValue(static_cast<int64>(Type)) : TEXT("Unknown");
+	}
+
+	/** Every element actor of the level's house, or an empty list when there is no house. */
+	TArray<AHFElementActor*> LevelElements(AHFHouseActor* House)
+	{
+		TArray<AHFElementActor*> Elements;
+		if (!IsValid(House))
+		{
+			return Elements;
+		}
+
+		for (AActor* Element : House->ElementActors)
+		{
+			if (AHFElementActor* Typed = Cast<AHFElementActor>(Element))
+			{
+				if (IsValid(Typed))
+				{
+					Elements.Add(Typed);
+				}
+			}
+		}
+		return Elements;
+	}
+
+	/**
+	 * Applies one override to a list of elements and writes the report every caller shows.
+	 *
+	 * Shared by the by-type and by-id paths because the only thing that differs between them is which
+	 * elements are in the list - and a second copy of the reporting is a second place for the
+	 * collision warning to be forgotten.
+	 */
+	FString ApplyOverrideTo(const TArray<AHFElementActor*>& Elements, const FHFAssetOverride& Override,
+		int32& OutApplied)
+	{
+		OutApplied = 0;
+
+		TArray<FString> Distorted;
+		TArray<FString> NoCollision;
+		TArray<FString> Failed;
+
+		for (AHFElementActor* Element : Elements)
+		{
+			const FHFAssetFitResult Fit = Element->SetAssetOverride(Override);
+			if (!Fit.bValid)
+			{
+				Failed.Add(Element->ElementId.ToString());
+				continue;
+			}
+
+			++OutApplied;
+
+			// STRETCH IS SURFACED, NOT HIDDEN. A wardrobe stretched 34% in depth is a decision the
+			// user should see, and 1.1 is not worth a line - the threshold is where an authored
+			// detail visibly stops being the shape its author drew.
+			if (Fit.WorstAxisRatio > 1.15)
+			{
+				Distorted.Add(FString::Printf(TEXT("%s %.2fx"), *Element->ElementId.ToString(), Fit.WorstAxisRatio));
+			}
+
+			if (Fit.Note.Contains(TEXT("no simple collision")))
+			{
+				NoCollision.Add(Element->ElementId.ToString());
+			}
+		}
+
+		FString Report = FString::Printf(TEXT("%d replaced."), OutApplied);
+
+		if (!Distorted.IsEmpty())
+		{
+			Report += FString::Printf(TEXT(" Stretched: %s."), *FString::Join(Distorted, TEXT(", ")));
+		}
+
+		if (!NoCollision.IsEmpty())
+		{
+			Report += FString::Printf(
+				TEXT(" NO SIMPLE COLLISION on %s - a walkthrough will pass through these. Set Collision Complexity to 'Use Complex As Simple' on the asset."),
+				*FString::Join(NoCollision, TEXT(", ")));
+		}
+
+		if (!Failed.IsEmpty())
+		{
+			Report += FString::Printf(TEXT(" Could not load the asset for: %s."), *FString::Join(Failed, TEXT(", ")));
+		}
+
+		return Report;
+	}
+}
+
+TArray<FHFFixtureGroup> UHFEditorSubsystem::GetFixtureGroups() const
+{
+	TMap<EHFFixtureType, FHFFixtureGroup> Groups;
+
+	for (AHFElementActor* Element : LevelElements(FindHouseActor()))
+	{
+		// Walls, rooms, beams and columns are not fixtures and cannot be swapped for a catalogue
+		// item, so they are absent from the list rather than present and inert.
+		if (Element->SourceFixtureType == EHFFixtureType::Unknown)
+		{
+			continue;
+		}
+
+		FHFFixtureGroup& Group = Groups.FindOrAdd(Element->SourceFixtureType);
+		Group.Type = Element->SourceFixtureType;
+		Group.TypeName = FixtureTypeName(Element->SourceFixtureType);
+		Group.InstanceCount += 1;
+		Group.ElementIds.Add(Element->ElementId);
+
+		if (Element->HasAssetOverride())
+		{
+			Group.OverriddenCount += 1;
+			if (!Element->HasTableAssetOverride())
+			{
+				Group.HandPickedCount += 1;
+			}
+		}
+	}
+
+	TArray<FHFFixtureGroup> Rows;
+	Groups.GenerateValueArray(Rows);
+
+	// Sorted by name rather than by enum order, so the list does not silently re-order itself the
+	// day a value is inserted into EHFFixtureType.
+	Rows.Sort([](const FHFFixtureGroup& A, const FHFFixtureGroup& B) { return A.TypeName < B.TypeName; });
+	return Rows;
+}
+
+FHFOperationResult UHFEditorSubsystem::PreviewAssetOverride(const FString& ElementId,
+	const FHFAssetOverride& Override, FHFAssetFitResult& OutFit) const
+{
+	const FName Id(*ElementId);
+
+	for (AHFElementActor* Element : LevelElements(FindHouseActor()))
+	{
+		if (Element->ElementId != Id)
+		{
+			continue;
+		}
+
+		OutFit = Element->PreviewAssetFit(Override);
+
+		if (!OutFit.bValid)
+		{
+			return FHFOperationResult::Fail(OutFit.Note);
+		}
+
+		return FHFOperationResult::Ok(FString::Printf(
+			TEXT("'%s' is %.0f x %.0f x %.0f as generated; the asset would land at %.0f x %.0f x %.0f (%.2fx), leaving %.0f x %.0f x %.0f of slack. %s"),
+			*ElementId,
+			OutFit.GeneratedSize.X, OutFit.GeneratedSize.Y, OutFit.GeneratedSize.Z,
+			OutFit.FittedSize.X, OutFit.FittedSize.Y, OutFit.FittedSize.Z,
+			OutFit.WorstAxisRatio,
+			OutFit.Slack.X, OutFit.Slack.Y, OutFit.Slack.Z,
+			*OutFit.Note));
+	}
+
+	return FHFOperationResult::Fail(FString::Printf(TEXT("No element '%s' in the level."), *ElementId));
+}
+
+FHFOperationResult UHFEditorSubsystem::ApplyAssetToType(EHFFixtureType Type,
+	const FHFAssetOverride& Override, FString& OutReport)
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (!IsValid(House))
+	{
+		return FHFOperationResult::Fail(TEXT("No HouseForge house in the level."));
+	}
+
+	TArray<AHFElementActor*> Matching;
+	int32 SkippedHandPicked = 0;
+
+	for (AHFElementActor* Element : LevelElements(House))
+	{
+		if (Element->SourceFixtureType != Type)
+		{
+			continue;
+		}
+
+		// HANDS OFF ANYTHING CHOSEN BY HAND, exactly as the table pass does. A by-type apply is a
+		// batch pass; reverting somebody's individual choice without saying so is the one loss this
+		// feature could cause that is invisible until a render.
+		if (Element->HasAssetOverride() && !Element->HasTableAssetOverride())
+		{
+			++SkippedHandPicked;
+			continue;
+		}
+
+		Matching.Add(Element);
+	}
+
+	if (Matching.IsEmpty() && SkippedHandPicked == 0)
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("No %s in the level."), *FixtureTypeName(Type)));
+	}
+
+	int32 Applied = 0;
+	OutReport = FString::Printf(TEXT("%s: %s"), *FixtureTypeName(Type),
+		*ApplyOverrideTo(Matching, Override, Applied));
+
+	if (SkippedHandPicked > 0)
+	{
+		OutReport += FString::Printf(
+			TEXT(" %d left alone because an asset was chosen for them individually."), SkippedHandPicked);
+	}
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::ApplyAssetToElements(const TArray<FString>& ElementIds,
+	const FHFAssetOverride& Override, FString& OutReport)
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (!IsValid(House))
+	{
+		return FHFOperationResult::Fail(TEXT("No HouseForge house in the level."));
+	}
+
+	TSet<FName> Wanted;
+	for (const FString& Id : ElementIds)
+	{
+		Wanted.Add(FName(*Id));
+	}
+
+	TArray<AHFElementActor*> Matching;
+	for (AHFElementActor* Element : LevelElements(House))
+	{
+		if (Wanted.Contains(Element->ElementId))
+		{
+			Matching.Add(Element);
+		}
+	}
+
+	if (Matching.IsEmpty())
+	{
+		return FHFOperationResult::Fail(TEXT("None of those element ids are in the level."));
+	}
+
+	// A SUBSET APPLY IS ALWAYS HAND-PICKED, whatever the caller passed. The user named these
+	// instances, so the record has to say so or the next table pass would take the choice back.
+	FHFAssetOverride ByHand = Override;
+	ByHand.SourceTable = NAME_None;
+
+	int32 Applied = 0;
+	OutReport = ApplyOverrideTo(Matching, ByHand, Applied);
+
+	if (Matching.Num() < Wanted.Num())
+	{
+		OutReport += FString::Printf(TEXT(" %d of the ids given are not in the level."),
+			Wanted.Num() - Matching.Num());
+	}
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::ClearAssetOverrides(const TArray<FString>& ElementIds, FString& OutReport)
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (!IsValid(House))
+	{
+		return FHFOperationResult::Fail(TEXT("No HouseForge house in the level."));
+	}
+
+	// An empty list means the whole level, which is what makes this usable as the panic button: the
+	// way back has to be reachable without first selecting the thing that went wrong.
+	if (ElementIds.IsEmpty())
+	{
+		const int32 Cleared = House->ClearAllAssetOverrides();
+		OutReport = FString::Printf(
+			TEXT("%d element(s) back to generated geometry. Every parameter struct is untouched, so they are exactly as they were generated."),
+			Cleared);
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	TSet<FName> Wanted;
+	for (const FString& Id : ElementIds)
+	{
+		Wanted.Add(FName(*Id));
+	}
+
+	int32 Cleared = 0;
+	for (AHFElementActor* Element : LevelElements(House))
+	{
+		if (Wanted.Contains(Element->ElementId) && Element->HasAssetOverride())
+		{
+			Element->ClearAssetOverride();
+			++Cleared;
+		}
+	}
+
+	OutReport = FString::Printf(TEXT("%d element(s) back to generated geometry."), Cleared);
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::ApplyAssetMappingTable(FString& OutReport)
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (!IsValid(House))
+	{
+		return FHFOperationResult::Fail(TEXT("No HouseForge house in the level."));
+	}
+
+	const UHFAssetMappingTable* Table = UHFAssetMappingTable::GetProjectTable();
+
+	TArray<FString> Lines;
+	const int32 Changed = House->ApplyAssetMappingTable(Table, &Lines);
+
+	if (Table == nullptr)
+	{
+		OutReport = FString::Printf(
+			TEXT("No asset mapping table is set (Project Settings > Plugins > HouseForge > Assets). %d table-driven override(s) cleared; the flat is fully procedural."),
+			Changed);
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	OutReport = FString::Printf(TEXT("'%s': %d element(s) changed. %s"),
+		*Table->GetName(), Changed, *FString::Join(Lines, TEXT(" ")));
+
+	return FHFOperationResult::Ok(OutReport);
 }
 
 FHFOperationResult UHFEditorSubsystem::SetHouseRenderMode(bool bBaked, FString& OutReport)

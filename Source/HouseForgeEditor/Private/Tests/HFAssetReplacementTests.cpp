@@ -921,6 +921,14 @@ bool FHFAssetCollisionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("...and the asset does"),
 		Wardrobe->GetAssetOverrideComponent()->GetCollisionEnabled() != ECollisionEnabled::NoCollision);
 
+	// RE-APPLIED OVER AN ACTIVE OVERRIDE, which is what a rebuild's re-fit and a second batch pass
+	// both do. The record must not be re-taken from the components we have already suppressed - it
+	// would record "blocks nothing" as the thing to restore, and the next revert would hand that
+	// back faithfully. Same guard, and same reason, as FHFBakedPart::SourceCollisionEnabled.
+	Wardrobe->SetAssetOverride(Override);
+	Wardrobe->SetAssetOverride(Override);
+	TestEqual(TEXT("Re-applying does not double-suppress"), LiveCollidingCount(), 0);
+
 	Wardrobe->ClearAssetOverride();
 
 	TestEqual(TEXT("Reverting gives the generated collision back, part for part"),

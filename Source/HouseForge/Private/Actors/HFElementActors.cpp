@@ -1075,18 +1075,27 @@ void AHFElementActor::RefreshAssetOverride()
 	// is still showing its own collision rather than ours. Re-applying an override over an active one
 	// would otherwise record the suppression as the thing to restore, and the next revert would hand
 	// back "blocks nothing" - the whole flat passable, with nothing logged.
-	if (!bOverrideSuppressedCollision)
+	//
+	// Guarded per entry on the VALUE as well as on the flag, exactly as ApplyRenderMode guards its
+	// own. NoCollision is not something a generator ever declares - only a suppression writes it - so
+	// "the source is reading NoCollision" is the exact complement of our own write, and an entry is
+	// left at whatever it already held rather than overwritten with the suppression.
+	while (PreOverrideCollision.Num() < Sources.Num())
 	{
-		PreOverrideCollision.Reset();
-		PreOverrideCollision.Reserve(Sources.Num());
-		for (const UDynamicMeshComponent* Source : Sources)
-		{
-			PreOverrideCollision.Add(IsValid(Source)
-				? Source->GetCollisionEnabled()
-				: ECollisionEnabled::QueryAndPhysics);
-		}
-		bOverrideSuppressedCollision = true;
+		PreOverrideCollision.Add(ECollisionEnabled::QueryAndPhysics);
 	}
+	PreOverrideCollision.SetNum(Sources.Num());
+
+	for (int32 Index = 0; Index < Sources.Num(); ++Index)
+	{
+		const UDynamicMeshComponent* Source = Sources[Index];
+		if (IsValid(Source) && Source->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+		{
+			PreOverrideCollision[Index] = Source->GetCollisionEnabled();
+		}
+	}
+
+	bOverrideSuppressedCollision = true;
 
 	// Everything HouseForge generated for this element steps back: the live parts and, if it has
 	// been baked, the baked stand-ins too. Suppressing both matters - an element that was baked and
