@@ -12,6 +12,7 @@
 #include "Geometry/HFMeshOps.h"
 #include "HouseForge.h"
 #include "Materials/HFMaterialLibrary.h"
+#include "PhysicsEngine/BodySetup.h"
 
 using namespace UE::Geometry;
 
@@ -640,6 +641,18 @@ void AHFElementActor::AdoptBakedMesh(int32 PartIndex, FName InSourceComponentNam
 
 void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
 {
+	ApplyRenderModeToComponents(Mode);
+
+	// THE OVERRIDE HAS THE LAST WORD ON WHAT DRAWS, and it gets it here rather than at every call
+	// site because there are a dozen of those. ApplyRenderMode runs at the end of every generation
+	// path, so a regeneration, a bake, an unbake and a whole-house rebuild all pass through this line
+	// - and an element the user replaced with a real sofa stays replaced through all four instead of
+	// flickering back to the generated one the moment anything else about it changes.
+	RefreshAssetOverride();
+}
+
+void AHFElementActor::ApplyRenderModeToComponents(EHFRenderMode Mode)
+{
 	const bool bWantsBaked = (Mode == EHFRenderMode::Baked);
 	const bool bBaked = bWantsBaked && HasAllBakedAssets();
 
@@ -796,6 +809,321 @@ void AHFElementActor::SetRenderMode(EHFRenderMode Mode)
 		UE_LOG(LogHouseForge, Warning,
 			TEXT("'%s' was asked to show baked geometry but has no baked asset for every part, so it is showing its live mesh. Bake it first."),
 			*GetName());
+	}
+}
+
+// ==================================================================== the asset override
+//
+// Rule 04: "Replacing a procedural fixture with a Content Browser asset never discards its parameter
+// struct. Clearing the override must restore the generated mesh exactly."
+//
+// Everything below hides components and shows one more. There is no call to Regenerate, CommitMesh
+// or RevertToGenerated anywhere in it, no read of FDynamicMesh3 and no write to one - which is why
+// ClearAssetOverride restores the generated mesh exactly, and why setting an override cannot set
+// bArtistEdited: that flag is raised by UDynamicMeshComponent::OnMeshChanged, and nothing here
+// changes a mesh.
+
+bool AHFElementActor::HasAssetOverride() const
+{
+	// The component holding an asset is the state, not the struct being filled in. They are the same
+	// thing everywhere except the moment between a soft pointer being set and failing to load, and
+	// this is the answer that matches what is on screen.
+	return IsValid(AssetOverrideComponent) && AssetOverrideComponent->GetStaticMesh() != nullptr;
+}
+
+bool AHFElementActor::HasTableAssetOverride() const
+{
+	return HasAssetOverride() && !AssetOverride.SourceTable.IsNone();
+}
+
+FBox AHFElementActor::GetGeneratedLocalBounds() const
+{
+	TArray<UDynamicMeshComponent*> Sources;
+	GetBakeSourceComponents(Sources);
+
+	const FTransform ActorToWorld = GetActorTransform();
+
+	FBox Box(ForceInit);
+	for (UDynamicMeshComponent* Source : Sources)
+	{
+		if (!IsValid(Source))
+		{
+			continue;
+		}
+
+		// The MESH's own bounds rather than the component's. UPrimitiveComponent::CalcBounds is
+		// protected, and it would be the wrong number anyway: it returns a world-axis-aligned box
+		// around an already-rotated shape, so a fixture at 45 degrees would measure its own diagonal
+		// and every fit against it would come out undersized.
+		FAxisAlignedBox3d LocalBounds = FAxisAlignedBox3d::Empty();
+		Source->GetDynamicMesh()->ProcessMesh([&LocalBounds](const UE::Geometry::FDynamicMesh3& Mesh)
+		{
+			LocalBounds = Mesh.GetBounds();
+		});
+
+		if (!LocalBounds.IsEmpty())
+		{
+			// Each part's box taken into the ACTOR's frame rather than left in its own. A wardrobe's
+			// shutters hang off components with their own relative transforms, so unioning raw local
+			// boxes would pile every part on top of the carcass and give a box one leaf wide.
+			const FTransform PartInActor = Source->GetComponentTransform().GetRelativeTransform(ActorToWorld);
+
+			// All eight corners through the transform, because a rotated part's extents are not its
+			// extents - the same reason FHFAssetFit::Solve re-bounds a rotated asset.
+			const FBox PartLocal(static_cast<FVector>(LocalBounds.Min), static_cast<FVector>(LocalBounds.Max));
+
+			FVector Corners[8];
+			PartLocal.GetVertices(Corners);
+			for (const FVector& Corner : Corners)
+			{
+				Box += PartInActor.TransformPosition(Corner);
+			}
+		}
+	}
+
+	return Box;
+}
+
+FHFAssetFitResult AHFElementActor::PreviewAssetFit(const FHFAssetOverride& InOverride) const
+{
+	FHFAssetFitResult Result;
+
+	if (!InOverride.IsSet())
+	{
+		Result.Note = TEXT("No asset chosen.");
+		return Result;
+	}
+
+	// LoadSynchronous on a const preview path is deliberate: a preview that could not say how big the
+	// asset is would be a preview of nothing, and the alternative - reporting bounds from the asset
+	// registry - is a second source for a number the fit divides by.
+	const UStaticMesh* Asset = InOverride.OverrideMesh.LoadSynchronous();
+	if (Asset == nullptr)
+	{
+		Result.Note = FString::Printf(TEXT("The asset '%s' could not be loaded."),
+			*InOverride.OverrideMesh.ToString());
+		return Result;
+	}
+
+	return FHFAssetFit::Solve(GetGeneratedLocalBounds(), Asset->GetBoundingBox(), InOverride);
+}
+
+FHFAssetFitResult AHFElementActor::SetAssetOverride(const FHFAssetOverride& InOverride)
+{
+	if (!InOverride.IsSet())
+	{
+		ClearAssetOverride();
+
+		FHFAssetFitResult Cleared;
+		Cleared.Note = TEXT("No asset chosen; the generated mesh is showing.");
+		return Cleared;
+	}
+
+	UStaticMesh* Asset = InOverride.OverrideMesh.LoadSynchronous();
+	if (Asset == nullptr)
+	{
+		// NEVER RENDER NOTHING, the same rule the bake follows for a missing baked asset. A soft
+		// pointer at a deleted or renamed package leaves the generated mesh showing and says so,
+		// rather than leaving a hole where the sofa was.
+		UE_LOG(LogHouseForge, Warning,
+			TEXT("'%s' could not load the override asset '%s', so it is showing its generated mesh."),
+			*GetName(), *InOverride.OverrideMesh.ToString());
+
+		FHFAssetFitResult Failed;
+		Failed.Note = FString::Printf(TEXT("The asset '%s' could not be loaded."),
+			*InOverride.OverrideMesh.ToString());
+		return Failed;
+	}
+
+	AssetOverride = InOverride;
+
+	if (!IsValid(AssetOverrideComponent))
+	{
+		AssetOverrideComponent = NewObject<UStaticMeshComponent>(this,
+			MakeUniqueObjectName(this, UStaticMeshComponent::StaticClass(), TEXT("AssetOverride")));
+
+		if (AssetOverrideComponent == nullptr)
+		{
+			FHFAssetFitResult Failed;
+			Failed.Note = TEXT("The override component could not be created.");
+			return Failed;
+		}
+
+		// Attached to the ROOT rather than to a part, because one asset stands in for the whole
+		// fixture - see FHFAssetOverride. A baked component hangs off the part it stands in for
+		// precisely because it stands in for a part; this does not.
+		AssetOverrideComponent->SetupAttachment(Mesh);
+
+		// Movable, for the reason the baked components are: mobility is nowhere in the chain that
+		// decides Lumen scene membership, and a Static-mobility component that is ever moved destroys
+		// and rebuilds its scene proxy, forcing a full surface-cache re-capture.
+		AssetOverrideComponent->SetMobility(EComponentMobility::Movable);
+		AssetOverrideComponent->SetGenerateOverlapEvents(false);
+		AssetOverrideComponent->RegisterComponent();
+		AddInstanceComponent(AssetOverrideComponent);
+	}
+
+	AssetOverrideComponent->SetStaticMesh(Asset);
+
+	LastAssetFit = FHFAssetFit::Solve(GetGeneratedLocalBounds(), Asset->GetBoundingBox(), AssetOverride);
+	AssetOverrideComponent->SetRelativeTransform(LastAssetFit.RelativeTransform);
+
+	// COLLISION IS REPORTED, NOT REPAIRED. A Content Browser asset may ship with no simple collision
+	// at all, and the correct trace flag for that lives on the ASSET's body setup - which belongs to
+	// the user and is shared by every other place they have used it. Writing to it from a batch pass
+	// would be this plugin editing somebody else's asset behind their back. So the walkthrough
+	// consequence is surfaced in the batch report instead, where it can be acted on deliberately.
+	if (const UBodySetup* Body = Asset->GetBodySetup())
+	{
+		if (!Body->AggGeom.GetElementCount() && Body->CollisionTraceFlag != CTF_UseComplexAsSimple)
+		{
+			UE_LOG(LogHouseForge, Warning,
+				TEXT("The override asset '%s' on '%s' has no simple collision and is not set to complex-as-simple, so a walkthrough will pass through it. Set its Collision Complexity in the Static Mesh Editor."),
+				*Asset->GetName(), *GetName());
+
+			LastAssetFit.Note = LastAssetFit.Note.IsEmpty()
+				? FString(TEXT("The asset has no simple collision; a walkthrough will pass through it."))
+				: LastAssetFit.Note + TEXT(" The asset has no simple collision; a walkthrough will pass through it.");
+		}
+	}
+
+	UHFMaterialLibrary::Get()->ApplyTo(AssetOverrideComponent);
+
+	// Applied through the render-mode path rather than by setting visibility here, so there is one
+	// function that decides what draws and the bake and the override cannot disagree about it.
+	ApplyRenderMode(RenderMode);
+
+	return LastAssetFit;
+}
+
+void AHFElementActor::ClearAssetOverride()
+{
+	AssetOverride = FHFAssetOverride();
+	LastAssetFit = FHFAssetFitResult();
+
+	if (IsValid(AssetOverrideComponent))
+	{
+		// CLEARED, NOT MERELY HIDDEN, and this is the Q1 tool-target measurement applying to a second
+		// component. HouseForge.Bake.Probe.ToolTargetSelection measured that
+		// UStaticMeshComponentToolTargetFactory::CanBuildTarget consults neither visibility nor
+		// registration - only whether the component holds a writable UStaticMesh - and that the static
+		// factory is registered before the dynamic one, so it wins every tie. A hidden override
+		// component still holding its asset would mean starting PolyEdit on a reverted element edits
+		// the vendor's asset instead of the live mesh. It would also leave two targetable components,
+		// which makes every single-selection modelling tool refuse to start at all.
+		AssetOverrideComponent->SetStaticMesh(nullptr);
+	}
+
+	ApplyRenderMode(RenderMode);
+}
+
+void AHFElementActor::RefreshAssetOverride()
+{
+	const bool bActive = HasAssetOverride();
+
+	if (IsValid(AssetOverrideComponent))
+	{
+		AssetOverrideComponent->SetVisibility(bActive);
+		AssetOverrideComponent->SetHiddenInGame(!bActive);
+		AssetOverrideComponent->SetCollisionEnabled(
+			bActive ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+	}
+
+	TArray<UDynamicMeshComponent*> Sources;
+	GetBakeSourceComponents(Sources);
+
+	if (!bActive)
+	{
+		// PUTTING BACK WHAT THIS OVERRIDE TOOK, rather than trusting ApplyRenderModeToComponents to
+		// have done it. It has not, on the commonest element there is: it returns early for anything
+		// that has never been baked, so on an un-baked fixture nothing at all restored the sources
+		// and clearing an override left the whole thing passable.
+		//
+		// Only when this override is what suppressed them, and never while the baked geometry is what
+		// is drawing - in that case ApplyRenderModeToComponents has just set these deliberately and
+		// owns the value.
+		if (bOverrideSuppressedCollision)
+		{
+			const bool bBakedIsDrawing = (RenderMode == EHFRenderMode::Baked) && HasAllBakedAssets();
+
+			for (int32 Index = 0; Index < Sources.Num(); ++Index)
+			{
+				UDynamicMeshComponent* Source = Sources[Index];
+				if (!IsValid(Source) || bBakedIsDrawing)
+				{
+					continue;
+				}
+
+				Source->SetVisibility(true);
+				Source->SetHiddenInGame(false);
+				Source->SetIsEditable(true);
+
+				if (PreOverrideCollision.IsValidIndex(Index))
+				{
+					Source->SetCollisionEnabled(PreOverrideCollision[Index].GetValue());
+				}
+			}
+
+			bOverrideSuppressedCollision = false;
+			PreOverrideCollision.Reset();
+		}
+
+		return;
+	}
+
+	// WHAT EACH PART BLOCKS IS RECORDED BEFORE ANYTHING IS SWITCHED, and only from a component that
+	// is still showing its own collision rather than ours. Re-applying an override over an active one
+	// would otherwise record the suppression as the thing to restore, and the next revert would hand
+	// back "blocks nothing" - the whole flat passable, with nothing logged.
+	if (!bOverrideSuppressedCollision)
+	{
+		PreOverrideCollision.Reset();
+		PreOverrideCollision.Reserve(Sources.Num());
+		for (const UDynamicMeshComponent* Source : Sources)
+		{
+			PreOverrideCollision.Add(IsValid(Source)
+				? Source->GetCollisionEnabled()
+				: ECollisionEnabled::QueryAndPhysics);
+		}
+		bOverrideSuppressedCollision = true;
+	}
+
+	// Everything HouseForge generated for this element steps back: the live parts and, if it has
+	// been baked, the baked stand-ins too. Suppressing both matters - an element that was baked and
+	// is now overridden would otherwise show the vendor's sofa and the baked one in the same place.
+	for (UDynamicMeshComponent* Source : Sources)
+	{
+		if (!IsValid(Source))
+		{
+			continue;
+		}
+
+		Source->SetVisibility(false);
+		Source->SetHiddenInGame(true);
+		Source->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+		// The same measured reason as the bake, in the other direction: the dynamic component has to
+		// drop out of the Modeling Tools' candidate list or the count is two and every
+		// single-selection tool refuses to start. UDynamicMeshComponentToolTargetFactory::CanBuildTarget
+		// tests IsEditable() explicitly (DynamicMeshComponentToolTarget.cpp:279).
+		//
+		// Note what this does NOT do: it does not stop generation. FHFEditableWriteScope lifts the
+		// flag for the plugin's own writes, so an overridden element still regenerates its hidden mesh
+		// when the drawing changes - which is what makes clearing the override give back geometry that
+		// matches the CURRENT spec rather than the one the asset was chosen over.
+		Source->SetIsEditable(false);
+	}
+
+	for (FHFBakedPart& Part : BakedParts)
+	{
+		if (!IsValid(Part.Component))
+		{
+			continue;
+		}
+
+		Part.Component->SetVisibility(false);
+		Part.Component->SetHiddenInGame(true);
+		Part.Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 }
 

@@ -552,6 +552,28 @@ public:
 		meta = (AllowedClasses = "/Script/HouseForge.HFMaterialLibrary"))
 	TSoftObjectPtr<class UHFMaterialLibrary> MaterialLibrary;
 
+	// ==================================================================== content browser assets
+
+	/**
+	 * Which generated fixtures are replaced by real assets, by type.
+	 *
+	 * THIS IS WHAT MAKES THE PROCEDURAL FLAT A STEPPING STONE RATHER THAN A DEAD END. Empty means
+	 * every fixture stays as HouseForge generated it, which is the correct default and is what the
+	 * plugin did before this existed. Point it at a UHFAssetMappingTable and every house generated
+	 * from this project comes out of the drawing already furnished with the studio's own models -
+	 * built once, applied to every future generation, re-applied on every rebuild.
+	 *
+	 * A project setting rather than a field on the house, for the same reason the material library is
+	 * one: the library belongs to the studio and outlives any particular flat, and a table that had to
+	 * be re-selected per level would be re-selected wrongly on the level somebody forgot.
+	 *
+	 * Soft, for the reason the material library's comment gives - a hard reference would drag every
+	 * mesh in the table, and every texture those use, into memory whenever these settings are read.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Assets",
+		meta = (AllowedClasses = "/Script/HouseForge.HFAssetMappingTable"))
+	TSoftObjectPtr<class UHFAssetMappingTable> AssetMappingTable;
+
 	// ================================================================================ resolving
 
 	/**

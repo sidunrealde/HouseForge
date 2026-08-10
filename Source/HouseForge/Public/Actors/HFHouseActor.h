@@ -126,6 +126,46 @@ public:
 	/** Ids of the fixtures in a list that BuildsGeometryFor accepts. */
 	static TSet<FName> BuiltFixtureIds(const TArray<FHFFixture>& Fixtures);
 
+	// ================================================================ the asset replacement pass
+
+	/**
+	 * THE BATCH PASS. Puts the project's asset library over every generated fixture it has a row for.
+	 *
+	 * Run at the end of every BuildGeometry, so a table built once applies to every house generated
+	 * afterwards without anybody remembering to ask - which is the whole point of having a table
+	 * rather than a per-instance picker.
+	 *
+	 * WHAT IT WILL NOT TOUCH: an element whose override was hand-picked (SourceTable is None). That
+	 * is somebody's decision about that instance, and a batch pass quietly reverting it would be the
+	 * worst kind of loss - invisible until a render, and impossible to attribute afterwards.
+	 *
+	 * Idempotent. Running it twice with the same table changes nothing the second time, and running
+	 * it after a row has been deleted from the table clears the override that row put there.
+	 *
+	 * @param Table       The table to apply, or null to clear every table-driven override.
+	 * @param OutReport   Optional. One line per type, plus what could not be loaded or has no collision.
+	 * @return how many element actors ended up with a different override than they started with.
+	 */
+	int32 ApplyAssetMappingTable(const class UHFAssetMappingTable* Table, TArray<FString>* OutReport = nullptr);
+
+	/** ApplyAssetMappingTable with the table named by the project settings. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Assets")
+	int32 ApplyProjectAssetMappingTable();
+
+	/**
+	 * Re-fits every override against the box its element occupies NOW.
+	 *
+	 * Needed because a rebuild re-parameterises a preserved element and regenerates it, so the box a
+	 * hand-picked asset was fitted into a moment ago may be a different size - a wardrobe the drawing
+	 * has since widened by 200 mm. Without this the asset keeps the old fit and the flat quietly
+	 * disagrees with the plan it was just rebuilt from.
+	 */
+	int32 RefitAssetOverrides();
+
+	/** Clears every asset override in the house, table-driven and hand-picked alike. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Assets")
+	int32 ClearAllAssetOverrides();
+
 	/**
 	 * Takes the house's elements with it.
 	 *

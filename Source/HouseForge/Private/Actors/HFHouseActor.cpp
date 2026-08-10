@@ -16,6 +16,7 @@
 #include "Actors/HFServiceActors.h"
 #include "Actors/HFTrimActors.h"
 #include "Actors/HFWardrobeActor.h"
+#include "Assets/HFAssetMappingTable.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
 #include "Geometry/HFBedKit.h"
@@ -1870,11 +1871,24 @@ void AHFHouseActor::BuildGeometry()
 			Preserved.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
 			Survivors.Add(Typed);
 		}
-		else if (IsValid(Typed) && (Typed->RenderMode == EHFRenderMode::Baked || Typed->HasAnyBakedAsset()))
+		else if (IsValid(Typed) && (Typed->RenderMode == EHFRenderMode::Baked || Typed->HasAnyBakedAsset()
+			|| (Typed->HasAssetOverride() && !Typed->HasTableAssetOverride())))
 		{
 			// HasAnyBakedAsset as well as the mode, so an element sitting in Dynamic with an asset
 			// still on disk - which is every element a user has ever unbaked - is not destroyed
 			// underneath its own asset either.
+			//
+			// A HAND-PICKED ASSET OVERRIDE JOINS THEM, and it belongs in THIS branch rather than in
+			// ShouldPreserveOnRebuild. The distinction between the two maps is load-bearing: Preserved
+			// is left completely alone, parameters included, so an element put there would stop
+			// tracking the drawing - a swapped-in wardrobe would keep the size the plan said last
+			// time, silently, forever. PreservedForBake is handed BACK to the spawn path and
+			// re-parameterised, so the override survives and the element underneath it still follows
+			// the spec. The override is re-fitted afterwards against the regenerated box.
+			//
+			// Only HAND-PICKED ones. A table-driven override needs no preserving because
+			// ApplyAssetMappingTable re-derives it at the end of every build; testing for it here as
+			// well would keep an actor alive for a mapping the user has since deleted from the table.
 			PreservedForBake.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
 			Survivors.Add(Typed);
 		}
@@ -2243,6 +2257,12 @@ void AHFHouseActor::BuildGeometry()
 			continue;
 		}
 
+		// STAMPED HERE BECAUSE THE ACTOR CLASS IS NOT THE ANSWER. Five types come through this loop
+		// as AHFCasedGoodsActor, so anything downstream that has to know a TV console from a shoe
+		// rack - the asset mapping table, and the panel's grouping - can only be told, not asked.
+		// Written on the way past rather than by the seed functions, so a new recipe cannot forget.
+		Actor->SourceFixtureType = Fixture.Type;
+
 		FHFFixtureContext Context;
 		Context.Spec = &Spec;
 		Context.Fixture = &Fixture;
@@ -2283,6 +2303,16 @@ void AHFHouseActor::BuildGeometry()
 			Articulated->RestorePartPoses(*Poses);
 		}
 	}
+
+	// THE ASSET LIBRARY GOES ON LAST, over finished geometry.
+	//
+	// Last because a fit is measured against the box the generated element occupies, and until every
+	// element has been seeded, regenerated and re-posed that box is not final. Run unconditionally
+	// rather than only when a table is set: with no table this clears table-driven overrides, which
+	// is what has to happen when somebody empties the setting and rebuilds expecting the procedural
+	// flat back.
+	RefitAssetOverrides();
+	ApplyProjectAssetMappingTable();
 
 	UE_LOG(LogHouseForge, Log,
 		TEXT("HouseForge built '%s': %d element actors, %d preserved as hand-edited."),
@@ -2444,6 +2474,159 @@ TSet<FName> AHFHouseActor::BuiltFixtureIds(const TArray<FHFFixture>& Fixtures)
 		}
 	}
 	return Ids;
+}
+
+// ================================================================ the asset replacement pass
+
+int32 AHFHouseActor::ApplyAssetMappingTable(const UHFAssetMappingTable* Table, TArray<FString>* OutReport)
+{
+	int32 Changed = 0;
+
+	// Counted per type rather than per element, so the report reads "Wardrobe: 2 replaced" instead of
+	// two lines that the user has to add up to discover both wardrobes were caught.
+	TMap<EHFFixtureType, int32> AppliedByType;
+	TSet<FString> UnloadableAssets;
+	TArray<FString> NoCollision;
+
+	for (AActor* Element : ElementActors)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (!IsValid(Typed))
+		{
+			continue;
+		}
+
+		// HANDS OFF ANYTHING CHOSEN BY HAND. The table owns the overrides it placed and nothing else.
+		if (Typed->HasAssetOverride() && !Typed->HasTableAssetOverride())
+		{
+			continue;
+		}
+
+		const FHFAssetMapping* Mapping = (Table != nullptr)
+			? Table->FindUsable(Typed->SourceFixtureType)
+			: nullptr;
+
+		if (Mapping == nullptr)
+		{
+			// A type the table has no row for - or a table that has gone away entirely - takes the
+			// element back to generated geometry. That is what makes the pass idempotent in both
+			// directions: deleting a row and rebuilding gives the procedural fixture back, rather
+			// than leaving last run's asset stranded with nothing declaring it.
+			if (Typed->HasTableAssetOverride())
+			{
+				Typed->ClearAssetOverride();
+				++Changed;
+			}
+			continue;
+		}
+
+		const FHFAssetOverride Desired = Table->MakeOverride(*Mapping);
+
+		// Re-applied even when it looks unchanged, because the FIT may have changed underneath it: a
+		// rebuild can have widened the wardrobe this asset is stretched into. Cheap - the asset is
+		// already loaded by then - and it is what keeps the flat agreeing with the drawing.
+		const FHFAssetFitResult Fit = Typed->SetAssetOverride(Desired);
+
+		if (!Fit.bValid)
+		{
+			UnloadableAssets.Add(Mapping->Mesh.ToString());
+			continue;
+		}
+
+		AppliedByType.FindOrAdd(Typed->SourceFixtureType) += 1;
+		++Changed;
+
+		if (Fit.Note.Contains(TEXT("no simple collision")))
+		{
+			NoCollision.Add(Typed->ElementId.ToString());
+		}
+	}
+
+	if (OutReport != nullptr)
+	{
+		const UEnum* TypeEnum = StaticEnum<EHFFixtureType>();
+		for (const TPair<EHFFixtureType, int32>& Pair : AppliedByType)
+		{
+			OutReport->Add(FString::Printf(TEXT("%s: %d replaced."),
+				TypeEnum != nullptr ? *TypeEnum->GetNameStringByValue(static_cast<int64>(Pair.Key)) : TEXT("?"),
+				Pair.Value));
+		}
+
+		for (const FString& Path : UnloadableAssets)
+		{
+			OutReport->Add(FString::Printf(TEXT("Could not load '%s'; those fixtures are still generated."), *Path));
+		}
+
+		if (!NoCollision.IsEmpty())
+		{
+			// SAID OUT LOUD, because the symptom is a walkthrough passing through the furniture and
+			// nothing else. Rule 04 asks for collision that matches the visual mesh; an asset that
+			// ships without any is the one case this code cannot fix without editing somebody else's
+			// asset behind their back.
+			OutReport->Add(FString::Printf(
+				TEXT("%d replaced fixtures have no simple collision and will not stop a walkthrough: %s. Set Collision Complexity to 'Use Complex As Simple' on those assets."),
+				NoCollision.Num(), *FString::Join(NoCollision, TEXT(", "))));
+		}
+	}
+
+	return Changed;
+}
+
+int32 AHFHouseActor::ApplyProjectAssetMappingTable()
+{
+	// Resolved by the asset, not here. The settings lookup lives with UHFAssetMappingTable for the
+	// same reason UHFMaterialLibrary::Get owns its own - this file reaches every other setting
+	// through FHFBuildDefaults::FromProjectSettings, which is a value snapshot and cannot carry a
+	// UObject.
+	const UHFAssetMappingTable* Table = UHFAssetMappingTable::GetProjectTable();
+
+	TArray<FString> Report;
+	const int32 Changed = ApplyAssetMappingTable(Table, &Report);
+
+	for (const FString& Line : Report)
+	{
+		UE_LOG(LogHouseForge, Log, TEXT("HouseForge assets: %s"), *Line);
+	}
+
+	return Changed;
+}
+
+int32 AHFHouseActor::RefitAssetOverrides()
+{
+	int32 Refitted = 0;
+
+	for (AActor* Element : ElementActors)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (!IsValid(Typed) || !Typed->HasAssetOverride())
+		{
+			continue;
+		}
+
+		// Its own override put back on itself. SetAssetOverride re-solves the fit against the box the
+		// element occupies now, which is the entire job.
+		Typed->SetAssetOverride(Typed->AssetOverride);
+		++Refitted;
+	}
+
+	return Refitted;
+}
+
+int32 AHFHouseActor::ClearAllAssetOverrides()
+{
+	int32 Cleared = 0;
+
+	for (AActor* Element : ElementActors)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (IsValid(Typed) && Typed->HasAssetOverride())
+		{
+			Typed->ClearAssetOverride();
+			++Cleared;
+		}
+	}
+
+	return Cleared;
 }
 
 TArray<FHFFixture> AHFHouseActor::ResolveFixtures(TArray<FString>* OutMoved) const

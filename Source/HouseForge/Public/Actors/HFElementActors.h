@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Actors/HFAssetOverrideTypes.h"
 #include "Actors/HFBakeTypes.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "GameFramework/Actor.h"
@@ -102,6 +103,22 @@ public:
 	/** Spec element this actor was generated from, so a rebuild can match it back up. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
 	FName ElementId;
+
+	/**
+	 * Which kind of fixture this actor was built for, or Unknown for a wall, room, beam or column.
+	 *
+	 * STAMPED AT SPAWN, and it has to be, because the actor class is not the answer. Five fixture
+	 * types - a kitchen base unit, a TV console, a bedside unit, a shoe rack and a vanity - all
+	 * become AHFCasedGoodsActor, which is the whole return on the cased goods kit and is exactly
+	 * what makes the class useless as a key. A mapping table that put a shoe rack where every TV
+	 * console should be would be applying itself correctly to the wrong things.
+	 *
+	 * Read by the asset replacement pass and by the panel's grouping, and by nothing that generates
+	 * geometry: what this element IS lives in its parameter struct, and this is only the label the
+	 * drawing gave it.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge")
+	EHFFixtureType SourceFixtureType = EHFFixtureType::Unknown;
 
 	/**
 	 * What is done to this element's geometry on the way to the component: chamfers, UVs, lightmap.
@@ -291,6 +308,83 @@ public:
 	 */
 	void FlushPendingRebake();
 
+	// ============================================================================ the asset override
+	//
+	// A SECOND SWITCH, ON THE SAME PRINCIPLE AS THE BAKE. .claude/rules/04-conventions.md: "Replacing
+	// a procedural fixture with a Content Browser asset never discards its parameter struct. Clearing
+	// the override must restore the generated mesh exactly." Nothing below reads, writes, clears or
+	// rebuilds the FDynamicMesh3, and nothing below calls Regenerate, CommitMesh or RevertToGenerated.
+	// The generated mesh comes back exactly because it never went anywhere.
+
+	/** The Content Browser asset standing in for this element, if any. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Asset",
+		meta = (ShowOnlyInnerProperties))
+	FHFAssetOverride AssetOverride;
+
+	/**
+	 * What the last fit worked out. Transient - a session fact, recomputed on every apply.
+	 *
+	 * Held so the panel can report `stretched 1.34x, 12 cm of slack in depth` on a row without
+	 * re-solving, and so the numbers a user saw on the preview are demonstrably the numbers that
+	 * were applied rather than a second computation that agrees by inspection.
+	 */
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Asset")
+	FHFAssetFitResult LastAssetFit;
+
+	/** True when an asset is currently standing in for this element's generated geometry. */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Asset")
+	bool HasAssetOverride() const;
+
+	/** True when the override was placed by a mapping table rather than chosen for this instance. */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Asset")
+	bool HasTableAssetOverride() const;
+
+	/**
+	 * Puts a Content Browser asset in front of the generated geometry.
+	 *
+	 * Loads the soft pointer, fits the asset into the box the GENERATED MESH occupies, and switches
+	 * which components draw. Returns the fit so the caller can report what it cost; an unset override
+	 * is the same call as ClearAssetOverride.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Asset")
+	FHFAssetFitResult SetAssetOverride(const FHFAssetOverride& InOverride);
+
+	/**
+	 * THE WAY BACK. Restores the generated mesh exactly.
+	 *
+	 * Clears the component's asset rather than merely hiding it - see the tool-target measurement in
+	 * ApplyRenderMode, which applies here for the same reason and with the same consequence.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Asset")
+	void ClearAssetOverride();
+
+	/**
+	 * Works out what an override WOULD do, changing nothing.
+	 *
+	 * What the panel's preview calls, so the mismatch between a vendor's model and the drawing is
+	 * something the user sees before it lands rather than after.
+	 */
+	FHFAssetFitResult PreviewAssetFit(const FHFAssetOverride& InOverride) const;
+
+	/**
+	 * The box this element's generated geometry occupies, in the ACTOR'S OWN LOCAL SPACE.
+	 *
+	 * The target an override is fitted into, and the reason the fit does not have to know which of
+	 * FHFFixturePlacement's five datums put this actor where it is: whatever datum that was, the
+	 * generated geometry is already in the right place relative to the actor, so this box is right by
+	 * construction. Taken over the same components the bake takes - GetBakeSourceComponents - so a
+	 * wardrobe's box includes its shutters and a door's includes its leaf.
+	 *
+	 * An articulated element held OPEN measures wider than one held shut, because the box is of what
+	 * is there rather than of what was drawn. Elements are generated shut, so this only bites on a
+	 * fixture the user has posed open and then overridden, and the preview shows the number.
+	 */
+	UFUNCTION(BlueprintPure, Category = "HouseForge|Asset")
+	FBox GetGeneratedLocalBounds() const;
+
+	/** The component drawing the override asset, or null. */
+	UStaticMeshComponent* GetAssetOverrideComponent() const { return AssetOverrideComponent; }
+
 	virtual void PostInitializeComponents() override;
 	virtual void PostLoad() override;
 
@@ -343,10 +437,58 @@ protected:
 	/** Creates, or finds, the static mesh component that stands in for one source component. */
 	UStaticMeshComponent* EnsureBakedComponent(int32 PartIndex, UDynamicMeshComponent* Source);
 
+	/**
+	 * The one component an asset override draws through. Attached to the root, created on first use.
+	 *
+	 * Held on the actor rather than made and destroyed with the override so that clearing an override
+	 * and setting another does not churn components - and, more importantly, so the component's
+	 * lifetime is not the thing that decides whether the override is active. What decides that is
+	 * whether it is holding a UStaticMesh, which is the same rule the bake arrived at by measurement.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Asset")
+	TObjectPtr<UStaticMeshComponent> AssetOverrideComponent;
+
+	/**
+	 * What each source component blocked before the override took its collision away.
+	 *
+	 * THE SAME INVARIANT AS FHFBakedPart::SourceCollisionEnabled, and it exists because the override
+	 * hit exactly the failure that field was written to prevent. ApplyRenderMode returns early for an
+	 * element that has never been baked - `if (BakedParts.IsEmpty() && !bBaked)` - so on an
+	 * un-baked fixture there was nothing at all to put the collision back, and clearing an override
+	 * left every part of it passable. Visible only as a walkthrough falling through the furniture,
+	 * with nothing logged. Found by HouseForge.Editor.Assets.CollisionFollowsTheOverride.
+	 *
+	 * Recorded per source and only from a component that is not already reading NoCollision, for the
+	 * reason FHFBakedPart spells out: NoCollision is never something a generator declares, so the
+	 * guard is the exact complement of our own write. Without it, re-applying an override over an
+	 * active one would record the suppression as the thing to restore.
+	 *
+	 * Not saved. bOverrideSuppressedCollision is what says the record is meaningful, and both are
+	 * rebuilt from the components on the next apply.
+	 */
+	UPROPERTY(Transient)
+	TArray<TEnumAsByte<ECollisionEnabled::Type>> PreOverrideCollision;
+
+	/** True while this override is the thing holding the source components' collision off. */
+	UPROPERTY(Transient)
+	bool bOverrideSuppressedCollision = false;
+
+	/**
+	 * Makes the components agree with AssetOverride, whatever the render mode says.
+	 *
+	 * Called at the end of ApplyRenderMode, which is called at the end of every generation path - so
+	 * a regeneration, a bake, an unbake and a whole-house rebuild all leave an overridden element
+	 * still showing its override rather than flickering back to geometry the user replaced.
+	 */
+	void RefreshAssetOverride();
+
 private:
 	bool bWatching = false;
 
 	void HandleMeshChanged();
+
+	/** The whole of ApplyRenderMode except the override reconciliation that always follows it. */
+	void ApplyRenderModeToComponents(EHFRenderMode Mode);
 };
 
 /** A wall, with its openings already cut out. */
