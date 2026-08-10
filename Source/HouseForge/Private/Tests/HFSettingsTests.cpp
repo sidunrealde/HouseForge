@@ -649,7 +649,14 @@ bool FHFSettingsInertOnesAreMarkedTest::RunTest(const FString& Parameters)
 	// EHFSofaDesign::Default into a design before the kit ever sees one, and the other two reach
 	// FHFSofaParams::BuiltChaiseProjection. All three are measured on the built geometry by
 	// HouseForge.Upholstery.SofaDesignSelection rather than on the parameter struct.
-	TestEqual(TEXT("The page ships every control it did"), Controls, 149);
+	// 150 rather than 149: AssetMappingTable, which names the UHFAssetMappingTable a project swaps
+	// its generated fixtures for Content Browser assets through. Added with the replacement pass
+	// itself and counted here afterwards - the ratchet doing its job, one commit late.
+	//
+	// NOT INERT, which is the assertion worth making rather than the count: it is read whenever an
+	// element resolves an override, so setting it reaches every fixture type the table has a row for.
+	// Left empty it means "no mapping", which is a real answer and the shipped default.
+	TestEqual(TEXT("The page ships every control it did"), Controls, 150);
 	TestEqual(TEXT("Every joinery control is still there"), Joinery, 32);
 
 	return true;
