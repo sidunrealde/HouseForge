@@ -321,7 +321,16 @@ namespace HouseForgeFlat
 	const TArray<FKnownObstruction>& KnownObstructions()
 	{
 		static const TArray<FKnownObstruction> Known = {
-			{ TEXT("F_Kitchen_BaseW.Shutter_0_2"), TEXT("W_North"), 6.5,
+			// 6.50 -> 6.75 when the J-profile was fitted with its aluminium section. The channel is
+			// routed into this leaf's LEADING edge, which on a hinged door is the edge that swings,
+			// and the section restores metal at that edge up to the door face where the bare channel
+			// left a void 11 mm further back. Past 90 degrees that metal is the deepest thing in the
+			// masonry, and it measures 2.3 mm more than the void did.
+			//
+			// Recorded rather than designed away because a real J-pull has metal exactly there - it
+			// is the visible edge of the profile - and because the corner is already the documented
+			// failure below. The handle did not create this; a blind-corner unit still settles it.
+			{ TEXT("F_Kitchen_BaseW.Shutter_0_2"), TEXT("W_North"), 6.75,
 				TEXT("THE BLIND CORNER. The west run dies into the north wall and its last bay's doors are hinged at that jamb, so past about 90 degrees the leaf's free edge comes back into the masonry. Every L-shaped kitchen has this corner and the trade's answer to it is a blind-corner unit - a fixed filler panel and a pull-out carousel behind it - which is a fixture type this catalogue does not have. Shortening the run instead only moves the problem to the return.") },
 
 			{ TEXT("F_Kitchen_BaseW.Shutter_0_2"), TEXT("F_Kitchen_BaseNW"), 1.0,
@@ -3403,7 +3412,13 @@ bool FHFFlatUnwrapTest::RunTest(const FString& Parameters)
 	//
 	// Ratcheted, not asserted at zero: zero is not true, and a test that claimed it would have to be
 	// switched off, which is how an assertion stops meaning anything.
-	constexpr int32 KnownFlatCuts = 1900;
+	//
+	// 1900 -> 1905 when the routed handle styles were fitted with the aluminium section that makes
+	// them handles. Five closed bands entered the flat and each costs exactly the one cut this
+	// comment already describes: a band has to be opened somewhere. Nothing curved got worse - the
+	// cuts-per-chart figure asserted above is unmoved - so this is the topological floor being paid
+	// five more times, not a new defect.
+	constexpr int32 KnownFlatCuts = 1905;
 
 	if (TotalFlatCuts > 0)
 	{
