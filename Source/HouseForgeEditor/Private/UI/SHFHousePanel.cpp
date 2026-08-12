@@ -3,6 +3,8 @@
 #include "UI/SHFHousePanel.h"
 
 #include "UI/HFPanelIds.h"
+#include "UI/SHFClaudePanel.h"
+#include "UI/SHFDrawingsPanel.h"
 #include "UI/SHFMaterialPanel.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SExpandableArea.h"
@@ -14,6 +16,36 @@
 TArray<FHFPanelSection> SHFHousePanel::BuildSections()
 {
 	TArray<FHFPanelSection> Sections;
+
+	// FIRST, because nothing below it can produce a house without Claude, and an artist should
+	// find that out before importing a set rather than after pressing Generate.
+	//
+	// Collapsed by default once it is working, expanded while it is not - but that is a refinement
+	// this does not yet make: it starts expanded, because "not checked yet" is exactly the state a
+	// first-time artist is in and hiding it would hide the one button they need.
+	FHFPanelSection& Claude = Sections.AddDefaulted_GetRef();
+	Claude.Id = HFPanelSectionIds::Claude();
+	Claude.Title = LOCTEXT("ClaudeSection", "CLAUDE");
+	Claude.bExpandedByDefault = true;
+	Claude.bFillsRemainingSpace = false;
+	Claude.IsRelevant = []() { return true; };
+	Claude.Build = []() -> TSharedRef<SWidget> { return SNew(SHFClaudePanel); };
+
+	// Then the drawings, because that is where a house comes from. The order of this stack is the
+	// order of the workflow: can we build at all, drawings in, then what the result is made of.
+	FHFPanelSection& Drawings = Sections.AddDefaulted_GetRef();
+	Drawings.Id = HFPanelSectionIds::Drawings();
+	Drawings.Title = LOCTEXT("DrawingsSection", "DRAWINGS");
+	Drawings.bExpandedByDefault = true;
+
+	// Short and true to its content - a drop target, a name, and a list. Nothing here needs the
+	// tab's remaining height, and taking it would starve SURFACES below.
+	Drawings.bFillsRemainingSpace = false;
+
+	// Always present. Drawings are files on disk rather than level state, so an empty level does
+	// not make this inert - and this is the section an artist uses BEFORE there is a level at all.
+	Drawings.IsRelevant = []() { return true; };
+	Drawings.Build = []() -> TSharedRef<SWidget> { return SNew(SHFDrawingsPanel); };
 
 	FHFPanelSection& Surfaces = Sections.AddDefaulted_GetRef();
 	Surfaces.Id = HFPanelSectionIds::Surfaces();
