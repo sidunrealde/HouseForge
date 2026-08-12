@@ -34,6 +34,7 @@ Output: Saved/Review/bake/<name>.png plus review.json, composed afterwards by hf
 
 import json
 import os
+import time
 
 import unreal
 
@@ -454,8 +455,23 @@ class Run(object):
         elif kind == "camera_fixture":
             self.frame_fixture(payload)
         elif kind == "bake":
+            # TIMED, because "what does baking the flat cost" is a question the milestone has to
+            # answer with a number and nothing in FHFBakeService measures itself. Wall clock on the
+            # game thread, which is the figure that matters: this is the interval in which the editor
+            # does not respond.
+            started = time.time()
             result, report = split(subsystem().set_house_render_mode(payload))
-            say("BAKE {} -> {} | {}".format(payload, result.message[:200], str(report)[:300]))
+            elapsed = time.time() - started
+
+            state = "bake" if payload else "unbake"
+            self.data.setdefault("cost", {})[state] = {
+                "seconds": round(elapsed, 2),
+                "elements": len(elements()),
+                "bakedParts": sum(len(e.get_editor_property("baked_parts")) for e in elements()),
+                "report": str(report)[:2000],
+            }
+            say("BAKE {} took {:.2f}s -> {} | {}".format(
+                payload, elapsed, result.message[:200], str(report)[:300]))
         elif kind == "coverage":
             self.record_coverage(payload)
         elif kind == "guard":
