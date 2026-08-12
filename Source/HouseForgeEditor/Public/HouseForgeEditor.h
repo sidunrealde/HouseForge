@@ -20,4 +20,15 @@ class FHouseForgeEditorModule : public IModuleInterface
 public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
+
+	/**
+	 * Whether the MCP toolset registration at startup actually succeeded.
+	 *
+	 * Asked by the CLAUDE panel, and asked of OURSELVES rather than of Claude. A missing toolset
+	 * and an unreachable server look identical from the CLI's side - both are "Claude cannot build
+	 * a house" - but they are completely different problems: one is a plugin fault the artist
+	 * cannot fix, the other is a server they can start with a button. The plugin already knows
+	 * which, so it should say so rather than make the artist find out by elimination.
+	 */
+	static bool IsToolsetRegistered();
 };

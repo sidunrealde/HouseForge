@@ -30,6 +30,9 @@ namespace HFPanelTabIds
  */
 namespace HFPanelSectionIds
 {
+	/** Whether Claude Code can be reached at all, and what to do when it cannot. */
+	inline FName Claude() { return FName(TEXT("Claude")); }
+
 	/** The drawings this house will be read from. Drop target, and what has been imported. */
 	inline FName Drawings() { return FName(TEXT("Drawings")); }
 

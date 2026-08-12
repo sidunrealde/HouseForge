@@ -26,6 +26,15 @@ DEFINE_LOG_CATEGORY(LogHouseForgeEditor);
 
 namespace
 {
+	/**
+	 * Whether RegisterToolsetClass was actually reached at startup.
+	 *
+	 * Recorded rather than re-derived. Asking the registry later would answer a different question
+	 * - whether the toolset is registered NOW, by anyone - and the one the panel needs is whether
+	 * THIS module got that far, which is what distinguishes a plugin fault from a missing plugin.
+	 */
+	bool GToolsetRegistered = false;
+
 	/** Opens a file dialog and imports whatever the user picks. */
 	void ImportDrawingsInteractive()
 	{
@@ -220,6 +229,7 @@ void FHouseForgeEditorModule::StartupModule()
 	if (UToolsetRegistry::IsAvailable())
 	{
 		UToolsetRegistry::RegisterToolsetClass(UHFToolset::StaticClass());
+		GToolsetRegistered = true;
 		UE_LOG(LogHouseForgeEditor, Log, TEXT("Registered the HouseForge MCP toolset."));
 	}
 	else
@@ -269,7 +279,14 @@ void FHouseForgeEditorModule::ShutdownModule()
 		UToolsetRegistry::UnregisterToolsetClass(UHFToolset::StaticClass());
 	}
 
+	GToolsetRegistered = false;
+
 	UE_LOG(LogHouseForgeEditor, Log, TEXT("HouseForge editor module shut down."));
+}
+
+bool FHouseForgeEditorModule::IsToolsetRegistered()
+{
+	return GToolsetRegistered;
 }
 
 #undef LOCTEXT_NAMESPACE
