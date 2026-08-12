@@ -1888,6 +1888,24 @@ bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
  * thing in the suite that asks the question twice.
  *
  * Asserted in degrees and in centimetres of aperture, not as "it still moves".
+ *
+ * ## FALSIFIED, by disabling the fix in ClearPortholeSwing and running this test alone
+ *
+ *   "Built fresh, the utility's machine is hung on the right and opens 112.5 degrees."
+ *   "Rebuild 1 leaves the door opening as far (110.0 of 112.5 degrees)"   - to be 112.5, was 110.0
+ *   "Rebuild 2 ... (107.5 of 112.5 degrees)"                              - was 107.5
+ *   "Rebuild 3 leaves the door on the same side (left, was right)"        - to be true
+ *   "Rebuild 3 ... (105.0 of 112.5 degrees)"                              - was 105.0
+ *   "Rebuild 4 leaves the door on the same side (left, was right)"        - to be true
+ *
+ * Three rebuilds to flip the hand, on the real path, in eleven seconds.
+ *
+ * AND THE APERTURE CHECK PASSED THROUGHOUT THAT RUN - "the open leaf's nearest point is 16.5 cm from
+ * the drum axis, clearing all 31.8 cm of the mouth" - on a left-hand door opening 102.5 degrees into
+ * the utility's west wall. Worth stating plainly, because measuring the aperture in centimetres is
+ * exactly what this project asks of an articulation test and it was NOT enough here: a door hung on
+ * the wrong side uncovers the drum just as well as the right one. What caught this was the resolved
+ * figures being asserted as STABLE, which is a different question from whether they are good.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFlatWasherRebuildTest,
 	"HouseForge.Flat.ThePortholeSurvivesARebuild", HF_TEST_FLAGS)
