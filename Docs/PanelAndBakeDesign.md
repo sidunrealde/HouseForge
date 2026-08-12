@@ -46,6 +46,9 @@ Shape: **artist-station** â€” a flat vertical stack of sections over the ed
 |   [ -o- ] Baked            mixed: 3 of 5 selected                  |
 |   Dynamic meshes are kept. Switching back restores them exactly.   |
 |   (!) 3 baked elements are stale     [ Rebake stale (3) ]          |
+|   [X] NOT IN THE LUMEN SCENE  0 of 410 radiant, 410 absent, 0.0%   |
+|       A render taken now is lit by sky through walls Lumen cannot  |
+|       see, and looks BRIGHTER than the correct one.  [ Bake all ]  |
 |   [ Bake all ]  [ All live ]      -> /Game/HouseForge/Baked/...    |
 +--------------------------------------------------------------------+
 | ok setup ready              last MCP: ModifyElement  12:04:31      |
@@ -73,7 +76,7 @@ Two other states, same stack:
 | ROOMS | house exists and â‰¥1 room | visible. Chips wrap; `not in any room (N)` chip appears only when N > 0 |
 | FIND | house exists | visible, empty text, all chips off. List renders only when text or a chip is active â€” an always-on 63-row list in a 400 px dock is the thing that made the tree designs unpleasant |
 | SELECTED | â‰¥1 HouseForge actor selected | visible, 1 line. `3 elements selected` for multi. Greys in place on empty selection; does not collapse |
-| BAKE | house exists | expanded |
+| BAKE | house exists | expanded. **Must carry the Lumen coverage row.** See below - this is not optional decoration |
 | Footer | always | 1 line: setup status + last MCP tool name and time |
 | SURFACES | always, house or no house | **BUILT.** Expanded, and it takes the tab's remaining height. Present with an empty level on purpose: finishes are assets rather than level state, so every control works and the usage figures read "not in this level" |
 | ASSETS / LIGHT | never, this milestone | not built, not stubbed. The section array is the reservation (Â§3) |
@@ -328,6 +331,33 @@ untouched, and any edit to the baked asset is discarded by the next rebake - the
 the stale row.)
 
 **The `FDynamicMesh3` is never read, modified, cleared or rebuilt by baking.** Bake creates an asset and flips component state. That is the entire reason unbake is instant and lossless.
+
+### 4.4a The Lumen coverage row - the only in-editor warning an artist will ever get
+
+Added after milestone 12 measured what an artist who never touches MCP actually sees, which is
+nothing at all. The MCP surface is good and was verified end to end: `capture_view` on an unbaked
+flat refuses with a message naming the 410 absentees, five of them by name, and the remedy, and
+`ApplySpecJson`'s build message says "Lumen cannot see a dynamic mesh, so BAKE BEFORE RENDERING".
+The console command `HouseForge.CheckLumenCoverage` says the same thing to anyone who runs it.
+
+None of that reaches an artist who generates a house and presses High Res Screenshot. There is no
+notification anywhere in `Source/HouseForgeEditor` - `FNotificationInfo` appears zero times - and the
+only in-editor evidence of bake state is the per-element `RenderMode` enum in the Details panel,
+which requires selecting an element and knowing to look. What that artist gets is a bright, cheerful,
+completely wrong picture and no warning of any kind, because **the broken configuration renders
+6.4x brighter than the correct one** (whole-frame 0.662 live against 0.104 baked - unoccluded sky
+floods through the walls). Brightness is the failure signal, which means it does not read as one.
+
+So the BAKE section carries a coverage row, fed by `FHFLumenCoverageReport`:
+
+* Covered: `FHFLumenCoverageReport::Summary()` verbatim - `314 of 410 primitives radiant, 100% of
+  cardable surface area`. Quiet, one line, no colour.
+* Not covered: `WhyNot()`'s first line, the consequence sentence, and a `[ Bake all ]` button on the
+  row itself. This is the one state in the whole panel that earns an error glyph on sight.
+
+It is specified here rather than left to the BAKE section's author because a bake section without it
+is a bake section that lets the flat be rendered wrong, which is the failure the milestone exists to
+prevent - reproduced in the UI built to surface it.
 
 ### 4.5 Staleness
 

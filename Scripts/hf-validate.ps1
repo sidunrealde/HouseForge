@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     HouseForge validation gate: build the editor, then run the HouseForge automation suite.
 
@@ -6,18 +6,38 @@
     This is the gate described in .claude/rules/03-validation-gate.md. Nothing merges into
     `develop` unless this exits 0.
 
-    Three stages, stopping at the first failure:
+    Four stages, stopping at the first failure:
       1. Build   - HouseBuilderEditor Win64 Development, via UnrealBuildTool.
       2. Test    - the HouseForge.* automation suite, headless (-nullrhi), via UnrealEditor-Cmd.
       3. Pixels  - the subset that measures the rendered image, re-run WITH a renderer.
+      4. Lumen   - hf-lumen.ps1: does indirect light actually arrive in a baked flat.
 
     Stage 3 is not a duplicate of stage 2. Under -nullrhi nothing can be drawn, so a test that
     measures pixels reports a warning and passes without asserting anything - which is how the
     millimetre tiling promise came to be guarded by a test the gate never actually executed. Stage 3
     runs those tests with a renderer and fails if any of them still skips its measurement.
 
+    STAGE 4 EXISTS BECAUSE STAGES 2 AND 3 CANNOT MEASURE LIGHT, AND THE BAKE IS ABOUT LIGHT.
+    Every HouseForge.Lumen.* test asserts a MECHANISM - DistanceFieldResolutionScale non-zero, an
+    orthogonal transform, a face over the card threshold - because that is all a settings-level
+    assertion can reach. Stage 3's only capture instrument is FHFSceneCapture, and a
+    USceneCaptureComponent2D runs no global illumination at all: measured, the same baked flat
+    captured with Lumen on, with r.DynamicGlobalIlluminationMethod 0, and with GI and the sky light
+    both off produced three BYTE-IDENTICAL PNGs. So the gate could be green - and was, 478/478 and
+    31/31 - with nothing anywhere having checked that light arrives.
+
+    hf-lumen.ps1 drives a real viewport, settles Lumen for 200 frames per state change, and asserts
+    that the shadowed wall is at least 1.5x brighter baked than live on the same tracing path. It is
+    the only instrument in the repo that measures the thing the bake was promoted to a prerequisite
+    for. It needs a GPU and about twenty minutes, which is the argument for -SkipLumen when a
+    developer is iterating, and not an argument for leaving it out of the gate that decides merges.
+    hf-merge.ps1 does not pass -SkipLumen.
+
 .PARAMETER SkipBuild
     Run only the tests. For iterating on tests when the binary is already current.
+
+.PARAMETER SkipLumen
+    Skip stage 4. For iterating without a GPU or without twenty minutes. Never used by hf-merge.ps1.
 
 .PARAMETER TestFilter
     Automation test prefix to run. Defaults to "HouseForge", i.e. the whole suite.
@@ -41,6 +61,7 @@
 [CmdletBinding()]
 param(
     [switch] $SkipBuild,
+    [switch] $SkipLumen,
     [string] $TestFilter = 'HouseForge',
 
     # WHAT STAGE 3 RE-RUNS WITH A RENDERER, AND WHY IT IS THREE FILTERS RATHER THAN ONE.
@@ -118,6 +139,34 @@ $EditorCmd  = Join-Path $EngineDir 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
 $ReportDir      = Join-Path $PluginDir "Saved\TestReports-$PID"
 $PixelReportDir = Join-Path $PluginDir "Saved\TestReportsPixels-$PID"
 
+# WHAT THE MERGE COMMIT RECORDS, WRITTEN BY THE RUN THAT EARNED IT.
+#
+# Rule 03 says the gate's evidence goes into the merge commit so history shows what was actually
+# verified. hf-merge.ps1 read that out of Saved\TestReports\index.json - a path that stopped existing
+# when the report directories became per-PID, so Test-Path failed, the fallback fired, and every
+# merge message since has said the unfalsifiable "validation gate passed" instead of a count. It also
+# read $Report.succeeded alone, which omits succeededWithWarnings and undercounts the suite by
+# however many tests warned.
+#
+# So the gate writes its own evidence, at a stable path, from the numbers it has just checked - and
+# deletes it up front, so a stale file from a previous run can never be picked up as this one's.
+$EvidencePath = Join-Path $PluginDir 'Saved\GateEvidence.json'
+$Evidence = [ordered]@{
+    ranAtUtc = (Get-Date).ToUniversalTime().ToString('s') + 'Z'
+    commit   = (& git -C $PluginDir rev-parse --short HEAD 2>$null)
+    build    = 'not run'
+    suite    = 'not run'
+    pixels   = 'not run'
+    lumen    = 'not run'
+}
+
+function Write-Evidence {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $EvidencePath) -Force | Out-Null
+    $Evidence | ConvertTo-Json | Out-File -FilePath $EvidencePath -Encoding utf8
+}
+
+if (Test-Path $EvidencePath) { Remove-Item $EvidencePath -Force }
+
 function Write-Stage([string] $Text) {
     Write-Host ''
     Write-Host "=== $Text ===" -ForegroundColor Cyan
@@ -136,7 +185,7 @@ Assert-Exists $EditorCmd 'UnrealEditor-Cmd.exe'
 
 # ----------------------------------------------------------------------------- stage 1: build
 if (-not $SkipBuild) {
-    Write-Stage 'Stage 1/3  Build  HouseBuilderEditor Win64 Development'
+    Write-Stage 'Stage 1/4  Build  HouseBuilderEditor Win64 Development'
 
     & $Ubt HouseBuilderEditor Win64 Development -Project="$UProject" -WaitMutex
     if ($LASTEXITCODE -ne 0) {
@@ -145,10 +194,13 @@ if (-not $SkipBuild) {
         exit $LASTEXITCODE
     }
     Write-Host 'Build OK' -ForegroundColor Green
+    $Evidence.build = 'OK'
 }
 else {
-    Write-Stage 'Stage 1/3  Build  SKIPPED (-SkipBuild)'
+    Write-Stage 'Stage 1/4  Build  SKIPPED (-SkipBuild)'
+    $Evidence.build = 'SKIPPED (-SkipBuild)'
 }
+Write-Evidence
 
 # -------------------------------------------------------------------------- stages 2 and 3: tests
 #
@@ -170,6 +222,9 @@ function Invoke-TestStage {
         [string]   $Reports,
         [string[]] $RhiArgs,
         [switch]   $RequireMeasured,
+
+        # Which field of $Evidence this stage's counts are recorded into, for the merge commit.
+        [string]   $EvidenceKey = '',
 
         # Absolute floor on how many tests must have run. Zero disables it, for a narrow filter.
         [int]      $Minimum = 0,
@@ -221,6 +276,13 @@ function Invoke-TestStage {
         $Total   = $Passed + $Report.failed + $Report.notRun
         Write-Host ''
         Write-Host "Tests: $Passed passed ($($Report.succeededWithWarnings) with warnings), $($Report.failed) failed, $($Report.notRun) not run (of $Total)"
+
+        # Recorded before the checks below, deliberately: if a check fails the script exits and this
+        # file is left describing the run that failed, which is more use than no file at all.
+        if ($EvidenceKey -ne '') {
+            $Evidence[$EvidenceKey] = "$Passed/$Total passed ($($Report.succeededWithWarnings) with warnings), $($Report.failed) failed, $($Report.notRun) not run"
+            Write-Evidence
+        }
 
         foreach ($t in $Report.tests) {
             if ($t.state -ne 'Success') {
@@ -413,22 +475,80 @@ $Canaries = @(
     'HouseForge.Flat.EveryRoomIsReachableFromTheFrontDoor'
 )
 
-Invoke-TestStage -Label "Stage 2/3  Test  automation filter '$TestFilter'" `
+Invoke-TestStage -Label "Stage 2/4  Test  automation filter '$TestFilter'" `
                  -Filter  $TestFilter `
                  -Reports $ReportDir `
                  -RhiArgs @('-nullrhi') `
+                 -EvidenceKey 'suite' `
                  -Minimum $(if ($FullSuite) { $MinTests } else { 0 }) `
                  -Canaries $(if ($FullSuite) { $Canaries } else { @() })
 
 # A REAL RHI, AND NOT A WINDOW. -AllowCommandletRendering gives an unattended process a working
 # renderer without a visible editor, which is what lets the gate assert the one thing -nullrhi can
 # never see: what the material actually draws.
-Invoke-TestStage -Label "Stage 3/3  Test  pixel measurements, with a renderer ('$PixelFilter')" `
+Invoke-TestStage -Label "Stage 3/4  Test  pixel measurements, with a renderer ('$PixelFilter')" `
                  -Filter  $PixelFilter `
                  -Reports $PixelReportDir `
                  -RhiArgs @('-AllowCommandletRendering') `
+                 -EvidenceKey 'pixels' `
                  -Minimum $MinPixelTests `
                  -RequireMeasured
+
+# ------------------------------------------------------------------ stage 4: does light arrive
+#
+# THE ONLY STAGE THAT MEASURES LIGHT, AND FOR TEN MILESTONES IT WAS NOT IN THE GATE AT ALL.
+#
+# hf_lumen_measure.py::verdict describes itself as "the third of the milestone's three tests" and it
+# is the only instrument in this repo that asserts indirect light actually ARRIVES - a 1.5x floor on
+# the shadowed wall baked against live, plus the surface-cache pink fraction. It was reachable only
+# by running Scripts/hf-lumen.ps1 by hand, and the string 'hf-lumen' appeared nowhere in this file or
+# in hf-merge.ps1.
+#
+# Everything stages 2 and 3 check about Lumen is settings-level, because that is all they can reach:
+# DistanceFieldResolutionScale non-zero, an orthogonal transform, a face over the card threshold. A
+# regression those settings cannot see - card placement, material classification, a change of tracing
+# path, or the surface cache simply not being captured - passes both stages without a murmur. And the
+# reason that matters more here than it would anywhere else is the measured asymmetry this whole
+# milestone turns on: the BROKEN configuration renders BRIGHTER than the correct one, 0.662 against
+# 0.104 whole-frame, because unoccluded sky floods through walls Lumen cannot see. A broken render
+# looks bright and cheerful, so there is no version of "look at it and see" that survives.
+#
+# It needs a GPU and about twenty minutes. That is the argument for -SkipLumen, and hf-merge.ps1
+# deliberately does not pass it.
+if ($SkipLumen) {
+    Write-Stage 'Stage 4/4  Lumen  SKIPPED (-SkipLumen)'
+    Write-Host 'Nothing has measured whether indirect light arrives. Do not record this run as gate evidence for a merge.' -ForegroundColor Yellow
+    $Evidence.lumen = 'SKIPPED (-SkipLumen) - NOTHING MEASURED WHETHER LIGHT ARRIVES'
+}
+else {
+    Write-Stage 'Stage 4/4  Lumen  does indirect light actually arrive in a baked flat'
+
+    $LumenScript = Join-Path $PSScriptRoot 'hf-lumen.ps1'
+    Assert-Exists $LumenScript 'hf-lumen.ps1'
+
+    & $LumenScript -EngineDir $EngineDir
+    $LumenExit = $LASTEXITCODE
+
+    if ($LumenExit -ne 0) {
+        Write-Host ''
+        Write-Host "GATE FAILED: the Lumen stage returned $LumenExit. Either the flat is not reaching the Lumen scene when baked, or indirect light is not arriving on the shadowed wall. Images and numbers in $PluginDir\Saved\Review\lumen-baked." -ForegroundColor Red
+        exit $LumenExit
+    }
+
+    # The measured numbers, not just a verdict. hf_lumen_measure.py writes them beside the images.
+    $Ratio = 'measured'
+    $MeasurePath = Join-Path $PluginDir 'Saved\Review\lumen-baked\measurements.json'
+    if (Test-Path $MeasurePath) {
+        $M = Get-Content $MeasurePath -Raw | ConvertFrom-Json
+        $Live  = $M.'B-live-hardware'.mbed.wall_left
+        $Baked = $M.'D-baked-hardware'.mbed.wall_left
+        if ($Live -gt 0) { $Ratio = ('shadowed wall {0:N3} baked against {1:N3} live, {2:N2}x' -f $Baked, $Live, ($Baked / $Live)) }
+    }
+
+    Write-Host 'Indirect light arrives, and it arrives because of the bake' -ForegroundColor Green
+    $Evidence.lumen = $Ratio
+}
+Write-Evidence
 
 Write-Host ''
 Write-Host 'GATE PASSED' -ForegroundColor Green
