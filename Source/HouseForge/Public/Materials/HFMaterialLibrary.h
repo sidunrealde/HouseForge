@@ -10,6 +10,7 @@
 
 class UDynamicMeshComponent;
 class UMaterialInterface;
+class UStaticMeshComponent;
 
 /**
  * How hard a push to the render side is allowed to work.
@@ -205,6 +206,22 @@ public:
 	 * property of the component.
 	 */
 	void ApplyTo(UDynamicMeshComponent* Component) const;
+
+	/**
+	 * The same slot table, on the static mesh component a baked element draws through.
+	 *
+	 * A baked element must stay reachable from the material panel, and it is: the bake writes one
+	 * material slot per surface role into the asset, and a non-empty section's index IS the role
+	 * index - because FHFMeshOps::AssignMaterialIdsFromRoles writes MaterialIdForRole and
+	 * FDynamicMeshToMeshDescription turns material ids into polygon groups one for one. Measured in
+	 * HouseForge.Bake.Probe.SurfaceRolesSurviveTheBake. So slot i means role i on a baked wall
+	 * exactly as it does on a live one, and this writes the same set into it.
+	 *
+	 * Overrides on the COMPONENT rather than on the asset, matching the dynamic side: the asset is
+	 * shared between every element that baked the same geometry, and the component is where a
+	 * per-element finish belongs.
+	 */
+	void ApplyTo(UStaticMeshComponent* Component) const;
 
 	// ============================================================================= live update
 

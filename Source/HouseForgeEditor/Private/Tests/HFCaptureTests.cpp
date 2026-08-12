@@ -18,6 +18,7 @@
 #include "EngineUtils.h"
 #include "HAL/FileManager.h"
 #include "HFEditorSubsystem.h"
+#include "HFRenderSettings.h"
 #include "ImageUtils.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInterface.h"
@@ -385,6 +386,13 @@ bool FHFCaptureNeedsNoViewportTest::RunTest(const FString& Parameters)
 
 	constexpr int32 Resolution = 512;
 
+	// THE SUBJECT HERE IS THE ABSENCE OF A VIEWPORT, not the light in the picture. The stand-in flat
+	// is seven unbaked elements, so the Lumen guard refuses the lit view on sight - correctly, and
+	// beside the point, because this test never looks at a pixel's brightness. Switched off narrowly
+	// rather than by baking the stand-in, which would put a 350-asset write into a test about whether
+	// a capture needs a window. See FHFLumenGuardScope.
+	const FHFLumenGuardScope NotJudgedOnItsLight(EHFLumenGuard::Off);
+
 	FString PlanOut;
 	const FHFOperationResult Plan = Editor->CaptureTopDown(PlanName, Resolution, 0.0, PlanOut);
 
@@ -513,6 +521,21 @@ bool FHFCapturePlanOrientationTest::RunTest(const FString& Parameters)
 	{
 		TestTrue(TEXT("The result says which way the image is oriented"),
 			Result.Message.Contains(TEXT("mirrored")) && Result.Message.Contains(TEXT("+Y")));
+	}
+	else
+	{
+		// A CAPTURE THAT DID NOT HAPPEN IS NOT A CAPTURE THAT WAS ORIENTED CORRECTLY. This branch
+		// used to end the test with no assertion and no trace of it: under -nullrhi the capture
+		// cannot succeed, so the one test guarding the mirrored-plan warning silently asserted
+		// nothing in the only stage anybody ran. Sentinel, so the renderer stage refuses it.
+		//
+		// FALSIFIED, and unlike the panel ones this branch is reached without forcing anything: stage
+		// 3 run on -nullrhi fails with "GATE FAILED: ... measurement(s) were skipped in the stage that
+		// exists to take them", naming this test. With the silent return this replaced, the same run
+		// prints "Every pixel measurement was actually taken" and exits 0.
+		AddWarning(FString::Printf(
+			TEXT("HF_UNMEASURED: the capture did not succeed, so the orientation message was NOT checked: %s"),
+			*Result.Message));
 	}
 
 	return true;

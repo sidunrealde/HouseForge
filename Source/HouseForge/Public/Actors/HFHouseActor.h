@@ -126,6 +126,48 @@ public:
 	/** Ids of the fixtures in a list that BuildsGeometryFor accepts. */
 	static TSet<FName> BuiltFixtureIds(const TArray<FHFFixture>& Fixtures);
 
+	// ================================================================ the asset replacement pass
+
+	/**
+	 * THE BATCH PASS. Puts the project's asset library over every generated fixture it has a row for.
+	 *
+	 * Run at the end of every BuildGeometry, so a table built once applies to every house generated
+	 * afterwards without anybody remembering to ask - which is the whole point of having a table
+	 * rather than a per-instance picker.
+	 *
+	 * WHAT IT WILL NOT TOUCH: an element whose override was hand-picked (SourceTable is None). That
+	 * is somebody's decision about that instance, and a batch pass quietly reverting it would be the
+	 * worst kind of loss - invisible until a render, and impossible to attribute afterwards.
+	 *
+	 * Idempotent. Running it twice with the same table changes nothing the second time, and running
+	 * it after a row has been deleted from the table clears the override that row put there.
+	 *
+	 * @param Table       The table to apply, or null to clear every table-driven override.
+	 * @param OutReport   Optional. One line per type, plus what could not be loaded or has no collision.
+	 * @return how many elements the pass acted on - applied an override to, or cleared one from.
+	 *         NOT how many changed appearance: a re-run over an unchanged table re-fits every one of
+	 *         them, deliberately, because the box an asset was fitted into may have moved.
+	 */
+	int32 ApplyAssetMappingTable(const class UHFAssetMappingTable* Table, TArray<FString>* OutReport = nullptr);
+
+	/** ApplyAssetMappingTable with the table named by the project settings. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Assets")
+	int32 ApplyProjectAssetMappingTable();
+
+	/**
+	 * Re-fits every override against the box its element occupies NOW.
+	 *
+	 * Needed because a rebuild re-parameterises a preserved element and regenerates it, so the box a
+	 * hand-picked asset was fitted into a moment ago may be a different size - a wardrobe the drawing
+	 * has since widened by 200 mm. Without this the asset keeps the old fit and the flat quietly
+	 * disagrees with the plan it was just rebuilt from.
+	 */
+	int32 RefitAssetOverrides();
+
+	/** Clears every asset override in the house, table-driven and hand-picked alike. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Assets")
+	int32 ClearAllAssetOverrides();
+
 	/**
 	 * Takes the house's elements with it.
 	 *
@@ -144,6 +186,36 @@ public:
 	/** Floor slab thickness used when generating rooms. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Geometry", meta = (ClampMin = "1.0"))
 	double SlabThickness = 15.0;
+
+	/**
+	 * Where this house's baked static meshes are written.
+	 *
+	 * Empty until the first bake, which resolves it to /Game/HouseForge/Baked/<LevelName> and writes
+	 * it back here. Written back rather than recomputed every time so that RENAMING THE LEVEL LATER
+	 * DOES NOT SCATTER THE ASSETS: the second half of a flat would otherwise land in a new folder and
+	 * the orphan scan would report the first half as unowned.
+	 *
+	 * Under /Game and never plugin content. Rule 01: levels and everything generated into them are
+	 * user output, not plugin source, and the plugin repo does not carry them.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Bake")
+	FString BakedAssetFolder;
+
+	/**
+	 * The level BakedAssetFolder was resolved for. What makes the folder survive being COPIED.
+	 *
+	 * A duplicated level, or one saved under a new name, carries this actor and its BakedAssetFolder
+	 * with it. Without a record of which level the folder was resolved for, the copy would carry on
+	 * baking into the ORIGINAL's folder, rewriting the original's assets in place - and re-stamping
+	 * them for the copy, so the original's orphan scan could no longer even report the damage. Both
+	 * halves are real: the folder name and the asset names are functions of the element id alone, and
+	 * they are identical in both copies.
+	 *
+	 * When this does not name the level that is open, the folder is re-resolved and this is rewritten,
+	 * so a copy quietly gets its own folder the first time it bakes.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Bake")
+	FName BakedAssetFolderLevel;
 
 	// -------------------------------------------------------------------- preview appearance
 

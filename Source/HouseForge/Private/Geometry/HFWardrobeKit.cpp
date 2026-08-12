@@ -23,29 +23,12 @@ namespace
 		return Out;
 	}
 
-	/**
-	 * The handle for one leaf, in that leaf's own local space.
-	 *
-	 * Not one line of this is conditional on how the leaf is hung, and that is the point. A leaf of
-	 * either hand carries its board on +Y of its pivot, so the face that looks out of the wardrobe is
-	 * the plane Y = 0 for both, and the facing is a constant - the same constant a drawer front uses.
-	 * What handedness DOES change is which edge the leaf opens from, and the kit is asked rather than
-	 * the answer being written out here: a run of shutters is exactly where a hand-derived flip gets
-	 * applied to five leaves and forgotten on the sixth.
-	 *
-	 * Everything else stays at FHFHandleParams' own defaults, which are the standard Indian cabinet
-	 * fittings. They are on the actor's parameter struct afterwards for anyone who wants a different
-	 * pull on this particular wardrobe.
-	 */
-	FHFHandleParams MakeLeafHandle(const FHFShutterParams& Leaf, EHFHandleStyle Style)
-	{
-		FHFHandleParams Handle;
-		Handle.Style = Style;
-		Handle.PanelBox = FHFJoineryKit::ShutterPanelBox(Leaf);
-		Handle.Facing = EHFPanelFacing::NegativeY;
-		Handle.Edge = FHFJoineryKit::ShutterLeadingEdge(Leaf);
-		return Handle;
-	}
+	// The handle for one leaf now comes from FHFJoineryKit::ShutterHandle, which is where the copy
+	// that used to live here went - along with the identical copy in HFCasedGoodsKit.cpp, whose
+	// comment pointed at this one. Duplication was tolerable while the answer was four obvious lines;
+	// it stopped being so once a SLIDING leaf needed a different edge from the one it leads with and a
+	// projection its neighbour's track gap allows, because the wrong version of either looks perfect
+	// in a still of a closed wardrobe.
 
 	/**
 	 * How many leaves close a run of that many bays.
@@ -298,7 +281,7 @@ FHFWardrobeBuild FHFWardrobeKit::Build(const FHFWardrobeParams& Params)
 			// Into the LEAF's own mesh, in the leaf's own space. Anywhere else and the handle stays
 			// on the carcass when the leaf swings - which, closed and seen from the front, looks
 			// exactly like success.
-			FHFJoineryKit::ApplyHandle(Part.Mesh, MakeLeafHandle(Leaf, P.HandleStyle));
+			FHFJoineryKit::ApplyHandle(Part.Mesh, FHFJoineryKit::ShutterHandle(Leaf, P.HandleStyle));
 
 			Part.PivotTransform = FHFJoineryKit::ShutterPivotTransform(Leaf)
 				* FTransform(FVector(Index * LeafModule, 0.0, BaseZ));

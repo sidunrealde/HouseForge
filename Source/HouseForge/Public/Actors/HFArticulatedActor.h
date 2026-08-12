@@ -192,6 +192,17 @@ public:
 	virtual void RevertToGenerated() override;
 	virtual bool ShouldPreserveOnRebuild() const override;
 
+	/**
+	 * The fixed shell first, then every moving part, in Parts order.
+	 *
+	 * THIS IS WHAT KEEPS A BAKED CHEST OF DRAWERS A CHEST OF DRAWERS. Rule 04 forbids welding a
+	 * fixture into one mesh, and a single-mesh bake would do exactly that - a baked door would be a
+	 * door that cannot open, today, on the one articulated element the plugin already ships. Each
+	 * source component gets its own asset on its own static mesh component parented to it, so the
+	 * articulation carries straight through the bake.
+	 */
+	virtual void GetBakeSourceComponents(TArray<UDynamicMeshComponent*>& OutComponents) const override;
+
 	virtual void PostInitializeComponents() override;
 	virtual void PostRegisterAllComponents() override;
 

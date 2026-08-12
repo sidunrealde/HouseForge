@@ -422,6 +422,25 @@ struct HOUSEFORGE_API FHFRefrigeratorParams
 };
 
 /**
+ * Which side a door is hung on, seen from in front of the thing it is hung on.
+ *
+ * A HAND IS A PRODUCT DECISION, NOT A DIMENSION. Every manufacturer sells the same front-loader
+ * both ways round for one reason: which way the door opens decides whether the machine can be
+ * installed where it has to go. So it is a parameter of the appliance rather than something the
+ * geometry may assume, and the composing layer picks it from what is beside the machine - the
+ * hinge-hand equivalent of AHFCasedGoodsActor::bBankAtRunStart.
+ */
+UENUM(BlueprintType)
+enum class EHFHingeHand : uint8
+{
+	/** Hinges on the left, opening to the left. What a catalogue calls the standard machine. */
+	Left,
+
+	/** Hinges on the right, opening to the right. The reversed machine, sold alongside it. */
+	Right
+};
+
+/**
  * A front-loading washing machine: a porthole, a detergent drawer and a programme dial.
  *
  * Frame and setback as FHFRefrigeratorParams, and for the same reasons.
@@ -431,6 +450,17 @@ struct HOUSEFORGE_API FHFRefrigeratorParams
  * The porthole, the detergent drawer and the dial. All three are things a person operates, and the
  * dial is in the list because a programme selector turns - the same rule that gave the geyser its
  * thermostat rather than a moulded bump. See .claude/rules/04-conventions.md.
+ *
+ * ## AND WHICH WAY THE PORTHOLE OPENS IS PART OF WHAT THE MACHINE IS
+ *
+ * The porthole was hung on the left, full stop, because that is the machine in most catalogue
+ * photographs. In the reference flat that put the door into the utility's west wall: 5.69 cm at 80%
+ * open, recorded by the clash scan for a milestone and impossible to design away, because the
+ * utility is 1200 wide and the machine is 600 - there is no room to move it into, and shifting it
+ * along the wall only puts the same door into the same masonry from further away.
+ *
+ * The trade's answer is not a narrower room. It is the right-hand machine, which every manufacturer
+ * also sells, and that is what HingeHand is.
  */
 USTRUCT(BlueprintType)
 struct HOUSEFORGE_API FHFWashingMachineParams
@@ -462,6 +492,18 @@ struct HOUSEFORGE_API FHFWashingMachineParams
 		meta = (ClampMin = "0.0", ClampMax = "170.0"))
 	double DoorSwingDegrees = 160.0;
 
+	/**
+	 * Which side the porthole is hung on. See EHFHingeHand.
+	 *
+	 * Left by default because that is the machine most catalogues photograph, and because a default
+	 * that changes what an existing parameter set builds is a silent edit to every saved level. The
+	 * composing layer overrides it from what is beside the machine - see AHFHouseActor's
+	 * SeedWashingMachine - and an artist can override it back in the details panel, which is the
+	 * whole reason it is a UPROPERTY and not a derived figure.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions")
+	EHFHingeHand HingeHand = EHFHingeHand::Left;
+
 	/** How far the detergent drawer pulls out. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Dimensions", meta = (ClampMin = "0.0"))
 	double DrawerTravel = 13.0;
@@ -480,6 +522,70 @@ struct HOUSEFORGE_API FHFWashingMachineParams
 	double BuiltDepth() const { return FMath::Max(Depth - SkirtingSetback, 0.0); }
 
 	bool IsValid() const { return Width > 0.0 && BuiltDepth() > 0.0 && Height > 0.0; }
+};
+
+/**
+ * WHERE A PORTHOLE LEAF IS, IN THE MACHINE'S OWN PLAN.
+ *
+ * Seen from above, a porthole is a LINE and not a disc: the leaf is a flat disc standing in a
+ * vertical plane, so its plan is a segment running Reach from its hinge, with the leaf's own
+ * thickness either side of it.
+ *
+ * Published because the composing layer has to know it and must not reconstruct it. Which side the
+ * door is hung on is decided by what is beside the machine, and answering that means walking the
+ * swing and asking whether the leaf is over clear floor - which needs the hinge, the reach and the
+ * thickness. A second copy of those three figures in AHFHouseActor is exactly how a leaf comes to be
+ * built one size and cleared for another; BuildWashingMachine draws from this same struct, so there
+ * is one set of numbers and the mesh is measured back against it in
+ * HouseForge.Services.ThePortholeLeafIsWhereTheKitSaysItIs.
+ *
+ * All distances in centimetres, in the machine's own frame: origin at the front-left footprint
+ * corner, +X across the width, +Y back into the machine, +Z up.
+ */
+struct HOUSEFORGE_API FHFPortholeLeaf
+{
+	/** +1 when the door is hung on the left, -1 on the right. The whole hand, as one number. */
+	double HandSign = 1.0;
+
+	/** Where the hinge sits across the machine's width. */
+	double HingeAcross = 0.0;
+
+	/** Centre of the drum mouth across the width, and its radius. What the door has to uncover. */
+	double MouthAcross = 0.0;
+	double MouthRadius = 0.0;
+
+	/** Hinge to the leaf's far edge - the door's own diameter. */
+	double Reach = 0.0;
+
+	/** How far the rim stands proud of the leaf's plane, towards the room. */
+	double Proud = 0.0;
+
+	/** How far the glass dishes the other way, towards the drum. */
+	double Dish = 0.0;
+
+	/** How far the door is built to open. */
+	double SwingDegrees = 0.0;
+
+	bool IsValid() const { return Reach > 0.0 && SwingDegrees > 0.0; }
+
+	/**
+	 * Which way the leaf runs from its hinge at a given open angle.
+	 *
+	 * +Y is INTO the machine, so a door opening is a door turning towards -Y whichever side it hangs
+	 * on - which is what makes this one expression rather than two.
+	 */
+	FVector2D DirectionAt(double Degrees) const
+	{
+		const double Radians = FMath::DegreesToRadians(Degrees);
+		return FVector2D(HandSign * FMath::Cos(Radians), -FMath::Sin(Radians));
+	}
+
+	/** The leaf's own normal at that angle: +Y when the door is shut, on either hand. */
+	FVector2D NormalAt(double Degrees) const
+	{
+		const FVector2D Direction = DirectionAt(Degrees);
+		return FVector2D(-HandSign * Direction.Y, HandSign * Direction.X);
+	}
 };
 
 /** A composed appliance. Plain data carrying meshes by value. */
@@ -527,6 +633,14 @@ public:
 
 	/** Case, fascia, and the porthole, detergent drawer and dial as their own parts. */
 	static FHFApplianceBuild BuildWashingMachine(const FHFWashingMachineParams& Params);
+
+	/**
+	 * Where this machine's porthole leaf is, in plan. See FHFPortholeLeaf.
+	 *
+	 * BuildWashingMachine draws the leaf from this, so it is the machine's own account of itself
+	 * rather than a description of it kept alongside.
+	 */
+	static FHFPortholeLeaf PortholeLeafOf(const FHFWashingMachineParams& Params);
 
 	/** Part id of a hob knob, left to right. */
 	static FName KnobPartId(int32 Index);

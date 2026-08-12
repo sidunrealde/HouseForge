@@ -347,14 +347,26 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("No routed face was left without a surface role"), EveryTriangleTagged(JPanel));
 	TestTrue(TEXT("The routed panel is unwrapped"), HasUVs(JPanel));
 
-	// The corner notch, plus the wedge the inner chamfer takes off the face, less the wedge the
-	// outer chamfer leaves on the lip. Both breaks are the same size, so they cancel exactly - which
-	// is a coincidence of arithmetic and not the assertion; the two chamfers are asserted
-	// individually below, where they are actually visible.
-	const double Wedge = J.LipChamfer * J.LipChamfer * 0.5;
-	const double JRemoved = RunSpan * (J.ProfileHeight * J.RecessDepth + Wedge - Wedge);
-	TestNearlyEqual(TEXT("A J-profile removes exactly the corner it describes"),
-		PanelVolume - Volume(JPanel), JRemoved, FMath::Abs(JRemoved) * 0.01);
+	// TWO THINGS HAPPEN NOW, and the net is what a caller sees. The cutter takes the corner notch
+	// off the board; the fitted section puts the aluminium back into it. Stated as both terms rather
+	// than as the net figure, because a net that came out right with either term wrong is exactly
+	// the sort of arithmetic this file exists to refuse.
+	//
+	// The channel, plus the wedge the INNER chamfer takes off the face. Only that one: with a section
+	// fitted the outer break-out is the section's job and the cutter no longer describes it, so the
+	// two wedges no longer cancel the way they did when the board was the whole profile. They differ
+	// by C*C/2 on a 5.13 cm2 rebate - 0.4%, comfortably inside the 1% tolerance below, which is
+	// exactly how this file carried two disagreeing formulae for the same shape until a section was
+	// fitted into it. Stated correctly here and matched in HandleOnEitherHand.
+	const FDynamicMesh3 JSection = FHFJoineryKit::GenerateHandleProfile(JAsked);
+	TestTrue(TEXT("A J-profile is fitted with a section, so the board is not the whole story"),
+		J.HasReturnProfile() && JSection.TriangleCount() > 0);
+
+	const double JRouted =
+		RunSpan * (J.ProfileHeight * J.RecessDepth + J.LipChamfer * J.LipChamfer * 0.5);
+	const double JNet = JRouted - Volume(JSection);
+	TestNearlyEqual(TEXT("A J-profile removes exactly the corner it describes, less the section in it"),
+		PanelVolume - Volume(JPanel), JNet, FMath::Abs(JNet) * 0.01);
 
 	// Both arrises the cut creates are broken, and both are asserted where a hand would find them.
 	//
@@ -364,10 +376,11 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 		Box.Max.Z - JBox.Min.Z, J.ProfileHeight + J.LipChamfer, 0.001);
 	TestTrue(TEXT("There is a chamfer to break it with"), J.LipChamfer > 0.0);
 
-	// The outer lip, where the recess floor runs out through the edge. Measured as board that is
-	// there: at a quarter of a chamfer in from the edge, the routed panel must still be solid a
-	// quarter of a chamfer above the recess floor. An unbroken 90-degree arris would have cut that
-	// away, and the volume above cannot see the difference because the two wedges cancel.
+	// The outer lip, where the channel runs out through the edge. It used to be a chamfer left on the
+	// board, and the assertion was that board survived there. With a section fitted it is the
+	// section's own floor and wall that turn that corner, so the same point must still be solid - but
+	// now because there is aluminium in it, which is the better answer: a break on a board arris is a
+	// 2 mm nod at a sharp edge, and a lined channel has no exposed board arris at all.
 	{
 		const double Depth = J.RecessDepth;
 		const double Quarter = J.LipChamfer * 0.25;
@@ -376,8 +389,15 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 
 		FDynamicMeshAABBTree3 Tree(&JPanel, true);
 		TFastWindingTree<FDynamicMesh3> Winding(&Tree, true);
-		TestTrue(TEXT("The outer lip is broken rather than left a sharp arris"),
+		TestTrue(TEXT("The outer corner of the channel is filled rather than left a sharp arris"),
 			Winding.IsInside(InsideTheChamfer));
+
+		// And it is the SECTION filling it, not board the cutter failed to take. Probed against the
+		// section on its own, so this cannot be satisfied by a rebate that was never cut.
+		FDynamicMeshAABBTree3 SectionTree(&JSection, true);
+		TFastWindingTree<FDynamicMesh3> SectionWinding(&SectionTree, true);
+		TestTrue(TEXT("...and it is the fitted section that fills it"),
+			SectionWinding.IsInside(InsideTheChamfer));
 
 		// And the recess really is cut to its full depth further in, so the chamfer is a break on
 		// the lip and not a shallower recess.
@@ -386,11 +406,20 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("The recess itself is still cut away"), Winding.IsInside(InsideTheRecess));
 	}
 
-	// A notch off one corner leaves the panel's overall extents alone: board survives behind the
-	// recess and below it, so nothing has actually got smaller.
-	TestTrue(TEXT("Routing a J-profile does not shrink the panel"),
-		JPanel.GetBounds().Max.Equals(FVector3d(Box.Max), 0.01)
-		&& JPanel.GetBounds().Min.Equals(FVector3d(Box.Min), 0.01));
+	// A notch off one corner leaves the board's extents alone: material survives behind the channel
+	// and below it, so nothing has actually got smaller. What DOES grow is the face the section
+	// stands proud of, by exactly its projection - the shadow line the run is read by, and the one
+	// direction a handle is allowed to change a panel's bounds in.
+	{
+		const FAxisAlignedBox3d Fitted = JPanel.GetBounds();
+		TestTrue(TEXT("Routing a J-profile does not shrink the panel"),
+			Fitted.Min.Equals(FVector3d(Box.Min), 0.01));
+		TestTrue(TEXT("...nor move it along the run or the edge it serves"),
+			FMath::IsNearlyEqual(Fitted.Max.X, Box.Max.X, 0.01)
+			&& FMath::IsNearlyEqual(Fitted.Max.Z, Box.Max.Z, 0.01));
+		TestNearlyEqual(TEXT("The section stands its declared projection off the face, and nothing else does"),
+			Fitted.Max.Y - Box.Max.Y, J.ProfileProjection, 0.01);
+	}
 
 	// ------------------------------------------------------------------------ handleless groove
 
@@ -426,14 +455,28 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The grooved panel still faces outward"), Volume(GPanel) > 0.0);
 	TestTrue(TEXT("No grooved face was left without a surface role"), EveryTriangleTagged(GPanel));
 
-	// The channel, plus a chamfer wedge on each of its two lips - one more than the J-profile gets.
-	const double GRemoved = RunSpan * (G.ProfileHeight * G.RecessDepth + G.LipChamfer * G.LipChamfer);
-	TestNearlyEqual(TEXT("A groove removes exactly the channel it describes"),
-		PanelVolume - Volume(GPanel), GRemoved, FMath::Abs(GRemoved) * 0.01);
+	// The channel, plus a chamfer wedge on each of its two lips - one more than the J-profile gets,
+	// because both of a groove's lips are board that stays on show. Less the gola section fitted into
+	// it, on the same terms as the J-profile above.
+	const FDynamicMesh3 GSection = FHFJoineryKit::GenerateHandleProfile(GAsked);
+	TestTrue(TEXT("A groove is fitted with a section too"),
+		G.HasReturnProfile() && GSection.TriangleCount() > 0);
 
-	TestTrue(TEXT("Routing a groove does not shrink the panel"),
-		GPanel.GetBounds().Max.Equals(FVector3d(Box.Max), 0.01)
-		&& GPanel.GetBounds().Min.Equals(FVector3d(Box.Min), 0.01));
+	const double GRouted = RunSpan * (G.ProfileHeight * G.RecessDepth + G.LipChamfer * G.LipChamfer);
+	const double GNet = GRouted - Volume(GSection);
+	TestNearlyEqual(TEXT("A groove removes exactly the channel it describes, less the section in it"),
+		PanelVolume - Volume(GPanel), GNet, FMath::Abs(GNet) * 0.01);
+
+	{
+		const FAxisAlignedBox3d Fitted = GPanel.GetBounds();
+		TestTrue(TEXT("Routing a groove does not shrink the panel"),
+			Fitted.Min.Equals(FVector3d(Box.Min), 0.01));
+		TestTrue(TEXT("...nor move it along the run or the edge it serves"),
+			FMath::IsNearlyEqual(Fitted.Max.X, Box.Max.X, 0.01)
+			&& FMath::IsNearlyEqual(Fitted.Max.Z, Box.Max.Z, 0.01));
+		TestNearlyEqual(TEXT("The gola stands its declared projection off the face"),
+			Fitted.Max.Y - Box.Max.Y, G.ProfileProjection, 0.01);
+	}
 
 	// ---------------------------------------------------------------- a recess deeper than the board
 
@@ -441,15 +484,28 @@ bool FHFHandleRecessTest::RunTest(const FString& Parameters)
 	TooDeep.RecessDepth = 10.0;
 	const FHFHandleParams Clamped = FHFJoineryKit::SanitiseHandle(TooDeep);
 
-	TestNearlyEqual(TEXT("A recess deeper than the board is clamped to leave the web"),
-		Clamped.RecessDepth, Box.GetSize().Y - Clamped.MinWeb, 0.001);
+	// THE BED IS CHARGED TO THE SAME ALLOWANCE, which is the whole reason it is a named constant.
+	// A fitted section sinks ProfileBed past the channel floor so none of its buried faces is
+	// coplanar with a routed one; that material has to come out of the reserve rather than out of the
+	// web, or the reserve is quietly not being kept and a shutter at full depth is thinner than it
+	// promises by half a millimetre nobody ever measures.
+	TestNearlyEqual(TEXT("A recess deeper than the board is clamped to leave the web, and the section's bed"),
+		Clamped.RecessDepth,
+		Box.GetSize().Y - Clamped.MinWeb - FHFJoineryKit::ProfileBed, 0.001);
 
 	FDynamicMesh3 DeepPanel = MakePanelMesh(Box);
 	TestTrue(TEXT("The clamped recess applies"), FHFJoineryKit::ApplyHandle(DeepPanel, TooDeep));
 	TestTrue(TEXT("A clamped recess leaves a watertight panel"), FHFMeshOps::IsClosed(DeepPanel));
 	TestTrue(TEXT("A clamped recess does not rout the panel in two"), Volume(DeepPanel) > 0.0);
-	TestNearlyEqual(TEXT("The web behind it is exactly what was reserved"),
+	TestNearlyEqual(TEXT("The cut stops the web and the bed short of the back"),
 		FHFJoineryKit::GenerateHandleRecessCutter(TooDeep).GetBounds().Min.Y - Box.Min.Y,
+		Clamped.MinWeb + FHFJoineryKit::ProfileBed, 0.001);
+
+	// And once the section is in it, what is actually left behind the deepest thing in the panel is
+	// the web itself. This is the assertion the one above is only a means to: the reserve is a
+	// promise about the finished part, not about the router.
+	TestNearlyEqual(TEXT("The web behind the fitted section is exactly what was reserved"),
+		FHFJoineryKit::GenerateHandleProfile(TooDeep).GetBounds().Min.Y - Box.Min.Y,
 		Clamped.MinWeb, 0.001);
 
 	return true;
@@ -732,14 +788,27 @@ bool FHFHandleOnEitherHandTest::RunTest(const FString& Parameters)
 				EveryTriangleTagged(Leaf));
 			TestTrue(*FString::Printf(TEXT("The routed %s leaf is unwrapped"), Which), HasUVs(Leaf));
 
-			// The material really came off this leaf, and exactly the notch that was described.
-			const double Removed = Shutter.LeafHeight()
+			// The material really came off this leaf - the channel and the inner chamfer's wedge, less
+			// the section fitted back into it. The outer break-out chamfer is not in the figure
+			// because a channel that gets a section does not get one; see the same sum in
+			// HouseForge.Joinery.HandleRecess.
+			const FDynamicMesh3 Section = FHFJoineryKit::GenerateHandleProfile(Handle);
+			const double Rebate = Shutter.LeafHeight()
 				* (P.ProfileHeight * P.RecessDepth + P.LipChamfer * P.LipChamfer * 0.5);
+			const double Net = Rebate - Volume(Section);
 			TestNearlyEqual(*FString::Printf(TEXT("A J-profile takes exactly its notch off a %s leaf"), Which),
-				BareVolume - Volume(Leaf), Removed, FMath::Abs(Removed) * 0.01);
+				BareVolume - Volume(Leaf), Net, FMath::Abs(Net) * 0.01);
+
+			// The leaf does not shrink, and grows in exactly one direction: out of the face it is
+			// pulled from, by the section's projection. A leaf that grew anywhere else would be a
+			// section overshooting the panel it is fitted to.
 			TestTrue(*FString::Printf(TEXT("Routing does not shrink the %s leaf"), Which),
-				Leaf.GetBounds().Max.Equals(BareBounds.Max, 0.01)
-					&& Leaf.GetBounds().Min.Equals(BareBounds.Min, 0.01));
+				Leaf.GetBounds().Max.Equals(BareBounds.Max, 0.01));
+			TestNearlyEqual(*FString::Printf(TEXT("The %s leaf's section stands proud of its outward face"), Which),
+				BareBounds.Min.Y - Leaf.GetBounds().Min.Y, P.ProfileProjection, 0.01);
+			TestTrue(*FString::Printf(TEXT("...and the %s leaf grows in no other direction"), Which),
+				FMath::IsNearlyEqual(Leaf.GetBounds().Min.X, BareBounds.Min.X, 0.01)
+					&& FMath::IsNearlyEqual(Leaf.GetBounds().Min.Z, BareBounds.Min.Z, 0.01));
 
 			// THE fault this test exists for. The channel is cut into the face that looks out of the
 			// cupboard: it breaks out at Y = 0 and stops its declared depth into the board. Cut into
@@ -751,11 +820,15 @@ bool FHFHandleOnEitherHandTest::RunTest(const FString& Parameters)
 				return false;
 			}
 
+			// The metal: the routed faces and the section lining them, which share a role because on a
+			// real leaf they are one material - the channel of a gola is the inside of the extrusion.
+			// It reaches out in front of the leaf's outward face by the projection and stops at the
+			// channel floor, the section's bed included.
 			const FAxisAlignedBox3d Cut = BoundsOfRole(Leaf, EHFSurfaceRole::MetalHardware);
-			TestNearlyEqual(*FString::Printf(TEXT("The channel breaks out of the %s leaf's outward face"), Which),
-				Cut.Min.Y, 0.0, 0.001);
-			TestNearlyEqual(*FString::Printf(TEXT("It cuts its declared depth into the %s leaf and no further"), Which),
-				Cut.Max.Y, P.RecessDepth, 0.001);
+			TestNearlyEqual(*FString::Printf(TEXT("The %s leaf's channel is lined out past its outward face"), Which),
+				Cut.Min.Y, -P.ProfileProjection, 0.001);
+			TestNearlyEqual(*FString::Printf(TEXT("It reaches its declared depth into the %s leaf and no further"), Which),
+				Cut.Max.Y, P.RecessDepth + FHFJoineryKit::ProfileBed, 0.001);
 
 			// And down the leading edge, not the hinge edge: it breaks out through that edge, and
 			// reaches back exactly its profile height and chamfer, leaving the rest of the face.

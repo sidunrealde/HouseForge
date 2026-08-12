@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="2480" height="1754" viewBox="0 0 2480 1754">
 <title>Sample 2BHK - Electrical Layout Plan</title>
+<desc>hf-spec-sha1 5da375c76abe701627dcd3619831923990f4367a</desc>
 <rect width="2480" height="1754" fill="#ffffff"/>
 <polygon points="30.00,30.00 2450.00,30.00 2450.00,1724.00 30.00,1724.00" fill="none" stroke="#000000" stroke-width="2.50"/>
 <polygon points="48.00,48.00 2432.00,48.00 2432.00,1706.00 48.00,1706.00" fill="none" stroke="#000000" stroke-width="1.00"/>

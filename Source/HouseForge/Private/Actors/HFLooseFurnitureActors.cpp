@@ -2,6 +2,8 @@
 
 #include "Actors/HFLooseFurnitureActors.h"
 
+#include "Model/HFBuildDefaults.h"
+
 using namespace UE::Geometry;
 
 // ---------------------------------------------------------------------------------------- sofa
@@ -10,14 +12,21 @@ void AHFSofaActor::ApplyProjectDefaults()
 {
 	// A SOFA IS BOUGHT, NOT BUILT ON SITE, so nothing on it comes off the joinery settings page - a
 	// board thickness and a shadow-gap figure describe fitted carcassing and have no meaning on
-	// upholstery. The hook exists so the composing layer can treat every fixture the same way and so
-	// there is somewhere obvious for a future furniture catalogue to be read from. The same reason
-	// AHFBedActor and AHFSinkActor have one.
+	// upholstery. What a project DOES decide about a bought object is which one it buys, and that is
+	// the whole of FHFSofaDefaults: the named design a drawing that named none gets, plus the two
+	// figures a chaise is set out by. See UHFSettings::Sofa.
+	Project = FHFBuildDefaults::FromProjectSettings().Sofa;
 }
 
-FHFSofaParams AHFSofaActor::ParamsFor(const FHFFixture& Fixture)
+FHFSofaParams AHFSofaActor::ParamsFor(const FHFFixture& Fixture, const FHFSofaDefaults& Defaults)
 {
-	FHFSofaParams P;
+	// WHICH SOFA, BEFORE HOW BIG. Every figure below the drawn box follows from the design, so the
+	// design has to be resolved first - and resolving it is exactly what the kit is not allowed to do,
+	// because Default means "ask the project" and a generator reads no settings object.
+	const EHFSofaDesign Named = Fixture.Params.SofaDesign == EHFSofaDesign::Default
+		? Defaults.DefaultDesign : Fixture.Params.SofaDesign;
+
+	FHFSofaParams P = FHFUpholsteryKit::FiguresFor(Named);
 
 	P.Width = Fixture.Footprint.X;
 	P.Depth = Fixture.Footprint.Y;
@@ -27,7 +36,19 @@ FHFSofaParams AHFSofaActor::ParamsFor(const FHFFixture& Fixture)
 	// because that figure has to agree with the nightstand beside it, and a sofa has nothing beside it
 	// to agree with - what a plan states for a sofa is the tallest thing about it, so that a picture
 	// or an AC head above can be set out clear of it.
-	P.Height = Fixture.Height;
+	//
+	// A drawing that states NO height keeps the design's own, which is what makes a design nameable
+	// from a spec that is only a plan. What the drawn height never touches is the seat and the arm:
+	// those are ergonomic and belong to the design - see FHFUpholsteryKit::FiguresFor.
+	if (Fixture.Height > 0.0)
+	{
+		P.Height = Fixture.Height;
+	}
+
+	// The two figures a project decides about an L, and the hand, which the drawing does.
+	P.ChaiseWidth = Defaults.ChaiseWidth;
+	P.MinChaiseProjection = Defaults.MinChaiseProjection;
+	P.bChaiseOnLeft = Fixture.Params.bChaiseOnLeft;
 
 	// HOW MANY SEATS IS NOT SOMETHING THE DRAWING SAYS, and it is derived rather than assumed at
 	// three. A seat cushion is 550-600 wide, everywhere, in every sofa anybody sells; so the seat
@@ -36,6 +57,9 @@ FHFSofaParams AHFSofaActor::ParamsFor(const FHFFixture& Fixture)
 	//
 	// Derived from the SANITISED arm width rather than the default, because a narrow drawing clamps
 	// the arms and a three-seater's worth of clear width would otherwise come out of a two-seater box.
+	// On a sectional the clear width is what the chaise has LEFT of the straight run, so the same
+	// 2100 box comes out as a two-seater plus a chaise rather than as a three-seater with a return
+	// bolted to one of its cushions.
 	const FHFSofaParams Clamped = FHFUpholsteryKit::SanitiseSofa(P);
 	P.SeatCount = FMath::Clamp(FMath::RoundToInt(Clamped.InnerWidth() / 58.0), 1, 6);
 
@@ -44,7 +68,7 @@ FHFSofaParams AHFSofaActor::ParamsFor(const FHFFixture& Fixture)
 
 void AHFSofaActor::ApplyFixture(const FHFFixture& Fixture)
 {
-	Sofa = ParamsFor(Fixture);
+	Sofa = ParamsFor(Fixture, Project);
 }
 
 FDynamicMesh3 AHFSofaActor::BuildMesh() const

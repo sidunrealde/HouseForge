@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="2480" height="1754" viewBox="0 0 2480 1754">
 <title>Sample 2BHK - Elevations - Bedroom 2</title>
+<desc>hf-spec-sha1 5da375c76abe701627dcd3619831923990f4367a</desc>
 <rect width="2480" height="1754" fill="#ffffff"/>
 <polygon points="30.00,30.00 2450.00,30.00 2450.00,1724.00 30.00,1724.00" fill="none" stroke="#000000" stroke-width="2.50"/>
 <polygon points="48.00,48.00 2432.00,48.00 2432.00,1706.00 48.00,1706.00" fill="none" stroke="#000000" stroke-width="1.00"/>
@@ -33,6 +34,7 @@
 <line x1="474.07" y1="672.57" x2="494.07" y2="672.57" stroke="#464646" stroke-width="2.40" stroke-linecap="round"/>
 <polygon points="580.49,374.44 809.51,374.44 809.51,398.55 580.49,398.55" fill="none" stroke="#464646" stroke-width="1.30"/>
 <line x1="580.49" y1="398.55" x2="809.51" y2="398.55" stroke="#787878" stroke-width="1.00" stroke-linecap="round"/>
+<polygon points="580.49,398.55 809.51,398.55 809.51,663.72 580.49,663.72" fill="none" stroke="#b9b9b9" stroke-width="1.00" stroke-dasharray="5 5"/>
 <polygon points="480.45,631.18 499.74,631.18 499.74,645.64 480.45,645.64" fill="none" stroke="#005aaa" stroke-width="1.40"/>
 <line x1="490.09" y1="631.18" x2="490.09" y2="645.64" stroke="#464646" stroke-width="0.90" stroke-linecap="round"/>
 <polygon points="604.60,428.68 785.40,428.68 785.40,573.32 604.60,573.32" fill="#ffffff" stroke="#000000" stroke-width="1.80"/>

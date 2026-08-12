@@ -153,4 +153,133 @@ public:
 		float CameraX, float CameraY, float CameraZ,
 		float TargetX, float TargetY, float TargetZ,
 		float FieldOfViewDegrees);
+
+	/**
+	 * Bakes the house to static meshes, or switches it back. REQUIRED BEFORE ANY LIT RENDER.
+	 *
+	 * Lumen cannot see the dynamic meshes HouseForge generates: they get no mesh cards, so no
+	 * surface cache, so no bounce light - on software AND hardware tracing. An unbaked interior is
+	 * lit by sky flooding straight through its own walls, which renders BRIGHTER than the correct
+	 * result and looks perfectly cheerful. CaptureView refuses to draw an unbaked flat for that
+	 * reason.
+	 *
+	 * The bake is reversible and non-destructive: the live meshes are kept and hidden, articulation
+	 * is preserved part by part, and unbaking restores them exactly. It writes one static mesh asset
+	 * per part into the project's Content folder, so it is not free - bake when you are ready to
+	 * look at the flat, not after every edit.
+	 * @param Baked True to bake, false to switch back to the live editable meshes.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString SetHouseRenderMode(bool Baked);
+
+	/**
+	 * Reports whether the flat is in the Lumen scene, so a render can be trusted before it is taken.
+	 *
+	 * Ask this rather than judging an image: the failure mode is a BRIGHTER, more attractive picture,
+	 * not a dark or obviously broken one. Names the elements that are absent and why.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString CheckLumenCoverage();
+
+	/**
+	 * Lists baked static meshes in this level's folder that no element claims any more.
+	 *
+	 * The bake deliberately never deletes an asset - a regeneration that drops a wardrobe drawer, an
+	 * element the revised spec removed, a level rebuilt - so they accumulate, and this is how they are
+	 * seen. Nothing is deleted; DeleteBakedOrphans is a separate, deliberate second call.
+	 *
+	 * Scoped to the OPEN level by a provenance stamp. Assets belonging to another level, or to nobody,
+	 * are never listed however unreferenced they look from here.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString FindBakedOrphans();
+
+	/** Deletes what FindBakedOrphans lists. NOT UNDOABLE - list first and read the list. */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString DeleteBakedOrphans();
+
+	/**
+	 * Takes edits made to a BAKED ASSET back into the element's live mesh.
+	 *
+	 * While an element is baked, Unreal's Modeling Tools edit the BAKED STATIC MESH rather than the
+	 * live one - that is measured, and it is the correct thing for the engine to do, because the live
+	 * mesh is deliberately not editable while it is hidden. A re-bake therefore REFUSES to overwrite an
+	 * asset that has changed since it was baked, and reports which element.
+	 *
+	 * This is the way out of that: the asset's geometry becomes the element's live mesh, the element is
+	 * marked hand-edited and stops regenerating, and baking again writes the sculpted form back.
+	 *
+	 * @param ElementIds Comma-separated element ids. LEAVE EMPTY for every affected element.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString AdoptBakedAssetEdits(const FString& ElementIds);
+
+	// ------------------------------------------------------------------ content browser assets
+	//
+	// The replacement pass, wrapped so Claude reaches exactly the code the ASSETS panel section
+	// reaches. The panel is a view onto UHFEditorSubsystem and holds no logic of its own; if these
+	// wrappers did not exist, the panel's flagship feature would be the one thing Claude could not
+	// do, and the two surfaces would drift from the day the panel was written.
+
+	/**
+	 * Lists what is in the level by fixture type, with how many of each and how many are swapped.
+	 *
+	 * Ask this first. The type names are the ones ReplaceFixtureType takes, and the counts are what
+	 * says whether a swap did anything.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString ListFixtureTypes();
+
+	/**
+	 * Replaces every generated fixture of one type with a Content Browser static mesh.
+	 *
+	 * NON-DESTRUCTIVE AND REVERSIBLE. The generated mesh is kept and hidden, its parameters are
+	 * untouched, and RevertFixturesToGenerated restores it exactly. The asset is fitted into the box
+	 * the generated fixture occupied, so it lands where the drawing put it whatever pivot its author
+	 * used.
+	 *
+	 * Fixtures somebody swapped individually are deliberately left alone.
+	 *
+	 * @param FixtureType One of the names ListFixtureTypes reports, e.g. Wardrobe, Sofa, WC.
+	 * @param AssetPath   Full object path of a UStaticMesh, e.g. /Game/Furniture/SM_Wardrobe.SM_Wardrobe.
+	 * @param FitMode     KeepAssetSize, UniformFit, StretchToFootprint or FitPlanKeepHeight.
+	 *                    UniformFit keeps the asset's proportions; StretchToFootprint fills the drawn
+	 *                    box exactly and is right for built-in joinery.
+	 * @param YawDegrees  Correction for an asset authored facing another way. Usually 0, 90, 180, 270.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString ReplaceFixtureType(const FString& FixtureType, const FString& AssetPath,
+		const FString& FitMode, float YawDegrees);
+
+	/**
+	 * What an asset would do to one fixture, without changing anything.
+	 *
+	 * An asset will never match the drawing exactly. This reports the generated size, the size the
+	 * asset would land at, how far it is being stretched and how much slack is left - so a bad fit is
+	 * something to see rather than something to discover in a render.
+	 * @param ElementId The fixture's element id, from ListElements or ListFixtureTypes.
+	 * @param AssetPath Full object path of a UStaticMesh.
+	 * @param FitMode   KeepAssetSize, UniformFit, StretchToFootprint or FitPlanKeepHeight.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString PreviewFixtureAsset(const FString& ElementId, const FString& AssetPath,
+		const FString& FitMode);
+
+	/**
+	 * THE WAY BACK. Puts generated geometry back, exactly as it was.
+	 *
+	 * The parameter structs were never discarded, so this is a switch rather than a regeneration.
+	 * @param ElementIds Comma-separated element ids. LEAVE EMPTY to revert the whole level.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString RevertFixturesToGenerated(const FString& ElementIds);
+
+	/**
+	 * Applies the project's asset mapping table across the level now.
+	 *
+	 * Every build already ends with this, so it is only needed when the table has been edited while a
+	 * house is standing.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString ApplyAssetMappingTable();
 };

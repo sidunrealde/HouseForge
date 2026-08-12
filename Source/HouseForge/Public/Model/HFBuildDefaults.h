@@ -331,6 +331,55 @@ struct HOUSEFORGE_API FHFFanDefaults
 };
 
 /**
+ * The project's answer for a sofa: which named design, and the two figures a chaise needs.
+ *
+ * DELIBERATELY THREE FIELDS RATHER THAN SIXTY. FHFCeilingDefaults carries the figures behind its
+ * four templates because those four share one vocabulary - a band width, a drop, a cove section -
+ * and each recipe picks which of them apply. The sofa designs share almost nothing: a rolled arm's
+ * 220 mm arm, a low-profile's 120 mm arm and a square arm's 180 mm one are three different objects'
+ * dimensions rather than one figure at three values, and a page carrying all of them would have
+ * fifty-five controls greyed out at any moment. So the recipes live in the kit, as
+ * FHFUpholsteryKit::FiguresFor, exactly where AHFTableActor::ParamsFor keeps the difference between
+ * a dining table and a coffee table.
+ *
+ * What IS here is what a project genuinely decides: which sofa it buys when a drawing does not say,
+ * and how the chaise on a sectional is set out.
+ */
+USTRUCT(BlueprintType)
+struct HOUSEFORGE_API FHFSofaDefaults
+{
+	GENERATED_BODY()
+
+	/**
+	 * The sofa a Sofa fixture gets when its spec leaves EHFSofaDesign::Default on it.
+	 *
+	 * SquareArm, because that is what the plugin built before there was a choice: a project that
+	 * never opens this page gets the sofa it already had, figure for figure.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	EHFSofaDesign DefaultDesign = EHFSofaDesign::SquareArm;
+
+	/**
+	 * How wide the chaise on a sectional is, in centimetres, measured across the sofa.
+	 *
+	 * 900 is the width of the seat somebody puts their legs along, and it is the same figure as the
+	 * sofa's own depth for the obvious reason: a chaise is a seat turned through ninety degrees.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "40.0"))
+	double ChaiseWidth = 90.0;
+
+	/**
+	 * Shortest return still worth calling a chaise, in centimetres.
+	 *
+	 * The floor under FHFSofaParams::BuiltChaiseProjection. Below this the L is a 200 mm stub off
+	 * the end of a straight sofa - a corner seat at best - and the honest answer is to build the
+	 * straight sofa and say so in FHFSofaBuild::Used rather than to ship a shape nobody ordered.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge", meta = (ClampMin = "10.0"))
+	double MinChaiseProjection = 40.0;
+};
+
+/**
  * Everything the project says about how its house is built.
  *
  * Held by value, copied freely, and the only thing the composing layer needs in hand before it can
@@ -352,6 +401,10 @@ struct HOUSEFORGE_API FHFBuildDefaults
 	/** How fast the fans turn, and how they are built. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
 	FHFFanDefaults Fan;
+
+	/** Which named sofa a drawing that names none gets, and how a chaise is set out. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")
+	FHFSofaDefaults Sofa;
 
 	/** The figures behind the named false-ceiling designs. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge")

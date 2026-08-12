@@ -110,6 +110,25 @@ namespace
 	}
 
 	/**
+	 * True for a fixture that is SUPPOSED to stand across an opening, and is pushed aside to pass.
+	 *
+	 * A curtain, and only a curtain. Both of the opening rules below judge a fixture on the plan area
+	 * it takes out of a window or a doorway, and both are right about everything rigid: a wardrobe
+	 * across a window is a wardrobe across a window, and a fridge in front of a door is a door that
+	 * does not open. A curtain covers 100% of its window at 0% open, on purpose, and covers a balcony
+	 * slider the same way; it is soft, it hangs on a track, and getting past it is what the track is
+	 * for. Reported, both rules would fire on every correctly placed curtain in the flat and would
+	 * teach whoever read the report to stop reading it.
+	 *
+	 * A blind or a roman shade would join it if either were ever built. Nothing else does: a pelmet
+	 * is rigid and sits above the head, which is why it needs no exemption and has never had one.
+	 */
+	bool IsDrawnAsideToPass(EHFFixtureType Type)
+	{
+		return Type == EHFFixtureType::Curtain;
+	}
+
+	/**
 	 * A sink cut into a worktop, a hob dropped into a counter, a basin over a vanity - these are
 	 * meant to overlap. Reporting them would train whoever reads the report to ignore the rule.
 	 *
@@ -117,11 +136,28 @@ namespace
 	 * written and did not actually allow, because until the loose furniture was built there were no
 	 * chairs in the flat to test it with. A chair that does not overlap its table is not tucked in -
 	 * it is standing 150 mm away from it - so the overlap is the correct state, not a tolerance.
+	 *
+	 * AND A CURTAIN AGAINST ANYTHING, which is the widest of the three and needs the most saying.
+	 *
+	 * A curtain's drawn footprint is its pelmet's: a plane of cloth hanging 180 mm off the plaster,
+	 * from a track inside the box, over the full height of the window. Everything else standing
+	 * against that wall reaches into it - the bed under the master bedroom window, the nightstand
+	 * beside it, the TV console on the living room's south wall - and every one of those is a room
+	 * arranged exactly as a room is arranged. Reported, this rule would fire on all of them and on
+	 * the pelmet itself, and would train whoever reads it to stop reading it.
+	 *
+	 * IT IS NOT LEFT UNCHECKED, and that is the reason this is acceptable rather than a hole. Drawn
+	 * boxes are the wrong instrument for cloth: the cloth is a 100 mm ribbon inside a 180 mm box, and
+	 * whether it actually touches the bed is a question about the built solids. It is asked, exactly,
+	 * at every open amount, by HouseForge.Flat.NothingStandsInsideAnythingElse and
+	 * HouseForge.Flat.EveryMovingPartClearsTheFlatThroughItsRange - which is where the drop is chosen
+	 * short when something stands under the window. See AHFHouseActor's SeedCurtain.
 	 */
 	bool IsExpectedOverlap(EHFFixtureType A, EHFFixtureType B)
 	{
 		return (IsInsetFitting(A) && IsCabinetRun(B)) || (IsCabinetRun(A) && IsInsetFitting(B))
-			|| (A == EHFFixtureType::Chair && IsTable(B)) || (IsTable(A) && B == EHFFixtureType::Chair);
+			|| (A == EHFFixtureType::Chair && IsTable(B)) || (IsTable(A) && B == EHFFixtureType::Chair)
+			|| IsDrawnAsideToPass(A) || IsDrawnAsideToPass(B);
 	}
 
 	/** The four corners of a fixture's footprint after rotation, in plan. */
@@ -1158,7 +1194,7 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 				// from the floor, so its height range cannot be compared with a sill without the room
 				// it hangs in. Nothing that hangs from a ceiling stands in front of a window anyway.
 				if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0 || Fixture.Height <= 0.0
-					|| Fixture.IsCeilingMounted())
+					|| Fixture.IsCeilingMounted() || IsDrawnAsideToPass(Fixture.Type))
 				{
 					continue;
 				}
@@ -1269,7 +1305,7 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 			for (const FHFFixture& Fixture : Spec.Fixtures)
 			{
 				if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0 || Fixture.Height <= 0.0
-					|| Fixture.IsCeilingMounted())
+					|| Fixture.IsCeilingMounted() || IsDrawnAsideToPass(Fixture.Type))
 				{
 					continue;
 				}
@@ -1397,7 +1433,7 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 			for (const FHFFixture& Fixture : Spec.Fixtures)
 			{
 				if (Fixture.Footprint.X <= 0.0 || Fixture.Footprint.Y <= 0.0 || Fixture.Height <= 0.0
-					|| Fixture.IsCeilingMounted())
+					|| Fixture.IsCeilingMounted() || IsDrawnAsideToPass(Fixture.Type))
 				{
 					continue;
 				}

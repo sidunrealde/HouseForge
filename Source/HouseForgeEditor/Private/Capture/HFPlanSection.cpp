@@ -3,6 +3,7 @@
 #include "Capture/HFPlanSection.h"
 
 #include "Actors/HFElementActors.h"
+#include "Capture/HFPlanDraw.h"
 #include "Actors/HFHouseActor.h"
 #include "Components/DynamicMeshComponent.h"
 #include "DynamicMesh/MeshTransforms.h"
@@ -115,6 +116,17 @@ TArray<AActor*> FHFPlanSection::Build(UWorld* World, const AHFHouseActor* House,
 			CutParams.CapRole = DominantRole(Working);
 
 			FDynamicMesh3 Section = FHFSectionCut::CutBelow(Working, CutParams);
+
+			// The ids the palette is indexed by, rebuilt from the roles the cut carried through -
+			// the cap faces are new triangles and nothing has given them one yet - and then the cut
+			// itself moved onto the poche slot. Order matters: the assignment writes every triangle
+			// from its polygroup, so poche-ing first would be overwritten immediately.
+			if (Section.TriangleCount() > 0)
+			{
+				FHFMeshOps::AssignMaterialIdsFromRoles(Section);
+				FHFPlanDraw::PocheTheCut(Section, CutZ);
+			}
+
 			if (Section.TriangleCount() == 0)
 			{
 				// Entirely above the cut - a loft, a bulkhead, a high-level cabinet. Correct to
@@ -152,9 +164,16 @@ TArray<AActor*> FHFPlanSection::Build(UWorld* World, const AHFHouseActor* House,
 			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			Component->SetMesh(MoveTemp(Section));
 
-			// The same role materials the real geometry wears, so the plan is drawn in the
-			// same colours as the model and a wall reads differently from the floor it stands on.
-			UHFMaterialLibrary::Get()->ApplyTo(Component);
+			// THE DRAWING'S PALETTE, NOT THE FINISH LIBRARY'S. This used to be
+			// UHFMaterialLibrary::ApplyTo, on the reasoning that a plan drawn in the model's own
+			// colours would let a wall read differently from the floor it stands on. It did not: wall
+			// paint is sRGB 230 and the floor tile 211, nineteen levels apart, and what a plan camera
+			// actually sees of a wall is its CUT FACE rather than its paint. Three review packages
+			// said walls barely separate from floor, and that is the measurement behind it.
+			//
+			// See FHFPlanDraw for the whole diagnosis, including the six stops of over-exposure that
+			// were flattening what little separation there was.
+			FHFPlanDraw::ApplyPaletteTo(Component);
 
 			Component->RegisterComponent();
 			Component->SetWorldTransform(FTransform::Identity);

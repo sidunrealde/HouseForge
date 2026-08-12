@@ -78,17 +78,33 @@ Write-Host 'Running validation gate first...' -ForegroundColor Cyan
 
 Invoke-GitChecked "checkout $Feature" @('checkout', $Feature) | Out-Null
 
+# NO -SkipLumen, DELIBERATELY. Stage 4 is the only stage that measures whether indirect light
+# actually arrives, and a merge is exactly the moment nobody should be taking that on trust. It costs
+# twenty minutes and a GPU; that is a reason for a developer to skip it while iterating, not a reason
+# for the gate that decides merges to.
 & (Join-Path $PSScriptRoot 'hf-validate.ps1')
 if ($LASTEXITCODE -ne 0) {
     Fail "validation gate failed (exit $LASTEXITCODE). Nothing merged."
 }
 
-# Re-read the report so the evidence in the merge message is the real numbers, not a guess.
-$IndexPath = Join-Path $PluginDir 'Saved\TestReports\index.json'
-$Evidence  = 'validation gate passed'
-if (Test-Path $IndexPath) {
-    $Report   = Get-Content $IndexPath -Raw | ConvertFrom-Json
-    $Evidence = "build OK; $($Report.succeeded) tests passed, $($Report.failed) failed"
+# WHAT THIS MESSAGE RECORDS, AND WHY IT USED TO RECORD NOTHING.
+#
+# Rule 03: "the merge commit message records the gate evidence - build result and test counts". This
+# read Saved\TestReports\index.json, and that path stopped existing when the report directories
+# became per-PID (Saved\TestReports-<pid>) so two concurrent gates could not clear each other's
+# evidence. Test-Path then failed on every run, the fallback fired, and every merge commit since has
+# recorded the unfalsifiable string "validation gate passed" - a gate whose whole purpose is to put
+# real numbers in history, putting none there. It also read $Report.succeeded alone, which omits
+# succeededWithWarnings and would have undercounted the suite by however many tests warned.
+#
+# hf-validate.ps1 now writes Saved\GateEvidence.json itself, from the numbers it has just finished
+# checking, deleting any previous file first so a stale one cannot be read as this run's. If it is
+# absent, that is a real fact about the run and the message says so rather than claiming a pass.
+$EvidencePath = Join-Path $PluginDir 'Saved\GateEvidence.json'
+$Evidence     = 'NO EVIDENCE FILE WAS WRITTEN - the gate exited 0 but recorded nothing, which should not happen'
+if (Test-Path $EvidencePath) {
+    $Gate = Get-Content $EvidencePath -Raw | ConvertFrom-Json
+    $Evidence = "build $($Gate.build); suite $($Gate.suite); pixels $($Gate.pixels); lumen $($Gate.lumen)"
 }
 
 Invoke-GitChecked "checkout $Into" @('checkout', $Into) | Out-Null

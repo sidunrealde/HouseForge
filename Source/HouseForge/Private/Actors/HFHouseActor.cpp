@@ -5,6 +5,7 @@
 #include "Actors/HFArticulatedActor.h"
 #include "Actors/HFCasedGoodsActor.h"
 #include "Actors/HFCounterActor.h"
+#include "Actors/HFCurtainActor.h"
 #include "Actors/HFElementActors.h"
 #include "Actors/HFFittingActors.h"
 #include "Actors/HFFurnitureActors.h"
@@ -15,8 +16,10 @@
 #include "Actors/HFServiceActors.h"
 #include "Actors/HFTrimActors.h"
 #include "Actors/HFWardrobeActor.h"
+#include "Assets/HFAssetMappingTable.h"
 #include "Components/LineBatchComponent.h"
 #include "Engine/World.h"
+#include "Geometry/HFBedKit.h"
 #include "Geometry/HFGenerators.h"
 #include "HouseForge.h"
 #include "Model/HFBuildDefaults.h"
@@ -926,12 +929,269 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
+	/**
+	 * Is there floor here that a door leaf may swing over?
+	 *
+	 * Three ways there is not: the point is outside the room, it is inside the thickness of a wall -
+	 * a room boundary is drawn on wall CENTRELINES, so half of every wall lies inside it - or
+	 * something is standing on the floor there at the height being asked about.
+	 *
+	 * @param LowZ,HighZ  The band the swinging thing occupies, above the room floor. A fitting that
+	 *                    is entirely above or entirely below it is not in the way, which is the whole
+	 *                    difference between a wall-hung sink and a base unit.
+	 */
+	bool FloorIsClearAt(const FHFFixtureContext& C, const FVector2D& Probe, double LowZ, double HighZ)
+	{
+		if (C.Spec == nullptr)
+		{
+			return true;
+		}
+
+		if (C.Room != nullptr && !C.Room->ContainsPoint(Probe))
+		{
+			return false;
+		}
+
+		for (const FHFWall& Wall : C.Spec->Walls)
+		{
+			const FVector2D Along = Wall.End - Wall.Start;
+			const double LengthSq = Along.SizeSquared();
+			if (LengthSq <= KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const double T = FMath::Clamp(
+				FVector2D::DotProduct(Probe - Wall.Start, Along) / LengthSq, 0.0, 1.0);
+
+			if (FVector2D::Distance(Probe, Wall.Start + Along * T) < Wall.Thickness * 0.5)
+			{
+				return false;
+			}
+		}
+
+		if (C.Fixtures == nullptr)
+		{
+			return true;
+		}
+
+		for (const FHFFixture& Other : *C.Fixtures)
+		{
+			if (Other.Id == C.Fixture->Id || !AHFHouseActor::BuildsGeometryFor(Other.Type)
+				|| Other.IsCeilingMounted())
+			{
+				continue;
+			}
+
+			// Heights first, because it is the cheap test and it is the one that decides the answer
+			// here: a utility sink hung at 600 and a porthole whose top edge reaches 606 share six
+			// millimetres of height and no more.
+			if (Other.BaseZ >= HighZ || Other.BaseZ + Other.Height <= LowZ)
+			{
+				continue;
+			}
+
+			if (FHFFixturePlacement::FootprintContains(Other, Probe))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * HOW FAR A FRONT-LOADER'S PORTHOLE CAN ACTUALLY OPEN, on a given hand, in degrees.
+	 *
+	 * A door hung on the wrong side of a machine standing next to a wall is not a door. In the
+	 * reference flat the porthole reached 5.69 cm into the utility's west wall at 80% open, and no
+	 * amount of moving the machine settles it: the utility is 1200 wide, the machine is 600, and
+	 * sliding it along the wall only presents the same leaf to the same masonry from further away.
+	 *
+	 * SEEN FROM ABOVE A PORTHOLE IS A LINE, NOT A DISC. The leaf is a flat disc standing in a
+	 * vertical plane, so in plan it is a segment running 2 x RimRadius from its hinge - which is what
+	 * makes this measurable by walking the swing and probing along that segment, rather than by
+	 * reasoning about a swept volume.
+	 *
+	 * Probed rather than derived, on the same grounds as RunEndIsObstructed above: only this layer
+	 * can see what is beside the machine, and a rule of thumb about clearances would be a second
+	 * place for the answer to be wrong.
+	 *
+	 * @return The largest swing, in degrees, at which every point of the leaf is still over clear
+	 *         floor. Zero when even the first step is blocked.
+	 */
+	double ClearPortholeSwing(const FHFFixtureContext& C, const FHFWashingMachineParams& Washer,
+		EHFHingeHand Hand)
+	{
+		FHFWashingMachineParams Asked = Washer;
+		Asked.HingeHand = Hand;
+
+		const FHFWashingMachineParams P = FHFApplianceKit::SanitiseWashingMachine(Asked);
+		const FHFPortholeLeaf Leaf = FHFApplianceKit::PortholeLeafOf(Asked);
+
+		if (!Leaf.IsValid())
+		{
+			return 0.0;
+		}
+
+		// The machine's own frame, exactly as AgainstWall will place it: origin at the front-left
+		// corner of the footprint, +X across the width, +Y back into the machine.
+		const double Yaw = FHFFixturePlacement::FacingYaw(*C.Fixture, C.AnchorWall);
+		const FRotator Rotation(0.0, Yaw, 0.0);
+
+		const FVector Corner = Rotation.RotateVector(
+			FVector(-C.Fixture->Footprint.X * 0.5, -C.Fixture->Footprint.Y * 0.5, 0.0));
+		const FVector2D Origin(C.Fixture->Position.X + Corner.X, C.Fixture->Position.Y + Corner.Y);
+
+		// The band of the room the leaf sweeps through, above the machine's own base. Only what
+		// shares that band can be in its way - which is the difference between a base unit and a
+		// sink hung above the door's top edge, and the difference decides this answer.
+		const double LowZ = C.Fixture->BaseZ + P.PortholeCentreZ - Leaf.Reach * 0.5;
+		const double HighZ = C.Fixture->BaseZ + P.PortholeCentreZ + Leaf.Reach * 0.5;
+
+		// Two and a half degrees is a 1.6 cm chord at the tip of a 36 cm leaf, comfortably inside the
+		// smallest thing this has to notice - the same reasoning HouseForge.Flat's sweep uses.
+		constexpr double Step = 2.5;
+
+		double Clear = 0.0;
+		bool bEverBlocked = false;
+
+		for (double Angle = Step; Angle <= Leaf.SwingDegrees + KINDA_SMALL_NUMBER; Angle += Step)
+		{
+			const double At = FMath::Min(Angle, Leaf.SwingDegrees);
+
+			const FVector2D Direction = Leaf.DirectionAt(At);
+			const FVector2D Normal = Leaf.NormalAt(At);
+
+			bool bBlocked = false;
+
+			// ALONG THE LEAF AND ACROSS IT. Along, because a door is longest at its tip and that is
+			// what reaches a wall first. Across, because a porthole is not a plane: the bezel stands
+			// proud of it towards the room and the glass dishes the other way towards the drum, and
+			// the graze that survived the first version of this was on the dish, 3.6 mm of it, at
+			// the very top of the swing.
+			for (const double Along : { 0.25, 0.45, 0.65, 0.85, 1.0 })
+			{
+				for (const double Across : { -Leaf.Proud, 0.0, Leaf.Dish })
+				{
+					const FVector2D Local = FVector2D(Leaf.HingeAcross, 0.0)
+						+ Direction * (Leaf.Reach * Along) + Normal * Across;
+
+					const FVector Turned = Rotation.RotateVector(FVector(Local.X, Local.Y, 0.0));
+					const FVector2D Probe(Origin.X + Turned.X, Origin.Y + Turned.Y);
+
+					if (!FloorIsClearAt(C, Probe, LowZ, HighZ))
+					{
+						bBlocked = true;
+						break;
+					}
+				}
+
+				if (bBlocked)
+				{
+					break;
+				}
+			}
+
+			if (bBlocked)
+			{
+				bEverBlocked = true;
+				break;
+			}
+
+			Clear = At;
+		}
+
+		// A DOOR THAT REACHED ITS END STOP CLEAR KEEPS ITS END STOP, and this is the difference
+		// between a resolution and a ratchet.
+		//
+		// The margin below stands back from an obstruction that was FOUND. When the walk runs to the
+		// end without ever being blocked there is no obstruction between two samples to stand back
+		// from - the leaf swung its whole declared travel over clear floor - so taking a step off it
+		// is subtracting a safety margin from a hazard that is not there.
+		//
+		// MEASURED, because this shipped and the log says exactly what it did. SeedWashingMachine
+		// writes the resolved figure back into DoorSwingDegrees, so the next build reads the clamped
+		// value as the catalogue one and clamps it again. One test that rebuilds the flat -
+		// HouseForge.Photoreal.TheChamferIsAProjectSetting - walked the utility's machine down on
+		// consecutive rebuilds, in its own log, inside a single test:
+		//
+		//   "clears 105 on the left and 112 on the right; hung right, built to open 112 of its
+		//    catalogue 160"   <- fresh
+		//   "... 110 on the right; hung right, built to open 110 of its catalogue 112"
+		//   "... 108 on the right; hung right, built to open 108 of its catalogue 110"
+		//   "... 105 on the right; hung LEFT,  built to open 105 of its catalogue 108"
+		//
+		// The last line is the whole feature undone. At 105 against 105 the hands tie, the tie goes to
+		// the left-hand machine by design, and the flat quietly gets back the door that reached 5.69 cm
+		// into the utility wall - after four rebuilds and without one thing in the room having moved.
+		//
+		// With the margin conditional this is a fixed point: 160 resolves to 112 against an obstruction
+		// at about 114.5, and 112 then walks its whole range clear and stays 112.
+		if (!bEverBlocked)
+		{
+			return Leaf.SwingDegrees;
+		}
+
+		// ONE STEP BACK FROM WHAT WAS MEASURED CLEAR. The walk finds the last sampled angle that was
+		// free, and the obstruction is somewhere between that and the next sample; declaring the
+		// sample itself would put the door's end stop on the edge of the thing it just missed.
+		return FMath::Max(Clear - Step, 0.0);
+	}
+
 	void SeedWashingMachine(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFWashingMachineActor& Actor = static_cast<AHFWashingMachineActor&>(Element);
 
 		Actor.ApplyProjectDefaults();
 		Actor.ApplyFixture(*C.Fixture);
+
+		// WHICH WAY THE DOOR OPENS, DECIDED BY WHAT IS BESIDE THE MACHINE. The same shape of answer
+		// as bBankAtRunStart a few hundred lines up, and for the same reason: the appliance cannot see
+		// the wall it is standing against, the wall does not know a machine is there, and only this
+		// layer has both. Resolved AFTER ApplyFixture, which is what sizes the porthole this measures.
+		//
+		// The left-hand machine stays the default and wins a tie, because it is what a catalogue
+		// photographs and because a flat where both hands are equally free should not have its
+		// appliances quietly reversed. It is overridden only when the right-hand machine - the one
+		// every manufacturer also sells - actually opens further.
+		const double OnTheLeft = ClearPortholeSwing(C, Actor.Washer, EHFHingeHand::Left);
+		const double OnTheRight = ClearPortholeSwing(C, Actor.Washer, EHFHingeHand::Right);
+
+		Actor.Washer.HingeHand = (OnTheRight > OnTheLeft) ? EHFHingeHand::Right : EHFHingeHand::Left;
+
+		// AND THE DOOR IS BUILT TO OPEN ONLY AS FAR AS IT CAN. Choosing the better hand is half the
+		// answer; the other half is that a catalogue's 160 degrees is a figure for a machine standing
+		// in open floor, and a part whose declared travel is further than it can go is exactly what
+		// .claude/rules/04-conventions.md means by a part that does not open. The end stop goes where
+		// the room puts it, which is what a real installation does to a real machine.
+		//
+		// Only ever downwards - a room cannot give a door more swing than it was built with.
+		const double Available = FMath::Max(OnTheLeft, OnTheRight);
+		const double Built = FMath::Min(Actor.Washer.DoorSwingDegrees, Available);
+
+		if (Built < Actor.Washer.DoorSwingDegrees - 1.0)
+		{
+			// A DOOR TOO SHORT TO LOAD THROUGH IS A LAYOUT PROBLEM, NOT A PARAMETER, and it must not
+			// be settled quietly by this function. Ninety degrees is the figure: at a right angle the
+			// leaf is entirely clear of the drum mouth, so anything at or above it loads normally and
+			// anything below it is a machine somebody has to reach around.
+			UE_CLOG(Built < 90.0, LogHouseForge, Warning,
+				TEXT("'%s' has room for only %.0f degrees of porthole swing (left %.0f, right %.0f). ")
+				TEXT("Under 90 the door does not clear the drum mouth, so the machine cannot be loaded ")
+				TEXT("squarely - this is a layout to change, not a figure to accept."),
+				*C.Fixture->Id.ToString(), Built, OnTheLeft, OnTheRight);
+
+			UE_LOG(LogHouseForge, Log,
+				TEXT("'%s': porthole clears %.0f deg hung on the left and %.0f on the right; hung %s ")
+				TEXT("and built to open %.0f of its catalogue %.0f."),
+				*C.Fixture->Id.ToString(), OnTheLeft, OnTheRight,
+				Actor.Washer.HingeHand == EHFHingeHand::Left ? TEXT("left") : TEXT("right"),
+				Built, Actor.Washer.DoorSwingDegrees);
+		}
+
+		Actor.Washer.DoorSwingDegrees = Built;
+
 		Actor.SetActorTransform(FHFFixturePlacement::AgainstWall(*C.Fixture, C.FloorZ(), C.AnchorWall));
 	}
 
@@ -1060,6 +1320,32 @@ namespace
 		Actor.SetActorTransform(FHFFixturePlacement::OnWallTop(Run, C.FloorZ(), C.AnchorWall));
 	}
 
+	/**
+	 * The finished soffit over a fixture, resolved the way the ceiling fit resolves it.
+	 *
+	 * THE CEILING DECIDES THE HEIGHT, NOT THE DRAWING. Asked over the whole FOOTPRINT rather than at
+	 * the centre - a 2.2 m pelmet in a 60 cm band routinely spans a level change, and the one that
+	 * matters is the lowest soffit anywhere over it, not whichever happens to be over its middle.
+	 * That is the same question FHFCeilingFit::Fit asks, asked through the same function, so the
+	 * resolver and the placement cannot come to different answers.
+	 *
+	 * Takes the fixture separately from the context because a curtain has to ask this about the
+	 * PELMET it hangs in rather than about itself: the two have to arrive at one number, and a
+	 * curtain resolving its own soffit would be a second answer to the same question.
+	 */
+	double SoffitZOver(const FHFFixtureContext& C, const FHFFixture& Fixture)
+	{
+		if (C.Room != nullptr && C.Spec != nullptr)
+		{
+			return FHFCeilingFit::LowestSoffitZOver(Fixture, *C.Room, C.Spec->FalseCeilings);
+		}
+		if (C.Room != nullptr)
+		{
+			return C.Room->FloorZ + C.Room->CeilingHeight - C.SoffitDrop;
+		}
+		return 0.0;
+	}
+
 	void SeedPelmet(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFPelmetActor& Actor = static_cast<AHFPelmetActor&>(Element);
@@ -1067,23 +1353,308 @@ namespace
 		Actor.ApplyProjectDefaults();
 		Actor.ApplyFixture(*C.Fixture);
 
-		// THE CEILING DECIDES THE HEIGHT, NOT THE DRAWING. Asked over the whole footprint rather than
-		// at the centre - a 2.2 m pelmet in a 60 cm band routinely spans a level change, and the one
-		// that matters is the lowest soffit anywhere over it, not whichever happens to be over its
-		// middle. That is the same question FHFCeilingFit::Fit asks, asked through the same function,
-		// so the resolver and the placement cannot come to different answers.
-		double SoffitZ = 0.0;
+		Actor.SetActorTransform(
+			FHFFixturePlacement::UnderSoffit(*C.Fixture, SoffitZOver(C, *C.Fixture), C.AnchorWall));
+	}
 
-		if (C.Room != nullptr && C.Spec != nullptr)
+	/**
+	 * How far the hooks hang below the track, in centimetres.
+	 *
+	 * A glider is a runner in the channel with an eye under it, and a hook through the eye. 10 mm is
+	 * the drop of the two together, and it is the difference between cloth that starts at the track
+	 * and cloth that hangs from it. Small, and not nothing: it is what keeps the heading clear of
+	 * the aluminium it runs in.
+	 */
+	constexpr double CurtainGliderDrop = 1.0;
+
+	/**
+	 * Air left between a sill-length hem and the sill it finishes over, in centimetres.
+	 *
+	 * Not a modelling tolerance. A curtain swings, so a hem that finishes level with a headboard
+	 * brushes it every time the door opens, and one that finishes below it is simply inside it -
+	 * which is what the whole-flat sweep measured in both bedrooms, at 2.2 and 3.0 cm. 50 mm is also
+	 * what a maker leaves, and it is what keeps the hem off the sill's own nosing.
+	 */
+	constexpr double CurtainStandoff = 5.0;
+
+	/**
+	 * The pelmet a curtain hangs in, or null for a curtain on a bare pole.
+	 *
+	 * FOUND RATHER THAN DECLARED, and that is deliberate. A drawing marks a pelmet and marks a
+	 * curtain in the same place because they are the same line on the plan; making the curtain carry
+	 * an id would be a second statement of a fact the geometry already makes, and one that goes
+	 * stale the moment either is moved. The pelmet whose footprint the curtain's centre falls inside
+	 * is the pelmet it hangs in, and there is never a second candidate - two pelmets over one point
+	 * would be a defect the overlap rule reports on its own.
+	 */
+	const FHFFixture* PelmetOver(const FHFFixtureContext& C)
+	{
+		if (C.Fixtures == nullptr || C.Fixture == nullptr)
 		{
-			SoffitZ = FHFCeilingFit::LowestSoffitZOver(*C.Fixture, *C.Room, C.Spec->FalseCeilings);
-		}
-		else if (C.Room != nullptr)
-		{
-			SoffitZ = C.Room->FloorZ + C.Room->CeilingHeight - C.SoffitDrop;
+			return nullptr;
 		}
 
-		Actor.SetActorTransform(FHFFixturePlacement::UnderSoffit(*C.Fixture, SoffitZ, C.AnchorWall));
+		const FHFFixture* Best = nullptr;
+		double BestDistance = TNumericLimits<double>::Max();
+
+		for (const FHFFixture& Other : *C.Fixtures)
+		{
+			if (Other.Type != EHFFixtureType::Pelmet || Other.RoomId != C.Fixture->RoomId)
+			{
+				continue;
+			}
+			if (!FHFFixturePlacement::FootprintContains(Other, C.Fixture->Position, 5.0))
+			{
+				continue;
+			}
+
+			const double Distance = FVector2D::Distance(Other.Position, C.Fixture->Position);
+			if (Distance < BestDistance)
+			{
+				BestDistance = Distance;
+				Best = &Other;
+			}
+		}
+
+		return Best;
+	}
+
+	/**
+	 * The opening a pelmet was drawn over, or null.
+	 *
+	 * Its SILL is the only thing wanted here, and it is the figure that decides a curtain's length
+	 * where the room has put something under the window. Matched on the wall and the run rather than
+	 * by an id, for the reason PelmetOver matches on the footprint: a pelmet is drawn over a window
+	 * because it is over the window, and a second statement of that would only go stale.
+	 */
+	const FHFOpening* OpeningUnderPelmet(const FHFHouseSpec& Spec, const FHFFixture& Pelmet)
+	{
+		const FHFWall* Wall = Spec.FindWall(Pelmet.AnchorWallId);
+		if (Wall == nullptr || Wall->Length() <= UE_KINDA_SMALL_NUMBER)
+		{
+			return nullptr;
+		}
+
+		const FVector2D Direction = (Wall->End - Wall->Start) / Wall->Length();
+		const double Centre = FVector2D::DotProduct(Pelmet.Position - Wall->Start, Direction);
+		const double Half = Pelmet.Footprint.X * 0.5;
+
+		const FHFOpening* Best = nullptr;
+		double BestOverlap = 0.0;
+
+		for (const FHFOpening& Opening : Spec.Openings)
+		{
+			if (Opening.WallId != Wall->Id)
+			{
+				continue;
+			}
+
+			const double Overlap =
+				FMath::Min(Centre + Half, Opening.OffsetAlongWall + Opening.Width * 0.5) -
+				FMath::Max(Centre - Half, Opening.OffsetAlongWall - Opening.Width * 0.5);
+
+			if (Overlap > BestOverlap)
+			{
+				BestOverlap = Overlap;
+				Best = &Opening;
+			}
+		}
+
+		return Best;
+	}
+
+	/**
+	 * How high a fixture actually STANDS, which is not always how high it is drawn.
+	 *
+	 * A drawn box states where a fixture is and how much floor it takes, and for almost everything it
+	 * also states how tall it is. A BED IS THE EXCEPTION IN THIS FLAT, and the drawn figure is not
+	 * wrong - it is the MATTRESS TOP, which is exactly what AHFFurnitureActor reads it as
+	 * (`P.MattressTopZ = Fixture.Height`). The headboard is the bed kit's own dimension and stands
+	 * 450 mm above it, so 'F_MBed_Bed' declares 600 and builds to 1050.
+	 *
+	 * Read off FHFBedParams rather than restated here, so the two cannot drift.
+	 */
+	double StandingTopOf(const FHFFixture& Fixture)
+	{
+		const double Drawn = Fixture.BaseZ + Fixture.Height;
+
+		if (Fixture.Type == EHFFixtureType::Bed)
+		{
+			return FMath::Max(Drawn, Fixture.BaseZ + FHFBedParams().HeadboardHeight);
+		}
+
+		return Drawn;
+	}
+
+	/**
+	 * How high the tallest thing standing under this curtain reaches, or a negative number if the
+	 * floor under it is clear.
+	 *
+	 * ASKED OF THE DRAWN FOOTPRINTS, which is the right instrument for this one question even though
+	 * it is the wrong one for reporting a clash. A curtain's footprint is the plane the cloth sweeps
+	 * along the wall, and anything whose footprint reaches into it is standing where the cloth wants
+	 * to be - whether or not their solids happen to touch at the moment. That is what a curtain-maker
+	 * looks at before deciding a length, and deciding it on the exact solids instead would give a
+	 * floor-length curtain wherever the bed happened to sit 5 mm clear.
+	 *
+	 * THE HEIGHT IS THE ANSWER, NOT A YES OR NO, and that correction came from the whole-flat sweep.
+	 * A bare "something is there" can only choose between two drawn lengths, and apron length - hem
+	 * 120 mm BELOW the sill - is the wrong one whenever the obstruction reaches the sill: both beds
+	 * in this flat have headboards that top out level with their window sills, so the apron hem
+	 * finished 120 mm inside the headboard and the sweep measured 2.2 to 3.0 cm of cloth in both.
+	 * A length that clears what it hangs over needs to know how high that is.
+	 *
+	 * 20 cm of height, so a rug or a floor box does not shorten a curtain, and a bed frame does.
+	 */
+	double TallestUnder(const FHFFixtureContext& C, const FHFFixture& Curtain)
+	{
+		double Tallest = -1.0;
+
+		if (C.Fixtures == nullptr)
+		{
+			return Tallest;
+		}
+
+		for (const FHFFixture& Other : *C.Fixtures)
+		{
+			if (Other.Id == Curtain.Id || Other.Type == EHFFixtureType::Pelmet
+				|| Other.Type == EHFFixtureType::Curtain || Other.IsCeilingMounted())
+			{
+				continue;
+			}
+
+			const double Top = StandingTopOf(Other);
+			if (Top < 20.0 || Top <= Tallest)
+			{
+				continue;
+			}
+
+			// Sampled on the OTHER fixture's corners and its centre. A footprint test either way round
+			// misses the case where one box is wholly inside the other, and a bed against a window
+			// wall is exactly that case seen from the curtain's side.
+			bool bReaches = FHFFixturePlacement::FootprintContains(Curtain, Other.Position, 0.0);
+
+			const double Radians = FMath::DegreesToRadians(Other.RotationDegrees);
+			const double CosR = FMath::Cos(Radians);
+			const double SinR = FMath::Sin(Radians);
+
+			for (int32 Corner = 0; Corner < 4 && !bReaches; ++Corner)
+			{
+				const double LocalX = ((Corner == 0 || Corner == 3) ? -0.5 : 0.5) * Other.Footprint.X;
+				const double LocalY = ((Corner < 2) ? -0.5 : 0.5) * Other.Footprint.Y;
+
+				bReaches = FHFFixturePlacement::FootprintContains(Curtain,
+					Other.Position + FVector2D(LocalX * CosR - LocalY * SinR,
+						LocalX * SinR + LocalY * CosR), 0.0);
+			}
+
+			if (bReaches)
+			{
+				Tallest = Top;
+			}
+		}
+
+		return Tallest;
+	}
+
+	/**
+	 * A curtain, hung on the track of the pelmet it was drawn under.
+	 *
+	 * EVERY DIMENSION THAT MATTERS COMES FROM SOMETHING ELSE, which is why this is one of the longer
+	 * seeds. The track's length is the pelmet's CLEAR width, not its drawn one; the depth the folds
+	 * may hang to is what the pelmet's slot has left with a track in it; the height of the glider
+	 * line is where the pelmet ended up under a ceiling whose depth is a project setting; and the
+	 * drop is that height less the floor. A curtain that took its drawn box instead would be the
+	 * length of the pelmet's outside, as deep as it liked, and hung at a stale 2350.
+	 *
+	 * Same argument as the railing's parapet and the sink's counter - see the seeds above - and the
+	 * same shape of answer: the composing layer measures, and the generator stays pure.
+	 */
+	void SeedCurtain(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFCurtainActor& Actor = static_cast<AHFCurtainActor&>(Element);
+
+		Actor.ApplyProjectDefaults();
+		Actor.ApplyFixture(*C.Fixture);
+
+		const FHFFixture* PelmetFixture = PelmetOver(C);
+		if (PelmetFixture == nullptr)
+		{
+			// Nothing to hang on. The drawn box is all there is to go on, which is the honest answer
+			// for a curtain on a pole - and better than inventing a pelmet nobody drew.
+			Actor.SetActorTransform(
+				FHFFixturePlacement::OnWallFace(*C.Fixture, C.FloorZ(), C.AnchorWall));
+			return;
+		}
+
+		// The pelmet EXACTLY AS IT IS BUILT, project board included. Reading its drawn footprint
+		// alone would give a track two board thicknesses too long and a slot that has never had the
+		// current board taken out of it - see AHFPelmetActor::ApplyProjectDefaults, which is the
+		// order this mirrors.
+		FHFPelmetParams Pelmet = AHFPelmetActor::ParamsFor(*PelmetFixture);
+		Pelmet.BoardThickness = FHFBuildDefaults::FromProjectSettings().Joinery.CarcassBoardThickness;
+		Pelmet = FHFWallPlateKit::SanitisePelmet(Pelmet);
+
+		Actor.ApplyPelmet(Pelmet);
+
+		// Where the pelmet itself lands, through the same call its own seed makes and about the same
+		// fixture - so the cloth cannot end up hanging at a height the box it hangs in is not at.
+		const FHFWall* PelmetWall = (C.Spec != nullptr)
+			? C.Spec->FindWall(PelmetFixture->AnchorWallId) : nullptr;
+
+		const FTransform PelmetTransform = FHFFixturePlacement::UnderSoffit(
+			*PelmetFixture, SoffitZOver(C, *PelmetFixture), PelmetWall);
+
+		// The glider line, in the pelmet's own frame: centred on the run, on the track's centreline,
+		// a hook's drop below the track's underside.
+		const FVector GliderLine(0.0, Pelmet.TrackCentreY(),
+			Pelmet.TrackSoffitZ() - CurtainGliderDrop);
+
+		const FTransform Hung(PelmetTransform.GetRotation(),
+			PelmetTransform.TransformPosition(GliderLine));
+
+		// THE DROP IS MEASURED, not drawn - floor to glider line, less the air the hem keeps off the
+		// tiles.
+		//
+		// AND THE LENGTH IS CHOSEN BY WHAT IS UNDER THE WINDOW, because only this layer can see what
+		// the room has been arranged with. Three standard lengths, and the choice between them is
+		// arithmetic:
+		//
+		//   FLOOR  hem 15 mm off the finished floor. What clear floor takes, and the only length a
+		//          DOOR can take - you walk through it, so it goes to the floor, and anything standing
+		//          in the way is a placement error to be fixed where it was placed.
+		//   SILL   hem clear ABOVE the sill. What a window takes when the room has put something under
+		//          it, which is both bedrooms here.
+		//
+		// THE SILL IS THE DATUM RATHER THAN THE OBSTRUCTION'S OWN TOP, and that is the correction the
+		// whole-flat sweep forced. Apron length - hem 120 mm BELOW the sill - was the first answer, and
+		// it left 2.2 to 3.0 cm of cloth inside both headboards. Lifting the hem to clear the drawn
+		// obstruction instead did not fix it either: 'F_MBed_Bed' DECLARES a height of 600 and BUILDS a
+		// headboard to 900, so the box this layer can see understates the solid the sweep measures by
+		// 300 mm. A drawn box is a reliable statement of where a fixture is and an unreliable one of
+		// how tall it turns out; the sill is neither guess - it is the line the window itself is set
+		// out from, and anything standing under a window is standing beside it.
+		//
+		// TallestUnder is still the trigger and still returns a height, because a fixture that tops out
+		// ABOVE the sill has to lift the hem further than the sill would.
+		const double TrackToFloor = Hung.GetLocation().Z - C.FloorZ();
+
+		const FHFOpening* Opening = (C.Spec != nullptr)
+			? OpeningUnderPelmet(*C.Spec, *PelmetFixture) : nullptr;
+
+		const double Tallest = TallestUnder(C, *C.Fixture);
+
+		if (Tallest < 0.0 || Opening == nullptr || Opening->SillHeight <= 0.0)
+		{
+			Actor.ApplyDrop(TrackToFloor);
+		}
+		else
+		{
+			Actor.ApplyDrop(TrackToFloor,
+				FMath::Max(Opening->SillHeight, Tallest) + CurtainStandoff);
+		}
+
+		Actor.SetActorTransform(Hung);
 	}
 
 	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
@@ -1222,6 +1793,11 @@ namespace
 				TEXT("Railing"), &SeedRailing },
 			{ EHFFixtureType::Pelmet, AHFPelmetActor::StaticClass(),
 				TEXT("Pelmet"), &SeedPelmet },
+
+			// AND THE CLOTH THAT HANGS IN IT, which is a fixture of its own rather than a part of
+			// the pelmet. See AHFCurtainActor for why the two are not one actor.
+			{ EHFFixtureType::Curtain, AHFCurtainActor::StaticClass(),
+				TEXT("Curtain"), &SeedCurtain },
 
 			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
 				TEXT("Fan"), &SeedCeilingFan },
@@ -1515,6 +2091,33 @@ void AHFHouseActor::BuildGeometry()
 	TMap<TPair<UClass*, FName>, AHFElementActor*> Preserved;
 	TArray<TObjectPtr<AActor>> Survivors;
 
+	// BAKED ELEMENTS SURVIVE A REBUILD TOO, and for a different reason from hand-edited ones.
+	//
+	// A baked element owns a UStaticMesh asset on disk. Destroying and respawning the actor would
+	// leave that asset referenced by nothing, in a folder nobody looks in, with the element it
+	// belonged to gone - one orphan per element, silently, on every rebuild of a fully baked flat.
+	// Worse, the flat would come back Dynamic, which since the Lumen measurement means it would come
+	// back INVISIBLE TO LUMEN and render brighter and wrong.
+	//
+	// Kept SEPARATE from Preserved on purpose. A hand-edited element is left completely alone,
+	// parameters included; a baked-but-generated one must still take the new parameters and rebuild,
+	// exactly as it would have if it had been respawned. So it is handed back to the spawn path
+	// rather than skipped by it, and the bake follows the geometry through FlushPendingRebake.
+	TMap<TPair<UClass*, FName>, AHFElementActor*> PreservedForBake;
+
+	// AND WHICH OF THEM THE NEW SPEC ACTUALLY ASKED FOR.
+	//
+	// Without this, preservation is a one-way ratchet. HasAnyBakedAsset() becomes true on an element's
+	// first bake and never becomes false again - unbake deliberately keeps every asset - so from then
+	// on the element is preserved on every rebuild, whether or not the spec still contains it. The
+	// primary workflow is "Claude reads a revised drawing, produces a new spec, applies it", and on a
+	// flat that had ever been baked that silently kept every fixture, wall and opening the revision
+	// DELETED, still rendering the old plan. The user's correction was not applied and nothing said so.
+	//
+	// Preserved (hand-edited) is deliberately NOT pruned: that is a user opt-out, where keeping the
+	// actor is the whole point. "Has ever been baked" is not the same bargain.
+	TSet<TPair<UClass*, FName>> ClaimedForBake;
+
 	// Open amounts are user state, exactly as a hand edit is. The elements themselves are respawned
 	// here, so a pose held only on the actor would die with it and every door in the flat would slam
 	// shut on a rebuild. Poses are carried across by element id and put back once the parts exist.
@@ -1536,6 +2139,27 @@ void AHFHouseActor::BuildGeometry()
 		if (IsValid(Typed) && Typed->ShouldPreserveOnRebuild())
 		{
 			Preserved.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
+			Survivors.Add(Typed);
+		}
+		else if (IsValid(Typed) && (Typed->RenderMode == EHFRenderMode::Baked || Typed->HasAnyBakedAsset()
+			|| (Typed->HasAssetOverride() && !Typed->HasTableAssetOverride())))
+		{
+			// HasAnyBakedAsset as well as the mode, so an element sitting in Dynamic with an asset
+			// still on disk - which is every element a user has ever unbaked - is not destroyed
+			// underneath its own asset either.
+			//
+			// A HAND-PICKED ASSET OVERRIDE JOINS THEM, and it belongs in THIS branch rather than in
+			// ShouldPreserveOnRebuild. The distinction between the two maps is load-bearing: Preserved
+			// is left completely alone, parameters included, so an element put there would stop
+			// tracking the drawing - a swapped-in wardrobe would keep the size the plan said last
+			// time, silently, forever. PreservedForBake is handed BACK to the spawn path and
+			// re-parameterised, so the override survives and the element underneath it still follows
+			// the spec. The override is re-fitted afterwards against the regenerated box.
+			//
+			// Only HAND-PICKED ones. A table-driven override needs no preserving because
+			// ApplyAssetMappingTable re-derives it at the end of every build; testing for it here as
+			// well would keep an actor alive for a mapping the user has since deleted from the table.
+			PreservedForBake.Add({ Typed->GetClass(), Typed->ElementId }, Typed);
 			Survivors.Add(Typed);
 		}
 		else if (IsValid(Element))
@@ -1577,6 +2201,25 @@ void AHFHouseActor::BuildGeometry()
 		if (Preserved.Contains({ Class, Id }))
 		{
 			return nullptr;
+		}
+
+		// A baked element is handed BACK rather than skipped, so the caller writes the new parameters
+		// onto it and calls Regenerate exactly as it would on a fresh one. It is not artist-edited -
+		// that case went into Preserved above - so there is nothing to lose, the geometry ends up
+		// matching the spec, and FlushPendingRebake carries the bake along behind it. Skipping it
+		// instead would leave a rebuilt house showing the previous plan's baked geometry, which is
+		// precisely the silent lie bAutoRebakeOnRegenerate exists to prevent.
+		if (AHFElementActor** Existing = PreservedForBake.Find({ Class, Id }))
+		{
+			// CLAIMED, and the record of that is what stops this preservation becoming a leak. See the
+			// prune at the end of this function.
+			ClaimedForBake.Add({ Class, Id });
+
+			// Re-seeded exactly as a fresh one is. The house is the only thing that reads the project
+			// settings, so a preserved element that kept last run's chamfer figures would be the one
+			// element in the flat finished differently from its neighbours.
+			(*Existing)->RenderFinish = RenderDefaults;
+			return *Existing;
 		}
 
 		AActor* Actor = World->SpawnActor<AActor>(Class, FTransform::Identity, Params);
@@ -1888,6 +2531,12 @@ void AHFHouseActor::BuildGeometry()
 			continue;
 		}
 
+		// STAMPED HERE BECAUSE THE ACTOR CLASS IS NOT THE ANSWER. Five types come through this loop
+		// as AHFCasedGoodsActor, so anything downstream that has to know a TV console from a shoe
+		// rack - the asset mapping table, and the panel's grouping - can only be told, not asked.
+		// Written on the way past rather than by the seed functions, so a new recipe cannot forget.
+		Actor->SourceFixtureType = Fixture.Type;
+
 		FHFFixtureContext Context;
 		Context.Spec = &Spec;
 		Context.Fixture = &Fixture;
@@ -1929,9 +2578,54 @@ void AHFHouseActor::BuildGeometry()
 		}
 	}
 
+	// THE ASSET LIBRARY GOES ON LAST, over finished geometry.
+	//
+	// Last because a fit is measured against the box the generated element occupies, and until every
+	// element has been seeded, regenerated and re-posed that box is not final. Run unconditionally
+	// rather than only when a table is set: with no table this clears table-driven overrides, which
+	// is what has to happen when somebody empties the setting and rebuilds expecting the procedural
+	// flat back.
+	// ------------------------------------------------- and what the new spec no longer contains
+	//
+	// THE PRUNE THAT MAKES PRESERVATION SAFE. Every element kept because it had been baked, or because
+	// somebody had hand-picked an asset for it, was added to Survivors before the spawn passes ran.
+	// The ones the new spec claimed came back through the Spawn lambda and were re-parameterised; the
+	// ones it did not are elements the revision DELETED, and they were staying in the level rendering
+	// the previous plan.
+	//
+	// Their assets are left on disk. That is deliberate and it is what the orphan scan is for - the
+	// element is gone, the asset is unclaimed, and FindBakedOrphans can now offer it with the user
+	// looking at it. Deleting assets from a rebuild path is not something this plugin does.
+	int32 Pruned = 0;
+	for (int32 Index = ElementActors.Num() - 1; Index >= 0; --Index)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(ElementActors[Index]);
+		if (!IsValid(Typed))
+		{
+			continue;
+		}
+
+		const TPair<UClass*, FName> Key{ Typed->GetClass(), Typed->ElementId };
+		if (!PreservedForBake.Contains(Key) || ClaimedForBake.Contains(Key))
+		{
+			continue;
+		}
+
+		UE_LOG(LogHouseForge, Log,
+			TEXT("'%s' is not in the new spec, so it has been removed. Its baked assets are left on disk and the orphan scan can offer them."),
+			*Typed->GetName());
+
+		ElementActors.RemoveAt(Index);
+		Typed->Destroy();
+		++Pruned;
+	}
+
+	RefitAssetOverrides();
+	ApplyProjectAssetMappingTable();
+
 	UE_LOG(LogHouseForge, Log,
-		TEXT("HouseForge built '%s': %d element actors, %d preserved as hand-edited."),
-		*Spec.Name, ElementActors.Num(), PreservedCount);
+		TEXT("HouseForge built '%s': %d element actors, %d preserved as hand-edited, %d removed as no longer in the spec."),
+		*Spec.Name, ElementActors.Num(), PreservedCount, Pruned);
 }
 
 int32 AHFHouseActor::ApplyProjectSettingsToCeilings()
@@ -2089,6 +2783,159 @@ TSet<FName> AHFHouseActor::BuiltFixtureIds(const TArray<FHFFixture>& Fixtures)
 		}
 	}
 	return Ids;
+}
+
+// ================================================================ the asset replacement pass
+
+int32 AHFHouseActor::ApplyAssetMappingTable(const UHFAssetMappingTable* Table, TArray<FString>* OutReport)
+{
+	int32 Changed = 0;
+
+	// Counted per type rather than per element, so the report reads "Wardrobe: 2 replaced" instead of
+	// two lines that the user has to add up to discover both wardrobes were caught.
+	TMap<EHFFixtureType, int32> AppliedByType;
+	TSet<FString> UnloadableAssets;
+	TArray<FString> NoCollision;
+
+	for (AActor* Element : ElementActors)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (!IsValid(Typed))
+		{
+			continue;
+		}
+
+		// HANDS OFF ANYTHING CHOSEN BY HAND. The table owns the overrides it placed and nothing else.
+		if (Typed->HasAssetOverride() && !Typed->HasTableAssetOverride())
+		{
+			continue;
+		}
+
+		const FHFAssetMapping* Mapping = (Table != nullptr)
+			? Table->FindUsable(Typed->SourceFixtureType)
+			: nullptr;
+
+		if (Mapping == nullptr)
+		{
+			// A type the table has no row for - or a table that has gone away entirely - takes the
+			// element back to generated geometry. That is what makes the pass idempotent in both
+			// directions: deleting a row and rebuilding gives the procedural fixture back, rather
+			// than leaving last run's asset stranded with nothing declaring it.
+			if (Typed->HasTableAssetOverride())
+			{
+				Typed->ClearAssetOverride();
+				++Changed;
+			}
+			continue;
+		}
+
+		const FHFAssetOverride Desired = Table->MakeOverride(*Mapping);
+
+		// Re-applied even when it looks unchanged, because the FIT may have changed underneath it: a
+		// rebuild can have widened the wardrobe this asset is stretched into. Cheap - the asset is
+		// already loaded by then - and it is what keeps the flat agreeing with the drawing.
+		const FHFAssetFitResult Fit = Typed->SetAssetOverride(Desired);
+
+		if (!Fit.bValid)
+		{
+			UnloadableAssets.Add(Mapping->Mesh.ToString());
+			continue;
+		}
+
+		AppliedByType.FindOrAdd(Typed->SourceFixtureType) += 1;
+		++Changed;
+
+		if (Fit.Note.Contains(TEXT("no simple collision")))
+		{
+			NoCollision.Add(Typed->ElementId.ToString());
+		}
+	}
+
+	if (OutReport != nullptr)
+	{
+		const UEnum* TypeEnum = StaticEnum<EHFFixtureType>();
+		for (const TPair<EHFFixtureType, int32>& Pair : AppliedByType)
+		{
+			OutReport->Add(FString::Printf(TEXT("%s: %d replaced."),
+				TypeEnum != nullptr ? *TypeEnum->GetNameStringByValue(static_cast<int64>(Pair.Key)) : TEXT("?"),
+				Pair.Value));
+		}
+
+		for (const FString& Path : UnloadableAssets)
+		{
+			OutReport->Add(FString::Printf(TEXT("Could not load '%s'; those fixtures are still generated."), *Path));
+		}
+
+		if (!NoCollision.IsEmpty())
+		{
+			// SAID OUT LOUD, because the symptom is a walkthrough passing through the furniture and
+			// nothing else. Rule 04 asks for collision that matches the visual mesh; an asset that
+			// ships without any is the one case this code cannot fix without editing somebody else's
+			// asset behind their back.
+			OutReport->Add(FString::Printf(
+				TEXT("%d replaced fixtures have no simple collision and will not stop a walkthrough: %s. Set Collision Complexity to 'Use Complex As Simple' on those assets."),
+				NoCollision.Num(), *FString::Join(NoCollision, TEXT(", "))));
+		}
+	}
+
+	return Changed;
+}
+
+int32 AHFHouseActor::ApplyProjectAssetMappingTable()
+{
+	// Resolved by the asset, not here. The settings lookup lives with UHFAssetMappingTable for the
+	// same reason UHFMaterialLibrary::Get owns its own - this file reaches every other setting
+	// through FHFBuildDefaults::FromProjectSettings, which is a value snapshot and cannot carry a
+	// UObject.
+	const UHFAssetMappingTable* Table = UHFAssetMappingTable::GetProjectTable();
+
+	TArray<FString> Report;
+	const int32 Changed = ApplyAssetMappingTable(Table, &Report);
+
+	for (const FString& Line : Report)
+	{
+		UE_LOG(LogHouseForge, Log, TEXT("HouseForge assets: %s"), *Line);
+	}
+
+	return Changed;
+}
+
+int32 AHFHouseActor::RefitAssetOverrides()
+{
+	int32 Refitted = 0;
+
+	for (AActor* Element : ElementActors)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (!IsValid(Typed) || !Typed->HasAssetOverride())
+		{
+			continue;
+		}
+
+		// Its own override put back on itself. SetAssetOverride re-solves the fit against the box the
+		// element occupies now, which is the entire job.
+		Typed->SetAssetOverride(Typed->AssetOverride);
+		++Refitted;
+	}
+
+	return Refitted;
+}
+
+int32 AHFHouseActor::ClearAllAssetOverrides()
+{
+	int32 Cleared = 0;
+
+	for (AActor* Element : ElementActors)
+	{
+		AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+		if (IsValid(Typed) && Typed->HasAssetOverride())
+		{
+			Typed->ClearAssetOverride();
+			++Cleared;
+		}
+	}
+
+	return Cleared;
 }
 
 TArray<FHFFixture> AHFHouseActor::ResolveFixtures(TArray<FString>* OutMoved) const

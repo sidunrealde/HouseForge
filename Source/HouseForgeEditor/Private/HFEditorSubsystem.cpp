@@ -3,6 +3,9 @@
 #include "HFEditorSubsystem.h"
 
 #include "Actors/HFHouseActor.h"
+#include "Assets/HFAssetMappingTable.h"
+#include "Bake/HFBakeService.h"
+#include "Capture/HFLumenCoverage.h"
 #include "Capture/HFPlanSection.h"
 #include "Capture/HFSceneCapture.h"
 #include "Capture/HFViewingLight.h"
@@ -14,6 +17,7 @@
 #include "FileHelpers.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
+#include "HFRenderSettings.h"
 #include "HouseForgeEditor.h"
 #include "ImageUtils.h"
 #include "Interfaces/IPluginManager.h"
@@ -393,6 +397,38 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 			Spec.Fixtures.Num() - BuiltFixtures);
 	}
 
+	// ============================================================== bake, and say which way it went
+	//
+	// THE DEFAULT IS NOT TO BAKE, and the reasoning is written out in Docs/LumenAndTheBake.md and on
+	// EHFBakeOnBuild::Never. What matters here is that the choice is never silent: a house that has
+	// just been built is not in the Lumen scene, that fact decides whether any render of it can be
+	// believed, and the one place a caller is guaranteed to read is the result of the build they
+	// just asked for. Leaving it to be discovered at capture time would be leaving it to be
+	// discovered by whoever is holding the wrong picture.
+	if (UHFRenderSettings::Policy().BakeOnBuild == EHFBakeOnBuild::Always)
+	{
+		FString BakeReport;
+		const FHFOperationResult BakeResult = SetHouseRenderMode(true, BakeReport);
+
+		Message += FString::Printf(TEXT("\nBaked on build (Project Settings > Plugins > HouseForge Rendering): %s"),
+			*BakeReport);
+
+		if (!BakeResult.bSuccess)
+		{
+			// Not fatal to the build - the house is standing and editable either way - but it must
+			// not read as a success, because the render that follows would be the wrong one.
+			Message += TEXT("\nTHE BAKE DID NOT COMPLETE. Renders of this house are not trustworthy until it does.");
+		}
+	}
+	else
+	{
+		Message += TEXT("\nRENDER MODE: live dynamic meshes, NOT baked - which is the default, and right for ")
+			TEXT("editing: the modelling tools target the live mesh and nothing has been written to the ")
+			TEXT("project's Content folder. Lumen cannot see a dynamic mesh, so BAKE BEFORE RENDERING ")
+			TEXT("(SetHouseRenderMode / the BakeHouse tool). Captures refuse an unbaked flat rather than ")
+			TEXT("drawing it, because the unbaked render is the BRIGHTER one and looks fine.");
+	}
+
 	if (Validation.HasWarnings())
 	{
 		Message += FString::Printf(TEXT("\n%s"), *Validation.ToString());
@@ -409,16 +445,61 @@ FHFOperationResult UHFEditorSubsystem::SpawnHouse(const FHFHouseSpec& Spec)
 		return FHFOperationResult::Fail(TEXT("No editor world is open."));
 	}
 
-	// One house per level. Replacing rather than adding keeps GetSpecJson unambiguous.
+	// ============================================ A RE-APPLY GOES INTO THE HOUSE THAT IS ALREADY THERE
 	//
-	// The elements go first, explicitly. AHFHouseActor::Destroyed does this too, but saying it here
-	// as well is what makes the central workflow - read drawing, build, screenshot, correct, rebuild
-	// - safe to read: without it the level ends up holding the wrong house and the right one,
-	// superimposed, while the log line reports the new house's element count and reads correct.
+	// This used to destroy every house in the level and spawn a fresh one, which took every element
+	// actor with it. Measured end to end: build the sample flat, sculpt a wall, bake it, then call
+	// apply_spec again with the same spec - which IS the documented "read drawing, build, screenshot,
+	// correct, rebuild" loop and the only tool a model has for re-applying a corrected spec. The
+	// replacement wall came back artist_edited=False, render_mode=DYNAMIC, baked_parts=0. The sculpt
+	// and the bake were gone and the returned message said nothing about either.
+	//
+	// AHFHouseActor::BuildGeometry was carefully built around exactly this: it preserves hand-edited
+	// elements, re-parameterises baked ones, carries poses across and now prunes what the new spec
+	// dropped. ModifyElement and DeleteElement already go through SetSpec and get all of it. This one
+	// route bypassed the lot.
+	//
+	// So the house is REUSED when there is one. Destroying is kept only for the case it was written
+	// for - a second house that should not be there - and for a genuinely new level, which by
+	// definition has none.
+	AHFHouseActor* Existing = nullptr;
 	for (TActorIterator<AHFHouseActor> It(World); It; ++It)
 	{
+		if (Existing == nullptr)
+		{
+			Existing = *It;
+			continue;
+		}
+
+		// One house per level. Replacing rather than adding keeps GetSpecJson unambiguous.
 		It->ClearGeometry();
 		World->DestroyActor(*It);
+	}
+
+	if (Existing != nullptr)
+	{
+		// What is about to be carried across, counted BEFORE the rebuild so it can be reported. An MCP
+		// caller cannot see a dialog, and this is the operation with the most to lose.
+		int32 HandEdited = 0;
+		int32 Baked = 0;
+		for (AActor* Element : Existing->ElementActors)
+		{
+			const AHFElementActor* Typed = Cast<AHFElementActor>(Element);
+			if (!IsValid(Typed))
+			{
+				continue;
+			}
+			HandEdited += Typed->bArtistEdited ? 1 : 0;
+			Baked += Typed->HasAnyBakedAsset() ? 1 : 0;
+		}
+
+		Existing->Modify();
+		Existing->SetActorLabel(Spec.Name.IsEmpty() ? TEXT("HouseForge House") : Spec.Name);
+		Existing->SetSpec(Spec);
+
+		return FHFOperationResult::Ok(FString::Printf(
+			TEXT("Applied to the house already in this level, so nothing was destroyed: %d hand-edited element(s) and %d baked element(s) were carried across. Elements the new spec no longer contains were removed and their baked assets left on disk."),
+			HandEdited, Baked));
 	}
 
 	FActorSpawnParameters Params;
@@ -450,6 +531,540 @@ AHFHouseActor* UHFEditorSubsystem::FindHouseActor() const
 		return *It;
 	}
 	return nullptr;
+}
+
+// ============================================================ content browser asset replacement
+//
+// Every call here sets a component's mesh, transform and visibility. Nothing reads or writes an
+// FDynamicMesh3, calls Regenerate, or touches bArtistEdited - which is what makes the revert exact.
+
+namespace
+{
+	/** The display name of a fixture type, for a panel row and for a report line. */
+	FString FixtureTypeName(EHFFixtureType Type)
+	{
+		const UEnum* Enum = StaticEnum<EHFFixtureType>();
+		return Enum != nullptr ? Enum->GetNameStringByValue(static_cast<int64>(Type)) : TEXT("Unknown");
+	}
+
+	/** Every element actor of the level's house, or an empty list when there is no house. */
+	TArray<AHFElementActor*> LevelElements(AHFHouseActor* House)
+	{
+		TArray<AHFElementActor*> Elements;
+		if (!IsValid(House))
+		{
+			return Elements;
+		}
+
+		for (AActor* Element : House->ElementActors)
+		{
+			if (AHFElementActor* Typed = Cast<AHFElementActor>(Element))
+			{
+				if (IsValid(Typed))
+				{
+					Elements.Add(Typed);
+				}
+			}
+		}
+		return Elements;
+	}
+
+	/**
+	 * Applies one override to a list of elements and writes the report every caller shows.
+	 *
+	 * Shared by the by-type and by-id paths because the only thing that differs between them is which
+	 * elements are in the list - and a second copy of the reporting is a second place for the
+	 * collision warning to be forgotten.
+	 */
+	FString ApplyOverrideTo(const TArray<AHFElementActor*>& Elements, const FHFAssetOverride& Override,
+		int32& OutApplied)
+	{
+		OutApplied = 0;
+
+		TArray<FString> Distorted;
+		TArray<FString> NoCollision;
+		TArray<FString> Failed;
+
+		for (AHFElementActor* Element : Elements)
+		{
+			const FHFAssetFitResult Fit = Element->SetAssetOverride(Override);
+			if (!Fit.bValid)
+			{
+				Failed.Add(Element->ElementId.ToString());
+				continue;
+			}
+
+			++OutApplied;
+
+			// STRETCH IS SURFACED, NOT HIDDEN. A wardrobe stretched 34% in depth is a decision the
+			// user should see, and 1.1 is not worth a line - the threshold is where an authored
+			// detail visibly stops being the shape its author drew.
+			if (Fit.WorstAxisRatio > 1.15)
+			{
+				Distorted.Add(FString::Printf(TEXT("%s %.2fx"), *Element->ElementId.ToString(), Fit.WorstAxisRatio));
+			}
+
+			if (Fit.Note.Contains(TEXT("no simple collision")))
+			{
+				NoCollision.Add(Element->ElementId.ToString());
+			}
+		}
+
+		FString Report = FString::Printf(TEXT("%d replaced."), OutApplied);
+
+		if (!Distorted.IsEmpty())
+		{
+			Report += FString::Printf(TEXT(" Stretched: %s."), *FString::Join(Distorted, TEXT(", ")));
+		}
+
+		if (!NoCollision.IsEmpty())
+		{
+			Report += FString::Printf(
+				TEXT(" NO SIMPLE COLLISION on %s - a walkthrough will pass through these. Set Collision Complexity to 'Use Complex As Simple' on the asset."),
+				*FString::Join(NoCollision, TEXT(", ")));
+		}
+
+		if (!Failed.IsEmpty())
+		{
+			Report += FString::Printf(TEXT(" Could not load the asset for: %s."), *FString::Join(Failed, TEXT(", ")));
+		}
+
+		return Report;
+	}
+}
+
+TArray<FHFFixtureGroup> UHFEditorSubsystem::GetFixtureGroups() const
+{
+	TMap<EHFFixtureType, FHFFixtureGroup> Groups;
+
+	for (AHFElementActor* Element : LevelElements(FindHouseActor()))
+	{
+		// Walls, rooms, beams and columns are not fixtures and cannot be swapped for a catalogue
+		// item, so they are absent from the list rather than present and inert.
+		if (Element->SourceFixtureType == EHFFixtureType::Unknown)
+		{
+			continue;
+		}
+
+		FHFFixtureGroup& Group = Groups.FindOrAdd(Element->SourceFixtureType);
+		Group.Type = Element->SourceFixtureType;
+		Group.TypeName = FixtureTypeName(Element->SourceFixtureType);
+		Group.InstanceCount += 1;
+		Group.ElementIds.Add(Element->ElementId);
+
+		if (Element->HasAssetOverride())
+		{
+			Group.OverriddenCount += 1;
+			if (!Element->HasTableAssetOverride())
+			{
+				Group.HandPickedCount += 1;
+			}
+		}
+	}
+
+	TArray<FHFFixtureGroup> Rows;
+	Groups.GenerateValueArray(Rows);
+
+	// Sorted by name rather than by enum order, so the list does not silently re-order itself the
+	// day a value is inserted into EHFFixtureType.
+	Rows.Sort([](const FHFFixtureGroup& A, const FHFFixtureGroup& B) { return A.TypeName < B.TypeName; });
+	return Rows;
+}
+
+FHFOperationResult UHFEditorSubsystem::PreviewAssetOverride(const FString& ElementId,
+	const FHFAssetOverride& Override, FHFAssetFitResult& OutFit) const
+{
+	const FName Id(*ElementId);
+
+	for (AHFElementActor* Element : LevelElements(FindHouseActor()))
+	{
+		if (Element->ElementId != Id)
+		{
+			continue;
+		}
+
+		OutFit = Element->PreviewAssetFit(Override);
+
+		if (!OutFit.bValid)
+		{
+			return FHFOperationResult::Fail(OutFit.Note);
+		}
+
+		return FHFOperationResult::Ok(FString::Printf(
+			TEXT("'%s' is %.0f x %.0f x %.0f as generated; the asset would land at %.0f x %.0f x %.0f (%.2fx), leaving %.0f x %.0f x %.0f of slack. %s"),
+			*ElementId,
+			OutFit.GeneratedSize.X, OutFit.GeneratedSize.Y, OutFit.GeneratedSize.Z,
+			OutFit.FittedSize.X, OutFit.FittedSize.Y, OutFit.FittedSize.Z,
+			OutFit.WorstAxisRatio,
+			OutFit.Slack.X, OutFit.Slack.Y, OutFit.Slack.Z,
+			*OutFit.Note));
+	}
+
+	return FHFOperationResult::Fail(FString::Printf(TEXT("No element '%s' in the level."), *ElementId));
+}
+
+FHFOperationResult UHFEditorSubsystem::ApplyAssetToType(EHFFixtureType Type,
+	const FHFAssetOverride& Override, FString& OutReport)
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (!IsValid(House))
+	{
+		return FHFOperationResult::Fail(TEXT("No HouseForge house in the level."));
+	}
+
+	TArray<AHFElementActor*> Matching;
+	int32 SkippedHandPicked = 0;
+
+	for (AHFElementActor* Element : LevelElements(House))
+	{
+		if (Element->SourceFixtureType != Type)
+		{
+			continue;
+		}
+
+		// HANDS OFF ANYTHING CHOSEN BY HAND, exactly as the table pass does. A by-type apply is a
+		// batch pass; reverting somebody's individual choice without saying so is the one loss this
+		// feature could cause that is invisible until a render.
+		if (Element->HasAssetOverride() && !Element->HasTableAssetOverride())
+		{
+			++SkippedHandPicked;
+			continue;
+		}
+
+		Matching.Add(Element);
+	}
+
+	if (Matching.IsEmpty() && SkippedHandPicked == 0)
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("No %s in the level."), *FixtureTypeName(Type)));
+	}
+
+	int32 Applied = 0;
+	OutReport = FString::Printf(TEXT("%s: %s"), *FixtureTypeName(Type),
+		*ApplyOverrideTo(Matching, Override, Applied));
+
+	if (SkippedHandPicked > 0)
+	{
+		OutReport += FString::Printf(
+			TEXT(" %d left alone because an asset was chosen for them individually."), SkippedHandPicked);
+	}
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::ApplyAssetToElements(const TArray<FString>& ElementIds,
+	const FHFAssetOverride& Override, FString& OutReport)
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (!IsValid(House))
+	{
+		return FHFOperationResult::Fail(TEXT("No HouseForge house in the level."));
+	}
+
+	TSet<FName> Wanted;
+	for (const FString& Id : ElementIds)
+	{
+		Wanted.Add(FName(*Id));
+	}
+
+	TArray<AHFElementActor*> Matching;
+	for (AHFElementActor* Element : LevelElements(House))
+	{
+		if (Wanted.Contains(Element->ElementId))
+		{
+			Matching.Add(Element);
+		}
+	}
+
+	if (Matching.IsEmpty())
+	{
+		return FHFOperationResult::Fail(TEXT("None of those element ids are in the level."));
+	}
+
+	// A SUBSET APPLY IS ALWAYS HAND-PICKED, whatever the caller passed. The user named these
+	// instances, so the record has to say so or the next table pass would take the choice back.
+	FHFAssetOverride ByHand = Override;
+	ByHand.SourceTable = NAME_None;
+
+	int32 Applied = 0;
+	OutReport = ApplyOverrideTo(Matching, ByHand, Applied);
+
+	if (Matching.Num() < Wanted.Num())
+	{
+		OutReport += FString::Printf(TEXT(" %d of the ids given are not in the level."),
+			Wanted.Num() - Matching.Num());
+	}
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::ClearAssetOverrides(const TArray<FString>& ElementIds, FString& OutReport)
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (!IsValid(House))
+	{
+		return FHFOperationResult::Fail(TEXT("No HouseForge house in the level."));
+	}
+
+	// An empty list means the whole level, which is what makes this usable as the panic button: the
+	// way back has to be reachable without first selecting the thing that went wrong.
+	if (ElementIds.IsEmpty())
+	{
+		const int32 Cleared = House->ClearAllAssetOverrides();
+		OutReport = FString::Printf(
+			TEXT("%d element(s) back to generated geometry. Every parameter struct is untouched, so they are exactly as they were generated."),
+			Cleared);
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	TSet<FName> Wanted;
+	for (const FString& Id : ElementIds)
+	{
+		Wanted.Add(FName(*Id));
+	}
+
+	int32 Cleared = 0;
+	for (AHFElementActor* Element : LevelElements(House))
+	{
+		if (Wanted.Contains(Element->ElementId) && Element->HasAssetOverride())
+		{
+			Element->ClearAssetOverride();
+			++Cleared;
+		}
+	}
+
+	OutReport = FString::Printf(TEXT("%d element(s) back to generated geometry."), Cleared);
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::ApplyAssetMappingTable(FString& OutReport)
+{
+	AHFHouseActor* House = FindHouseActor();
+	if (!IsValid(House))
+	{
+		return FHFOperationResult::Fail(TEXT("No HouseForge house in the level."));
+	}
+
+	const UHFAssetMappingTable* Table = UHFAssetMappingTable::GetProjectTable();
+
+	TArray<FString> Lines;
+	const int32 Changed = House->ApplyAssetMappingTable(Table, &Lines);
+
+	if (Table == nullptr)
+	{
+		OutReport = FString::Printf(
+			TEXT("No asset mapping table is set (Project Settings > Plugins > HouseForge > Assets). %d table-driven override(s) cleared; the flat is fully procedural."),
+			Changed);
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	OutReport = FString::Printf(TEXT("'%s': %d element(s) changed. %s"),
+		*Table->GetName(), Changed, *FString::Join(Lines, TEXT(" ")));
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::SetHouseRenderMode(bool bBaked, FString& OutReport)
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	FHFBakeReport Report;
+	FHFBakeService::SetHouseRenderMode(World, bBaked, Report);
+
+	// The coverage the operation actually achieved, not the operation's own opinion of itself. A
+	// bake that reports "150 baked" and still leaves the flat invisible to Lumen - because the
+	// project does not build distance fields, say - is a bake that has not done its job, and the
+	// caller should be told in the same breath.
+	FHFLumenCoverageReport Coverage;
+	FHFLumenCoverage::Inspect(World, Coverage);
+
+	OutReport = FString::Printf(TEXT("%s\n%s"), *Report.Summary(), *Coverage.Summary());
+
+	if (Report.ElementsFailed > 0)
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("%d element(s) could not be baked.\n%s"), Report.ElementsFailed, *OutReport));
+	}
+
+	if (bBaked && !Coverage.IsCovered())
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("The bake ran but the flat is still not in the Lumen scene.\n%s\n%s"),
+			*OutReport, *Coverage.WhyNot()));
+	}
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::RebakeStale(FString& OutReport)
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	FHFBakeReport Report;
+	FHFBakeService::RebakeStale(World, Report);
+	OutReport = Report.Summary();
+
+	return (Report.ElementsFailed > 0)
+		? FHFOperationResult::Fail(OutReport)
+		: FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::FindBakedOrphans(FString& OutReport) const
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	TArray<FAssetData> Orphans;
+	FHFBakeService::FindOrphans(World, Orphans);
+
+	if (Orphans.IsEmpty())
+	{
+		OutReport = TEXT("No unclaimed baked assets in this level's folder.");
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	TArray<FString> Lines;
+	Lines.Reserve(Orphans.Num());
+	for (const FAssetData& Orphan : Orphans)
+	{
+		Lines.Add(Orphan.GetSoftObjectPath().ToString());
+	}
+	Lines.Sort();
+
+	OutReport = FString::Printf(
+		TEXT("%d baked asset(s) in this level's folder are claimed by no element. Nothing has been deleted; call DeleteBakedOrphans to remove them.\n  %s"),
+		Orphans.Num(), *FString::Join(Lines, TEXT("\n  ")));
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::DeleteBakedOrphans(FString& OutReport)
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	// RE-SCANNED rather than acting on a list handed in. A delete that trusted a caller's list could
+	// be handed a picture of the level from before something was baked, and would then delete an asset
+	// an element is currently drawing.
+	TArray<FAssetData> Orphans;
+	FHFBakeService::FindOrphans(World, Orphans);
+
+	if (Orphans.IsEmpty())
+	{
+		OutReport = TEXT("No unclaimed baked assets in this level's folder; nothing was deleted.");
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	FString Error;
+	const int32 Deleted = FHFBakeService::DeleteOrphans(Orphans, Error);
+
+	OutReport = FString::Printf(TEXT("Deleted %d of %d unclaimed baked asset(s).%s"),
+		Deleted, Orphans.Num(), Error.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" %s"), *Error));
+
+	return Error.IsEmpty() ? FHFOperationResult::Ok(OutReport) : FHFOperationResult::Fail(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::AdoptBakedAssetEdits(const TArray<FString>& ElementIds, FString& OutReport)
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	TSet<FName> Wanted;
+	for (const FString& Id : ElementIds)
+	{
+		Wanted.Add(FName(*Id));
+	}
+
+	TArray<AHFElementActor*> Elements;
+	FHFBakeService::GatherElements(World, Elements);
+
+	TArray<AHFElementActor*> Chosen;
+	for (AHFElementActor* Element : Elements)
+	{
+		if (IsValid(Element) && Element->HasHandEditedBakedAsset()
+			&& (Wanted.IsEmpty() || Wanted.Contains(Element->ElementId)))
+		{
+			Chosen.Add(Element);
+		}
+	}
+
+	if (Chosen.IsEmpty())
+	{
+		OutReport = TEXT("No element has a baked asset that was edited after it was baked.");
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	FHFBakeReport Report;
+	const int32 Adopted = FHFBakeService::AdoptBakedAssetEdits(Chosen, Report);
+
+	OutReport = FString::Printf(
+		TEXT("%d part(s) across %d element(s) adopted. Those elements are now hand-edited and showing their live meshes; bake them again to put the edits back on disk.%s"),
+		Adopted, Chosen.Num(), *Report.Summary());
+
+	return FHFOperationResult::Ok(OutReport);
+}
+
+FHFOperationResult UHFEditorSubsystem::CheckLumenCoverage(FString& OutReport) const
+{
+	OutReport.Reset();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return FHFOperationResult::Fail(TEXT("No editor world is open."));
+	}
+
+	FHFLumenCoverageReport Report;
+	FHFLumenCoverage::Inspect(World, Report);
+
+	if (!Report.IsApplicable())
+	{
+		// Said rather than silently passed. "The check does not apply" and "the check passed" are
+		// different answers, and a caller that cannot tell them apart will believe a render is
+		// trustworthy on a project where nothing has been checked at all.
+		OutReport = FString::Printf(
+			TEXT("%s\nThis project is not using Lumen (r.DynamicGlobalIlluminationMethod is not 1), ")
+			TEXT("so nothing here decides whether a render is correct. The check is inert, not passing."),
+			*Report.Summary());
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	if (Report.IsCovered())
+	{
+		OutReport = Report.Summary();
+		return FHFOperationResult::Ok(OutReport);
+	}
+
+	OutReport = Report.WhyNot();
+	return FHFOperationResult::Fail(OutReport);
 }
 
 FHFOperationResult UHFEditorSubsystem::GetSpecJson(FString& OutSpecJson) const
@@ -834,6 +1449,18 @@ FHFOperationResult UHFEditorSubsystem::CaptureTopDown(const FString& FileName, i
 	// the flat only makes the comparison harder.
 	Request.bShowSky = false;
 
+	// AND IT IS DRAWN, NOT PHOTOGRAPHED. A plan rendered lit is a plan exposed for an interior with
+	// its ceiling taken off, which is six stops hot and clips to white - the defect three review
+	// packages reported and FHFPlanDraw works through. Flat tone off the base-colour buffer instead,
+	// with the section poched from the same palette.
+	Request.DrawStyle = EHFDrawStyle::Drawing;
+
+	// And no Lumen guard. A plan is an orthographic section of a temporary cut copy with the sky and
+	// fog switched off, judged on where the walls are; no part of that answer comes from bounce. The
+	// guard exists to stop a LIT render being trusted, and blocking the layout tool over a bake would
+	// make the check something to switch off rather than something to believe.
+	Request.LumenGuard = EHFLumenGuard::Off;
+
 	Request.OutputPath = CapturePath(FileName, TEXT("Plan"));
 
 	FIntPoint Written = FIntPoint::ZeroValue;
@@ -895,6 +1522,11 @@ FHFOperationResult UHFEditorSubsystem::CaptureView(const FString& FileName, int3
 
 	// The whole scene, uncut: this is a view of the flat as built, not a diagnostic drawing of it.
 	Request.bShowSky = true;
+
+	// A LIT view, so the Lumen guard applies. Taken from the project policy rather than left at the
+	// struct default, because this is the one capture a user can deliberately want the broken
+	// configuration out of - measuring it is how the evidence in Saved/Review/lumen was gathered.
+	Request.LumenGuard = UHFRenderSettings::Policy().LumenGuard;
 
 	Request.OutputPath = CapturePath(FileName, TEXT("View"));
 

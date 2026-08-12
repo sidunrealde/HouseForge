@@ -3,10 +3,33 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HFRenderSettings.h"
 
 class AActor;
 class UMaterialInterface;
 class UWorld;
+
+/**
+ * What KIND of picture this is: a photograph of the flat, or a drawing of it.
+ *
+ * Not a style preference. The two want opposite things out of the renderer, and pretending
+ * otherwise is what put three review packages' worth of blown-out plans on the record - see
+ * FHFPlanDraw for the arithmetic.
+ */
+enum class EHFDrawStyle : uint8
+{
+	/** Lit, exposed, tonemapped. A view of a room, judged on how it looks. */
+	Lit,
+
+	/**
+	 * Flat tone, straight off the base-colour buffer. A plan, judged against a drawing.
+	 *
+	 * Taken before lighting, before exposure, before the tonemapper and before bloom, so none of the
+	 * four things that blew the plan out is on the path at all. A drawing has no exposure to get
+	 * wrong.
+	 */
+	Drawing
+};
 
 /** One offscreen render: where the camera is, what it sees, and how big the image is. */
 struct FHFCaptureRequest
@@ -42,6 +65,31 @@ struct FHFCaptureRequest
 	 * what comes through a window is part of what is being judged.
 	 */
 	bool bShowSky = true;
+
+	/**
+	 * Photograph or drawing. Lit by default, because most captures are of a room.
+	 *
+	 * UHFEditorSubsystem::CaptureTopDown sets Drawing, and FHFPlanSection materialles the section it
+	 * builds from the matching palette. The two belong together: a drawing style over the finish
+	 * library's tones would be flat and unreadable, and the plan palette under a lit render would be
+	 * a set of greys with sun shadows across them.
+	 */
+	EHFDrawStyle DrawStyle = EHFDrawStyle::Lit;
+
+	/**
+	 * What to do when the geometry in this picture cannot contribute indirect light.
+	 *
+	 * Left at Refuse for a view of a room. UHFEditorSubsystem::CaptureTopDown sets it to Off, and
+	 * that is not laziness: a plan is an orthographic section drawn with the sky and fog switched
+	 * off, compared against a line drawing. Nothing in it depends on bounce, so refusing to draw one
+	 * because the flat is unbaked would block the tool Claude uses to check its own layout for a
+	 * reason that has nothing to do with layout.
+	 *
+	 * Refuse is the STRUCT's default rather than the project policy's, so a request built by code
+	 * that has never heard of the policy is guarded rather than not. Callers that mean a lit view of
+	 * a room read UHFRenderSettings::Policy() and overwrite this.
+	 */
+	EHFLumenGuard LumenGuard = EHFLumenGuard::Refuse;
 
 	/** Absolute path of the PNG to write. */
 	FString OutputPath;
@@ -103,6 +151,28 @@ public:
 	 * @param OutWhyNot  Filled in with the materials that could not be made ready.
 	 */
 	static bool EnsureMaterialsReady(UWorld* World, const FHFCaptureRequest& Request, FString& OutWhyNot);
+
+	/**
+	 * Refuses a lit render of a flat Lumen cannot see, on the same terms as the material check above.
+	 *
+	 * ## Why this is a refusal and not a warning
+	 *
+	 * Every other guard in this file exists because a capture that goes wrong goes wrong QUIETLY: an
+	 * uncompiled material draws as grey checkerboard, -nullrhi draws black. This one is worse than
+	 * quiet. An unbaked flat renders BRIGHTER than a baked one, because the walls are not in the
+	 * Lumen scene and the sky light is never occluded - measured whole-frame luminance 0.260 against
+	 * 0.083 from identical lighting, with the broken image the cheerful one. There is no visual cue
+	 * to notice, so the check has to be mechanical.
+	 *
+	 * Separated out from RenderToPixels for the same reason GatherRenderedMaterials is: WHAT gets
+	 * checked is testable with no renderer at all, and the validation gate runs under -nullrhi.
+	 *
+	 * Returns true, and says nothing, when the project is not using Lumen - in which case a dynamic
+	 * mesh is not a correctness problem and a refusal would be noise.
+	 *
+	 * @param OutWhyNot  The full report: what is absent, why, and what to bake.
+	 */
+	static bool EnsureLumenCoverage(UWorld* World, const FHFCaptureRequest& Request, FString& OutWhyNot);
 
 	/**
 	 * Renders and hands back the pixels, writing nothing.

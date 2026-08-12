@@ -37,22 +37,9 @@ namespace
 		return Out;
 	}
 
-	/**
-	 * The handle for one leaf, in that leaf's own local space.
-	 *
-	 * Not one line of it is conditional on how the leaf is hung, and that is the point - see the same
-	 * function in HFWardrobeKit.cpp. What handedness DOES change is which edge the leaf opens from,
-	 * and the kit is asked rather than the answer being written out here.
-	 */
-	FHFHandleParams MakeLeafHandle(const FHFShutterParams& Leaf, EHFHandleStyle Style)
-	{
-		FHFHandleParams Handle;
-		Handle.Style = Style;
-		Handle.PanelBox = FHFJoineryKit::ShutterPanelBox(Leaf);
-		Handle.Facing = EHFPanelFacing::NegativeY;
-		Handle.Edge = FHFJoineryKit::ShutterLeadingEdge(Leaf);
-		return Handle;
-	}
+	// The handle for one leaf is FHFJoineryKit::ShutterHandle, which is where the copy that used to
+	// live here went - it and the identical one in HFWardrobeKit.cpp, each carrying a comment
+	// pointing at the other.
 
 	/**
 	 * The handle for one drawer front, read off the part's own mesh.
@@ -478,7 +465,7 @@ FHFCasedGoodsBuild FHFCasedGoodsKit::Build(const FHFCasedGoodsParams& Params)
 						continue;
 					}
 
-					FHFJoineryKit::ApplyHandle(Part.Mesh, MakeLeafHandle(Leaf, P.HandleStyle));
+					FHFJoineryKit::ApplyHandle(Part.Mesh, FHFJoineryKit::ShutterHandle(Leaf, P.HandleStyle));
 
 					Part.PivotTransform = FHFJoineryKit::ShutterPivotTransform(Leaf)
 						* FTransform(FVector(BayX + LeafIndex * LeafModule, 0.0, LeafBaseZ));

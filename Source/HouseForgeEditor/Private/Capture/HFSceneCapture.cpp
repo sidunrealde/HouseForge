@@ -2,6 +2,8 @@
 
 #include "Capture/HFSceneCapture.h"
 
+#include "Capture/HFLumenCoverage.h"
+#include "Capture/HFPlanDraw.h"
 #include "Capture/HFViewingLight.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -210,6 +212,55 @@ bool FHFSceneCapture::EnsureMaterialsReady(UWorld* World, const FHFCaptureReques
 	return true;
 }
 
+bool FHFSceneCapture::EnsureLumenCoverage(UWorld* World, const FHFCaptureRequest& Request, FString& OutWhyNot)
+{
+	OutWhyNot.Reset();
+
+	if (World == nullptr || Request.LumenGuard == EHFLumenGuard::Off)
+	{
+		return true;
+	}
+
+	FHFLumenCoverageReport Report;
+	FHFLumenCoverage::Inspect(World, Report);
+
+	if (Report.IsCovered())
+	{
+		// A FACT ABOUT THE LEVEL, SAID AS ONE. Not a claim about the picture that follows.
+		//
+		// This line used to read as evidence that the render was trustworthy, and that is more than a
+		// HouseForge capture can carry. Measured: the same baked flat captured three times through this
+		// path - Lumen on, r.DynamicGlobalIlluminationMethod 0, and GI plus sky light both off -
+		// produced BYTE-IDENTICAL PNGs, md5 15f7788f10d4cb0980fe8ee220afb64a, whole-frame luminance
+		// 0.377881 in all three. A USceneCaptureComponent2D runs no global illumination at all, which
+		// this file says itself a hundred lines down and FHFViewingLight says again: the light in these
+		// images is entirely the ambient cubemap the rig pins.
+		//
+		// The guard is still worth running here, because "is the flat in the Lumen scene" is a real
+		// question about the level and this is a convenient moment to ask it. But stamping a
+		// trustworthiness claim onto an image that cannot show the thing is the milestone's own failure
+		// mode reproduced inside the guard, so the wording carries the caveat.
+		UE_LOG(LogHouseForgeEditor, Log,
+			TEXT("%s (a fact about the LEVEL. This capture is an ambient-fill diagnostic view and runs no global illumination - judge lighting from a viewport HighResShot or Movie Render Queue frame, not from this image.)"),
+			*Report.Summary());
+		return true;
+	}
+
+	OutWhyNot = Report.WhyNot();
+
+	if (Request.LumenGuard == EHFLumenGuard::Warn)
+	{
+		// The whole refusal, at Warning, and then the render happens anyway. This is how the
+		// comparison in Saved/Review/lumen was taken: measuring the broken configuration requires
+		// being allowed to render it, and being told in full what is broken about it.
+		UE_LOG(LogHouseForgeEditor, Warning, TEXT("%s"), *OutWhyNot);
+		OutWhyNot.Reset();
+		return true;
+	}
+
+	return false;
+}
+
 bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Request,
 	TArray<FColor>& OutPixels, FIntPoint& OutSize, FString& OutError)
 {
@@ -232,6 +283,14 @@ bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Req
 	// that cannot be correct must not be written: an image of the wrong thing is acted on, whereas a
 	// refusal is read.
 	if (!EnsureMaterialsReady(World, Request, OutError))
+	{
+		return false;
+	}
+
+	// And the geometry, on the same terms. A material that is not ready draws checkerboard, which is
+	// obvious; geometry Lumen cannot see draws a brighter, more attractive version of the wrong
+	// answer, which is not. Both refusals happen before a single pixel is written.
+	if (!EnsureLumenCoverage(World, Request, OutError))
 	{
 		return false;
 	}
@@ -275,7 +334,16 @@ bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Req
 	Capture->SetWorldLocationAndRotation(Request.Location, Request.Rotation);
 
 	Capture->TextureTarget = Target;
-	Capture->CaptureSource = SCS_FinalColorLDR;
+
+	// WHERE IN THE FRAME THE PIXELS ARE TAKEN FROM, and it is the whole of the plan fix.
+	//
+	// SCS_FinalColorLDR is the end of the pipeline: lit, exposed, tonemapped, bloomed. That is what a
+	// view of a room wants and it is what was wrong with every plan this tool has ever produced.
+	// SCS_BaseColor is the deferred base-colour buffer, read before any of those four exist - so a
+	// drawing cannot be over-exposed, cannot clip, and cannot grow a halo, rather than being tuned
+	// until it currently does none of those. See FHFPlanDraw.
+	Capture->CaptureSource = (Request.DrawStyle == EHFDrawStyle::Drawing)
+		? SCS_BaseColor : SCS_FinalColorLDR;
 
 	// One frame, taken when we ask for it. Left on, this component would render every tick of the
 	// editor for as long as it existed, which for a 4096-square target is a visible cost for no
@@ -322,7 +390,19 @@ bool FHFSceneCapture::RenderToPixels(UWorld* World, const FHFCaptureRequest& Req
 	// no global illumination, so the sky light lights nothing inside an enclosed room and an
 	// interior view is black for an entirely different reason. Both figures come from the
 	// placeholder rig, so a capture and the editor viewport agree.
-	FHFViewingLight::ApplyViewingSettingsTo(Capture->PostProcessSettings);
+	if (Request.DrawStyle == EHFDrawStyle::Drawing)
+	{
+		// A drawing takes none of the rig's exposure and none of its ambient fill: both are answers
+		// to "how is this lit", and a base-colour capture is not lit. Applied anyway rather than
+		// skipped, because a post-process volume in the level still reaches this camera and the
+		// bloom on it is the halo that was round the last three plans.
+		FHFPlanDraw::ApplyDrawingPostProcess(Capture->PostProcessSettings);
+	}
+	else
+	{
+		FHFViewingLight::ApplyViewingSettingsTo(Capture->PostProcessSettings);
+	}
+
 	Capture->PostProcessBlendWeight = 1.0f;
 
 	Capture->CaptureScene();

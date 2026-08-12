@@ -2,6 +2,7 @@
 
 #include "HouseForgeEditor.h"
 
+#include "Bake/HFBakeService.h"
 #include "DesktopPlatformModule.h"
 #include "Editor.h"
 #include "HAL/IConsoleManager.h"
@@ -120,6 +121,52 @@ namespace
 		TEXT("Open the HouseForge panel."),
 		FConsoleCommandDelegate::CreateStatic(&OpenHousePanel));
 
+	/**
+	 * Whether the flat is in the Lumen scene, from the console.
+	 *
+	 * ## Where the guard was NOT, and why this had to exist
+	 *
+	 * FHFSceneCapture::EnsureLumenCoverage guards the one render path that contains no Lumen at all -
+	 * measured, three captures with GI on, off and absent came back byte-identical. The paths that DO
+	 * converge Lumen are the viewport's HighResShot, PIE and Movie Render Queue, and none of them
+	 * passes through any HouseForge code that could refuse.
+	 *
+	 * A console command is what those have in common: Scripts/hf_lumen.py already drives the viewport
+	 * through console commands, so it can now ask this first, and so can anyone taking a screenshot by
+	 * hand. The answer goes to the log at Warning when the flat is not covered, which is what makes it
+	 * visible in an unattended run's output rather than only to whoever is looking at the screen.
+	 */
+	void CheckLumenCoverageCommand()
+	{
+		UHFEditorSubsystem* Editor = GEditor != nullptr
+			? GEditor->GetEditorSubsystem<UHFEditorSubsystem>() : nullptr;
+
+		if (Editor == nullptr)
+		{
+			UE_LOG(LogHouseForgeEditor, Warning, TEXT("HouseForge.CheckLumenCoverage: no editor subsystem."));
+			return;
+		}
+
+		FString CoverageReport;
+		const FHFOperationResult Result = Editor->CheckLumenCoverage(CoverageReport);
+
+		if (Result.bSuccess)
+		{
+			UE_LOG(LogHouseForgeEditor, Log, TEXT("HouseForge.CheckLumenCoverage: %s"), *CoverageReport);
+		}
+		else
+		{
+			UE_LOG(LogHouseForgeEditor, Warning,
+				TEXT("HouseForge.CheckLumenCoverage: THIS FLAT IS NOT IN THE LUMEN SCENE. Any render taken now is lit by sky flooding through walls Lumen cannot see, and will look BRIGHTER than the correct result rather than obviously broken.\n%s"),
+				*CoverageReport);
+		}
+	}
+
+	FAutoConsoleCommand GCheckLumenCoverageCommand(
+		TEXT("HouseForge.CheckLumenCoverage"),
+		TEXT("Report whether the flat is in the Lumen scene. Ask this BEFORE a HighResShot, PIE or MRQ render."),
+		FConsoleCommandDelegate::CreateStatic(&CheckLumenCoverageCommand));
+
 	void RegisterMenus()
 	{
 		FToolMenuOwnerScoped OwnerScoped(TEXT("HouseForge"));
@@ -181,6 +228,12 @@ void FHouseForgeEditorModule::StartupModule()
 			TEXT("ToolsetRegistry is unavailable; HouseForge will not be reachable over MCP."));
 	}
 
+	// The runtime element actors reach asset creation through exactly one static delegate, bound
+	// here. Package creation is unreachable from a runtime module and making HouseForge depend on
+	// UnrealEd to fix that would be far worse. Unbound, nothing can bake - which is the correct
+	// behaviour in a cooked build rather than a link error.
+	FHFBakeService::Register();
+
 	UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateStatic(&RegisterMenus));
 
@@ -203,6 +256,8 @@ void FHouseForgeEditorModule::ShutdownModule()
 {
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(TEXT("HouseForge"));
+
+	FHFBakeService::Unregister();
 
 	if (FSlateApplication::IsInitialized())
 	{

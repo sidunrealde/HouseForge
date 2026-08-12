@@ -524,6 +524,20 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 	int32 MissedSomewhere = 0;
 	int32 BodiesThatNeverMoved = 0;
 
+	// HOW MANY PARTS THE LEFT-BEHIND-COLLISION CHECK COULD ACTUALLY BE ASKED ABOUT.
+	//
+	// The check below only applies to a part that travels clear of where it started - open bounds
+	// disjoint from shut bounds - and for most of this milestone NOTHING in the flat did. No leaf of
+	// a two-track slider travels further than its own width, so the branch never executed, and
+	// "TestEqual(BodiesThatNeverMoved, 0)" passed by never having been asked. A count of the times a
+	// zero-valued counter was not incremented is not evidence, and the whole point of this file is
+	// that a test which cannot fail is worse than no test.
+	//
+	// So the OPPORTUNITIES are counted too, and asserted. If a future change leaves nothing in the
+	// flat travelling clear of itself, this stops being a vacuous pass and starts being a failure
+	// that says so.
+	int32 TravelledClear = 0;
+
 	for (const TObjectPtr<AActor>& Actor : House->ElementActors)
 	{
 		AHFArticulatedActor* Articulated = Cast<AHFArticulatedActor>(Actor);
@@ -564,12 +578,39 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 				++MissedSomewhere;
 			}
 
-			// Fully open, the shut position must be clear - as long as the leaf actually travelled
-			// further than its own width, which is what a two-track slider does by construction.
+			// Fully open, the shut position must be clear - as long as the part actually travelled
+			// further than its own width, which no leaf of a two-track slider does and every fold of
+			// a drawn curtain does.
+			//
+			// TRACED WHERE THE PART USED TO BE, which is the whole content of this check and is not
+			// what ProbeHits does. ProbeHits aims at the part's OWN triangles, so it follows the part
+			// wherever the part has gone - handed the shut box it still traced the open position and
+			// still hit, and the branch reported "never moved" about every body that had. No slider
+			// in the flat travelled far enough for the branch to fire, so the fault sat here until a
+			// curtain fold arrived that travels six times its own width.
 			const FBox OpenBounds = Component->Bounds.GetBox();
-			if (!OpenBounds.Intersect(ShutBounds) && ProbeHits(Component, ShutBounds))
+			if (!OpenBounds.Intersect(ShutBounds))
 			{
-				++BodiesThatNeverMoved;
+				++TravelledClear;
+
+				const FVector Extent = ShutBounds.GetExtent();
+
+				int32 Thinnest = 0;
+				for (int32 Axis = 1; Axis < 3; ++Axis)
+				{
+					Thinnest = Extent[Axis] < Extent[Thinnest] ? Axis : Thinnest;
+				}
+
+				FVector Along = FVector::ZeroVector;
+				Along[Thinnest] = FMath::Max(Extent[Thinnest] * 4.0, 10.0);
+
+				const FVector Where = ShutBounds.GetCenter();
+
+				FHitResult Hit;
+				if (Component->LineTraceComponent(Hit, Where - Along, Where + Along, TraceParams))
+				{
+					++BodiesThatNeverMoved;
+				}
 			}
 
 			Articulated->SetPartOpenAmount(Part.PartId, 0.0);
@@ -577,8 +618,25 @@ bool FHFSlidingCollisionTest::RunTest(const FString& Parameters)
 	}
 
 	TestTrue(TEXT("The flat has sliding parts to test"), SlidingParts > 0);
-	AddInfo(FString::Printf(TEXT("%d sliding parts traced at five open amounts each."), SlidingParts));
+	AddInfo(FString::Printf(
+		TEXT("%d sliding parts traced at five open amounts each; %d of them travel clear of their own shut position."),
+		SlidingParts, TravelledClear));
 	TestEqual(TEXT("Every sliding part blocks at every open amount"), MissedSomewhere, 0);
+
+	// THE CHECK BELOW IS ONLY MEANINGFUL IF SOMETHING QUALIFIED FOR IT. See TravelledClear.
+	//
+	// FALSIFIED by suppressing the counter, which reinstates the flat as it was for most of this
+	// milestone - 86 sliding parts traced, not one of them travelling clear of its own shut bounds:
+	//   "Expected 'Something in the flat travels clear of where it started, so 'left its collision
+	//    behind' is a question that was actually asked - 0 part(s)' to be true."
+	// Sole failure. "Every sliding part blocks at every open amount" passed, and so did "No sliding
+	// part left its collision behind" - the latter by never once executing the branch that could
+	// increment it. A zero-valued counter reported as evidence is not evidence.
+	TestTrue(*FString::Printf(
+		TEXT("Something in the flat travels clear of where it started, so 'left its collision behind' is a question that was actually asked - %d part(s)"),
+		TravelledClear),
+		TravelledClear > 0);
+
 	TestEqual(TEXT("No sliding part left its collision behind"), BodiesThatNeverMoved, 0);
 
 	return true;

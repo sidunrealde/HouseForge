@@ -65,6 +65,22 @@ public class HouseForgeEditor : ModuleRules
 				"GeometryFramework",
 				"DynamicMesh",
 
+				// Baking a dynamic mesh down to a UStaticMesh asset.
+				// MeshConversion is FDynamicMeshToMeshDescription; ModelingComponentsEditorOnly is
+				// UE::AssetUtils::CreateStaticMeshAsset, the low-level asset creator that does NOT
+				// touch GEditor or GUndo, which is what makes it safe in a headless run.
+				"MeshDescription",
+				"StaticMeshDescription",
+				"MeshConversion",
+				"ModelingComponentsEditorOnly",
+
+				// UToolTargetManager and the tool target interfaces. HouseForge has to reason about
+				// what a Modeling Tool will pick when a baked element carries two mesh components,
+				// because picking the wrong one silently edits a baked asset instead of the live
+				// mesh. See HouseForge.Bake.Probe.* in Private/Tests/HFBakeProbeTests.cpp.
+				"InteractiveToolsFramework",
+				"ModelingComponents",
+
 				"Json",
 				"JsonUtilities",
 

@@ -1511,6 +1511,91 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 		AddPelmet(TEXT("F_Pelmet_Living"), TEXT("R_Living"), FVector2D(5400.0, 180.0), FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
 		AddPelmet(TEXT("F_Pelmet_MBed"),   TEXT("R_MBed"),   FVector2D(7500.0, 8220.0), FVector2D(2200.0, 180.0), 0.0, TEXT("W_North"));
 		AddPelmet(TEXT("F_Pelmet_Bed2"),   TEXT("R_Bed2"),   FVector2D(8700.0, 180.0), FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
+
+		// THE FOURTH, AND THE ONE THE FLAT MOST OBVIOUSLY WANTED. D_Balcony is an 1800 sliding unit
+		// standing in the living room's south wall with nothing over it: the widest sheet of glass in
+		// the flat, facing south, straight onto the seating. Every other pelmet in this drawing is
+		// over a 1500 window and this one was over nothing.
+		//
+		// 1800 - THE DOOR'S OWN WIDTH - AND THAT IS THE SECOND ANSWER TO THIS ONE.
+		//
+		// It was drawn 2600 first, on the rule every other pelmet here follows: a pelmet is wider than
+		// its opening by the STACK the drawn-back curtain occupies at each end, or the curtain parks
+		// itself over the glass it was hung to clear. On length alone 2600 fits, and the arithmetic
+		// said so - COL_SW's east face is at 225 and F_Pelmet_Living starts at 4450, so there is 4225
+		// of clear wall to take 2600 out of the middle of.
+		//
+		// CLEAR WALL WAS THE WRONG MEASUREMENT. What matters to a curtain is not how much wall is free
+		// but what is standing against it, and both ends of that run are joinery 450 deep: F_TVUnit_W
+		// is 1800 tall and reaches 1140, F_TVUnit_E starts at 3200. A curtain hangs in the outer 250
+		// of the 180 mm pelmet, so a 2600 track puts 311 mm of cloth inside a tall unit at one end and
+		// 171 inside a console at the other - which the whole-flat sweep measured and no length
+		// calculation could ever have seen.
+		//
+		// So the track is fitted to the OPENING and the stack goes over the glass, which is what a
+		// maker does when there is nowhere beside a window to stack on. It costs aperture: 1216 clear
+		// of 1780 rather than 1854 of 2564, so the drawn-back pair covers about 280 mm of glass at
+		// each jamb. That is the real trade this wall forces, and the alternative was no curtain over
+		// the largest sheet of glass in the flat.
+		AddPelmet(TEXT("F_Pelmet_LivBalc"), TEXT("R_Living"), FVector2D(2100.0, 180.0), FVector2D(1800.0, 180.0), 0.0, TEXT("W_South"));
+	}
+
+	// ----------------------------------------------------------------- and the curtains in them
+	//
+	// FOUR CURTAINS, NOT NINE, AND THE COUNT IS THE DECISION. The flat has eleven openings; these are
+	// the four that a curtain belongs on, and every exclusion below is a measurement rather than a
+	// taste.
+	//
+	//   Win_Living, Win_Bed2_S, Win_MBed_N   habitable rooms, south and north facing, each already
+	//                                        drawn with a pelmet. A bedroom window without a curtain
+	//                                        is a bedroom somebody can see into.
+	//   D_Balcony                            the living room's balcony slider, on the new pelmet
+	//                                        above. Full drop, floor length.
+	//
+	// And the seven that get nothing:
+	//
+	//   Vent_CBath      a 600 x 350 ventilator sitting on a door head at 2100, into a corridor. There
+	//                   is nothing to screen and nowhere to hang it.
+	//   Win_Kitchen     1200 x 900 on a 1200 sill, directly over the worktop with wall units either
+	//                   side of it. Cloth over a working counter is a grease trap and there is no
+	//                   pelmet, no room for one, and a blind is what a kitchen window takes.
+	//   Win_Utility     600 wide, over the washing machine, in the one room in the flat nobody sits
+	//                   in.
+	//   D_BalcE         the master bathroom's door onto its own service balcony.
+	//   Win_Bed2_E      THE ONE WORTH THE ARITHMETIC. A 900 window with 1360 of wall to hang over:
+	//                   COL_SE's north face is at 115 and the wardrobe starts at 1500. A single-draw
+	//                   curtain on a 1360 pelmet stacks 354 mm, so 900 of opening needs 1254 of clear
+	//                   track plus its boards - 1670 of pelmet, and there is 1360. It would park a
+	//                   sixth of itself over the glass whichever end it stacked at. A roller blind is
+	//                   what that window takes and this plugin does not build one yet.
+	//   D_BalcN         the same sum on the master bedroom's north wall. 4085 of clear wall carries
+	//                   F_Pelmet_MBed's 2200 over the window, leaving 1885 for an 1800 door: 335 short
+	//                   of the 2220 a pair needs to clear it, and the door is hard against the east
+	//                   corner so the stack has nowhere else to go. One curtain's stack allowance fits
+	//                   on that wall and not two, and the window is the one that wants it.
+	//   D_Main          a front door.
+	//
+	// The curtain's drawn box is the pelmet's, because on a plan they are the same line. Everything
+	// that decides how the cloth is actually built - the track's clear length, the depth the folds may
+	// hang to, the height of the glider line, the drop - is measured off the pelmet and the room by
+	// AHFHouseActor's SeedCurtain. See AHFCurtainActor::ApplyPelmet.
+	{
+		auto AddCurtain = [&B](const FName& Id, const FName& RoomId, const FVector2D& Position,
+			const FVector2D& Footprint, double Rotation, const FName& AnchorWall)
+		{
+			// BaseZ 150 and 2200 of drop puts the head exactly on the pelmet's own 2350 soffit, so the
+			// drawn box reads as cloth in a pelmet rather than cloth through one. Both figures are
+			// nominal and both are replaced on build: the drop is the measured floor-to-track height,
+			// which is the same argument the pelmet's own stale 2350 makes.
+			FHFFixture& Curtain = B.AddFixture(Id, RoomId, EHFFixtureType::Curtain,
+				TEXT("Curtain"), Position, Footprint, 2200.0, Rotation, 150.0);
+			Curtain.AnchorWallId = AnchorWall;
+		};
+
+		AddCurtain(TEXT("F_Curtain_Living"),  TEXT("R_Living"), FVector2D(5400.0, 180.0),  FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
+		AddCurtain(TEXT("F_Curtain_LivBalc"), TEXT("R_Living"), FVector2D(2100.0, 180.0),  FVector2D(1800.0, 180.0), 0.0, TEXT("W_South"));
+		AddCurtain(TEXT("F_Curtain_MBed"),    TEXT("R_MBed"),   FVector2D(7500.0, 8220.0), FVector2D(2200.0, 180.0), 0.0, TEXT("W_North"));
+		AddCurtain(TEXT("F_Curtain_Bed2"),    TEXT("R_Bed2"),   FVector2D(8700.0, 180.0),  FVector2D(1900.0, 180.0), 0.0, TEXT("W_South"));
 	}
 
 	// ------------------------------------------------------------------- resolve the templates
@@ -1528,6 +1613,116 @@ FHFHouseSpec FHFSampleHouse::Make2BHK()
 	FHFCeilingTemplates::Apply(B.Spec, FHFCeilingDefaults());
 
 	return B.Spec;
+}
+
+FHFHouseSpec FHFSampleHouse::Make2BHK(EHFSofaDesign SofaDesign)
+{
+	FHFHouseSpec Spec = Make2BHK();
+
+	FHFFixture* Sofa = Spec.Fixtures.FindByPredicate(
+		[](const FHFFixture& F) { return F.Id == FName(TEXT("F_Sofa")); });
+	FHFFixture* Coffee = Spec.Fixtures.FindByPredicate(
+		[](const FHFFixture& F) { return F.Id == FName(TEXT("F_CoffeeTable")); });
+
+	if (Sofa == nullptr || Coffee == nullptr)
+	{
+		return Spec;
+	}
+
+	Sofa->Params.SofaDesign = SofaDesign;
+
+	// THE DRAWN BOX IS PART OF THE DESIGN, because a drawing of a low-profile sofa is not a drawing
+	// of a square-arm one with a note attached: it is drawn 950 deep and 700 tall, and the plan of a
+	// sectional is drawn as an L. So each of these is what a plan of this living room would actually
+	// dimension, and the kit takes it from there. See EHFSofaDesign.
+	switch (SofaDesign)
+	{
+	case EHFSofaDesign::LowProfile:
+		// 50 deeper and 100 lower. The seating group does not move: the front goes from 2450 to 2592
+		// and the coffee table keeps 442 of knee room, against 492 before.
+		Sofa->Label = TEXT("3-seater sofa, low profile");
+		Sofa->Footprint = FVector2D(2100.0, 950.0);
+		Sofa->Height = 700.0;
+		Sofa->Position = FVector2D(3800.0, 3067.5);
+		break;
+
+	case EHFSofaDesign::RolledArm:
+		// Deeper and 50 mm taller, in the same 2100 the room already gives a sofa. THE WIDTH DOES NOT
+		// MOVE, deliberately: a roll arm's arms are 220 against a square arm's 180, so at 2000 the
+		// three seats it has to hold come out 493 wide - under the 500 nobody sells - and the design
+		// would have been paying for its arms out of the cushions. It keeps its 2100 and the arms are
+		// what change.
+		Sofa->Label = TEXT("3-seater sofa, rolled arm");
+		Sofa->Footprint = FVector2D(2100.0, 950.0);
+		Sofa->Height = 850.0;
+		Sofa->Position = FVector2D(3800.0, 3067.5);
+		break;
+
+	case EHFSofaDesign::ChaiseSectional:
+	{
+		// ----------------------------------------------------------------- why the whole group moves
+		//
+		// A 1400 deep box against the same wall puts the chaise's front on Y 2142.5, and the coffee
+		// table's back edge is at 2150. Seven millimetres. Everything below is what that costs.
+		//
+		// THE SOFA GOES 300 WEST AND 100 WIDER, to X 2400..4600. The width buys back the seats the
+		// chaise takes: a 900 return out of a 2100 box leaves 1020 of straight run, which is two 480
+		// cushions, and 2200 makes them 540. It cannot grow further east - at the old centre the
+		// return reached X 4850, which is 165 mm across the dining chair F_Chair_D1 pulled out to
+		// Y 2180 and 38 mm into it in the other axis, and that chair is one of the two anybody
+		// actually sits on. 4600 leaves 85. West is bounded too: D_Foyer's leaf sweeps X 375..1425.
+		//
+		// THE CHAISE TAKES THE EAST END, which is bChaiseOnLeft FALSE. The 180 degrees on this fixture
+		// is not the yaw it is built at - FHFFixturePlacement::FacingYaw turns a run round until its
+		// back faces its anchor wall, and W_Mid_Lower is north of it, so the sofa is built at zero and
+		// its own +X is the room's east. The other hand would put 900 mm of return in front of
+		// D_Balcony (X 1200..3000), which is the way out onto the balcony.
+		//
+		// THE COFFEE TABLE GOES BESIDE THE RETURN AND SMALLER, at 1000 x 600 on (3100, 1800), so
+		// X 2600..3600 and Y 1500..2100. Measured:
+		//
+		//     table  -> the chaise's west face (X 3700)            100
+		//     table  -> the straight run's front (Y 2642.5)        542   reach from the seat
+		//     table  -> the TV run's front (Y 565)                 935   the walking route
+		//     table  -> D_Balcony's threshold (Y 115)             1385   the approach off the balcony
+		//     table  -> F_Chair_D3 pulled out (X 3920)             320
+		//     chaise -> F_TVUnit_E's drawers pulled out (Y 795)   1347
+		//     chaise -> F_Chair_D1 pulled out (X 4685)              85
+		//     chaise -> the dining table (Y 1600)                  542
+		//     sofa   -> D_Living's leaf sweep (X 4950)             350
+		//     sofa   -> D_Foyer's leaf sweep (X 1425)              975
+		//
+		// IT STOPS 42 mm SHORT OF THE SOFA'S DRAWN BOX, and the 42 is not slack - it is the one place
+		// this layout answers to something other than the geometry. The L's real plan leaves the
+		// crook empty, so the table could stand 100 mm inside that box and touch nothing; but the
+		// SPEC's overlap rule reads a fixture as the rectangle round it, and a table 17% inside the
+		// sofa's box would be reported as two solids in one place by every validation of the flat.
+		// Correct, given what a spec can see. Keeping the boxes apart is cheaper than teaching the
+		// validator about L-shaped fixtures, and it costs 42 mm of reach.
+		//
+		// See HouseForge.Upholstery.SofaDesignsFitTheLivingRoom, which measures every figure above
+		// from the spec rather than trusting this comment - and measures them against the L's REAL
+		// plan rather than the box round it.
+		Sofa->Label = TEXT("2-seater sofa with chaise");
+		Sofa->Footprint = FVector2D(2200.0, 1400.0);
+		Sofa->Height = 800.0;
+		Sofa->Position = FVector2D(3500.0, 2842.5);
+		Sofa->Params.bChaiseOnLeft = false;
+
+		Coffee->Footprint = FVector2D(1000.0, 600.0);
+		Coffee->Position = FVector2D(3100.0, 1800.0);
+		break;
+	}
+
+	case EHFSofaDesign::SquareArm:
+	case EHFSofaDesign::Default:
+	default:
+		// The reference flat's own sofa, untouched. Naming the design it already was is the whole
+		// change, and it is what keeps Sample2BHK.json the SquareArm case rather than a fifth thing.
+		break;
+	}
+
+	return Spec;
 }
 
 FString FHFSampleHouse::GetCommittedSpecPath()
@@ -1553,6 +1748,61 @@ bool FHFSampleHouse::ExportCommittedSpec(FString& OutError)
 
 	return FHFSpecSerializer::SaveToFile(Make2BHK(), Path, OutError);
 }
+
+bool FHFSampleHouse::ExportSofaDesignSpecs(TArray<FString>& OutPaths, FString& OutError)
+{
+	OutPaths.Reset();
+
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HouseForge"));
+	if (!Plugin.IsValid())
+	{
+		OutError = TEXT("Could not locate the HouseForge plugin directory.");
+		return false;
+	}
+
+	const FString Dir = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(Plugin->GetBaseDir(), TEXT("Saved"), TEXT("Review"), TEXT("sofa-designs")));
+
+	const TPair<EHFSofaDesign, const TCHAR*> Designs[] = {
+		{ EHFSofaDesign::SquareArm,       TEXT("square-arm") },
+		{ EHFSofaDesign::ChaiseSectional, TEXT("chaise-sectional") },
+		{ EHFSofaDesign::LowProfile,      TEXT("low-profile") },
+		{ EHFSofaDesign::RolledArm,       TEXT("rolled-arm") }
+	};
+
+	for (const TPair<EHFSofaDesign, const TCHAR*>& Design : Designs)
+	{
+		const FString Path = FPaths::Combine(Dir, FString::Printf(TEXT("Sample2BHK-%s.json"), Design.Value));
+		if (!FHFSpecSerializer::SaveToFile(Make2BHK(Design.Key), Path, OutError))
+		{
+			return false;
+		}
+
+		OutPaths.Add(Path);
+	}
+
+	return true;
+}
+
+static FAutoConsoleCommand GExportSofaDesignSpecsCommand(
+	TEXT("HouseForge.ExportSofaDesignSpecs"),
+	TEXT("Writes one spec per named sofa design into Saved/Review/sofa-designs/."),
+	FConsoleCommandDelegate::CreateStatic([]()
+	{
+		TArray<FString> Paths;
+		FString Error;
+		if (FHFSampleHouse::ExportSofaDesignSpecs(Paths, Error))
+		{
+			for (const FString& Path : Paths)
+			{
+				UE_LOG(LogHouseForge, Display, TEXT("Exported sofa design spec to %s"), *Path);
+			}
+		}
+		else
+		{
+			UE_LOG(LogHouseForge, Error, TEXT("Failed to export sofa design specs: %s"), *Error);
+		}
+	}));
 
 static FAutoConsoleCommand GExportSampleSpecCommand(
 	TEXT("HouseForge.ExportSampleSpec"),

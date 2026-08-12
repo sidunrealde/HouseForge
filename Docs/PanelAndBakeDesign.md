@@ -46,6 +46,9 @@ Shape: **artist-station** â€” a flat vertical stack of sections over the ed
 |   [ -o- ] Baked            mixed: 3 of 5 selected                  |
 |   Dynamic meshes are kept. Switching back restores them exactly.   |
 |   (!) 3 baked elements are stale     [ Rebake stale (3) ]          |
+|   [X] NOT IN THE LUMEN SCENE  0 of 410 radiant, 410 absent, 0.0%   |
+|       A render taken now is lit by sky through walls Lumen cannot  |
+|       see, and looks BRIGHTER than the correct one.  [ Bake all ]  |
 |   [ Bake all ]  [ All live ]      -> /Game/HouseForge/Baked/...    |
 +--------------------------------------------------------------------+
 | ok setup ready              last MCP: ModifyElement  12:04:31      |
@@ -73,7 +76,7 @@ Two other states, same stack:
 | ROOMS | house exists and â‰¥1 room | visible. Chips wrap; `not in any room (N)` chip appears only when N > 0 |
 | FIND | house exists | visible, empty text, all chips off. List renders only when text or a chip is active â€” an always-on 63-row list in a 400 px dock is the thing that made the tree designs unpleasant |
 | SELECTED | â‰¥1 HouseForge actor selected | visible, 1 line. `3 elements selected` for multi. Greys in place on empty selection; does not collapse |
-| BAKE | house exists | expanded |
+| BAKE | house exists | expanded. **Must carry the Lumen coverage row.** See below - this is not optional decoration |
 | Footer | always | 1 line: setup status + last MCP tool name and time |
 | SURFACES | always, house or no house | **BUILT.** Expanded, and it takes the tab's remaining height. Present with an empty level on purpose: finishes are assets rather than level state, so every control works and the usage figures read "not in this level" |
 | ASSETS / LIGHT | never, this milestone | not built, not stubbed. The section array is the reservation (Â§3) |
@@ -206,6 +209,41 @@ UPROPERTY(Transient, VisibleAnywhere, Category="HouseForge|Bake") bool bBakeAsse
 
 Part 0's `UStaticMeshComponent` is a constructor default subobject (`CreateDefaultSubobject<UStaticMeshComponent>("BakedMesh_0")`, `SetupAttachment(Mesh)`, created hidden and non-colliding). Parts > 0 are created by `EnsurePartComponent(int32)` with `NewObject` + `AddInstanceComponent` + `RegisterComponent`, attached to **that part's dynamic component** so it inherits the articulated pose for free.
 
+**Built as described, with one departure and two additions the design did not anticipate.** The
+departure: part 0's component is created lazily like every other, not as a default subobject.
+`AHFArticulatedActor` already creates all of its mesh components that way and they round-trip through
+save and load, so the subobject buys only a second code path and one always-present component on all
+150-odd elements of a flat that may never be baked at all.
+
+The additions came out of taking the per-part model from one door to the whole flat - **77 articulated
+elements, 327 parts, 250 of them moving** - and both are silent failures.
+
+**Parts must be MATCHED to sources, not truncated to length.** `SyncBakedPartsToSources` trimmed
+`BakedParts` from the end until the two lists were the same length, which is correct only while parts
+can vanish from the end alone. They cannot: a wardrobe's parts are its body leaves and *then* its loft
+leaves, so narrowing it by one bay loses a body leaf out of the **middle** while every loft leaf above
+it stays. Truncation drops the last entry instead, and from that moment `BakedParts[i]` stands for a
+part it was never baked from - the loft leaves wear the body leaves' assets, one slot out, and every
+re-bake writes the wrong geometry into the wrong asset path. Nothing logs.
+
+The dropped part's baked component is the visible half. `USceneComponent::OnComponentDestroyed`
+re-attaches a live child to its **grandparent** rather than destroying it, so a baked leaf whose
+dynamic twin has gone comes back parented to the carcass and hangs there, frozen. Matching is
+therefore by **attachment first** - the baked component hangs off the dynamic component it stands in
+for, and that is the one record a reordering cannot falsify - by recorded `SourceComponentName`
+second, for an asset loaded from a saved level with no component yet to be attached by. The shell's
+slot is **pinned** rather than matched, so an orphan the engine has just re-parented onto the shell
+cannot be mistaken for the shell's own; and a survivor's attachment is repaired rather than trusted.
+Guarded by `HouseForge.Bake.Articulation.ADroppedMiddlePartDoesNotShuffleTheBakedMeshes`.
+
+**A baked component is created `Movable`, which is the opposite of the usual instinct.** Mobility
+appears nowhere in the chain that decides Lumen scene membership, so it costs nothing there;
+`UStaticMeshComponent::ShouldRecreateProxyOnUpdateTransform` returns true for anything that is *not*
+Movable, so a Static-mobility baked shutter would destroy and rebuild its scene proxy every time it
+opened, forcing `LumenRemovePrimitive` + `LumenAddPrimitive` and a full surface-cache re-capture.
+Movable re-transforms the cards and keeps the captured pages. Movable is strictly cheaper for anything
+that moves.
+
 ### 4.4 The switch â€” the only place visibility or collision is touched
 
 ```cpp
@@ -224,19 +262,102 @@ void AHFElementActor::ApplyRenderMode(EHFRenderMode Mode)
     for (FHFBakedPart& P : BakedParts)
     {
         if (!P.Component) continue;
-        if (bBaked && !P.Component->IsRegistered()) P.Component->RegisterComponent();
         P.Component->SetVisibility(bBaked);
         P.Component->SetHiddenInGame(!bBaked);
         P.Component->SetCollisionEnabled(bBaked ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-        if (!bBaked && P.Component->IsRegistered()) P.Component->UnregisterComponent();
+        // THE TOOL TARGET FIX. Measured, not assumed - see below.
+        P.Component->SetStaticMesh(bBaked ? P.BakedMesh : nullptr);
     }
     RenderMode = bBaked ? EHFRenderMode::Baked : EHFRenderMode::Dynamic;
 }
 ```
 
-Two non-obvious requirements. **Collision switches with visibility** â€” leaving both on double-traces every wall and leaves complex-as-simple dynamic collision under a mesh the user believes is the only thing there. **The baked component is unregistered while Dynamic**, not merely hidden: a hidden-but-registered `UStaticMeshComponent` is a candidate `UStaticMeshComponentToolTarget`, and an artist starting a Modeling Tool on what they believe is the live wall must not silently edit a baked asset instead. Unregistering removes the candidate entirely. (In Baked mode the hazard reverses and is acceptable: the switch is visibly on, the dynamic mesh is untouched, and any edit to the baked asset is discarded by the next rebake â€” the panel says so in the stale row.)
+Two non-obvious requirements. **Collision switches with visibility** - leaving both on double-traces
+every wall and leaves complex-as-simple dynamic collision under a mesh the user believes is the only
+thing there.
+
+**And `SetCollisionEnabled` alone is not the declaration.** The listing above restores a single enum,
+which is right for a wall and wrong for anything articulated. `AHFArticulatedActor::ApplyPartCollision`
+gives a fan rotor `QueryOnly` with every response set to `Ignore` except `Visibility`, because
+collision geometry cannot spin with the render and a blocking rotor is one blade frozen across a third
+of its own sweep. Copying the source's collision **profile name** across carries none of that: writing
+a response by hand invalidates the profile name to `Custom`, and loading a name that is not a real
+profile takes `FBodyInstance::LoadProfileData`'s no-profile branch (BodyInstance.cpp:4507-4533) and
+rebuilds the responses from the **target's** own array - block everything. So a baked rotor came out
+`QueryOnly` and blocking, and `QueryOnly` is quite enough to stop a walking character, because
+character movement is a sweep and a sweep is a query. Every baked ceiling fan in the flat was an
+invisible wall at head height. The object type and the whole response container are copied when the
+source is carrying custom responses, before the `CollisionEnabled` stamp because loading a real
+profile sets `CollisionEnabled` as a side effect - and re-copied on **every** switch to Baked rather
+than only at bake time, because a regeneration re-declares what a part blocks. Guarded by
+`HouseForge.Bake.Articulation.ABakedRotorStillBlocksNothingButTraces`, which traces the world on both
+channels rather than reading flags back.
+
+**The baked component's `UStaticMesh` is cleared while Dynamic.** This paragraph used to say
+"unregistered", and that was wrong. `HouseForge.Bake.Probe.ToolTargetSelection` builds an actor with
+both components and asks a `UToolTargetManager` loaded with exactly the factories
+`UModelingToolsEditorMode::Enter` loads, in its order, what a Modeling Tool would get. Measured on
+5.8:
+
+| Baked component state | Candidates | What a tool edits |
+|---|---:|---|
+| registered, visible | 2 | **the baked asset** |
+| registered, hidden | 2 | **the baked asset** |
+| **unregistered** | 2 | **the baked asset** |
+| registered, dynamic marked `SetIsEditable(false)` | 1 | the baked asset (correct, this is Baked mode) |
+| **`SetStaticMesh(nullptr)`** | 1 | the live dynamic mesh |
+| component destroyed | 1 | the live dynamic mesh |
+
+Hiding does nothing and unregistering does nothing, because
+`ToolBuilderUtil::FindAllComponents` (ToolBuilderUtil.cpp:63) resolves a selected actor through
+`AActor::GetComponents`, which walks `OwnedComponents` with no registration test
+(Actor.h:3865 `ForEachComponent_Internal`), and
+`UStaticMeshComponentToolTargetFactory::CanBuildTarget` (StaticMeshComponentToolTarget.cpp:304)
+asks only whether the component holds a writable, non-cooked `UStaticMesh`. Registration and
+visibility are never consulted. The static factory is also registered **before** the dynamic one
+(ModelingToolsEditorMode.cpp:320-322) and `BuildFirstSelectedTargetable` returns from the first
+factory that can build anything, so the static mesh wins every tie.
+
+The candidate count matters as much as the winner: `USingleSelectionMeshEditingToolBuilder::CanBuildTool`
+requires **exactly one** targetable component, so in the three two-candidate rows every
+single-selection modelling tool - PolyEdit, Sculpt, Displace - refuses to start at all. A baked
+element left that way is both dangerous and dead.
+
+Clearing the mesh is cheap and lossless: `FHFBakedPart::BakedMesh` is the hard reference that keeps
+the asset alive and loaded, so switching back is a pointer assignment, not a load.
+
+(In Baked mode the hazard reverses and is acceptable: the switch is visibly on, the dynamic mesh is
+untouched, and any edit to the baked asset is discarded by the next rebake - the panel says so in
+the stale row.)
 
 **The `FDynamicMesh3` is never read, modified, cleared or rebuilt by baking.** Bake creates an asset and flips component state. That is the entire reason unbake is instant and lossless.
+
+### 4.4a The Lumen coverage row - the only in-editor warning an artist will ever get
+
+Added after milestone 12 measured what an artist who never touches MCP actually sees, which is
+nothing at all. The MCP surface is good and was verified end to end: `capture_view` on an unbaked
+flat refuses with a message naming the 410 absentees, five of them by name, and the remedy, and
+`ApplySpecJson`'s build message says "Lumen cannot see a dynamic mesh, so BAKE BEFORE RENDERING".
+The console command `HouseForge.CheckLumenCoverage` says the same thing to anyone who runs it.
+
+None of that reaches an artist who generates a house and presses High Res Screenshot. There is no
+notification anywhere in `Source/HouseForgeEditor` - `FNotificationInfo` appears zero times - and the
+only in-editor evidence of bake state is the per-element `RenderMode` enum in the Details panel,
+which requires selecting an element and knowing to look. What that artist gets is a bright, cheerful,
+completely wrong picture and no warning of any kind, because **the broken configuration renders
+6.4x brighter than the correct one** (whole-frame 0.662 live against 0.104 baked - unoccluded sky
+floods through the walls). Brightness is the failure signal, which means it does not read as one.
+
+So the BAKE section carries a coverage row, fed by `FHFLumenCoverageReport`:
+
+* Covered: `FHFLumenCoverageReport::Summary()` verbatim - `314 of 410 primitives radiant, 100% of
+  cardable surface area`. Quiet, one line, no colour.
+* Not covered: `WhyNot()`'s first line, the consequence sentence, and a `[ Bake all ]` button on the
+  row itself. This is the one state in the whole panel that earns an error glyph on sight.
+
+It is specified here rather than left to the BAKE section's author because a bake section without it
+is a bake section that lets the flat be rendered wrong, which is the failure the milestone exists to
+prevent - reproduced in the UI built to surface it.
 
 ### 4.5 Staleness
 
@@ -329,6 +450,32 @@ All named `HouseForge.*` so `hf-validate.ps1` catches them.
 * `AllFourStateCombinationsRoundTrip` â€” {edited, generated} Ã— {baked, dynamic} through serialise/deserialise.
 * `ArticulatedBakeKeepsPartsSeparate` â€” bake an `AHFOpeningActor`, assert one `FHFBakedPart` per source component and that the leaf still moves with `SetPartOpenAmount`. Rule 04's "a bake must not weld a chest of drawers into a block", tested on the one articulated element that exists today.
 
+**`HouseForge.Bake.Articulation.*`** - `Source/HouseForgeEditor/Private/Tests/HFBakeArticulationTests.cpp`.
+The above tested one door; these test the flat, and writing them found two silent defects (the
+collision declaration in 4.4, the middle-part drop in 4.3):
+
+* `EveryArticulatedFixtureInTheFlatBakesAndStillMoves` - **77 articulated elements, 327 parts, 250 of
+  them moving.** Per fixture: one baked part per source, no two parts sharing an asset, every baked
+  component `Movable` with both Lumen flags on and a non-zero `DistanceFieldResolutionScale`, and
+  every baked component's world transform equal to its live part's at five open amounts. The fixture
+  is driven as a WHOLE rather than a part at a time, because `SequencedAfterPartId` means a drawer
+  cannot come out through a shut shutter and asking one part alone for a full open would be measuring
+  the interlock and reporting it as a bake defect. Spinning parts get a phase past a whole turn
+  instead; a leaf that a master open deliberately holds shut gets `OpenRunFrom`.
+* `ABakedRotorStillBlocksNothingButTraces` - traced on both channels, against the live rotor's own
+  measured behaviour rather than against a flag written down in the test.
+* `BakedCollisionFollowsAPartThroughItsRange` - a walk trace hits the baked leaf at 0, 25, 50, 75 and
+  100% open. Rule 04's "including on open doors".
+* `PosesAndSpinPhasesSurviveBakeUnbakeAndRebuild` - four opening parts and two spinning ones, through
+  bake, unbake, re-bake and a whole-house `BuildGeometry`. The spinner is sought separately, because a
+  flat has far more doors than fans and "take the first few" never reaches one - which is how this
+  test first passed while proving nothing about the case it exists for.
+* `ABakedSliderStillOpensInCentimetres` - 88.4 cm uncovered on a 179.4 cm run, measured off the
+  BAKED meshes. Not "the leaf moved": a pair of sliding leaves driven out together report their full
+  travel and uncover nothing, which is the whole reason `bMasterOpens` exists.
+* `ADroppedMiddlePartDoesNotShuffleTheBakedMeshes` - and every surviving baked component still hangs
+  on the part it stands in for.
+
 **`HouseForge.Editor.Bake.*`**:
 * `HouseRebuildPreservesBakedElements` â€” extends the existing rebuild-preserves-edits test: a baked, non-artist-edited element survives `BuildGeometry`, keeps its asset, is not orphaned.
 * `BakeCreatesStampedAsset` â€” asset at the expected path with `UHFBakedMeshUserData` carrying the right `ElementId` and `LevelPackageName`.
@@ -383,7 +530,7 @@ Widget rendering is not tested. Slate render tests are expensive and brittle; th
 * **One `MeshRevision` per actor, not per part.** Editing a door leaf marks the frame stale and rebakes both. Wasted milliseconds, in exchange for a staleness rule one sentence long.
 * **`bAutoRebakeOnRegenerate` defaults on.** It makes parameter edits on baked elements slower. Off, the viewport lies about what the spec says, and `CaptureTopDown` â€” the tool Claude uses to check its own work â€” screenshots the lie.
 * **The sections stack vertically.** Right for four sections, wrong for seven. `FHFPanelSection` makes the eventual conversion to a mode strip one change in `Construct`; it does not make it free.
-* **Unresolved until ten minutes in the actual editor** (settle during step 5, all have stated fallbacks): whether `UToolTargetManager` filters candidates by registration as assumed in Â§4.4; whether `UStaticMesh` async compilation needs an explicit `FinishCompilation` before collision assertions in a `-nullrhi` run; and whether polygroups survive `CommitMeshDescription` into a readable form â€” if not, surface-role targeting on baked meshes must go through material sections, which the material library should do anyway.
+* ~~**Unresolved until ten minutes in the actual editor**~~ **SETTLED BY MEASUREMENT.** All three, and the other four, are answered in the table at the end of this document. The one that changed the design: `UToolTargetManager` does **not** filter candidates by registration or visibility, so §4.4's "unregister it" was wrong and the baked component's `UStaticMesh` is cleared instead. `FinishCompilation` is needed and exists under that name. Polygroups do survive, and material sections carry the role as well, at the role's own index.
 
 ---
 
@@ -419,10 +566,23 @@ Design 3 â€” artist-station. Build it, with the twelve grafts below. It is 
 
 Design 1 â€” task-flow, with the workflow rail deleted and ten grafts applied
 
-## Open questions on the bake, to settle in the editor
+## Open questions on the bake - ALL SEVEN NOW SETTLED BY MEASUREMENT
 
-These are the things the design agent would not assert without checking. The first is the
-dangerous one: it would silently break the artist-editable guarantee.
+`Source/HouseForgeEditor/Private/Tests/HFBakeProbeTests.cpp` answers every question below against
+the running engine. Run `Automation RunTests HouseForge.Bake.Probe`; each probe logs its numbers.
+The originals are kept verbatim underneath so the answers can be read against what was asked.
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Which component does a Modeling Tool target? | **The static mesh, in every configuration where it holds an asset.** Hiding does not help. **Unregistering does not help** - the proposed fix does not work. Clear `SetStaticMesh(nullptr)` while Dynamic instead. Two live candidates also make single-selection tools refuse to start. §4.4 rewritten. |
+| 2 | Is cooked collision available immediately in a `-nullrhi` run? | `GetBodySetup()` is valid immediately and `ContainsPhysicsTriMeshData` already returns true, but `IsCompiling()` is 1 and `GetPhysicsTriMeshData` yields nothing until `FStaticMeshCompilingManager::Get().FinishCompilation({Mesh})`. The name and availability are confirmed on 5.8. Note `UStaticMeshToolTarget::HasNonGeneratedLOD` early-outs false while compiling, so a tool target is unavailable during the compile too. |
+| 3 | What does `NewObject<UStaticMesh>` do when the name is taken? | It **reuses the object in place**: same pointer, same name, one `UStaticMesh` in the package, no rename, no leak, and a component still referencing it keeps a valid mesh. Milder than feared. It still re-runs the constructor over a live asset - `AssetUserData` goes with it and the `LightingGuid` is regenerated - so the `UHFBakedMeshUserData` stamp must be re-applied after every re-create. Prefer the update path anyway; the reason is now "it wipes our stamp", not "it duplicates". |
+| 4 | Do polygroups survive `CommitMeshDescription`? | **Yes.** `PolyTriGroups` is present with its group ids intact (`AutoGenerated`, not `Transient`, so it serialises). And the fallback is already in place and needs no lookup table: sections come out dense `0..max`, and a non-empty section's index **is** the role index, because `AssignMaterialIdsFromRoles` writes `MaterialIdForRole`. Both routes to role targeting work. |
+| 5 | `bUseBuildScale` on a scaled actor? | **Inert.** `BuildScale3D` is a property of the asset's build settings, not the actor transform, and it is identity on an asset we create. The asset holds local-space geometry; a 2/1/0.5 actor scale gives the baked component world bounds identical to the dynamic one. |
+| 6 | `bGenerateLightmapUVs` - worth it? | **No, and it must be off.** Its defaults are `SrcLightmapIndex 0 -> DstLightmapIndex 1`, so it unwraps the world-scale tiling UV0 (which by construction overlaps between rooms) and writes the result **over** the packed, gutter-sized lightmap channel milestone 10 already generated into UV1. That channel reaches the asset intact without it. Set `bGenerateLightmapUVs = false` and call `SetLightMapCoordinateIndex(1)` explicitly. Build cost was only ~1.7 ms per wall, so the reason to refuse is correctness, not time. |
+| 7 | Is there a valid `GEditor` headless? | Yes - `GEditor` is valid and `GUndo` is null in the automation run. Moot for the chosen path: `UE::AssetUtils::CreateStaticMeshAsset` nulls `GUndo` for its own duration and never calls `GEditor`, which is one more reason to prefer it over the GeometryScript wrappers. |
+
+The original questions, as asked:
 
 1. Modeling Tools target selection when one actor carries both a hidden UDynamicMeshComponent and a visible UStaticMeshComponent. I could not determine from the headers whether UToolTargetManager filters candidate components by visibility, so it is possible that starting a modelling tool on a baked element builds a UStaticMeshComponentToolTarget and edits the baked asset rather than the live mesh. The design mitigates it (SetIsEditable(false), bUnbakeOnHandEdit, a panel affordance) but this needs ten minutes in the actual editor to confirm. If it does target the static mesh component, the fix is to unregister BakedMeshComponent whenever RenderMode == Dynamic rather than merely hiding it.
 

@@ -1514,6 +1514,37 @@ FHFWashingMachineParams FHFApplianceKit::SanitiseWashingMachine(const FHFWashing
 	return P;
 }
 
+FHFPortholeLeaf FHFApplianceKit::PortholeLeafOf(const FHFWashingMachineParams& Params)
+{
+	const FHFWashingMachineParams P = SanitiseWashingMachine(Params);
+
+	FHFPortholeLeaf Leaf;
+	if (!P.IsValid() || P.PortholeDiameter <= 0.0 || P.DoorSwingDegrees <= 0.0)
+	{
+		return Leaf;
+	}
+
+	// The same three derivations BuildWashingMachine makes, and it makes them by calling this.
+	const double FrontThickness = FMath::Min(1.2, P.BuiltDepth() * 0.06);
+	const double PortholeRadius = P.PortholeDiameter * 0.5;
+
+	// The bezel stands a little outside the drum mouth - it has to, or it would not frame it - and it
+	// is the bezel's outer edge that decides where the hinge goes and how far the leaf reaches.
+	const double RimRadius = PortholeRadius * 1.14;
+	const double RimDepth = FMath::Max(FrontThickness * 1.6, 0.6);
+
+	Leaf.HandSign = (P.HingeHand == EHFHingeHand::Left) ? 1.0 : -1.0;
+	Leaf.MouthAcross = P.Width * 0.5;
+	Leaf.MouthRadius = PortholeRadius;
+	Leaf.HingeAcross = Leaf.MouthAcross - Leaf.HandSign * RimRadius;
+	Leaf.Reach = RimRadius * 2.0;
+	Leaf.Proud = RimDepth;
+	Leaf.Dish = RimDepth * 2.8;
+	Leaf.SwingDegrees = P.DoorSwingDegrees;
+
+	return Leaf;
+}
+
 FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachineParams& Params)
 {
 	FHFApplianceBuild Out;
@@ -1674,20 +1705,34 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 
 	// -------------------------------------------------------------------------------- the porthole
 	//
-	// Hinged on the LEFT, which is where a front loader's door hangs, and glazed - the drum behind the
-	// glass is the only interesting thing on the face of the machine.
+	// Hinged on the side P.HingeHand says, and glazed - the drum behind the glass is the only
+	// interesting thing on the face of the machine.
+	//
+	// THE WHOLE HAND IS ONE SIGN, applied in three places that have to agree: which way the leaf is
+	// drawn from its hinge, where the hinge sits relative to the aperture, and which way the hinge
+	// turns. Written as one number rather than as a branch precisely because those three are what
+	// would drift apart - a leaf drawn one way and turned the other opens INTO the machine, which
+	// looks correct shut and is nonsense the moment anything poses it.
+	//
+	// Taken from the leaf rather than recomputed, so the figures the composing layer clears space for
+	// are the figures this draws with. See FHFPortholeLeaf.
 
-	if (PortholeRadius > 0.0 && P.DoorSwingDegrees > 0.0)
+	const FHFPortholeLeaf Leaf = PortholeLeafOf(Params);
+	const double HandSign = Leaf.HandSign;
+
+	if (Leaf.IsValid())
 	{
 		FHFMeshPart Porthole;
 		Porthole.PartId = PortholePartId();
 		FHFMeshOps::InitialiseMesh(Porthole.Mesh);
 
-		const double RimRadius = PortholeRadius * 1.14;
-		const double RimDepth = FMath::Max(FrontThickness * 1.6, 0.6);
+		const double RimRadius = Leaf.Reach * 0.5;
+		const double RimDepth = Leaf.Proud;
 
-		// Drawn about its own hinge on the left of the aperture: the door's centre is out at +X.
-		const FVector2D LocalCentre(RimRadius, 0.0);
+		// Drawn about its own hinge: the door's centre is out at +X on a left-hand machine and at -X
+		// on a right-hand one, so the leaf always reaches ACROSS the aperture from the jamb it hangs
+		// on rather than away from it.
+		const FVector2D LocalCentre(HandSign * RimRadius, 0.0);
 
 		// The bezel, as an ANNULUS - see AnnularSector. A revolved ring would come out a solid disc
 		// and would hide the glass it is supposed to frame, which is a failure that looks perfectly
@@ -1721,9 +1766,13 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 				FVector2D(-RimDepth, 0.0),
 				FVector2D(-RimDepth, PortholeRadius * 0.84),
 				FVector2D(0.0, PortholeRadius * 0.84),
-				FVector2D(RimDepth * 1.4, PortholeRadius * 0.62),
-				FVector2D(RimDepth * 2.4, PortholeRadius * 0.30),
-				FVector2D(RimDepth * 2.8, 0.0)
+				FVector2D(Leaf.Dish * 0.5, PortholeRadius * 0.62),
+				FVector2D(Leaf.Dish * 0.857, PortholeRadius * 0.30),
+
+				// The deepest point of the dish, and the figure FHFPortholeLeaf publishes as the
+				// leaf's thickness on the drum side. One number, so the space cleared for the door
+				// is the space the door takes.
+				FVector2D(Leaf.Dish, 0.0)
 			};
 
 			FDynamicMesh3 Pane;
@@ -1739,15 +1788,19 @@ FHFApplianceBuild FHFApplianceKit::BuildWashingMachine(const FHFWashingMachinePa
 			FHFMeshOps::ApplyWorldScaleUVs(Porthole.Mesh);
 
 			Porthole.PivotTransform = FTransform(
-				FVector(PortholeCentre.X - RimRadius, 0.0, PortholeCentre.Y));
+				FVector(PortholeCentre.X - HandSign * RimRadius, 0.0, PortholeCentre.Y));
 
 			Porthole.Motion.Type = EHFMotionType::Hinge;
 			Porthole.Motion.Axis = FVector::ZAxisVector;
 
-			// NEGATIVE, SO THE FREE EDGE COMES OUT AND ROUND TO THE LEFT. The leaf is drawn along +X
-			// from its hinge, and a rotation about +Z carries +X towards +Y - which is INTO the drum.
+			// THE FREE EDGE COMES OUT AND ROUND TO THE HINGE'S OWN SIDE, which is the only direction
+			// a door can open. +Y is INTO the drum, so on a left-hand machine - leaf drawn along +X -
+			// a rotation about +Z carries +X towards +Y and the angle has to be negative to send it
+			// the other way. A right-hand machine's leaf is drawn along -X and wants the opposite
+			// sign for exactly the same reason, which is why this is HandSign and not a constant.
+			//
 			// The sign is checked as a swept transform rather than reasoned about; see the tests.
-			Porthole.Motion.MaxAngleDegrees = -P.DoorSwingDegrees;
+			Porthole.Motion.MaxAngleDegrees = -HandSign * P.DoorSwingDegrees;
 			Porthole.DefaultOpenAmount = 0.0;
 
 			Out.Parts.Add(MoveTemp(Porthole));
