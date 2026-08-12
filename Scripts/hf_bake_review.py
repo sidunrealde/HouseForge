@@ -167,6 +167,38 @@ def flat_bounds():
     return origin, extent
 
 
+def baked_folder_size():
+    """What the assets this bake wrote actually occupy, on disk, in the project's Content folder.
+
+    Measured from the /Game path the house recorded rather than from a guess, and reported in the
+    package because "what does the bake cost" is a disk question as much as a time one - these are
+    user output written into somebody else's project (rule 01), and the number is what makes that a
+    stated cost rather than a surprise.
+    """
+    home = house()
+    if home is None:
+        return None
+
+    folder = str(home.get_editor_property("baked_asset_folder"))
+    if not folder.startswith("/Game/"):
+        return {"folder": folder, "files": None, "megabytes": None}
+
+    root = os.path.join(
+        r"D:/Projects/UnrealEngine/5.8/HouseBuilder/Content", folder[len("/Game/"):])
+
+    total = 0
+    files = 0
+    for base, _dirs, names in os.walk(root):
+        for name in names:
+            try:
+                total += os.path.getsize(os.path.join(base, name))
+                files += 1
+            except OSError:
+                pass
+
+    return {"folder": folder, "files": files, "megabytes": round(total / (1024.0 * 1024.0), 1)}
+
+
 def zero_the_ambient_cubemap():
     """THE CONTROL, and without it none of the interior frames mean anything.
 
@@ -465,6 +497,7 @@ class Run(object):
                 "seconds": round(elapsed, 2),
                 "elements": len(elements()),
                 "bakedParts": sum(len(e.get_editor_property("baked_parts")) for e in elements()),
+                "disk": baked_folder_size(),
                 "report": str(report)[:2000],
             }
             say("BAKE {} took {:.2f}s -> {} | {}".format(

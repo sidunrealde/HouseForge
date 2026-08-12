@@ -132,6 +132,155 @@ def wrap(text, width=140):
     return out
 
 
+def write_index(out_dir, review, measured, failures):
+    """The index, GENERATED from the measurements rather than written beside them.
+
+    Every number below is interpolated from measurements.json. A hand-written index drifts from its
+    own evidence the first time the package is regenerated and nobody re-reads the prose - which is
+    the same class of failure as a green gate that measured nothing, one level out.
+    """
+    cost = review.get("cost", {}).get("bake", {})
+    lines = []
+    add = lines.append
+
+    add("# The reversible bake, seen")
+    add("")
+    add("Rendered by `Scripts/hf-bake-review.ps1`, which drives a real editor viewport and then")
+    add("measures what it drew. `Saved/*` is gitignored, so everything here is a build artefact - if")
+    add("the images are missing, run the script rather than looking for them in history.")
+    add("")
+    if failures:
+        add("**THIS PACKAGE DID NOT PASS ITS OWN ASSERTIONS.** " + str(len(failures)) + " failure(s):")
+        add("")
+        for failure in failures:
+            add("* " + failure)
+        add("")
+    else:
+        add("Every claim this package makes about pixels was measured, and held.")
+        add("")
+
+    # ------------------------------------------------------------------ 1: the interiors
+    add("## 1. The same interior, live and baked")
+    add("")
+    add("`SIDEBYSIDE__interior__<view>__beauty.png`. Same camera, same lights, same manual exposure.")
+    add("The ambient cubemap `FHFViewingLight` pins was zeroed first, and the zeroing is reported in")
+    add("`review.json` - left in, it lights the room on its own and both states come back looking the")
+    add("same, which would 'prove' the bake changes nothing.")
+    add("")
+    add("| View | Live (dynamic meshes) | Baked (static meshes) | Live / baked |")
+    add("|---|---:|---:|---:|")
+    for view, m in sorted(measured.get("interior", {}).items()):
+        add("| `{}` | **{:.4f}** | {:.4f} | **{:.2f}x** |".format(
+            view, m["liveLuminance"], m["bakedLuminance"], m["liveOverBaked"]))
+    add("")
+    add("Mean linearised Rec.709 luminance over the whole frame.")
+    add("")
+    add("**The broken one is the bright one.** That is the entire reason this needed a guard rather")
+    add("than a note in the documentation. A render of an unbaked flat is not dim, or obviously")
+    add("missing something - it is a clean, evenly-lit room, lit by sky pouring through walls Lumen")
+    add("cannot see. There is no version of 'look at it and check' that survives this, which is why")
+    add("`FHFLumenCoverage` refuses the capture instead of warning about it.")
+    add("")
+
+    # ------------------------------------------------------------------ 2: the Lumen scene
+    add("## 2. What Lumen can see")
+    add("")
+    add("`SIDEBYSIDE__interior__<view>__lumenscene.png` - `r.Lumen.Visualize 3` over the same two")
+    add("states. A plain engine `Cube` stands beside the flat in every frame as the control: a black")
+    add("Lumen scene proves nothing on its own, because it could equally mean the visualisation never")
+    add("ran. The cube is what turns 'the flat is absent' into a reading rather than a guess.")
+    add("")
+    for state in ("live", "baked"):
+        report = review.get("coverage", {}).get(state, {})
+        if report:
+            add("* **{}** - `CheckLumenCoverage`: {}".format(state, report.get("report", "").strip()))
+    add("")
+
+    # ------------------------------------------------------------------ 3: articulation
+    art = measured.get("articulation")
+    if art:
+        add("## 3. A baked fixture that still opens")
+        add("")
+        add("`STRIP__articulation.png` - one articulated fixture, **baked**, at "
+            + ", ".join("{:.0f}%".format(a * 100) for a in art["openAmounts"]) + " open.")
+        add("")
+        add("Rule 04: *a bake must not weld a chest of drawers into a block.* The pictures show")
+        add("movement; the numbers show it is the **baked** geometry moving and not a live part")
+        add("behind a welded one. Of **{}** baked component(s) on this fixture, **{}** changed world".format(
+            art["bakedComponents"], art["bakedComponentsThatMoved"]))
+        add("position across the five open amounts - read off the baked `UStaticMeshComponent`")
+        add("transforms themselves, in `review.json`.")
+        add("")
+
+    # ------------------------------------------------------------------ 4: the override
+    over = measured.get("override")
+    if over:
+        add("## 4. An asset override, applied and reversed")
+        add("")
+        add("`STRIP__override.png` - generated, then `{}` over it, then cleared.".format(over.get("asset")))
+        add("")
+        add("| | Measured |")
+        add("|---|---|")
+        add("| The override actually changed the picture | worst channel moved by **{}** |".format(
+            over["maxChannelDiff_generatedVsAsset"]))
+        add("| Clearing it restored the picture | **{}** pixel(s) differ from the generated frame |".format(
+            over["differingPixels_generatedVsCleared"]))
+        add("| The live dynamic mesh across all three steps | {} triangles |".format(
+            " / ".join(str(t) for t in over["liveMeshTriangles"])))
+        add("")
+        add("Rule 04 says *clearing the override must restore the generated mesh exactly*, and")
+        add("exactly is a word with a test attached: the first and third frames are compared pixel by")
+        add("pixel and any difference at all fails this script. The triangle count is the stronger")
+        add("claim underneath it - nothing in the override path reads or writes an `FDynamicMesh3`, so")
+        add("the restore is exact by construction rather than by repair.")
+        add("")
+
+    # ------------------------------------------------------------------ 5: the guard
+    add("## 5. The guard firing")
+    add("")
+    add("`guard__refused.png` - `capture_view` called on the flat while it was still unbaked, and its")
+    add("refusal verbatim. This is the only thing standing between a model driving the editor and a")
+    add("confidently wrong render, so the package shows it working rather than describing it.")
+    add("")
+
+    # ------------------------------------------------------------------ 6: what it cost
+    if cost:
+        add("## 6. What the bake cost")
+        add("")
+        add("| | |")
+        add("|---|---:|")
+        add("| Elements | {} |".format(cost.get("elements")))
+        add("| Baked parts (one static mesh asset each) | {} |".format(cost.get("bakedParts")))
+        add("| Wall clock, whole-flat bake | **{:.1f} s** |".format(cost.get("seconds", 0.0)))
+        if cost.get("bakedParts"):
+            add("| Per part | {:.0f} ms |".format(
+                cost.get("seconds", 0.0) * 1000.0 / cost["bakedParts"]))
+        disk = cost.get("disk") or {}
+        if disk.get("megabytes") is not None:
+            add("| On disk, in the project's `Content` | **{} MB** across {} file(s) |".format(
+                disk["megabytes"], disk["files"]))
+            add("| Written to | `{}` |".format(disk["folder"]))
+        add("")
+        add("Wall clock on the game thread, which is the figure that matters: this is the interval in")
+        add("which the editor does not respond. `SetRenderModeMany` runs it under an `FScopedSlowTask`")
+        add("with a cancel button, so it is a progress bar rather than a hang.")
+        add("")
+
+    add("## Files")
+    add("")
+    add("* `interior__<view>__<state>__beauty.png` / `__lumenscene.png` - the raw frames")
+    add("* `SIDEBYSIDE__*` - the pairs, captioned with their own numbers")
+    add("* `articulation__open-NNN.png`, `STRIP__articulation.png`")
+    add("* `override__1-generated.png` / `__2-asset.png` / `__3-cleared.png`, `STRIP__override.png`")
+    add("* `guard__refused.png`")
+    add("* `review.json` - everything the editor pass recorded, including the baked transforms")
+    add("* `measurements.json` - everything this script measured")
+    add("")
+
+    with open(os.path.join(out_dir, "index.md"), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+
+
 def main(out_dir):
     review_path = os.path.join(out_dir, "review.json")
     if not os.path.exists(review_path):
@@ -304,6 +453,8 @@ def main(out_dir):
 
     with open(os.path.join(out_dir, "measurements.json"), "w", encoding="utf-8") as handle:
         json.dump(measured, handle, indent=1, sort_keys=True)
+
+    write_index(out_dir, review, measured, failures)
 
     print(json.dumps(measured, indent=1, sort_keys=True))
 
