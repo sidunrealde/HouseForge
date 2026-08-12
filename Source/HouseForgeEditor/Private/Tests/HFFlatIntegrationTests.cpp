@@ -527,8 +527,20 @@ namespace HouseForgeFlat
 			{ TEXT("D_Kitchen.Leaf"), TEXT("F_Kitchen_BaseW.Drawer"), 0.60,
 				TEXT("The kitchen door at half swing across the west run's drawers at three quarters out. Measured at 0.54 cm. The door is hung to open into the kitchen, which is right - a door opening into the 1800 corridor would foul the circulation this flat has less of - and the run has to start where the wall does.") },
 
-			{ TEXT("F_Kitchen_BaseN.Drawer"), TEXT("F_Util_Washer.Porthole"), 0.40,
-				TEXT("The north run's drawer out into the washing machine's porthole at full swing, through the utility opening. Measured at 0.34 cm. The porthole is already recorded in FKnownObstruction for reaching the utility's west wall - it is a left-hand door in a 1200 room, and the right-hand machine that answers both is the same missing hinge hand.") },
+			// GONE, AND IT IS THE SECOND HALF OF A DELETION THAT WAS ONLY HALF DONE.
+			//
+			// 'F_Kitchen_BaseN.Drawer' into 'F_Util_Washer.Porthole' at 0.34 cm, recorded here with its
+			// own fix named in the note: "the right-hand machine that answers both is the same missing
+			// hinge hand". The hinge hand landed, FKnownObstruction's porthole row was deleted with a
+			// careful paragraph about why a stale waiver is not inert - and THIS row, the same machine's
+			// and answered by the same change, was left standing.
+			//
+			// It no longer matched anything: the utility's machine is now the right-hand one, so its
+			// porthole swings away from the utility opening instead of out through it, and the north
+			// run's drawer has nothing to meet. Until it was deleted it went on excusing 0.40 cm between
+			// those two names for whatever changed next.
+			//
+			// FailOnStaleRecords is what found it, and is why a third half cannot be left behind.
 		};
 
 		return Known;
