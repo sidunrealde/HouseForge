@@ -2,7 +2,9 @@
 
 #include "UI/SHFDrawingsPanel.h"
 
+#include "Claude/HFClaudeCli.h"
 #include "DesktopPlatformModule.h"
+#include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HFEditorSubsystem.h"
@@ -10,8 +12,12 @@
 #include "Input/DragAndDrop.h"
 #include "Misc/Paths.h"
 #include "SDropTarget.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "UI/SHFClaudePanel.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
@@ -188,6 +194,220 @@ void SHFDrawingsPanel::RefreshSets()
 	}
 }
 
+// =========================================================================== generating a house
+
+SHFDrawingsPanel::~SHFDrawingsPanel()
+{
+	// A panel closed mid-generation must not leave the CLI running: it would hold an MCP session
+	// open against an editor that has stopped listening, and nothing would ever read its pipe.
+	if (PumpHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(PumpHandle);
+	}
+	FHFClaudeCli::Finish(Run);
+}
+
+bool SHFDrawingsPanel::CanGenerate() const
+{
+	if (Run.IsValid() && !Run.bFinished)
+	{
+		return false;
+	}
+
+	// THE GATE, and the only one in this panel. Importing and listing above are deliberately live
+	// whatever Claude is doing - it is only building a house from a drawing that needs a model.
+	return SHFClaudePanel::LastStatus().IsReady() && SetList.IsValid() && SetList->NumSlots() > 0;
+}
+
+FText SHFDrawingsPanel::GenerateLabel() const
+{
+	return (Run.IsValid() && !Run.bFinished)
+		? LOCTEXT("Generating", "Building...")
+		: LOCTEXT("Generate", "Generate");
+}
+
+FText SHFDrawingsPanel::GenerateTooltip() const
+{
+	// Says WHICH precondition is missing. "Disabled" with no reason is the most common way a UI
+	// wastes somebody's afternoon.
+	if (Run.IsValid() && !Run.bFinished)
+	{
+		return LOCTEXT("BusyTip", "A house is being built. Wait for it to finish.");
+	}
+
+	if (!SHFClaudePanel::LastStatus().IsReady())
+	{
+		return LOCTEXT("NoClaudeTip",
+			"Claude Code is not connected. Check the connection in the CLAUDE section above - "
+			"reading a drawing needs it, though importing drawings does not.");
+	}
+
+	if (!SetList.IsValid() || SetList->NumSlots() == 0)
+	{
+		return LOCTEXT("NoSetTip", "Import a drawing set first - drop the sheets above.");
+	}
+
+	return LOCTEXT("GenerateTip",
+		"Hands the drawings to Claude Code, which reads them and builds the flat in this editor.");
+}
+
+FReply SHFDrawingsPanel::OnGenerateClicked()
+{
+	const FString Executable = FHFClaudeCli::FindExecutable();
+	if (Executable.IsEmpty())
+	{
+		Trace = TEXT("Claude Code is not installed, or not on PATH.");
+		return FReply::Handled();
+	}
+
+	RunningSet = SetNameBox.IsValid() ? SetNameBox->GetText().ToString().TrimStartAndEnd() : FString();
+	if (RunningSet.IsEmpty())
+	{
+		// Nothing typed: build the set that is actually there. Naming it explicitly beats letting
+		// Claude choose, which on a folder with several sets would be a coin toss.
+		UHFEditorSubsystem* Editor = Subsystem();
+		const TArray<FString> Sheets = Editor ? Editor->ListDrawings() : TArray<FString>();
+		if (Sheets.Num() > 0)
+		{
+			FString Remainder;
+			if (!Sheets[0].Split(TEXT("/"), &RunningSet, &Remainder))
+			{
+				RunningSet = Sheets[0];
+			}
+		}
+	}
+
+	const FString ConfigPath = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectDir(), TEXT(".mcp.json")));
+
+	Trace = FString::Printf(TEXT("Building '%s'...\n"), *RunningSet);
+
+	FString Error;
+	if (!FHFClaudeCli::Start(
+		Executable,
+		FHFClaudeCli::BuildGenerateArguments(RunningSet, ConfigPath),
+		// The PROJECT directory this time, not the neutral one the cheap checks use: a generation
+		// wants the project's CLAUDE.md, which is what tells Claude the rules it is building under.
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()),
+		Run,
+		Error))
+	{
+		Trace += Error;
+		return FReply::Handled();
+	}
+
+	PumpHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateSP(this, &SHFDrawingsPanel::PumpGeneration), 0.1f);
+
+	return FReply::Handled();
+}
+
+bool SHFDrawingsPanel::PumpGeneration(float DeltaTime)
+{
+	TArray<FString> Lines;
+	FHFClaudeCli::Pump(Run, Lines);
+
+	for (const FString& Line : Lines)
+	{
+		AppendTrace(Line);
+	}
+
+	if (!Run.bFinished)
+	{
+		return true;
+	}
+
+	// stderr is reported only on failure. On a good run it carries progress chatter nobody needs,
+	// but on a bad one it is the only place the real reason appears.
+	if (Run.ReturnCode != 0)
+	{
+		Trace += FString::Printf(TEXT("\nClaude exited with code %d.\n"), Run.ReturnCode);
+		if (!Run.StdErr.IsEmpty())
+		{
+			Trace += Run.StdErr.TrimStartAndEnd();
+		}
+	}
+
+	if (TraceBox.IsValid())
+	{
+		TraceBox->SetText(FText::FromString(Trace));
+	}
+
+	FHFClaudeCli::Finish(Run);
+	PumpHandle.Reset();
+	RefreshSets();
+	return false;
+}
+
+void SHFDrawingsPanel::AppendTrace(const FString& JsonLine)
+{
+	TSharedPtr<FJsonObject> Object;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
+
+	if (!FJsonSerializer::Deserialize(Reader, Object) || !Object.IsValid())
+	{
+		// Not JSON. Shown rather than swallowed - if the CLI printed a plain-text error, that line
+		// is the most useful thing on screen, and dropping it would leave the panel silent about
+		// the one thing that went wrong.
+		Trace += JsonLine + TEXT("\n");
+	}
+	else
+	{
+		const FString Type = Object->GetStringField(TEXT("type"));
+
+		if (Type == TEXT("assistant") || Type == TEXT("user"))
+		{
+			// The message text, which is Claude narrating what it is doing.
+			const TSharedPtr<FJsonObject>* Message = nullptr;
+			if (Object->TryGetObjectField(TEXT("message"), Message) && Message != nullptr)
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Content = nullptr;
+				if ((*Message)->TryGetArrayField(TEXT("content"), Content) && Content != nullptr)
+				{
+					for (const TSharedPtr<FJsonValue>& Block : *Content)
+					{
+						const TSharedPtr<FJsonObject> BlockObject = Block->AsObject();
+						if (!BlockObject.IsValid())
+						{
+							continue;
+						}
+
+						const FString BlockType = BlockObject->GetStringField(TEXT("type"));
+						if (BlockType == TEXT("text"))
+						{
+							Trace += BlockObject->GetStringField(TEXT("text")) + TEXT("\n");
+						}
+						else if (BlockType == TEXT("tool_use"))
+						{
+							Trace += FString::Printf(TEXT("  [%s]\n"),
+								*BlockObject->GetStringField(TEXT("name")));
+						}
+					}
+				}
+			}
+		}
+		else if (Type == TEXT("result"))
+		{
+			const FString Result = Object->GetStringField(TEXT("result"));
+			if (!Result.IsEmpty())
+			{
+				Trace += TEXT("\n") + Result + TEXT("\n");
+			}
+
+			double Cost = 0.0;
+			if (Object->TryGetNumberField(TEXT("total_cost_usd"), Cost) && Cost > 0.0)
+			{
+				Trace += FString::Printf(TEXT("\nDone. This build used $%.2f of your Claude account.\n"), Cost);
+			}
+		}
+	}
+
+	if (TraceBox.IsValid())
+	{
+		TraceBox->SetText(FText::FromString(Trace));
+	}
+}
+
 void SHFDrawingsPanel::Construct(const FArguments& InArgs)
 {
 	ChildSlot
@@ -285,6 +505,36 @@ void SHFDrawingsPanel::Construct(const FArguments& InArgs)
 		.Padding(4.0f, 4.0f, 4.0f, 6.0f)
 		[
 			SAssignNew(SetList, SVerticalBox)
+		]
+
+		// ---------------------------------------------------------------------------- generate
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(4.0f, 2.0f)
+		[
+			SNew(SButton)
+			.HAlign(HAlign_Center)
+			.Text(this, &SHFDrawingsPanel::GenerateLabel)
+			.ToolTipText(this, &SHFDrawingsPanel::GenerateTooltip)
+			.IsEnabled(this, &SHFDrawingsPanel::CanGenerate)
+			.OnClicked(FOnClicked::CreateSP(this, &SHFDrawingsPanel::OnGenerateClicked))
+		]
+
+		// The trace. Read-only, but a text box rather than a label so an artist can select a line
+		// and paste it into a bug report - which is most of what a trace is for.
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(4.0f, 4.0f, 4.0f, 6.0f)
+		[
+			SNew(SBox)
+			.MaxDesiredHeight(220.0f)
+			[
+				SAssignNew(TraceBox, SMultiLineEditableTextBox)
+				.IsReadOnly(true)
+				.AlwaysShowScrollbars(false)
+				.AutoWrapText(true)
+				.Text_Lambda([this]() { return FText::FromString(Trace); })
+			]
 		]
 	];
 

@@ -98,11 +98,158 @@ EHFClaudeState FHFClaudeCli::ParseMcpList(const FString& Output, const FString& 
 	return EHFClaudeState::ConfigMissing;
 }
 
+FString FHFClaudeCli::BuildGenerateArguments(const FString& DrawingSet, const FString& ConfigPath)
+{
+	// The task, in the terms the plugin's own workflow doc uses. Deliberately says what to do and
+	// not how - the CLI already carries the read/validate/correct/capture loop, and prescribing
+	// the steps here would fight it rather than help.
+	const FString Prompt = FString::Printf(
+		TEXT("Read the interior drawings in the '%s' set and build the flat in Unreal. ")
+		TEXT("Use the HouseForge tools: list the drawings, read them, write a House Spec, ")
+		TEXT("validate it, and apply it. If validation reports problems, correct the spec and ")
+		TEXT("validate again rather than building a spec with errors. When the level is built, ")
+		TEXT("capture a plan and compare it against the source drawing."),
+		*DrawingSet);
+
+	FString Arguments;
+
+	// -p, so it runs and exits rather than waiting for a terminal nobody is watching.
+	Arguments += TEXT("-p ");
+	Arguments += FString::Printf(TEXT("\"%s\" "), *Prompt.ReplaceCharWithEscapedChar());
+
+	// One JSON object per line as it happens, which is what lets the panel show the trace live
+	// rather than a spinner and then a wall of text.
+	Arguments += TEXT("--output-format stream-json --include-partial-messages --verbose ");
+
+	Arguments += FString::Printf(TEXT("--mcp-config \"%s\" "), *ConfigPath);
+	Arguments += TEXT("--strict-mcp-config ");
+	Arguments += FString::Printf(TEXT("--allowedTools \"mcp__%s__*\" "), ServerName());
+	Arguments += TEXT("--permission-mode dontAsk ");
+	Arguments += TEXT("--model opus");
+
+	return Arguments;
+}
+
 FString FHFClaudeCli::NeutralWorkingDirectory()
 {
 	const FString Directory = FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("HouseForge"), TEXT("Cli"));
 	IFileManager::Get().MakeDirectory(*Directory, /*Tree*/ true);
 	return Directory;
+}
+
+bool FHFClaudeCli::Start(
+	const FString& Executable,
+	const FString& Arguments,
+	const FString& WorkingDirectory,
+	FRun& OutRun,
+	FString& OutError)
+{
+	if (!FPlatformProcess::CreatePipe(OutRun.OutRead, OutRun.OutWrite)
+		|| !FPlatformProcess::CreatePipe(OutRun.ErrRead, OutRun.ErrWrite))
+	{
+		OutError = TEXT("Could not create a pipe to read Claude's output.");
+		Finish(OutRun);
+		return false;
+	}
+
+	OutRun.Process = FPlatformProcess::CreateProc(
+		*Executable,
+		*Arguments,
+		/*bLaunchDetached*/ false,
+		/*bLaunchHidden*/ true,
+		/*bLaunchReallyHidden*/ true,
+		/*OutProcessID*/ nullptr,
+		/*PriorityModifier*/ 0,
+		WorkingDirectory.IsEmpty() ? nullptr : *WorkingDirectory,
+		OutRun.OutWrite,
+		/*PipeReadChild*/ nullptr,
+		OutRun.ErrWrite);
+
+	if (!OutRun.Process.IsValid())
+	{
+		OutError = FString::Printf(TEXT("Could not start '%s'."), *Executable);
+		Finish(OutRun);
+		return false;
+	}
+
+	return true;
+}
+
+void FHFClaudeCli::Pump(FRun& Run, TArray<FString>& OutCompleteLines)
+{
+	OutCompleteLines.Reset();
+
+	if (!Run.IsValid() || Run.bFinished)
+	{
+		return;
+	}
+
+	Run.PendingOut += FPlatformProcess::ReadPipe(Run.OutRead);
+	Run.StdErr += FPlatformProcess::ReadPipe(Run.ErrRead);
+
+	// Split on newlines and keep the tail. A read can land mid-object, and handing half a line to
+	// a JSON parse would drop the event rather than merely delaying it.
+	int32 Newline = INDEX_NONE;
+	while (Run.PendingOut.FindChar(TEXT('\n'), Newline))
+	{
+		FString Line = Run.PendingOut.Left(Newline);
+		Run.PendingOut.RightChopInline(Newline + 1, EAllowShrinking::No);
+
+		Line.TrimEndInline();
+		if (!Line.IsEmpty())
+		{
+			OutCompleteLines.Add(MoveTemp(Line));
+		}
+	}
+
+	if (!FPlatformProcess::IsProcRunning(Run.Process))
+	{
+		// One last read: anything written between the read above and the process exiting would
+		// otherwise be lost, and on a short run that can be the entire result.
+		Run.PendingOut += FPlatformProcess::ReadPipe(Run.OutRead);
+		Run.StdErr += FPlatformProcess::ReadPipe(Run.ErrRead);
+
+		Run.PendingOut.TrimEndInline();
+		if (!Run.PendingOut.IsEmpty())
+		{
+			OutCompleteLines.Add(Run.PendingOut);
+			Run.PendingOut.Reset();
+		}
+
+		FPlatformProcess::GetProcReturnCode(Run.Process, &Run.ReturnCode);
+		Run.bFinished = true;
+	}
+}
+
+void FHFClaudeCli::Finish(FRun& Run)
+{
+	if (Run.Process.IsValid())
+	{
+		if (FPlatformProcess::IsProcRunning(Run.Process))
+		{
+			// KillTree, because the CLI spawns its own children and leaving them behind would keep
+			// the MCP session open against an editor that has moved on.
+			FPlatformProcess::TerminateProc(Run.Process, /*KillTree*/ true);
+		}
+		FPlatformProcess::CloseProc(Run.Process);
+		Run.Process.Reset();
+	}
+
+	if (Run.OutRead != nullptr || Run.OutWrite != nullptr)
+	{
+		FPlatformProcess::ClosePipe(Run.OutRead, Run.OutWrite);
+		Run.OutRead = nullptr;
+		Run.OutWrite = nullptr;
+	}
+
+	if (Run.ErrRead != nullptr || Run.ErrWrite != nullptr)
+	{
+		FPlatformProcess::ClosePipe(Run.ErrRead, Run.ErrWrite);
+		Run.ErrRead = nullptr;
+		Run.ErrWrite = nullptr;
+	}
+
+	Run.bFinished = true;
 }
 
 int32 FHFClaudeCli::RunToCompletion(

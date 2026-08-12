@@ -98,6 +98,28 @@ public:
 	static EHFClaudeState ParseMcpList(const FString& Output, const FString& InServerName);
 
 	/**
+	 * The command line that builds a house from a drawing set.
+	 *
+	 * PURE, AND TESTED, because two of these flags are the only thing confining what Claude may do
+	 * inside the artist's editor and machine, and a flag that quietly stops being passed would
+	 * widen that with no visible symptom:
+	 *
+	 *   --strict-mcp-config   Without it, Claude Code ALSO loads whatever MCP servers the artist
+	 *                         has configured personally. HouseForge would be one tool among an
+	 *                         unknown set, on someone else's machine, reaching things this plugin
+	 *                         never sanctioned.
+	 *
+	 *   --allowedTools        Without it, the run carries Claude Code's own Bash, Edit and Write
+	 *                         alongside ours - a generation that can edit files and run commands.
+	 *                         With it, the process can build houses and nothing else.
+	 *
+	 * --permission-mode is set too, because a headless run that stops to ask permission nobody can
+	 * answer does not fail: it hangs, which reads as a crash. The allowlist above is what actually
+	 * bounds the run; this only stops it blocking.
+	 */
+	static FString BuildGenerateArguments(const FString& DrawingSet, const FString& ConfigPath);
+
+	/**
 	 * Runs a command to completion and returns its exit code, with stdout and stderr separately.
 	 *
 	 * SEPARATE PIPES ON PURPOSE. The agent's output arrives on stdout as JSON; a CLI that could
@@ -113,6 +135,52 @@ public:
 		double TimeoutSeconds,
 		FString& OutStdOut,
 		FString& OutStdErr);
+
+	/**
+	 * A generation in flight.
+	 *
+	 * Long-running - minutes, not seconds - so it cannot be a blocking call on the game thread and
+	 * it cannot be pumped from SWidget::Tick either: Slate stops ticking a widget whose tab is
+	 * hidden, and an artist who docks the panel behind another tab would strand the process with
+	 * its pipe unread until it filled and the child blocked. Pumped from a core ticker instead,
+	 * which runs whatever the UI is doing.
+	 */
+	struct FRun
+	{
+		FProcHandle Process;
+		void* OutRead = nullptr;
+		void* OutWrite = nullptr;
+		void* ErrRead = nullptr;
+		void* ErrWrite = nullptr;
+
+		/** Everything read so far that has not yet been split into whole lines. */
+		FString PendingOut;
+
+		FString StdErr;
+		bool bFinished = false;
+		int32 ReturnCode = -1;
+
+		bool IsValid() const { return Process.IsValid(); }
+	};
+
+	/** Starts a run. Returns false and fills OutError if the process could not be launched. */
+	static bool Start(
+		const FString& Executable,
+		const FString& Arguments,
+		const FString& WorkingDirectory,
+		FRun& OutRun,
+		FString& OutError);
+
+	/**
+	 * Reads whatever is available, hands back any WHOLE lines, and notes whether it has exited.
+	 *
+	 * Whole lines only, because each line of --output-format stream-json is one JSON object and
+	 * half of one parses as nothing. The remainder is held until its newline arrives.
+	 */
+	static void Pump(FRun& Run, TArray<FString>& OutCompleteLines);
+
+	/** Ends a run, killing the process if it is still going. Safe to call twice. */
+	static void Finish(FRun& Run);
 
 	/**
 	 * A neutral directory to run the CLI from.

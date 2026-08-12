@@ -2,11 +2,14 @@
 
 #pragma once
 
+#include "Claude/HFClaudeCli.h"
+#include "Containers/Ticker.h"
 #include "CoreMinimal.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "Widgets/SCompoundWidget.h"
 
 class SEditableTextBox;
+class SMultiLineEditableTextBox;
 class STextBlock;
 class SVerticalBox;
 
@@ -43,6 +46,9 @@ public:
 
 	void Construct(const FArguments& InArgs);
 
+	/** Kills any generation still running, so closing the panel cannot orphan a CLI process. */
+	virtual ~SHFDrawingsPanel();
+
 	/**
 	 * Whether this drag carries at least one file HouseForge can actually read.
 	 *
@@ -73,4 +79,36 @@ private:
 
 	/** One row per set found under Reference/Drawings. */
 	TSharedPtr<SVerticalBox> SetList;
+
+	// -------------------------------------------------------------------------------- generate
+
+	FReply OnGenerateClicked();
+
+	/** Enabled only with a connected Claude AND a set to build from. */
+	bool CanGenerate() const;
+	FText GenerateTooltip() const;
+	FText GenerateLabel() const;
+
+	/** Drains the CLI's pipe and appends to the trace. Returns false to unregister. */
+	bool PumpGeneration(float DeltaTime);
+
+	/** Turns one stream-json line into something worth showing a human, or nothing. */
+	void AppendTrace(const FString& JsonLine);
+
+	/** The generation in flight, if any. */
+	FHFClaudeCli::FRun Run;
+	FTSTicker::FDelegateHandle PumpHandle;
+
+	/**
+	 * What Claude is doing, as it does it.
+	 *
+	 * NOT a progress bar. An artist who sees "reading the reflected ceiling plan" understands what
+	 * is happening and can tell you what went wrong; a spinner throws that away and makes every
+	 * failure look identical.
+	 */
+	TSharedPtr<SMultiLineEditableTextBox> TraceBox;
+	FString Trace;
+
+	/** The set the running generation was started on, for the completion message. */
+	FString RunningSet;
 };

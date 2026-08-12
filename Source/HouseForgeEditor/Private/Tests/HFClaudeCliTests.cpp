@@ -90,6 +90,54 @@ bool FHFClaudeMcpListTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * THE TWO FLAGS THAT BOUND WHAT A GENERATION MAY DO.
+ *
+ * Not a formatting test. Generate spawns Claude Code on the artist's own machine, and exactly two
+ * flags decide what that process can touch. Either one silently dropped widens the blast radius
+ * with no visible symptom - the generation still works, so nothing looks wrong, and the next
+ * person to read the code has no way to tell the omission from a decision.
+ *
+ *   --strict-mcp-config  keeps the run to HouseForge's server instead of also loading whatever
+ *                        MCP servers the artist happens to have configured
+ *   --allowedTools       keeps it to HouseForge's tools instead of also handing it Claude Code's
+ *                        own Bash, Edit and Write
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFClaudeGenerateArgumentsTest,
+	"HouseForge.Claude.AGenerationIsConfinedToHouseForge", HF_TEST_FLAGS)
+
+bool FHFClaudeGenerateArgumentsTest::RunTest(const FString& Parameters)
+{
+	const FString Arguments = FHFClaudeCli::BuildGenerateArguments(
+		TEXT("Sample2BHK"), TEXT("D:/Project/.mcp.json"));
+
+	TestTrue(TEXT("The artist's own MCP servers are excluded from the run"),
+		Arguments.Contains(TEXT("--strict-mcp-config")));
+
+	TestTrue(TEXT("Only HouseForge's own tools are allowed - not Bash, Edit or Write"),
+		Arguments.Contains(FString::Printf(TEXT("--allowedTools \"mcp__%s__*\""), FHFClaudeCli::ServerName())));
+
+	// A headless run that stops to ask permission nobody can answer does not fail, it hangs - and
+	// a hang is indistinguishable from a crash to the artist watching an empty panel.
+	TestTrue(TEXT("It cannot block waiting for a permission prompt"),
+		Arguments.Contains(TEXT("--permission-mode")));
+
+	// Streaming is what makes the panel show the trace as it happens rather than a spinner.
+	TestTrue(TEXT("Output streams as it happens"),
+		Arguments.Contains(TEXT("--output-format stream-json")));
+
+	TestTrue(TEXT("It runs non-interactively"), Arguments.Contains(TEXT("-p ")));
+
+	TestTrue(TEXT("The config it is pointed at is the one passed in"),
+		Arguments.Contains(TEXT("D:/Project/.mcp.json")));
+
+	// The set has to reach the prompt, or every generation would build whatever Claude found first.
+	TestTrue(TEXT("The drawing set to build from is named in the prompt"),
+		Arguments.Contains(TEXT("Sample2BHK")));
+
+	return true;
+}
+
+/**
  * FINDING THE CLI AT ALL.
  *
  * Asserted as a property rather than as a path: whether Claude Code is installed on the machine
