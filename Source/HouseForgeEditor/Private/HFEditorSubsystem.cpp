@@ -106,6 +106,19 @@ FString UHFEditorSubsystem::GetSpecsDirectory() const
 	return Base.IsEmpty() ? FString() : FPaths::Combine(Base, TEXT("Reference"), TEXT("Specs"));
 }
 
+bool UHFEditorSubsystem::IsReadableDrawing(const FString& Path)
+{
+	// PDF is on this list even though it is not an image: ImportDrawings rasterises it to one PNG
+	// per page, so from the caller's side it is a readable drawing. A drop target that refused PDF
+	// would refuse the most common way an AutoCAD set actually arrives.
+	const FString Extension = FPaths::GetExtension(Path).ToLower();
+
+	return Extension == TEXT("png")
+		|| Extension == TEXT("jpg")
+		|| Extension == TEXT("jpeg")
+		|| Extension == TEXT("pdf");
+}
+
 TArray<FString> UHFEditorSubsystem::ListDrawings() const
 {
 	TArray<FString> Result;
@@ -244,7 +257,10 @@ FHFOperationResult UHFEditorSubsystem::ImportDrawings(const TArray<FString>& Sou
 			continue;
 		}
 
-		if (Extension != TEXT("png") && Extension != TEXT("jpg") && Extension != TEXT("jpeg"))
+		// Through IsReadableDrawing rather than a second copy of the extension list - the drop
+		// target refuses on the same predicate, so a file cannot be droppable and then rejected
+		// here, which would read as the drop being broken rather than as the format being unread.
+		if (!IsReadableDrawing(Source))
 		{
 			Problems.Add(FString::Printf(TEXT("'%s' is a .%s; only .png, .jpg and .pdf can be read"),
 				*FPaths::GetCleanFilename(Source), *Extension));

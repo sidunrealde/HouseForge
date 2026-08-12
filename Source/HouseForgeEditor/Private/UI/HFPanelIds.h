@@ -30,6 +30,9 @@ namespace HFPanelTabIds
  */
 namespace HFPanelSectionIds
 {
+	/** The drawings this house will be read from. Drop target, and what has been imported. */
+	inline FName Drawings() { return FName(TEXT("Drawings")); }
+
 	/** What every surface role is made of. Backed by UHFMaterialLibrary. */
 	inline FName Surfaces() { return FName(TEXT("Surfaces")); }
 }

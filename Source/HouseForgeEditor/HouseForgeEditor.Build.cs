@@ -40,6 +40,11 @@ public class HouseForgeEditor : ModuleRules
 				"PropertyEditor",
 				"WorkspaceMenuStructure",
 
+				// SDropTarget, for dropping drawings onto the panel. It draws the valid/invalid
+				// hover state and refuses a bad drag BEFORE the drop, which is the difference
+				// between a "no" cursor and a dialog listing what was skipped.
+				"EditorWidgets",
+
 				// Content Browser integration for the asset replacement pass.
 				"AssetTools",
 				"ContentBrowser",

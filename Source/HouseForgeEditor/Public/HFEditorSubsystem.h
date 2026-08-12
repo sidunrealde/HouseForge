@@ -158,6 +158,18 @@ public:
 	TArray<FString> ListDrawings() const;
 
 	/**
+	 * Whether ImportDrawings can read this file at all.
+	 *
+	 * ONE SOURCE OF TRUTH, deliberately. Three places need this answer - the import itself, the
+	 * file dialog's filter, and the panel's drop target, which has to refuse a bad drag BEFORE the
+	 * drop so the cursor says no rather than a dialog listing what was skipped. Three copies of a
+	 * list of extensions is three chances for a format to become droppable but not importable,
+	 * which reads to the user as the drop being broken.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Drawings")
+	static bool IsReadableDrawing(const FString& Path);
+
+	/**
 	 * Copies drawings into Reference/Drawings/<SetName>, rasterising any PDF pages to PNG so they
 	 * can be read as images.
 	 *
