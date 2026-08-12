@@ -355,6 +355,68 @@ namespace HouseForgeFlat
 		return Known;
 	}
 
+	/**
+	 * WHICH RECORDED ENTRIES MATCHED SOMETHING THIS RUN, KEYED ON THE `Why` LITERAL.
+	 *
+	 * A RECORD THAT MATCHES NOTHING IS NOT AN INERT LEFTOVER; IT IS RE-ARMED TOLERANCE. Both tables
+	 * below downgrade anything matching a recorded pair from a foul to a warning, up to the recorded
+	 * depth. So an entry left behind after its defect is fixed goes on quietly excusing that many
+	 * centimetres around those two names for whatever changes next - which is exactly the hazard
+	 * FKnownObstruction's deleted porthole row was careful to describe, in a file that then left the
+	 * SAME machine's row standing in FKnownPairConflict.
+	 *
+	 * That is what these sets close. Nothing here decides whether a waiver is justified - only whether
+	 * it still describes something the flat actually does. A waiver for a clash that no longer happens
+	 * is deleted, not kept "in case".
+	 *
+	 * Keyed on the `Why` TEXT, not on its pointer - so no row needs an id it would otherwise not have.
+	 *
+	 * The pointer was the first instinct and it does not compile: TypeHash.h's scalar GetTypeHash
+	 * explicitly excludes TCHAR* and const TCHAR*, so TSet<const TCHAR*> has no hash at all. Casting
+	 * to const void* would compile, and would be wrong in a way this file is exactly the wrong place
+	 * for: identical string literals may be POOLED to one address, so two rows worded the same would
+	 * share a key and a single match would mark both as hit - a false negative in the detector whose
+	 * entire job is to notice a waiver that matched nothing.
+	 *
+	 * A set per table rather than one shared, so that whichever order the two tests run in, neither can
+	 * clear the other's evidence.
+	 */
+	TSet<FString>& ObstructionsHit()
+	{
+		static TSet<FString> Hits;
+		return Hits;
+	}
+
+	TSet<FString>& PairConflictsHit()
+	{
+		static TSet<FString> Hits;
+		return Hits;
+	}
+
+	/**
+	 * Fail for every recorded row that matched nothing, naming it and saying what to do about it.
+	 *
+	 * An error rather than a warning, deliberately. The whole value of these tables is that they are
+	 * measurements which cannot drift without the gate saying so, and a row nobody has to justify any
+	 * more is a hole in that guarantee rather than a tidiness question.
+	 */
+	template <typename TRecord>
+	void FailOnStaleRecords(FAutomationTestBase& Test, const TArray<TRecord>& Records,
+		const TSet<FString>& Hits, const TCHAR* Table)
+	{
+		for (const TRecord& Record : Records)
+		{
+			if (!Hits.Contains(Record.Why))
+			{
+				Test.AddError(FString::Printf(
+					TEXT("STALE WAIVER in %s: nothing in the flat matched this row, so the clash it ")
+					TEXT("records no longer happens - and until it is deleted it goes on excusing ")
+					TEXT("%.2f cm between those two names. Delete it. It said: %s"),
+					Table, Record.DepthCm, Record.Why));
+			}
+		}
+	}
+
 	/** The recorded depth for a known obstruction, or zero if this pair is not one. */
 	double KnownObstructionDepth(const FString& PartName, const FString& Into, FString& OutWhy)
 	{
@@ -362,6 +424,11 @@ namespace HouseForgeFlat
 		{
 			if (PartName.Contains(Known.Part) && Into.Contains(Known.Into))
 			{
+				// Recorded on the NAME match, before any depth comparison. A row whose pair still
+				// meets but now meets deeper has not gone stale - it fails as a foul, which is a
+				// different report and the right one.
+				ObstructionsHit().Add(Known.Why);
+
 				OutWhy = Known.Why;
 				return Known.DepthCm;
 			}
@@ -477,6 +544,9 @@ namespace HouseForgeFlat
 
 			if (bForward || bReverse)
 			{
+				// See KnownObstructionDepth: recorded on the name match, not on the depth.
+				PairConflictsHit().Add(Known.Why);
+
 				OutWhy = Known.Why;
 				return Known.DepthCm;
 			}
@@ -1258,6 +1328,10 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 {
 	using namespace HouseForgeFlat;
 
+	// Cleared before the sweep rather than after it, so what is left in here at the end is this run's
+	// evidence and not a previous run's in the same editor session.
+	ObstructionsHit().Reset();
+
 	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
 	if (!TestNotNull(TEXT("An editor world is open"), World))
 	{
@@ -1484,6 +1558,9 @@ bool FHFFlatArticulationSweepTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Part positions that foul something"), Fouls.Num(), 0);
 
+	// AND EVERY ROW IN THE TABLE STILL DESCRIBES SOMETHING. See FailOnStaleRecords.
+	FailOnStaleRecords(*this, KnownObstructions(), ObstructionsHit(), TEXT("FKnownObstruction"));
+
 	return true;
 }
 
@@ -1538,6 +1615,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFlatOpenPairSweepTest,
 bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
 {
 	using namespace HouseForgeFlat;
+
+	// See the sweep above.
+	PairConflictsHit().Reset();
 
 	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
 	if (!TestNotNull(TEXT("An editor world is open"), World))
@@ -1755,6 +1835,9 @@ bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Pose combinations where two open elements meet"), Fouls.Num(), 0);
+
+	// AND EVERY ROW IN THE TABLE STILL DESCRIBES SOMETHING. See FailOnStaleRecords.
+	FailOnStaleRecords(*this, KnownPairConflicts(), PairConflictsHit(), TEXT("FKnownPairConflict"));
 
 	return true;
 }
