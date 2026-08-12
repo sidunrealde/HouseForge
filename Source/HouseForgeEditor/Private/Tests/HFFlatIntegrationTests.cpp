@@ -10,7 +10,10 @@
 #include "Actors/HFElementActors.h"
 #include "Actors/HFHouseActor.h"
 #include "Actors/HFOpeningActor.h"
+#include "Actors/HFServiceActors.h"
 #include "Components/DynamicMeshComponent.h"
+#include "Geometry/HFApplianceKit.h"
+#include "HFEditorSubsystem.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "Editor.h"
@@ -1850,6 +1853,182 @@ bool FHFFlatOpenPairSweepTest::RunTest(const FString& Parameters)
 
 	// AND EVERY ROW IN THE TABLE STILL DESCRIBES SOMETHING. See FailOnStaleRecords.
 	FailOnStaleRecords(*this, KnownPairConflicts(), PairConflictsHit(), TEXT("FKnownPairConflict"));
+
+	return true;
+}
+
+/**
+ * DOES REBUILDING THE FLAT LEAVE THE WASHING MACHINE'S DOOR WHERE IT WAS?
+ *
+ * A RESOLUTION THAT IS NOT IDEMPOTENT IS A RATCHET, and this one was.
+ *
+ * SeedWashingMachine picks the porthole's hinge hand from what is beside the machine and then cuts
+ * its travel to what the room actually gives it - both right - and writes the cut figure back into
+ * DoorSwingDegrees. So the next build reads a clamped value as the catalogue one and clamps it
+ * again. ClearPortholeSwing stood one 2.5-degree step back from the last clear sample WHETHER OR NOT
+ * anything had blocked, so every rebuild took another step off a door that nothing was in the way of.
+ *
+ * IT SHIPPED, AND ITS OWN LOG RECORDED IT. Inside one run of
+ * HouseForge.Photoreal.TheChamferIsAProjectSetting, which rebuilds the standing flat:
+ *
+ *   "clears 105 on the left and 112 on the right; hung right, built to open 112 of its catalogue 160"
+ *   "... 110 on the right; hung right, built to open 110 of its catalogue 112"
+ *   "... 108 on the right; hung right, built to open 108 of its catalogue 110"
+ *   "... 105 on the right; hung LEFT,  built to open 105 of its catalogue 108"
+ *
+ * The last line is the milestone undone. The hands tie at 105, the tie goes to the left-hand machine
+ * by design, and the flat silently gets back the door that reached 5.69 cm into the utility's west
+ * wall - four rebuilds later, with nothing in the room having moved.
+ *
+ * ## Why this needs its own test rather than being covered by the sweeps
+ *
+ * Every clash test in this file builds the flat ONCE. A defect that only appears on the second build
+ * is invisible to all of them, and the aperture tests in HouseForge.Services measure a machine built
+ * from fresh parameters, which is exactly the case that was always fine. What follows is the only
+ * thing in the suite that asks the question twice.
+ *
+ * Asserted in degrees and in centimetres of aperture, not as "it still moves".
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFFlatWasherRebuildTest,
+	"HouseForge.Flat.ThePortholeSurvivesARebuild", HF_TEST_FLAGS)
+
+bool FHFFlatWasherRebuildTest::RunTest(const FString& Parameters)
+{
+	using namespace HouseForgeFlat;
+
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UHFEditorSubsystem* Subsystem = GEditor != nullptr
+		? GEditor->GetEditorSubsystem<UHFEditorSubsystem>() : nullptr;
+
+	if (!TestNotNull(TEXT("An editor world is open"), World)
+		|| !TestNotNull(TEXT("The HouseForge subsystem is up"), Subsystem))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT{ ClearHouseForgeActors(World); };
+
+	FHFHouseSpec Spec;
+	AHFHouseActor* House = BuildReferenceFlat(World, Spec);
+	if (!TestNotNull(TEXT("The reference flat builds"), House))
+	{
+		return false;
+	}
+
+	AHFWashingMachineActor* Washer = nullptr;
+	for (TActorIterator<AHFWashingMachineActor> It(World); It; ++It)
+	{
+		Washer = *It;
+		break;
+	}
+
+	if (!TestNotNull(TEXT("The flat has a washing machine"), Washer))
+	{
+		return false;
+	}
+
+	const EHFHingeHand FirstHand = Washer->Washer.HingeHand;
+	const double FirstSwing = Washer->Washer.DoorSwingDegrees;
+
+	AddInfo(FString::Printf(
+		TEXT("Built fresh, the utility's machine is hung on the %s and opens %.1f degrees."),
+		FirstHand == EHFHingeHand::Left ? TEXT("left") : TEXT("right"), FirstSwing));
+
+	// THE UTILITY'S ANSWER, NAMED. The room is 1200 and the machine is 600; the right-hand machine is
+	// the one that fits, and it is the entire reason EHFHingeHand exists. Asserted rather than merely
+	// recorded, because a flat that quietly reverted to the left-hand door would still pass every
+	// "is it stable" check below by being stably wrong.
+	TestTrue(TEXT("The utility gets the right-hand machine"), FirstHand == EHFHingeHand::Right);
+
+	// AND IT CAN BE LOADED. Ninety degrees is where the leaf clears the drum mouth - see
+	// SeedWashingMachine, which warns below it. A door resolved to less than that is a machine
+	// somebody has to reach around.
+	TestTrue(*FString::Printf(TEXT("And it opens far enough to load - %.1f degrees"), FirstSwing),
+		FirstSwing >= 90.0);
+
+	// FOUR REBUILDS, because the log above took four to flip the hand. Each is the real path a user
+	// takes: settings applied to a level that is already standing, actors preserved rather than
+	// respawned - which is what Rule 04 requires and what makes the re-seed happen at all.
+	for (int32 Pass = 1; Pass <= 4; ++Pass)
+	{
+		Subsystem->ApplyProjectSettingsToLevel();
+
+		const EHFHingeHand Hand = Washer->Washer.HingeHand;
+		const double Swing = Washer->Washer.DoorSwingDegrees;
+
+		TestTrue(*FString::Printf(
+			TEXT("Rebuild %d leaves the door on the same side (%s, was %s)"), Pass,
+			Hand == EHFHingeHand::Left ? TEXT("left") : TEXT("right"),
+			FirstHand == EHFHingeHand::Left ? TEXT("left") : TEXT("right")),
+			Hand == FirstHand);
+
+		TestEqual(*FString::Printf(
+			TEXT("Rebuild %d leaves the door opening as far (%.1f of %.1f degrees)"),
+			Pass, Swing, FirstSwing), Swing, FirstSwing, 0.001);
+	}
+
+	// AND THE APERTURE IS STILL THERE, IN CENTIMETRES. The figures above are the machine's own
+	// account of itself; this is the drum mouth actually being uncovered by the mesh that was built,
+	// after every one of those rebuilds. A door that travelled its whole declared range into the
+	// machine would satisfy the degrees and uncover nothing.
+	const FHFPortholeLeaf Leaf = FHFApplianceKit::PortholeLeafOf(Washer->Washer);
+	const FHFWashingMachineParams P = FHFApplianceKit::SanitiseWashingMachine(Washer->Washer);
+	const FName PortholeId = FHFApplianceKit::PortholePartId();
+
+	Washer->SetAllPartsOpenAmount(1.0);
+
+	double Nearest = TNumericLimits<double>::Max();
+	int32 Points = 0;
+
+	const TArray<TObjectPtr<UDynamicMeshComponent>>& Parts = Washer->GetPartComponents();
+	const FTransform FromMachine = Washer->GetActorTransform();
+
+	for (int32 Index = 0; Index < Parts.Num(); ++Index)
+	{
+		if (!Washer->Parts.IsValidIndex(Index) || Washer->Parts[Index].PartId != PortholeId)
+		{
+			continue;
+		}
+
+		UDynamicMeshComponent* Part = Parts[Index];
+		if (Part == nullptr || Part->GetDynamicMesh() == nullptr)
+		{
+			continue;
+		}
+
+		const FTransform ToWorld = Part->GetComponentTransform();
+		const FDynamicMesh3& Mesh = Part->GetDynamicMesh()->GetMeshRef();
+
+		for (const int32 Vertex : Mesh.VertexIndicesItr())
+		{
+			const FVector At = ToWorld.TransformPosition(FVector(Mesh.GetVertex(Vertex)));
+			const FVector Local = FromMachine.InverseTransformPosition(At);
+
+			// Only what is in FRONT of the machine's face can cover the mouth; the drum is behind it.
+			// The machine's own frame has +Y going back into it.
+			if (Local.Y > 0.5)
+			{
+				continue;
+			}
+
+			Nearest = FMath::Min(Nearest,
+				FVector2D(Local.X - Leaf.MouthAcross, Local.Z - P.PortholeCentreZ).Size());
+			++Points;
+		}
+	}
+
+	Washer->SetAllPartsOpenAmount(0.0);
+
+	if (TestTrue(TEXT("The porthole leaf was found to measure"), Points > 0))
+	{
+		AddInfo(FString::Printf(
+			TEXT("After four rebuilds the open leaf's nearest point is %.1f cm from the drum axis, ")
+			TEXT("clearing all %.1f cm of the mouth."), Nearest, Leaf.MouthRadius * 2.0));
+
+		TestTrue(*FString::Printf(
+			TEXT("All %.1f cm of the drum mouth is still reachable (nearest %.1f cm of a %.1f cm radius)"),
+			Leaf.MouthRadius * 2.0, Nearest, Leaf.MouthRadius),
+			Nearest >= Leaf.MouthRadius);
+	}
 
 	return true;
 }

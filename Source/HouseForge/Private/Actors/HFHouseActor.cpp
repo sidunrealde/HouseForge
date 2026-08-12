@@ -1054,6 +1054,7 @@ namespace
 		constexpr double Step = 2.5;
 
 		double Clear = 0.0;
+		bool bEverBlocked = false;
 
 		for (double Angle = Step; Angle <= Leaf.SwingDegrees + KINDA_SMALL_NUMBER; Angle += Step)
 		{
@@ -1094,10 +1095,42 @@ namespace
 
 			if (bBlocked)
 			{
+				bEverBlocked = true;
 				break;
 			}
 
 			Clear = At;
+		}
+
+		// A DOOR THAT REACHED ITS END STOP CLEAR KEEPS ITS END STOP, and this is the difference
+		// between a resolution and a ratchet.
+		//
+		// The margin below stands back from an obstruction that was FOUND. When the walk runs to the
+		// end without ever being blocked there is no obstruction between two samples to stand back
+		// from - the leaf swung its whole declared travel over clear floor - so taking a step off it
+		// is subtracting a safety margin from a hazard that is not there.
+		//
+		// MEASURED, because this shipped and the log says exactly what it did. SeedWashingMachine
+		// writes the resolved figure back into DoorSwingDegrees, so the next build reads the clamped
+		// value as the catalogue one and clamps it again. One test that rebuilds the flat -
+		// HouseForge.Photoreal.TheChamferIsAProjectSetting - walked the utility's machine down on
+		// consecutive rebuilds, in its own log, inside a single test:
+		//
+		//   "clears 105 on the left and 112 on the right; hung right, built to open 112 of its
+		//    catalogue 160"   <- fresh
+		//   "... 110 on the right; hung right, built to open 110 of its catalogue 112"
+		//   "... 108 on the right; hung right, built to open 108 of its catalogue 110"
+		//   "... 105 on the right; hung LEFT,  built to open 105 of its catalogue 108"
+		//
+		// The last line is the whole feature undone. At 105 against 105 the hands tie, the tie goes to
+		// the left-hand machine by design, and the flat quietly gets back the door that reached 5.69 cm
+		// into the utility wall - after four rebuilds and without one thing in the room having moved.
+		//
+		// With the margin conditional this is a fixed point: 160 resolves to 112 against an obstruction
+		// at about 114.5, and 112 then walks its whole range clear and stays 112.
+		if (!bEverBlocked)
+		{
+			return Leaf.SwingDegrees;
 		}
 
 		// ONE STEP BACK FROM WHAT WAS MEASURED CLEAR. The walk finds the last sampled angle that was
