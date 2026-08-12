@@ -27,6 +27,20 @@ enum class EHFClaudeState : uint8
 	/** The server is configured but nothing is listening. The plugin can fix this itself. */
 	ServerNotRunning,
 
+	/**
+	 * Configured, running, reachable - and Claude Code will not connect until the artist approves
+	 * it once.
+	 *
+	 * A project-scoped .mcp.json is untrusted input: it arrives with a repository and can point
+	 * anywhere, so Claude Code asks before connecting. Entirely reasonable, and invisible until
+	 * you hit it - the server is up, the config is right, and nothing works.
+	 *
+	 * Modelled separately because it is the one failure a running server produces. Folded into
+	 * ServerNotRunning, the panel would tell an artist to start something already started and
+	 * offer a button that could never help.
+	 */
+	PendingApproval,
+
 	/** Server up, but HouseForge never registered with the ToolsetRegistry - a plugin fault. */
 	ToolsetMissing,
 

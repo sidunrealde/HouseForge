@@ -88,6 +88,14 @@ EHFClaudeState FHFClaudeCli::ParseMcpList(const FString& Output, const FString& 
 			return EHFClaudeState::NotAuthenticated;
 		}
 
+		// Checked BEFORE the fall-through, because a pending server is running and reachable - it
+		// is only unapproved. Reading it as "not running" sends an artist to start something that
+		// is already started, which is the exact wrong instruction.
+		if (Trimmed.Contains(TEXT("Pending approval"), ESearchCase::IgnoreCase))
+		{
+			return EHFClaudeState::PendingApproval;
+		}
+
 		// "Failed to connect", "ConnectionRefused", and anything else this line can say all mean
 		// the same thing for a server the plugin itself hosts: nothing is listening yet.
 		return EHFClaudeState::ServerNotRunning;

@@ -68,6 +68,20 @@ bool FHFClaudeMcpListTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("A server needing authentication is not reported as merely down"),
 		FHFClaudeCli::ParseMcpList(NeedsAuth, ServerName), EHFClaudeState::NotAuthenticated);
 
+	// A RUNNING SERVER THAT STILL WILL NOT CONNECT, captured verbatim from a real editor session
+	// with the MCP server confirmed listening on 127.0.0.1:8000.
+	//
+	// This state cost a manual test to find. Claude Code treats a project-scoped .mcp.json as
+	// untrusted input - it arrives with a repository and can point anywhere - so it asks before
+	// connecting. Every other signal says healthy: the port is open, the config is right, the
+	// listener logged itself. Folded into ServerNotRunning, as it was, the panel told the user to
+	// start a server that was already started and offered a button that could never help.
+	const FString Pending = TEXT(
+		"unreal-mcp: http://127.0.0.1:8000/mcp (HTTP) - Pending approval (run `claude` to approve)\n");
+
+	TestEqual(TEXT("An unapproved server is waiting for the user, not down"),
+		FHFClaudeCli::ParseMcpList(Pending, ServerName), EHFClaudeState::PendingApproval);
+
 	// ------------------------------------------------------------------ the two ways to mis-parse
 
 	// A DIFFERENT server whose URL happens to contain ours. Matching anywhere in the line rather
