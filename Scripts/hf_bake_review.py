@@ -247,38 +247,35 @@ def baked_component_transforms(element):
 def pick_articulated():
     """The fixture photographed opening. Chosen by what it HAS, never by name.
 
-    A fixture is only useful here if it has a part that actually travels, so the choice is made on
-    the part list - the one with the most moving parts wins, and the id is reported so the picture
-    can be matched to the actor.
+    Chosen on the PART LIST, because that is the only thing here that is actually reflected.
+    FHFPartState exposes PartId, OpenAmount, SpinTurns and bArtistEdited - and no motion type at all,
+    so a picker that filtered on one would silently match nothing and this whole section would go
+    missing from the package with a warning nobody reads.
+
+    A fixture is preferred over an opening on a tie: rule 04's example is a chest of drawers, and a
+    wardrobe with four shutters makes the point a single door leaf makes weakly. Whether the parts
+    really move is not guessed at here - it is MEASURED afterwards, from the baked components' own
+    world transforms across the five open amounts, and the compose step fails if none of them moved.
     """
     best = None
-    best_moving = 0
+    best_score = 0
 
     for element in elements():
-        if not hasattr(element, "get_editor_property"):
-            continue
         try:
             parts = element.get_editor_property("parts")
         except Exception:
             continue
-        if parts is None:
+        if not parts:
             continue
 
-        moving = []
-        for part in parts:
-            try:
-                motion = str(part.get_editor_property("motion_type"))
-            except Exception:
-                continue
-            # Anything that is not a fixed part. Spinners are excluded: a fan blade at five phases
-            # photographs as a blur of the same shape and shows nothing about welding.
-            if "FIXED" in motion.upper() or "SPIN" in motion.upper():
-                continue
-            moving.append(str(part.get_editor_property("part_id")))
+        ids = [str(p.get_editor_property("part_id")) for p in parts]
 
-        if len(moving) > best_moving:
-            best = (element, moving)
-            best_moving = len(moving)
+        # A fixture outranks an opening with the same part count, and any articulated element beats
+        # none. Nothing here depends on the names.
+        score = len(ids) * 2 + (1 if element.get_class().get_name() == "HFFixtureActor" else 0)
+        if score > best_score:
+            best = (element, ids)
+            best_score = score
 
     return best
 
@@ -369,7 +366,7 @@ class Run(object):
         # in - the whole claim is about baked geometry moving.
         if articulated is not None:
             element, moving = articulated
-            self.add("say", "=== articulation: {} ({} moving parts) ===".format(
+            self.add("say", "=== articulation: {} ({} parts) ===".format(
                 element.get_editor_property("element_id"), len(moving)))
             self.add("camera_fixture", element)
             self.add("wait", SETTLE_FRAMES)
@@ -660,9 +657,9 @@ def main():
 
     articulated = pick_articulated()
     if articulated is None:
-        say("WARNING: no articulated fixture with moving parts was found.")
+        say("WARNING: no articulated element with parts was found.")
     else:
-        say("ARTICULATED {} with {} moving parts".format(
+        say("ARTICULATED {} with {} parts".format(
             articulated[0].get_editor_property("element_id"), len(articulated[1])))
 
     override_target = pick_override_target()
