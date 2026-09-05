@@ -141,6 +141,7 @@ void SHFDrawingsPanel::RefreshSets()
 	}
 
 	SetList->ClearChildren();
+	SetCount = 0;
 
 	UHFEditorSubsystem* Editor = Subsystem();
 	if (Editor == nullptr)
@@ -177,6 +178,7 @@ void SHFDrawingsPanel::RefreshSets()
 		return;
 	}
 
+	SetCount = SheetsPerSet.Num();
 	SheetsPerSet.KeySort([](const FString& A, const FString& B) { return A < B; });
 
 	for (const TPair<FString, int32>& Entry : SheetsPerSet)
@@ -216,7 +218,11 @@ bool SHFDrawingsPanel::CanGenerate() const
 
 	// THE GATE, and the only one in this panel. Importing and listing above are deliberately live
 	// whatever Claude is doing - it is only building a house from a drawing that needs a model.
-	return SHFClaudePanel::LastStatus().IsReady() && SetList.IsValid() && SetList->NumSlots() > 0;
+	// SetCount, NOT SetList->NumSlots(). An empty drawings folder still puts one row in the list -
+	// the row that says it is empty - so NumSlots() answers "is anything drawn here", which is a
+	// different question and is always yes. Generate would have been enabled with no drawings, and
+	// the run would have asked Claude to build a set that does not exist.
+	return SHFClaudePanel::LastStatus().IsReady() && SetCount > 0;
 }
 
 FText SHFDrawingsPanel::GenerateLabel() const
@@ -242,7 +248,7 @@ FText SHFDrawingsPanel::GenerateTooltip() const
 			"reading a drawing needs it, though importing drawings does not.");
 	}
 
-	if (!SetList.IsValid() || SetList->NumSlots() == 0)
+	if (SetCount == 0)
 	{
 		return LOCTEXT("NoSetTip", "Import a drawing set first - drop the sheets above.");
 	}
@@ -394,10 +400,19 @@ void SHFDrawingsPanel::AppendTrace(const FString& JsonLine)
 				Trace += TEXT("\n") + Result + TEXT("\n");
 			}
 
+			// NOT "money taken from your account", which is what this used to say.
+			//
+			// total_cost_usd is a computed API-equivalent price derived from token usage, and
+			// the CLI emits it identically whether it is authenticated by an API key or by a
+			// Pro/Max subscription. On a subscription nothing is charged at all - so telling an
+			// artist a build "used $0.87 of your Claude account" is false, and false in the
+			// direction that makes a reasonable person stop using the tool.
 			double Cost = 0.0;
 			if (Object->TryGetNumberField(TEXT("total_cost_usd"), Cost) && Cost > 0.0)
 			{
-				Trace += FString::Printf(TEXT("\nDone. This build used $%.2f of your Claude account.\n"), Cost);
+				Trace += FString::Printf(
+					TEXT("\nDone - about $%.2f of tokens at API rates. On a Claude ")
+					TEXT("subscription that is what it would have cost, not a charge.\n"), Cost);
 			}
 		}
 	}

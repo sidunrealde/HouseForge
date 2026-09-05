@@ -82,6 +82,19 @@ bool FHFClaudeMcpListTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("An unapproved server is waiting for the user, not down"),
 		FHFClaudeCli::ParseMcpList(Pending, ServerName), EHFClaudeState::PendingApproval);
 
+	// THE FAILURE STRING THAT CONTAINS THE SUCCESS WORD.
+	//
+	// "Connected - tools fetch failed" means the transport opened and tools/list did not, so the
+	// run would have NO HouseForge tools. Checked after the plain Connected test, this went green
+	// and enabled Generate into a session where every HouseForge call fails - and a missing
+	// toolset is silent to the model, which answers from its own knowledge instead of erroring.
+	// A false green is the worst answer a connection check can give.
+	const FString ToolsFailed = TEXT(
+		"unreal-mcp: http://127.0.0.1:8000/mcp (HTTP) - Connected - tools fetch failed");
+
+	TestEqual(TEXT("A server whose tools failed to load is not reported as ready"),
+		FHFClaudeCli::ParseMcpList(ToolsFailed, ServerName), EHFClaudeState::ToolsetMissing);
+
 	// ------------------------------------------------------------------ the two ways to mis-parse
 
 	// A DIFFERENT server whose URL happens to contain ours. Matching anywhere in the line rather
@@ -111,10 +124,12 @@ bool FHFClaudeMcpListTest::RunTest(const FString& Parameters)
  * with no visible symptom - the generation still works, so nothing looks wrong, and the next
  * person to read the code has no way to tell the omission from a decision.
  *
- *   --strict-mcp-config  keeps the run to HouseForge's server instead of also loading whatever
- *                        MCP servers the artist happens to have configured
- *   --allowedTools       keeps it to HouseForge's tools instead of also handing it Claude Code's
- *                        own Bash, Edit and Write
+ *   --strict-mcp-config      keeps the run to HouseForge's server instead of also loading whatever
+ *                            MCP servers the artist happens to have configured
+ *   --allowedTools           names what may run without being asked about
+ *   --permission-mode dontAsk  denies everything that is not on that list - INCLUDING Claude
+ *                            Code's own Bash, Edit and Write, which an allow-list alone does not
+ *                            remove from the model's tool set
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFClaudeGenerateArgumentsTest,
 	"HouseForge.Claude.AGenerationIsConfinedToHouseForge", HF_TEST_FLAGS)
@@ -127,13 +142,21 @@ bool FHFClaudeGenerateArgumentsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The artist's own MCP servers are excluded from the run"),
 		Arguments.Contains(TEXT("--strict-mcp-config")));
 
-	TestTrue(TEXT("Only HouseForge's own tools are allowed - not Bash, Edit or Write"),
+	TestTrue(TEXT("HouseForge's own tools are the ones allowed without asking"),
 		Arguments.Contains(FString::Printf(TEXT("--allowedTools \"mcp__%s__*\""), FHFClaudeCli::ServerName())));
 
-	// A headless run that stops to ask permission nobody can answer does not fail, it hangs - and
-	// a hang is indistinguishable from a crash to the artist watching an empty panel.
-	TestTrue(TEXT("It cannot block waiting for a permission prompt"),
-		Arguments.Contains(TEXT("--permission-mode")));
+	// THE FLAG THAT ACTUALLY DENIES, and the reason this assertion is written this way.
+	//
+	// It used to read "Only HouseForge's own tools are allowed - not Bash, Edit or Write" against
+	// --allowedTools, which is wrong about the mechanism: an allow-list names what runs WITHOUT
+	// being asked, and the built-in tools stay in the model's tool set either way. What denies
+	// them is the mode. So the old assertion would have passed with the real guard deleted - a
+	// test that could not fail, dressed as a security check.
+	//
+	// Asserted on the VALUE, not just the flag's presence: --permission-mode acceptEdits would
+	// satisfy a Contains("--permission-mode") while permitting exactly what this is meant to stop.
+	TestTrue(TEXT("Anything not on the allow-list is denied rather than asked about"),
+		Arguments.Contains(TEXT("--permission-mode dontAsk")));
 
 	// Streaming is what makes the panel show the trace as it happens rather than a spinner.
 	TestTrue(TEXT("Output streams as it happens"),
