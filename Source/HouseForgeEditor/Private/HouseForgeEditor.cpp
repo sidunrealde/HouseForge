@@ -90,15 +90,60 @@ namespace
 		}
 
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-		GEngine->Exec(World, TEXT("ModelContextProtocol.StartServer"));
+
+		// THE RETURN VALUES ARE THE POINT, and both used to be discarded.
+		//
+		// Both commands are registered by the ModelContextProtocol plugin. If that plugin is not
+		// enabled - and Setup.md step 3 exists precisely because enabling HouseForge does NOT
+		// pull it in - the console has never heard of them, Exec returns false, nothing starts,
+		// nothing is written, and the success dialog appeared anyway. That is the same failure
+		// as the argument-less GenerateClientConfig bug, one level up: a no-op under a UI that
+		// says it worked.
+		const bool bStarted = GEngine->Exec(World, TEXT("ModelContextProtocol.StartServer"));
+
 		// The client to write a config for is REQUIRED. Called bare, the command prints its usage
 		// and writes nothing - which is what it had been doing since this menu entry was added.
 		// Nobody noticed, because a .mcp.json written by hand months earlier was already on disk.
-		GEngine->Exec(World, TEXT("ModelContextProtocol.GenerateClientConfig ClaudeCode"));
+		const bool bWroteConfig =
+			GEngine->Exec(World, TEXT("ModelContextProtocol.GenerateClientConfig ClaudeCode"));
+
+		if (!bStarted || !bWroteConfig)
+		{
+			FMessageDialog::Open(EAppMsgType::Ok,
+				LOCTEXT("McpMissing",
+					"The Unreal MCP commands are not available, so nothing was started and no config \n"
+					"was written.\n\nEnable the Model Context Protocol plugin in Edit > Plugins and \n"
+					"restart the editor. Enabling HouseForge does not enable it for you."),
+				LOCTEXT("McpTitle", "HouseForge - Unreal MCP"));
+			return;
+		}
+
+		// AND THE FILE ITSELF, because the command succeeding is not the same as the config
+		// landing where this plugin looks for it. The engine chooses the directory from the
+		// ENGINE's install kind, not the project: on a source build it writes to the workspace
+		// root rather than ProjectDir, and every consumer here - the --mcp-config argument, the
+		// panel's ConfigMissing message - hardcodes ProjectDir.
+		const FString ConfigPath = FPaths::ConvertRelativePathToFull(
+			FPaths::Combine(FPaths::ProjectDir(), TEXT(".mcp.json")));
+
+		if (!FPaths::FileExists(ConfigPath))
+		{
+			FMessageDialog::Open(EAppMsgType::Ok,
+				FText::Format(LOCTEXT("McpConfigElsewhere",
+					"The server started, but no config appeared at:\n\n{0}\n\n"
+					"On an engine built from source the MCP plugin writes it to the workspace root \n"
+					"instead. Copy it into the project folder, or run Claude Code from wherever it \n"
+					"was written."),
+					FText::FromString(ConfigPath)),
+				LOCTEXT("McpTitle", "HouseForge - Unreal MCP"));
+			return;
+		}
 
 		const FText Message = LOCTEXT("McpStarted",
 			"Started the Unreal MCP server and wrote .mcp.json into the project folder.\n\n"
 			"Claude can now reach HouseForge through list_toolsets / describe_toolset / call_tool.\n\n"
+			"The first time, open a terminal in the project folder and run 'claude' once to \n"
+			"approve the unreal-mcp server - Claude Code will not connect to it until you do.\n\n"
 			"To have the server start with the editor, tick Auto Start Server under\n"
 			"Editor Preferences > Plugins > Model Context Protocol.");
 

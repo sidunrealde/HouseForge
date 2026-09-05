@@ -1,7 +1,8 @@
 # Setting HouseForge up in a project
 
-From nothing to a flat built out of a drawing. Follow it in order; step 4 is the one that catches
-people out.
+From nothing to a flat built out of a drawing. Follow it in order. Steps 3 and 7 are the ones that
+catch people out, and both fail in the same misleading way — everything looks configured and
+nothing works.
 
 If you only want to know how to *use* it once it runs, that is
 [`DrawingWorkflow.md`](DrawingWorkflow.md). This page is about getting it installed.
@@ -94,6 +95,9 @@ The editor will usually have built it for you on first load. To build by hand, o
     -project="<full path>\<YourProject>.uproject" -waitmutex
 ```
 
+Build **Development**. That is what the validation gate builds and tests, and a different
+configuration is a different set of binaries — a fix built into one does not appear in the other.
+
 To run the plugin's own test suite — worth doing once, to confirm the install rather than to test
 your changes:
 
@@ -127,25 +131,47 @@ into the project folder, which is the file Claude Code reads to find it.
 To have it start with the editor instead of asking every time, tick *Auto Start Server* under
 **Editor Preferences > Plugins > Model Context Protocol**.
 
-Then, from the project folder:
+## 7. Approve the server — once, and everyone hits this
+
+From the project folder:
 
 ```bash
 claude
 ```
 
-Claude Code picks up `.mcp.json` automatically. Ask it to list its toolsets; `HouseForge` should be
-among them. If it is not, the server is not running or Claude was started somewhere other than the
-project folder.
+It will ask whether to trust the `unreal-mcp` server it found in `.mcp.json`. **Approve it, then
+`/exit`.** This is a one-time step per project and nothing works until you do it.
+
+Claude Code treats a project-scoped `.mcp.json` as untrusted input — the file arrives with a
+repository and can point anywhere — so it refuses to connect until a human says yes. Every other
+signal says healthy while this is outstanding: the port is open, the config is correct, the editor
+logged its listener. `claude mcp list` is what tells you the truth:
+
+```
+unreal-mcp: http://127.0.0.1:8000/mcp (HTTP) - ⏸ Pending approval (run `claude` to approve)
+```
+
+**Approval is stored per directory**, in `<folder>/.claude/settings.local.json`. Approving in some
+other folder does nothing for this one, so do it in the project folder.
+
+Then ask Claude to list its toolsets; `HouseForge` should be among them.
 
 Write `.mcp.json` through the menu entry rather than by hand — the port and transport have to match
 what the server actually bound, and a hand-written file that disagrees fails as "no tools found",
 which reads like the plugin is broken.
 
-## 7. Build something
+## 8. Build something
 
-Open **Tools > HouseForge Panel**, drop a drawing onto the **DRAWINGS** section, and ask Claude to
-read it and build the flat. (*Tools > Import Interior Drawings…* does the same thing through a file
-dialog, if you would rather pick than drag.)
+Open **Tools > HouseForge Panel**. Three sections, in the order you use them:
+
+1. **CLAUDE** — press *Check connection*. Green *Connected* means the whole chain works. Anything
+   else names which link is broken and what to do about it.
+2. **DRAWINGS** — drop the sheets in, or *Browse…*. Then **Generate**, and watch the trace.
+3. **SURFACES** — what everything is made of, once it is built.
+
+Generate hands the drawings to your own Claude Code, which reads them and builds the flat in this
+editor. Importing drawings and re-materialling do not need Claude; only Generate does, and only
+Generate is disabled without it.
 
 With no drawing of your own to hand, the reference 2BHK set is already in
 `Reference/Drawings/Sample2BHK/`. It is a real set — plan, furniture layout, reflected ceiling plan
@@ -167,9 +193,15 @@ is in it.
 **The panel opens but every section is empty.** Expected with no level open and no house built.
 SURFACES stays usable regardless, because finishes are assets rather than level state.
 
-**Claude connects but has no HouseForge tools.** In order: is the server running (step 6), did
-`Registered the HouseForge MCP toolset` appear at startup (step 3), was Claude started in the
-project folder.
+**Claude connects but has no HouseForge tools.** In order, and the first one is what it usually
+is: has the server been approved (step 7 — `claude mcp list` says `Pending approval` if not), is
+the server running (step 6), did `Registered the HouseForge MCP toolset` appear at startup
+(step 3), was Claude started in the project folder.
+
+**The panel says "Server not configured" and `.mcp.json` is nowhere.** The MCP plugin chooses
+where to write it from the ENGINE's install kind, not the project: on an engine built from source
+it writes to the workspace root instead of the project folder. Copy it into the project folder.
+*Tools > Start Unreal MCP Server* now checks for this and says so rather than reporting success.
 
 **PDF import says it cannot rasterise.** Step 5 has not been run, or it failed without a network.
 `hf-drawings.ps1 -SvgOnly` skips the venv entirely, but then PDF import stays unavailable.

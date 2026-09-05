@@ -347,75 +347,9 @@ bool SHFDrawingsPanel::PumpGeneration(float DeltaTime)
 
 void SHFDrawingsPanel::AppendTrace(const FString& JsonLine)
 {
-	TSharedPtr<FJsonObject> Object;
-	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
-
-	if (!FJsonSerializer::Deserialize(Reader, Object) || !Object.IsValid())
-	{
-		// Not JSON. Shown rather than swallowed - if the CLI printed a plain-text error, that line
-		// is the most useful thing on screen, and dropping it would leave the panel silent about
-		// the one thing that went wrong.
-		Trace += JsonLine + TEXT("\n");
-	}
-	else
-	{
-		const FString Type = Object->GetStringField(TEXT("type"));
-
-		if (Type == TEXT("assistant") || Type == TEXT("user"))
-		{
-			// The message text, which is Claude narrating what it is doing.
-			const TSharedPtr<FJsonObject>* Message = nullptr;
-			if (Object->TryGetObjectField(TEXT("message"), Message) && Message != nullptr)
-			{
-				const TArray<TSharedPtr<FJsonValue>>* Content = nullptr;
-				if ((*Message)->TryGetArrayField(TEXT("content"), Content) && Content != nullptr)
-				{
-					for (const TSharedPtr<FJsonValue>& Block : *Content)
-					{
-						const TSharedPtr<FJsonObject> BlockObject = Block->AsObject();
-						if (!BlockObject.IsValid())
-						{
-							continue;
-						}
-
-						const FString BlockType = BlockObject->GetStringField(TEXT("type"));
-						if (BlockType == TEXT("text"))
-						{
-							Trace += BlockObject->GetStringField(TEXT("text")) + TEXT("\n");
-						}
-						else if (BlockType == TEXT("tool_use"))
-						{
-							Trace += FString::Printf(TEXT("  [%s]\n"),
-								*BlockObject->GetStringField(TEXT("name")));
-						}
-					}
-				}
-			}
-		}
-		else if (Type == TEXT("result"))
-		{
-			const FString Result = Object->GetStringField(TEXT("result"));
-			if (!Result.IsEmpty())
-			{
-				Trace += TEXT("\n") + Result + TEXT("\n");
-			}
-
-			// NOT "money taken from your account", which is what this used to say.
-			//
-			// total_cost_usd is a computed API-equivalent price derived from token usage, and
-			// the CLI emits it identically whether it is authenticated by an API key or by a
-			// Pro/Max subscription. On a subscription nothing is charged at all - so telling an
-			// artist a build "used $0.87 of your Claude account" is false, and false in the
-			// direction that makes a reasonable person stop using the tool.
-			double Cost = 0.0;
-			if (Object->TryGetNumberField(TEXT("total_cost_usd"), Cost) && Cost > 0.0)
-			{
-				Trace += FString::Printf(
-					TEXT("\nDone - about $%.2f of tokens at API rates. On a Claude ")
-					TEXT("subscription that is what it would have cost, not a charge.\n"), Cost);
-			}
-		}
-	}
+	// The reading is pure and lives on FHFClaudeCli so it can be tested against captured
+	// CLI output; the widget keeps only the part that is genuinely about being a widget.
+	Trace += FHFClaudeCli::SummariseTraceLine(JsonLine, LastAssistantText);
 
 	if (TraceBox.IsValid())
 	{

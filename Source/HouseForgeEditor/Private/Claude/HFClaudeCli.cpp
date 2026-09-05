@@ -5,7 +5,10 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "Dom/JsonObject.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 FString FHFClaudeCli::FindExecutable()
 {
@@ -122,7 +125,8 @@ FString FHFClaudeCli::BuildGenerateArguments(const FString& DrawingSet, const FS
 	// not how - the CLI already carries the read/validate/correct/capture loop, and prescribing
 	// the steps here would fight it rather than help.
 	const FString Prompt = FString::Printf(
-		TEXT("Read the interior drawings in the '%s' set and build the flat in Unreal. ")
+		TEXT("Read the interior drawings in the drawing set named %s and build the flat in ")
+		TEXT("Unreal. ")
 		TEXT("Use the HouseForge tools: list the drawings, read them, write a House Spec, ")
 		TEXT("validate it, and apply it. If validation reports problems, correct the spec and ")
 		TEXT("validate again rather than building a spec with errors. When the level is built, ")
@@ -137,7 +141,12 @@ FString FHFClaudeCli::BuildGenerateArguments(const FString& DrawingSet, const FS
 
 	// One JSON object per line as it happens, which is what lets the panel show the trace live
 	// rather than a spinner and then a wall of text.
-	Arguments += TEXT("--output-format stream-json --include-partial-messages --verbose ");
+	//
+	// WITHOUT --include-partial-messages, which was here and did nothing. It adds one shape,
+	// {type:"stream_event", event:<raw SSE>}, which the trace does not read - so it bought no
+	// extra granularity and cost roughly ten times the byte volume on a pipe drained every 100 ms,
+	// multiplying the mid-character read boundaries the line splitter has to survive.
+	Arguments += TEXT("--output-format stream-json --verbose ");
 
 	Arguments += FString::Printf(TEXT("--mcp-config \"%s\" "), *ConfigPath);
 	Arguments += TEXT("--strict-mcp-config ");
@@ -153,6 +162,174 @@ FString FHFClaudeCli::NeutralWorkingDirectory()
 	const FString Directory = FPaths::Combine(FPaths::ProjectIntermediateDir(), TEXT("HouseForge"), TEXT("Cli"));
 	IFileManager::Get().MakeDirectory(*Directory, /*Tree*/ true);
 	return Directory;
+}
+
+FString FHFClaudeCli::SummariseTraceLine(const FString& JsonLine, FString& InOutLastAssistant)
+{
+	FString Out;
+	TSharedPtr<FJsonObject> Object;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
+
+	if (!FJsonSerializer::Deserialize(Reader, Object) || !Object.IsValid())
+	{
+		// Not JSON. Shown rather than swallowed - if the CLI printed a plain-text error, that line
+		// is the most useful thing on screen, and dropping it would leave the panel silent about
+		// the one thing that went wrong.
+		Out += JsonLine + TEXT("\n");
+	}
+	else
+	{
+		const FString Type = Object->GetStringField(TEXT("type"));
+
+		// ------------------------------------------------------------------- what went wrong
+		//
+		// FIRST, because these are the only events that explain a run in trouble, and the panel
+		// used to drop every one of them. An artist watching a generation that was failing every
+		// single MCP call saw the same picture as one that was succeeding: a list of tool names.
+		if (Type == TEXT("system"))
+		{
+			const FString Subtype = Object->GetStringField(TEXT("subtype"));
+
+			if (Subtype == TEXT("init"))
+			{
+				// The one event that says whether this run can work AT ALL: which MCP servers
+				// connected, and which tools survived --allowedTools. Everything the connection
+				// check guesses at beforehand, this reports as fact at generation time.
+				const TArray<TSharedPtr<FJsonValue>>* Servers = nullptr;
+				if (Object->TryGetArrayField(TEXT("mcp_servers"), Servers) && Servers != nullptr)
+				{
+					for (const TSharedPtr<FJsonValue>& Entry : *Servers)
+					{
+						const TSharedPtr<FJsonObject> Server = Entry->AsObject();
+						if (Server.IsValid())
+						{
+							Out += FString::Printf(TEXT("  MCP %s: %s\n"),
+								*Server->GetStringField(TEXT("name")),
+								*Server->GetStringField(TEXT("status")));
+						}
+					}
+				}
+
+				const TArray<TSharedPtr<FJsonValue>>* Tools = nullptr;
+				if (Object->TryGetArrayField(TEXT("tools"), Tools) && Tools != nullptr)
+				{
+					Out += FString::Printf(TEXT("  %d tool(s) available\n"), Tools->Num());
+				}
+			}
+			else if (Subtype == TEXT("api_error"))
+			{
+				Out += TEXT("  The API returned an error.\n");
+			}
+			else if (Subtype == TEXT("api_retry"))
+			{
+				// Without this, an overloaded API is minutes of silence under a "Building..."
+				// button, which is indistinguishable from a hang.
+				int32 Attempt = 0;
+				int32 MaxRetries = 0;
+				Object->TryGetNumberField(TEXT("attempt"), Attempt);
+				Object->TryGetNumberField(TEXT("max_retries"), MaxRetries);
+				Out += FString::Printf(TEXT("  Retrying (%d of %d)...\n"), Attempt, MaxRetries);
+			}
+			else if (Subtype == TEXT("notification"))
+			{
+				// Text the CLI wrote specifically to be shown to a human.
+				Out += TEXT("  ") + Object->GetStringField(TEXT("text")) + TEXT("\n");
+			}
+			else if (Subtype.StartsWith(TEXT("model_refusal")) || Subtype.StartsWith(TEXT("model_fallback"))
+				|| Subtype == TEXT("model_consent_fallback"))
+			{
+				// A refusal ends the run. Dropped, the trace simply stops with no reason given.
+				Out += TEXT("  ") + Object->GetStringField(TEXT("content")) + TEXT("\n");
+			}
+		}
+		else if (Type == TEXT("assistant") || Type == TEXT("user"))
+		{
+			const TSharedPtr<FJsonObject>* Message = nullptr;
+			if (Object->TryGetObjectField(TEXT("message"), Message) && Message != nullptr)
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Content = nullptr;
+				if ((*Message)->TryGetArrayField(TEXT("content"), Content) && Content != nullptr)
+				{
+					for (const TSharedPtr<FJsonValue>& Block : *Content)
+					{
+						const TSharedPtr<FJsonObject> BlockObject = Block->AsObject();
+						if (!BlockObject.IsValid())
+						{
+							continue;
+						}
+
+						const FString BlockType = BlockObject->GetStringField(TEXT("type"));
+						if (BlockType == TEXT("text"))
+						{
+							InOutLastAssistant = BlockObject->GetStringField(TEXT("text"));
+							Out += InOutLastAssistant + TEXT("\n");
+						}
+						else if (BlockType == TEXT("tool_use"))
+						{
+							Out += FString::Printf(TEXT("  [%s]\n"),
+								*BlockObject->GetStringField(TEXT("name")));
+						}
+						else if (BlockType == TEXT("tool_result"))
+						{
+							// THE PAYLOAD OF EVERY user EVENT IN AN AGENTIC RUN, and where a
+							// failed MCP call puts its error text. Only errors are shown: a
+							// successful tool result is usually a wall of spec JSON that would
+							// bury the narration, but a failure is the whole story.
+							bool bIsError = false;
+							if (BlockObject->TryGetBoolField(TEXT("is_error"), bIsError) && bIsError)
+							{
+								FString ErrorText;
+								if (!BlockObject->TryGetStringField(TEXT("content"), ErrorText))
+								{
+									ErrorText = TEXT("(no detail given)");
+								}
+								Out += TEXT("  FAILED: ") + ErrorText.Left(600) + TEXT("\n");
+							}
+						}
+					}
+				}
+				else
+				{
+					// A user event whose content is a plain string rather than an array. Silently
+					// skipped before, which is a whole event kind vanishing.
+					FString Plain;
+					if ((*Message)->TryGetStringField(TEXT("content"), Plain) && !Plain.IsEmpty())
+					{
+						Out += Plain + TEXT("\n");
+					}
+				}
+			}
+		}
+		else if (Type == TEXT("result"))
+		{
+			// ONLY IF IT IS NOT A REPEAT. On a successful run the result field IS the text of
+			// the last assistant block - the same string printed a moment earlier when that
+			// event came through - so appending it unconditionally showed Claude's closing
+			// summary twice at the bottom of every trace.
+			const FString Result = Object->GetStringField(TEXT("result"));
+			if (!Result.IsEmpty() && Result != InOutLastAssistant)
+			{
+				Out += TEXT("\n") + Result + TEXT("\n");
+			}
+
+			// NOT "money taken from your account", which is what this used to say.
+			//
+			// total_cost_usd is a computed API-equivalent price derived from token usage, and
+			// the CLI emits it identically whether it is authenticated by an API key or by a
+			// Pro/Max subscription. On a subscription nothing is charged at all - so telling an
+			// artist a build "used $0.87 of your Claude account" is false, and false in the
+			// direction that makes a reasonable person stop using the tool.
+			double Cost = 0.0;
+			if (Object->TryGetNumberField(TEXT("total_cost_usd"), Cost) && Cost > 0.0)
+			{
+				Out += FString::Printf(
+					TEXT("\nDone - about $%.2f of tokens at API rates. On a Claude ")
+					TEXT("subscription that is what it would have cost, not a charge.\n"), Cost);
+			}
+		}
+	}
+
+	return Out;
 }
 
 bool FHFClaudeCli::Start(

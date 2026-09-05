@@ -180,6 +180,24 @@ public:
 		FString& OutStdErr);
 
 	/**
+	 * Turns one line of --output-format stream-json into what an artist should see, or nothing.
+	 *
+	 * PURE, AND TESTED, because this is the ONLY window an artist has into a generation, and an
+	 * audit found it silently dropping every event that says a run is in trouble - the failed
+	 * tool_result carrying an MCP error, the api_retry that explains two minutes of silence, the
+	 * refusal that ends a run, and the init event that reports whether the server connected at all.
+	 * A run failing every single call produced the same picture as one succeeding: a list of tool
+	 * names. Untested, that was invisible; the panel looked busy either way.
+	 *
+	 * @param JsonLine            one whole line from the CLI
+	 * @param InOutLastAssistant  the previous assistant text, updated in place - the result event
+	 *                            repeats the final assistant block verbatim, so without this the
+	 *                            closing summary is printed twice
+	 * @return                    text to append, already newline-terminated, or empty
+	 */
+	static FString SummariseTraceLine(const FString& JsonLine, FString& InOutLastAssistant);
+
+	/**
 	 * A generation in flight.
 	 *
 	 * Long-running - minutes, not seconds - so it cannot be a blocking call on the game thread and
