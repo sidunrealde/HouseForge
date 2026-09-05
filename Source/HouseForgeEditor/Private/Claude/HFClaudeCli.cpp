@@ -164,7 +164,28 @@ FString FHFClaudeCli::BuildGenerateArguments(const FString& DrawingSet, const FS
 
 	Arguments += FString::Printf(TEXT("--mcp-config \"%s\" "), *ConfigPath);
 	Arguments += TEXT("--strict-mcp-config ");
-	Arguments += FString::Printf(TEXT("--allowedTools \"mcp__%s__*\" "), ServerName());
+	// READ AND GLOB ARE PART OF THE JOB, not a relaxation of the confinement.
+	//
+	// The MCP tools hand back PATHS, not content: ListDrawings returns the names of the sheets and
+	// CaptureTopDown returns where it wrote the plan PNG. So "read the drawings" and "compare the
+	// capture against the source" are both, mechanically, reading a file off disk. Without Read in
+	// the allow-list a generation cannot look at a single drawing - it is not confined, it is
+	// unable, and it went looking for a shell to get around it:
+	//
+	//   [PowerShell] FAILED: Permission to use PowerShell has been denied ... don't ask mode
+	//   [Bash]       FAILED: Permission to use Bash has been denied ... don't ask mode
+	//
+	// which is what a well-behaved agent does when the sanctioned route is missing, and exactly
+	// what --permission-mode is there to stop. The denials were right; the allow-list was wrong.
+	//
+	// Read is already confined to the run's working directory - Claude Code will not read outside
+	// its cwd tree - and that is the project folder, so this grants the drawings, the captures and
+	// the project, not the machine.
+	//
+	// WRITE IS STILL NOT HERE, and does not need to be: ValidateSpec and ApplySpec take the spec
+	// JSON inline over MCP, and SaveSpec writes it from inside the editor. The spec never touches
+	// the filesystem through the model.
+	Arguments += FString::Printf(TEXT("--allowedTools \"mcp__%s__*,Read,Glob\" "), ServerName());
 	Arguments += TEXT("--permission-mode dontAsk ");
 	Arguments += TEXT("--model opus");
 
