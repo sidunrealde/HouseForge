@@ -9,6 +9,7 @@
 #include "Actors/HFElementActors.h"
 #include "Actors/HFFittingActors.h"
 #include "Actors/HFFurnitureActors.h"
+#include "Actors/HFLightFixtureActor.h"
 #include "Actors/HFLooseFurnitureActors.h"
 #include "Actors/HFOpeningActor.h"
 #include "Actors/HFFanActor.h"
@@ -1657,6 +1658,23 @@ namespace
 		Actor.SetActorTransform(Hung);
 	}
 
+	void SeedLightFixture(const FHFFixtureContext& C, AHFElementActor& Element)
+	{
+		AHFLightFixtureActor& Actor = static_cast<AHFLightFixtureActor&>(Element);
+
+		// No ApplyProjectDefaults: there are no project figures for a luminaire. What a fitting is comes
+		// entirely out of what the drawing marked - see AHFLightFixtureActor::ParamsFor - and inventing
+		// a settings page for it would put a second answer next to the drawing.
+		Actor.ApplyFixture(*C.Fixture);
+
+		// THE FINISHED SOFFIT, NOT THE SLAB. A light fitting is screwed to the plasterboard, which is
+		// what FHFCeilingFit::RuleFor has said about this type all along (HangsFromSoffit) and what
+		// nothing had ever acted on. Resolved through SoffitZOver, so the fitting and the ceiling it
+		// hangs off cannot arrive at two different heights.
+		Actor.SetActorTransform(AHFLightFixtureActor::PlacementFor(
+			*C.Fixture, C.Room, C.AnchorWall, SoffitZOver(C, *C.Fixture)));
+	}
+
 	void SeedCeilingFan(const FHFFixtureContext& C, AHFElementActor& Element)
 	{
 		AHFFanActor& Actor = static_cast<AHFFanActor&>(Element);
@@ -1798,6 +1816,11 @@ namespace
 			// the pelmet. See AHFCurtainActor for why the two are not one actor.
 			{ EHFFixtureType::Curtain, AHFCurtainActor::StaticClass(),
 				TEXT("Curtain"), &SeedCurtain },
+
+			// AND THE LIGHT ITSELF, which had no row here at all: a LightFixture in a drawing became no
+			// actor, no mesh and no light, and the build report filed it under "not modelled yet".
+			{ EHFFixtureType::LightFixture, AHFLightFixtureActor::StaticClass(),
+				TEXT("Light"), &SeedLightFixture },
 
 			{ EHFFixtureType::CeilingFan, AHFFanActor::StaticClass(),
 				TEXT("Fan"), &SeedCeilingFan },

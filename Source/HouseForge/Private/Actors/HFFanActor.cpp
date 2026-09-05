@@ -2,6 +2,7 @@
 
 #include "Actors/HFFanActor.h"
 
+#include "Components/PointLightComponent.h"
 #include "Model/HFBuildDefaults.h"
 
 using namespace UE::Geometry;
@@ -50,6 +51,12 @@ void AHFFanActor::ApplyProjectDefaults(EHFFanKind Kind)
 	// exist. By the time the generator runs, everything it needs is already on the actor.
 	Fan = FHFFanKit::DefaultsFor(Kind);
 	FHFBuildDefaults::FromProjectSettings().Fan.ApplyTo(Fan);
+
+	// A ceiling fan is assumed to have a light kit and an extract is assumed not to, which is what
+	// the two things are. Seeded here rather than defaulted on the property so that re-seeding a fan
+	// that has been converted from one kind to the other converts its lighting too - the same reason
+	// every other figure in this function is re-seeded rather than merged.
+	bHasLightKit = (Kind == EHFFanKind::Ceiling);
 }
 
 FHFFanParams AHFFanActor::ParamsFor(const FHFFixture& Fixture)
@@ -257,7 +264,74 @@ FTransform AHFFanActor::PlacementFor(const FHFFixture& Fixture, const FHFRoom* R
 
 FDynamicMesh3 AHFFanActor::BuildMesh() const
 {
+	// Rebuilt with the fan, because where the lamp sits is a consequence of the rod length and the
+	// motor depth: a fan whose rod grew to clear a deeper ceiling would otherwise leave its light
+	// up inside the plasterboard it just came out of. Same argument, same shape, as
+	// AHFCeilingActor::BuildMesh and AHFLightFixtureActor::BuildMesh.
+	const_cast<AHFFanActor*>(this)->RebuildLights();
+
 	return FHFFanKit::Build(Fan).Shell;
+}
+
+int32 AHFFanActor::RebuildLights()
+{
+	// Destroyed and rebuilt rather than adjusted, so calling this twice cannot leave two lamps in
+	// one fan. See AHFCeilingActor::RebuildLights for the argument in full.
+	if (Light != nullptr)
+	{
+		Light->DestroyComponent();
+		Light = nullptr;
+	}
+
+	// An extract has no lamp in it, whatever the flag says. The flag is seeded per kind, but a fan
+	// converted to an extract by hand would keep it, and a bathroom extract that glows is a worse
+	// mistake than one that does not light the room.
+	if (!bHasLightKit || Fan.Kind != EHFFanKind::Ceiling)
+	{
+		return 0;
+	}
+
+	UPointLightComponent* Point = NewObject<UPointLightComponent>(this);
+	if (Point == nullptr)
+	{
+		return 0;
+	}
+
+	// UNDER THE MOTOR, on the axis. FHFFanParams::OverallDepth is the mounting surface to the
+	// bottom of the motor housing for a ceiling fan, and it is asked for rather than reassembled
+	// out of DropLength and MotorHeight here: that sum is exactly the kind of figure this plugin
+	// has watched drift when it was written down twice.
+	//
+	// A centimetre clear of the housing rather than on its face, so the lamp is in the room and not
+	// buried in the solid that is supposed to be shading it upwards.
+	constexpr double StandOff = 1.0;
+
+	const FVector Local(0.0, 0.0, Fan.OverallDepth() + StandOff);
+	Point->SetWorldLocation(GetActorTransform().TransformPosition(Local));
+
+	// Movable, because this actor regenerates on a property change and a static light would need a
+	// lighting build to notice.
+	Point->SetMobility(EComponentMobility::Movable);
+
+	Point->SetUseTemperature(true);
+	Point->SetTemperature(static_cast<float>(TemperatureKelvin));
+
+	Point->SetIntensityUnits(ELightUnits::Lumens);
+	Point->SetIntensity(static_cast<float>(FMath::Max(Lumens, 0.0)));
+	Point->SetAttenuationRadius(static_cast<float>(FMath::Max(AttenuationRadius, 1.0)));
+
+	// About the size of the lamp bowl a kit like this has, which is what softens the shadow the
+	// blades throw. A point source would strobe them into hard-edged spokes across the floor.
+	Point->SetSourceRadius(static_cast<float>(FMath::Max(Fan.MotorDiameter * 0.5 * 0.55, 1.0)));
+
+	Point->SetCastShadows(true);
+
+	Point->RegisterComponent();
+	Point->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+
+	Light = Point;
+
+	return 1;
 }
 
 void AHFFanActor::BuildParts(TArray<FHFMeshPart>& OutParts) const

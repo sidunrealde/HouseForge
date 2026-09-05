@@ -9,6 +9,8 @@
 #include "Capture/HFPlanSection.h"
 #include "Capture/HFSceneCapture.h"
 #include "Capture/HFViewingLight.h"
+#include "Lighting/HFInteriorLighting.h"
+#include "Walkthrough/HFWalkthroughStart.h"
 #include "Editor.h"
 #include "Editor/UnrealEdEngine.h"
 #include "Engine/Level.h"
@@ -367,10 +369,19 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 		return SpawnResult;
 	}
 
-	// A freshly created level has no lights in it at all, so the house that was just built is
-	// invisible until something puts one there. Idempotent, so building into an existing level -
-	// or building the same spec twice - does not accumulate suns.
-	EnsureViewingLight();
+	// A freshly created level has no sky and no exposure, so the house that was just built is
+	// invisible until something puts them there - and the fittings inside it, which DO now light
+	// themselves, would be a few bright pools in a black box. Idempotent, so building into an
+	// existing level, or building the same spec twice, does not accumulate suns.
+	//
+	// This is the real rig rather than the placeholder one, and it deletes the placeholder as it
+	// goes in. See FHFInteriorLighting.
+	EnsureInteriorLighting();
+
+	// And somewhere to stand. Without this, pressing Play on a freshly built flat drops the pawn at
+	// the world origin - which in these specs is a corner of the building, inside the masonry - and
+	// the flat that was just generated cannot be walked at all.
+	const bool bHasStart = EnsureWalkthroughStart();
 
 	// WHAT WAS BUILT, NOT WHAT WAS READ.
 	//
@@ -443,6 +454,14 @@ FHFOperationResult UHFEditorSubsystem::ApplySpecJson(const FString& SpecJson, co
 			TEXT("project's Content folder. Lumen cannot see a dynamic mesh, so BAKE BEFORE RENDERING ")
 			TEXT("(SetHouseRenderMode / the BakeHouse tool). Captures refuse an unbaked flat rather than ")
 			TEXT("drawing it, because the unbaked render is the BRIGHTER one and looks fine.");
+	}
+
+	// SAID OUT LOUD, because a level with no start point is a level that cannot be walked, and
+	// the only way to find that out otherwise is to press Play and land in the masonry.
+	if (!bHasStart)
+	{
+		Message += TEXT("\nNO WALKTHROUGH START WAS PLACED: nowhere in the entrance room had room ")
+			TEXT("for a person to stand. Pressing Play will drop the pawn at the world origin.");
 	}
 
 	if (Validation.HasWarnings())
@@ -1569,6 +1588,16 @@ int32 UHFEditorSubsystem::EnsureViewingLight()
 		return 0;
 	}
 
+	// REFUSED WHEN THE REAL RIG IS THERE. The placeholder is scaffolding for a level with no
+	// lighting design in it, and spawning it over one that has lighting design would put a second
+	// sun and a second unbound exposure volume in the level. Two unbound volumes do not average -
+	// they are resolved by priority, and the loser silently contributes nothing - so the symptom
+	// would be an exposure that ignores every change made to it.
+	if (!FHFInteriorLighting::FindIn(World).IsEmpty())
+	{
+		return 0;
+	}
+
 	return FHFViewingLight::EnsureIn(World).Num();
 }
 
@@ -1576,6 +1605,43 @@ int32 UHFEditorSubsystem::RemoveViewingLight()
 {
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	return (World != nullptr) ? FHFViewingLight::RemoveFrom(World) : 0;
+}
+
+int32 UHFEditorSubsystem::EnsureInteriorLighting()
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return 0;
+	}
+
+	return FHFInteriorLighting::EnsureIn(World).Num();
+}
+
+int32 UHFEditorSubsystem::RemoveInteriorLighting()
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	return (World != nullptr) ? FHFInteriorLighting::RemoveFrom(World) : 0;
+}
+
+bool UHFEditorSubsystem::EnsureWalkthroughStart()
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	// FROM THE HOUSE THAT IS STANDING, not from a spec passed in. A caller with a built level open
+	// should not have to hand over a second copy of something the level already holds, and the
+	// house actor's spec is the one the geometry was actually built from.
+	const AHFHouseActor* House = FindHouseActor();
+	if (House == nullptr)
+	{
+		return false;
+	}
+
+	return FHFWalkthroughStart::EnsureIn(World, House->Spec) != nullptr;
 }
 
 // ------------------------------------------------------------------------------- settings

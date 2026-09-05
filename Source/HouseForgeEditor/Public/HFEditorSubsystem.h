@@ -274,9 +274,11 @@ public:
 	/**
 	 * Makes sure the level has the placeholder viewing light, and returns how many actors it has.
 	 *
-	 * Idempotent, and called by both captures - there are no materials and no lighting milestone
-	 * yet, so without it a render comes back black and says nothing about the geometry in it. The
-	 * rig is scaffolding and is labelled as such in the outliner; milestone 11 replaces it.
+	 * SCAFFOLDING, AND SUPERSEDED. It exists for a level that has geometry in it and no lighting
+	 * design - which, now that EnsureInteriorLighting is what a build calls, means a level somebody
+	 * has deliberately stripped. Returns 0 without spawning anything when the real rig is present,
+	 * because two unbound exposure volumes and two suns in one level is a lighting fault that looks
+	 * like a rendering fault.
 	 */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Capture")
 	int32 EnsureViewingLight();
@@ -284,6 +286,34 @@ public:
 	/** Deletes the placeholder viewing light. Returns how many actors went. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Capture")
 	int32 RemoveViewingLight();
+
+	// ------------------------------------------------------------------------------ lighting
+
+	/**
+	 * Makes sure the level has the interior lighting rig: sun, sky, atmosphere and exposure.
+	 *
+	 * Idempotent, and called by every build. Removes the placeholder viewing light on its way in -
+	 * see FHFInteriorLighting, whose header sets out what it does differently and why.
+	 *
+	 * @return How many actors the rig has.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Lighting")
+	int32 EnsureInteriorLighting();
+
+	/** Deletes the interior lighting rig. Returns how many actors went. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Lighting")
+	int32 RemoveInteriorLighting();
+
+	/**
+	 * Makes sure the level has a walkthrough start point standing in the foyer.
+	 *
+	 * Idempotent, and it moves an existing one rather than adding a second. Placed from the house
+	 * actor's own spec, so it follows a foyer that has moved.
+	 *
+	 * @return True when there is now a start point somebody can press Play on.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge|Lighting")
+	bool EnsureWalkthroughStart();
 
 	/** The house actor in the current level, or nullptr. */
 	AHFHouseActor* FindHouseActor() const;
