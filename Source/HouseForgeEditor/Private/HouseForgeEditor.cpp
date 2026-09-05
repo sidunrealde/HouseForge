@@ -91,7 +91,10 @@ namespace
 
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 		GEngine->Exec(World, TEXT("ModelContextProtocol.StartServer"));
-		GEngine->Exec(World, TEXT("ModelContextProtocol.GenerateClientConfig"));
+		// The client to write a config for is REQUIRED. Called bare, the command prints its usage
+		// and writes nothing - which is what it had been doing since this menu entry was added.
+		// Nobody noticed, because a .mcp.json written by hand months earlier was already on disk.
+		GEngine->Exec(World, TEXT("ModelContextProtocol.GenerateClientConfig ClaudeCode"));
 
 		const FText Message = LOCTEXT("McpStarted",
 			"Started the Unreal MCP server and wrote .mcp.json into the project folder.\n\n"

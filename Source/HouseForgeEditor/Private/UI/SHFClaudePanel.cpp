@@ -53,7 +53,7 @@ void SHFClaudePanel::RunCheck()
 	if (GEngine != nullptr)
 	{
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-		GEngine->Exec(World, TEXT("ModelContextProtocol.GenerateClientConfig"));
+		GEngine->Exec(World, TEXT("ModelContextProtocol.GenerateClientConfig ClaudeCode"));
 	}
 
 	// ------------------------------------- 3. free health check: config, server, reachability
@@ -102,6 +102,15 @@ void SHFClaudePanel::RunCheck()
 			"Claude account - you only do this once.");
 		return;
 
+	case EHFClaudeState::PendingApproval:
+		GStatus.State = Health;
+		GStatus.Message = FString::Printf(
+			TEXT("The server is running, but Claude Code will not connect to it until you approve "
+				 "it once. Open a terminal in '%s', run 'claude', and approve the 'unreal-mcp' "
+				 "server it asks about. You only do this once for this project."),
+			*FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
+		return;
+
 	default:
 		break;
 	}
@@ -136,7 +145,7 @@ FReply SHFClaudePanel::OnStartServerClicked()
 	{
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 		GEngine->Exec(World, TEXT("ModelContextProtocol.StartServer"));
-		GEngine->Exec(World, TEXT("ModelContextProtocol.GenerateClientConfig"));
+		GEngine->Exec(World, TEXT("ModelContextProtocol.GenerateClientConfig ClaudeCode"));
 	}
 
 	// Re-checked immediately, so the button either clears the problem or proves it is something
@@ -164,6 +173,7 @@ FText SHFClaudePanel::StatusLine() const
 	case EHFClaudeState::CliNotFound:      return LOCTEXT("NoCli", "Claude Code not found");
 	case EHFClaudeState::ConfigMissing:    return LOCTEXT("NoConfig", "Server not configured");
 	case EHFClaudeState::ServerNotRunning: return LOCTEXT("NoServer", "Server not running");
+	case EHFClaudeState::PendingApproval:  return LOCTEXT("Pending", "Waiting for you to approve the server");
 	case EHFClaudeState::ToolsetMissing:   return LOCTEXT("NoToolset", "HouseForge toolset missing");
 	case EHFClaudeState::NotAuthenticated: return LOCTEXT("NoAuth", "Not signed in");
 	default:                               return LOCTEXT("Failed", "Could not check");
