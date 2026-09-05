@@ -78,6 +78,16 @@ EHFClaudeState FHFClaudeCli::ParseMcpList(const FString& Output, const FString& 
 		// On the WORDS, never the glyphs. The check marks and crosses are decorative and depend on
 		// the console's encoding; keying on them would break the first time this ran through a
 		// pipe that mangled them - and it would break by reporting a healthy server as broken.
+		// BEFORE the Connected test, because the failure string CONTAINS the success word:
+		// "! Connected - tools fetch failed" means the transport opened and tools/list did not,
+		// so the run would have no HouseForge tools at all. Tested first, this went green and
+		// enabled Generate into a session where every HouseForge call would fail - and a missing
+		// toolset is silent to the model, which answers from its own knowledge instead.
+		if (Trimmed.Contains(TEXT("tools fetch failed"), ESearchCase::IgnoreCase))
+		{
+			return EHFClaudeState::ToolsetMissing;
+		}
+
 		if (Trimmed.Contains(TEXT("Connected"), ESearchCase::IgnoreCase))
 		{
 			return EHFClaudeState::Ready;
@@ -152,6 +162,19 @@ bool FHFClaudeCli::Start(
 	FRun& OutRun,
 	FString& OutError)
 {
+	// RESET FIRST, and this is not tidiness.
+	//
+	// FRun is a long-lived member of the panel, so a second Generate re-uses the struct a finished
+	// run left behind. Finish() sets bFinished, and Start() used only to fill in the handles - so
+	// on every run after the first, Pump() returned immediately on the stale flag, PumpGeneration
+	// saw a finished run on its first tick and called Finish(), which TerminateProc'd the Claude
+	// process launched a hundred milliseconds earlier. The first generation in a session worked
+	// and every one after it killed itself, which reads as intermittent rather than as broken.
+	//
+	// PendingOut and StdErr carried over too, so the next run's trace opened with the last one's
+	// tail.
+	OutRun = FRun();
+
 	if (!FPlatformProcess::CreatePipe(OutRun.OutRead, OutRun.OutWrite)
 		|| !FPlatformProcess::CreatePipe(OutRun.ErrRead, OutRun.ErrWrite))
 	{

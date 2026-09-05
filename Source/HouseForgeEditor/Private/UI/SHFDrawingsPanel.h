@@ -80,6 +80,15 @@ private:
 	/** One row per set found under Reference/Drawings. */
 	TSharedPtr<SVerticalBox> SetList;
 
+	/**
+	 * How many drawing sets there actually are.
+	 *
+	 * Counted rather than read off SetList->NumSlots(), which is not the same number: when there
+	 * are no sets the list still gets a row saying so, so NumSlots() returns one and every "is
+	 * there anything to build" test passes on an empty drawings folder.
+	 */
+	int32 SetCount = 0;
+
 	// -------------------------------------------------------------------------------- generate
 
 	FReply OnGenerateClicked();

@@ -59,10 +59,27 @@ void SHFClaudePanel::RunCheck()
 	// ------------------------------------- 3. free health check: config, server, reachability
 	FString StdOut;
 	FString StdErr;
+	//
+	// FROM THE PROJECT DIRECTORY, and the directory is the whole check.
+	//
+	// This ran from a scratch directory once, to dodge the CLAUDE.md tokens a MODEL call loads.
+	// That call is gone - `mcp list` calls no model and costs nothing - so the optimisation had
+	// nothing left to optimise, and it had quietly become a deadlock: Claude Code stores a
+	// .mcp.json approval per directory, in <cwd>/.claude/settings.local.json under
+	// enabledMcpjsonServers. The panel told the artist to approve in the PROJECT folder, which
+	// wrote the project's record and did nothing for the scratch directory the check read. That
+	// directory could never become approved by following the panel's own instructions.
+	//
+	// Measured on one machine, same minute, only the directory differing:
+	//   project dir  -> unreal-mcp: ... - Failed to connect - ConnectionRefused   (approved)
+	//   scratch dir  -> unreal-mcp: ... - Pending approval (run `claude` to approve)
+	//
+	// Running here also makes the check agree with the thing it gates: a generation runs from the
+	// project directory too, so both now resolve the same configuration from the same place.
 	const int32 ReturnCode = FHFClaudeCli::RunToCompletion(
 		Executable,
 		TEXT("mcp list"),
-		FHFClaudeCli::NeutralWorkingDirectory(),
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()),
 		/*TimeoutSeconds*/ 60.0,
 		StdOut,
 		StdErr);

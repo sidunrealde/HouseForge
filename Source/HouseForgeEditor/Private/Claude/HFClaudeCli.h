@@ -44,7 +44,22 @@ enum class EHFClaudeState : uint8
 	/** Server up, but HouseForge never registered with the ToolsetRegistry - a plugin fault. */
 	ToolsetMissing,
 
-	/** Everything is up but the CLI has no usable Claude account. They log in once, in a terminal. */
+	/**
+	 * THE MCP SERVER wants an OAuth login - not the Claude account.
+	 *
+	 * `claude mcp list` reports "Needs authentication" per server, when connecting to THAT server
+	 * returns needs-auth. It says nothing about whether the artist is signed in, and the fix is
+	 * `claude mcp login <server>` rather than `claude`.
+	 *
+	 * Named carefully because the obvious reading is the wrong one, and acting on the wrong one
+	 * sends an artist to re-log-in an account that was never the problem. HouseForge's own server
+	 * is bare local HTTP with no OAuth, so in practice this fires for somebody else's server.
+	 *
+	 * AND THE GAP IT LEAVES, said out loud: nothing in the cascade detects a signed-OUT CLI.
+	 * `mcp list` needs no account, so a machine with no usable Claude account still reports Ready.
+	 * The failure surfaces as raw stderr in the trace after Generate is pressed. Closing that would
+	 * take a model call, which is the one thing the cascade is built to avoid.
+	 */
 	NotAuthenticated,
 
 	/** Something else went wrong; carry the raw text rather than inventing a diagnosis. */
@@ -79,8 +94,14 @@ struct FHFClaudeStatus
  * answers from its own knowledge. A missing MCP server is SILENT to the model.
  *
  * `claude mcp list` health-checks every configured server, costs nothing, calls no model, and
- * names the failure outright. So the cascade runs the free checks first and only reaches the paid
- * one for the single question the free checks cannot answer - whether there is a usable account.
+ * names the failure outright. So the cascade is free the whole way down: find the executable,
+ * write the config, read the health check, and ask OURSELVES whether the toolset registered.
+ *
+ * There is no paid step, and an earlier version of this comment promised one - "only reaches the
+ * paid one for the single question the free checks cannot answer, whether there is a usable
+ * account". Nothing in the cascade tests the account. See EHFClaudeState::NotAuthenticated for
+ * what that leaves uncovered; the honest position is that the gap exists rather than that a step
+ * covers it.
  */
 class FHFClaudeCli
 {
@@ -123,13 +144,21 @@ public:
 	 *                         unknown set, on someone else's machine, reaching things this plugin
 	 *                         never sanctioned.
 	 *
-	 *   --allowedTools        Without it, the run carries Claude Code's own Bash, Edit and Write
-	 *                         alongside ours - a generation that can edit files and run commands.
-	 *                         With it, the process can build houses and nothing else.
+	 *   --allowedTools        The allow-list. Names what may run WITHOUT being asked about.
 	 *
-	 * --permission-mode is set too, because a headless run that stops to ask permission nobody can
-	 * answer does not fail: it hangs, which reads as a crash. The allowlist above is what actually
-	 * bounds the run; this only stops it blocking.
+	 *   --permission-mode     What happens to everything NOT on that list. This is the flag that
+	 *                         actually denies Bash, Edit and Write - and it also stops a headless
+	 *                         run blocking on a prompt nobody can answer, which does not fail but
+	 *                         hangs, and reads as a crash.
+	 *
+	 * THE TWO ARE A PAIR, and an earlier version of this comment had it backwards: it credited
+	 * --allowedTools with removing the built-in tools. It does not. An allow-list is not a tool
+	 * roster - Bash, Edit and Write stay in the model's tool set and can still be CALLED; what
+	 * decides whether the call is permitted is the mode. So --allowedTools alone, with a mode that
+	 * asks or allows, would confine nothing.
+	 *
+	 * That error had reached the test as well, which asserted the wrong flag was the guard and
+	 * would therefore have passed with the real guard deleted.
 	 */
 	static FString BuildGenerateArguments(const FString& DrawingSet, const FString& ConfigPath);
 
