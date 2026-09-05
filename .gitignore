@@ -78,3 +78,16 @@ DerivedDataCache/*
 # Created on first run so nothing is installed globally; never committed.
 Scripts/.venv/
 Scripts/__pycache__/
+
+# Drawing sets an artist imports through the DRAWINGS panel.
+#
+# Reference/Drawings is where the panel copies imported sheets to, and it is also where the
+# plugin's own reference set lives - so every artist who used the panel dirtied the plugin repo
+# with their client's floor plans, and the validation gate refused to merge until they were dealt
+# with. Their drawings are their work, not the plugin's.
+#
+# Tracked sets are unaffected: git ignores nothing it already tracks, so Sample2BHK stays in.
+# Adding a new reference set on purpose takes `git add -f`, which is the right amount of friction
+# for a decision that ships someone's floor plan to a public repo.
+Reference/Drawings/*/
+!Reference/Drawings/Sample2BHK/
