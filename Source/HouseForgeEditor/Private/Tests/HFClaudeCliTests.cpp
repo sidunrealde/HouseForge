@@ -175,6 +175,93 @@ bool FHFClaudeGenerateArgumentsTest::RunTest(const FString& Parameters)
 }
 
 /**
+ * WHAT THE TRACE MUST NEVER DROP AGAIN.
+ *
+ * The trace is the ONLY window an artist has into a generation, and an audit found it reading
+ * three event shapes out of a dozen. Everything that says a run is in TROUBLE fell off the end of
+ * the chain: the failed tool_result carrying an MCP error, the api_retry that explains two minutes
+ * of silence, the refusal that ends a run without a word, and the init event that reports whether
+ * the server connected at all.
+ *
+ * The consequence was not a missing detail. A generation failing every single MCP call produced
+ * exactly the same picture as one succeeding - a list of tool names - so the panel could not tell
+ * an artist the one thing they needed to know, and looked busy while doing it.
+ *
+ * Fixtures are the shapes claude 2.1.x actually emits in --output-format stream-json.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFClaudeTraceTest,
+	"HouseForge.Claude.TheTraceShowsWhenARunIsInTrouble", HF_TEST_FLAGS)
+
+bool FHFClaudeTraceTest::RunTest(const FString& Parameters)
+{
+	FString Last;
+
+	// ------------------------------------------------------------------- a failing MCP call
+	//
+	// THE ONE THAT MATTERS MOST. Every "user" event in an agentic run is tool_result blocks, and a
+	// failed call puts its reason right there. Dropped, the artist sees the tool name that was
+	// called and nothing about it having failed.
+	const FString Failure = FHFClaudeCli::SummariseTraceLine(
+		TEXT(R"({"type":"user","message":{"content":[{"type":"tool_result","is_error":true,)")
+		TEXT(R"("content":"ValidationFailed: W_North overlaps W_East"}]}})"), Last);
+
+	TestTrue(TEXT("A failed tool call says so"), Failure.Contains(TEXT("FAILED")));
+	TestTrue(TEXT("...and carries the reason the artist needs"),
+		Failure.Contains(TEXT("W_North overlaps W_East")));
+
+	// A SUCCESSFUL result is deliberately NOT shown: it is usually a wall of spec JSON that would
+	// bury the narration it sits between.
+	const FString Success = FHFClaudeCli::SummariseTraceLine(
+		TEXT(R"({"type":"user","message":{"content":[{"type":"tool_result","content":"{...spec...}"}]}})"), Last);
+	TestTrue(TEXT("A successful tool result does not bury the trace"), Success.IsEmpty());
+
+	// --------------------------------------------------------------- silence that has a reason
+	const FString Retry = FHFClaudeCli::SummariseTraceLine(
+		TEXT(R"({"type":"system","subtype":"api_retry","attempt":2,"max_retries":5})"), Last);
+	TestTrue(TEXT("A retry explains the pause instead of leaving it silent"),
+		Retry.Contains(TEXT("2")) && Retry.Contains(TEXT("5")));
+
+	// A refusal ENDS the run. Dropped, the trace simply stops with no reason on screen.
+	const FString Refusal = FHFClaudeCli::SummariseTraceLine(
+		TEXT(R"({"type":"system","subtype":"model_refusal_no_fallback","content":"Declined the request."})"), Last);
+	TestTrue(TEXT("A refusal that ends the run is shown"), Refusal.Contains(TEXT("Declined")));
+
+	// ------------------------------------------------- whether this run could ever have worked
+	//
+	// The init event is the only report of GROUND TRUTH: what the connection check guesses at
+	// beforehand, this states at generation time.
+	const FString Init = FHFClaudeCli::SummariseTraceLine(
+		TEXT(R"({"type":"system","subtype":"init","mcp_servers":[{"name":"unreal-mcp",)")
+		TEXT(R"("status":"failed"}],"tools":["a","b"]})"), Last);
+
+	TestTrue(TEXT("The init event names the server"), Init.Contains(TEXT("unreal-mcp")));
+	TestTrue(TEXT("...and its real status, even when that status is failure"),
+		Init.Contains(TEXT("failed")));
+
+	// ------------------------------------------------------------------ narration, and no echo
+	const FString Said = FHFClaudeCli::SummariseTraceLine(
+		TEXT(R"({"type":"assistant","message":{"content":[{"type":"text","text":"Reading the ceiling plan."}]}})"), Last);
+	TestTrue(TEXT("Claude's narration reaches the artist"), Said.Contains(TEXT("Reading the ceiling plan")));
+
+	// The result event repeats the final assistant block verbatim, so printing it unconditionally
+	// showed the closing summary twice at the bottom of every trace.
+	const FString Echo = FHFClaudeCli::SummariseTraceLine(
+		TEXT(R"({"type":"result","result":"Reading the ceiling plan."})"), Last);
+	TestFalse(TEXT("The result event does not repeat what was just said"),
+		Echo.Contains(TEXT("Reading the ceiling plan")));
+
+	// ----------------------------------------------------------------- and never silent on junk
+	//
+	// A line that is not JSON is the CLI failing outside its own protocol, which is exactly when
+	// the panel must not go quiet.
+	TestTrue(TEXT("A non-JSON line is shown rather than swallowed"),
+		FHFClaudeCli::SummariseTraceLine(TEXT("bash: claude: command not found"), Last)
+			.Contains(TEXT("command not found")));
+
+	return true;
+}
+
+/**
  * FINDING THE CLI AT ALL.
  *
  * Asserted as a property rather than as a path: whether Claude Code is installed on the machine

@@ -120,4 +120,12 @@ private:
 
 	/** The set the running generation was started on, for the completion message. */
 	FString RunningSet;
+
+	/**
+	 * The last thing Claude said, so the result event does not print it a second time.
+	 *
+	 * On a successful run the CLI's result field is literally the final assistant text block, so
+	 * the trace ended with the same paragraph twice.
+	 */
+	FString LastAssistantText;
 };
