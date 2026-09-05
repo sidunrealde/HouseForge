@@ -9,6 +9,7 @@
 #include "Capture/HFPlanSection.h"
 #include "Capture/HFSceneCapture.h"
 #include "Capture/HFViewingLight.h"
+#include "Lighting/HFInteriorLighting.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Editor.h"
 #include "Engine/DirectionalLight.h"
@@ -159,12 +160,34 @@ namespace HouseForgeCapture
 		return Count;
 	}
 
+	/** How many of a class the PLACEHOLDER rig owns - not how many the level has. */
 	int32 CountOfClass(UWorld* World, UClass* Class)
 	{
 		int32 Count = 0;
 		for (AActor* Actor : FHFViewingLight::FindIn(World))
 		{
 			if (IsValid(Actor) && Actor->IsA(Class))
+			{
+				++Count;
+			}
+		}
+		return Count;
+	}
+
+	/**
+	 * How many of a class the WHOLE LEVEL has, whoever owns them.
+	 *
+	 * The distinction is the whole point at the handover between the two rigs. The question there
+	 * is not "does the placeholder still have a sun" - it should not - but "did the level end up
+	 * with TWO suns because both rigs are in it at once". A count scoped to one rig cannot see
+	 * that failure at all: it would read zero and pass while the level was doubly lit.
+	 */
+	int32 CountInLevel(UWorld* World, UClass* Class)
+	{
+		int32 Count = 0;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (IsValid(*It) && It->IsA(Class))
 			{
 				++Count;
 			}
@@ -283,6 +306,21 @@ bool FHFCapturePlanIsASectionTest::RunTest(const FString& Parameters)
  * The failure this guards is cumulative and quiet: every capture ensures the rig exists, so a rig
  * that was found unreliably would add a sun per screenshot. Ten captures in and the flat is white,
  * with nothing in the level obviously wrong - just ten identical actors in a folder nobody opens.
+ *
+ *
+ * REWRITTEN BY THE LIGHTING MILESTONE, and the part that changed is the premise rather than the
+ * mechanism. This test used to build a house and assert that BUILDING spawned the placeholder.
+ * Applying a spec now installs the real rig (FHFInteriorLighting) instead, and the real rig
+ * deletes the placeholder on its way in - so the old premise asserted a contract that was
+ * deliberately replaced, and it failed the moment that replacement landed.
+ *
+ * The placeholder still has a job, which is what this now covers: lighting a level that has NO
+ * lighting design in it, so a capture of one is not black. Its idempotence, its survival across a
+ * geometry rebuild and its one-call removal are all still load-bearing for that job.
+ *
+ * What the level looks like once it IS lit belongs to
+ * HouseForge.Lighting.TheLevelGetsASkyAndAnInteriorExposure, which owns the real rig's contract
+ * including the refusal that stops the placeholder coming back on top of it.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCaptureLightSpawnsOnceTest,
 	"HouseForge.Capture.ThePlaceholderLightSpawnsOnce", HF_TEST_FLAGS)
@@ -298,19 +336,34 @@ bool FHFCaptureLightSpawnsOnceTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// Start from nothing, so this measures spawning rather than whatever an earlier test left.
-	Editor->RemoveViewingLight();
-	TestEqual(TEXT("The level starts with no placeholder light"), FHFViewingLight::FindIn(World).Num(), 0);
-
 	AHFHouseActor* House = BuildFlat(*this);
 	if (!TestNotNull(TEXT("The test flat was built"), House))
 	{
 		return false;
 	}
 
-	// Building lights the house, because a new level has nothing in it to see by.
-	const int32 AfterBuild = FHFViewingLight::FindIn(World).Num();
-	TestTrue(TEXT("Building a house lights it"), AfterBuild > 0);
+	// AN UNLIT LEVEL, which is the only state the placeholder is for. Applying the spec above put
+	// the real rig in; both come out so what follows measures the placeholder alone rather than
+	// whatever an earlier test left, and so EnsureViewingLight is not refused by the real rig's
+	// presence - a refusal here would read as "the placeholder is broken" when it is working.
+	Editor->RemoveInteriorLighting();
+	Editor->RemoveViewingLight();
+	TestEqual(TEXT("The level starts with no placeholder light"), FHFViewingLight::FindIn(World).Num(), 0);
+	TestEqual(TEXT("...and no real rig either"), FHFInteriorLighting::FindIn(World).Num(), 0);
+
+	// THE LEVEL'S OWN SUN IS NOT ZERO, and pretending otherwise is how the first version of this
+	// assertion failed. These tests run in whatever map the editor has open, which is a real level
+	// with its own directional light in it - measured, not assumed: with both rigs removed and
+	// this test run on its own, the level still reports one. So the handover below is checked
+	// against THIS baseline rather than against nought, which is what makes it a claim about what
+	// HouseForge added rather than a claim about the map it was dropped into.
+	const int32 SunsWithNoRig = CountInLevel(World, ADirectionalLight::StaticClass());
+	AddInfo(FString::Printf(TEXT("The level carries %d sun(s) of its own."), SunsWithNoRig));
+
+	// A capture of an unlit level asks for this, so that the image is not black.
+	const int32 AfterEnsure = Editor->EnsureViewingLight();
+	TestTrue(TEXT("The placeholder lights an unlit level"), AfterEnsure > 0);
+	TestEqual(TEXT("...and that is what is in the level"), FHFViewingLight::FindIn(World).Num(), AfterEnsure);
 
 	TestEqual(TEXT("Exactly one sun"), CountOfClass(World, ADirectionalLight::StaticClass()), 1);
 	TestEqual(TEXT("Exactly one sky light"), CountOfClass(World, ASkyLight::StaticClass()), 1);
@@ -320,24 +373,39 @@ bool FHFCaptureLightSpawnsOnceTest::RunTest(const FString& Parameters)
 	Editor->EnsureViewingLight();
 	Editor->EnsureViewingLight();
 	TestEqual(TEXT("Asking for the light again does not add a second one"),
-		FHFViewingLight::FindIn(World).Num(), AfterBuild);
+		FHFViewingLight::FindIn(World).Num(), AfterEnsure);
 
 	// A geometry rebuild destroys and respawns element actors. The rig must not be caught up in it.
 	House->BuildGeometry();
 	TestEqual(TEXT("Rebuilding the geometry does not duplicate the light"),
-		FHFViewingLight::FindIn(World).Num(), AfterBuild);
-
-	// And re-applying the spec into the same level, which is the other way a house gets rebuilt.
-	BuildFlat(*this);
-	TestEqual(TEXT("Re-applying the spec does not duplicate the light"),
-		FHFViewingLight::FindIn(World).Num(), AfterBuild);
+		FHFViewingLight::FindIn(World).Num(), AfterEnsure);
 
 	TestEqual(TEXT("Still exactly one sun"), CountOfClass(World, ADirectionalLight::StaticClass()), 1);
 
-	// It comes out in one call, which is what the lighting milestone will do to it.
+	// It comes out in one call, which is what the real rig does to it.
 	const int32 Removed = Editor->RemoveViewingLight();
-	TestEqual(TEXT("Removing the rig removes all of it"), Removed, AfterBuild);
+	TestEqual(TEXT("Removing the rig removes all of it"), Removed, AfterEnsure);
 	TestEqual(TEXT("And leaves none of it behind"), FHFViewingLight::FindIn(World).Num(), 0);
+
+	// ------------------------------------------------------------------------------ THE HANDOVER
+	//
+	// The one thing that genuinely changed, asserted rather than left implied. Re-applying a spec
+	// installs the real rig, and the placeholder does NOT survive alongside it. Two unbound
+	// exposure volumes do not average - they resolve by priority and the loser contributes nothing
+	// - so a level carrying both would have an exposure that ignores every change made to it.
+	Editor->EnsureViewingLight();
+	TestTrue(TEXT("A placeholder is in place before the handover"), FHFViewingLight::FindIn(World).Num() > 0);
+
+	BuildFlat(*this);
+
+	TestTrue(TEXT("Applying a spec installs the real rig"), FHFInteriorLighting::FindIn(World).Num() > 0);
+	TestEqual(TEXT("...and takes the placeholder out with it"), FHFViewingLight::FindIn(World).Num(), 0);
+	// ONE sun added by HouseForge, not two. The failure this rules out is both rigs sitting in the
+	// level at once - which would also mean two unbound exposure volumes, and those do not average:
+	// they resolve by priority and the loser contributes nothing, so the symptom would be an
+	// exposure that silently ignores every change made to it.
+	TestEqual(TEXT("The handover leaves one HouseForge sun in the level, not two"),
+		CountInLevel(World, ADirectionalLight::StaticClass()), SunsWithNoRig + 1);
 
 	return true;
 }

@@ -8,6 +8,8 @@
 #include "Model/HFTypes.h"
 #include "HFFanActor.generated.h"
 
+class UPointLightComponent;
+
 /**
  * A fan in the level, whose blades actually turn.
  *
@@ -172,6 +174,75 @@ public:
 
 	/** Part id of the spinning assembly: motor housing and blades. */
 	static FName RotorPartId() { return FHFFanKit::RotorPartId; }
+
+	/**
+	 * Puts the light kit under the motor, and takes away the one that was there.
+	 *
+	 * ## Why a fan carries a light at all
+	 *
+	 * Because in these flats it is very often the only thing on the ceiling. Every bedroom in the
+	 * reference 2BHK has a fan; the light fittings are drawn on the electrical layer, and a spec
+	 * that has not had that layer read into it produces a bedroom whose ceiling has a fan on it and
+	 * nothing else. Lit only by a cove or a run of downlights around the edge of the room, the
+	 * middle of that room is dark - and the fan hanging in it is the fitting a person would reach
+	 * for the switch of.
+	 *
+	 * A ceiling fan with an integral light kit is a real and common product, so this is not an
+	 * invention. It is a default rather than a certainty, which is why bHasLightKit exists and why
+	 * a drawing that does mark separate light fixtures can be built with it switched off.
+	 *
+	 * ## What is NOT done here, and why
+	 *
+	 * No geometry. The lamp is a light component placed just under the motor housing, and the
+	 * housing is what stands in for the lamp glass. Modelling a separate bowl would change the mesh
+	 * of every fan in the flat - its volume, its bounds, its part fingerprints - and the fan is
+	 * finished, tested work from the fixtures milestone. That is a change for whoever extends the
+	 * fixture kit, not for the lighting pass, and doing it here would have meant re-recording a
+	 * dozen measured figures to add a light.
+	 *
+	 * ## Extracts get nothing
+	 *
+	 * A bathroom extract has no lamp in it. Called on one, this removes any light and returns 0.
+	 *
+	 * Idempotent, and safe on a hand-edited actor: it does not touch the mesh. See
+	 * AHFLightFixtureActor for the same argument at greater length.
+	 *
+	 * @return How many lights the fan now has: 1, or 0 when there is no kit or it is switched off.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "HouseForge")
+	int32 RebuildLights();
+
+	/**
+	 * Whether this fan has a light kit in it. Seeded true for a ceiling fan, false for an extract.
+	 *
+	 * Seeded rather than fixed, so that a flat whose drawing DOES carry its light fixtures can have
+	 * the fans switched back to being only fans.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting")
+	bool bHasLightKit = false;
+
+	/**
+	 * Output of the kit, in lumens.
+	 *
+	 * A fan light kit is a modest thing - 12 W or so, around 900 lm - and deliberately dimmer than
+	 * the 1600 lm AHFLightFixtureActor gives a dedicated ceiling panel. It is the lamp that comes
+	 * bolted to a fan rather than the one that lights the room properly, and it should not read as
+	 * brighter than a fitting somebody chose.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "0.0"))
+	double Lumens = 900.0;
+
+	/** Colour temperature in kelvin. 3000 is the warm white these flats are lit with. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "1700.0", ClampMax = "12000.0"))
+	double TemperatureKelvin = 3000.0;
+
+	/** How far the light is allowed to reach, in centimetres. A hard cull, not a falloff. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HouseForge|Lighting", meta = (ClampMin = "0.0"))
+	double AttenuationRadius = 900.0;
+
+	/** The light this fan owns, so a rebuild can take it away again. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HouseForge|Lighting")
+	TObjectPtr<UPointLightComponent> Light;
 
 protected:
 	virtual UE::Geometry::FDynamicMesh3 BuildMesh() const override;
