@@ -15,6 +15,16 @@ enum class EHFClaudeState : uint8
 	/** Not checked yet. */
 	Unknown,
 
+	/**
+	 * A check is in flight.
+	 *
+	 * Modelled rather than left as Unknown, because the check takes seconds and it asks the CLI a
+	 * question only this editor can answer - see the note on SHFClaudePanel. A panel that still
+	 * reads "Not checked yet" while a check runs invites a second click, and the second click is
+	 * exactly what the first one is waiting on.
+	 */
+	Checking,
+
 	/** Everything works: CLI present, server reachable, toolset registered, account authenticated. */
 	Ready,
 

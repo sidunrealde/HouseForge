@@ -32,8 +32,27 @@ const FHFClaudeStatus& SHFClaudePanel::LastStatus()
 	return GStatus;
 }
 
-void SHFClaudePanel::RunCheck()
+SHFClaudePanel::~SHFClaudePanel()
 {
+	if (CheckHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(CheckHandle);
+	}
+	FHFClaudeCli::Finish(CheckRun);
+}
+
+bool SHFClaudePanel::IsCheckIdle() const
+{
+	return !CheckRun.IsValid() || CheckRun.bFinished;
+}
+
+void SHFClaudePanel::BeginCheck()
+{
+	if (!IsCheckIdle())
+	{
+		return;
+	}
+
 	// ------------------------------------------------------------------- 1. is the CLI there
 	const FString Executable = FHFClaudeCli::FindExecutable();
 	if (Executable.IsEmpty())
@@ -57,33 +76,55 @@ void SHFClaudePanel::RunCheck()
 	}
 
 	// ------------------------------------- 3. free health check: config, server, reachability
-	FString StdOut;
-	FString StdErr;
 	//
-	// FROM THE PROJECT DIRECTORY, and the directory is the whole check.
-	//
-	// This ran from a scratch directory once, to dodge the CLAUDE.md tokens a MODEL call loads.
-	// That call is gone - `mcp list` calls no model and costs nothing - so the optimisation had
-	// nothing left to optimise, and it had quietly become a deadlock: Claude Code stores a
-	// .mcp.json approval per directory, in <cwd>/.claude/settings.local.json under
-	// enabledMcpjsonServers. The panel told the artist to approve in the PROJECT folder, which
-	// wrote the project's record and did nothing for the scratch directory the check read. That
-	// directory could never become approved by following the panel's own instructions.
-	//
-	// Measured on one machine, same minute, only the directory differing:
-	//   project dir  -> unreal-mcp: ... - Failed to connect - ConnectionRefused   (approved)
-	//   scratch dir  -> unreal-mcp: ... - Pending approval (run `claude` to approve)
-	//
-	// Running here also makes the check agree with the thing it gates: a generation runs from the
-	// project directory too, so both now resolve the same configuration from the same place.
-	const int32 ReturnCode = FHFClaudeCli::RunToCompletion(
-		Executable,
-		TEXT("mcp list"),
-		FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()),
-		/*TimeoutSeconds*/ 60.0,
-		StdOut,
-		StdErr);
+	// SPAWNED, NOT WAITED FOR. See the note on the class: this command health-checks the MCP
+	// server by connecting to it, and that server is this editor. Waiting here stops the game
+	// thread, the HTTP listener stops answering, and the check times out against itself.
+	CheckDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	CheckOutput.Reset();
 
+	FString Error;
+	if (!FHFClaudeCli::Start(Executable, TEXT("mcp list"), CheckDirectory, CheckRun, Error))
+	{
+		GStatus.State = EHFClaudeState::Failed;
+		GStatus.Message = Error;
+		return;
+	}
+
+	GStatus.State = EHFClaudeState::Checking;
+	GStatus.Message = TEXT("Asking Claude Code what it can see...");
+
+	CheckHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateSP(this, &SHFClaudePanel::PumpCheck), 0.1f);
+}
+
+bool SHFClaudePanel::PumpCheck(float DeltaTime)
+{
+	TArray<FString> Lines;
+	FHFClaudeCli::Pump(CheckRun, Lines);
+
+	for (const FString& Line : Lines)
+	{
+		CheckOutput += Line + TEXT("\n");
+	}
+
+	if (!CheckRun.bFinished)
+	{
+		return true;
+	}
+
+	const FString StdErr = CheckRun.StdErr;
+	const int32 ReturnCode = CheckRun.ReturnCode;
+
+	FHFClaudeCli::Finish(CheckRun);
+	CheckHandle.Reset();
+
+	ConcludeCheck(CheckOutput, StdErr, ReturnCode);
+	return false;
+}
+
+void SHFClaudePanel::ConcludeCheck(const FString& StdOut, const FString& StdErr, const int32 ReturnCode)
+{
 	if (ReturnCode != 0 && StdOut.IsEmpty())
 	{
 		GStatus.State = EHFClaudeState::Failed;
@@ -91,6 +132,29 @@ void SHFClaudePanel::RunCheck()
 			TEXT("Claude Code could not be run. It said: %s"),
 			*(StdErr.IsEmpty() ? FString(TEXT("nothing")) : StdErr.TrimStartAndEnd()));
 		return;
+	}
+
+	// LOGGED, because this is otherwise a black box - and it is what found the deadlock above.
+	UE_LOG(LogHouseForgeEditor, Log,
+		TEXT("Claude check: 'mcp list' in '%s' returned %d.\n")
+		TEXT("--- stdout ---\n%s\n--- stderr ---\n%s\n---"),
+		*CheckDirectory, ReturnCode,
+		StdOut.IsEmpty() ? TEXT("(nothing)") : *StdOut,
+		StdErr.IsEmpty() ? TEXT("(nothing)") : *StdErr);
+
+	// Kept, so the Failed case below can SHOW what it could not read rather than describing it.
+	FString ServerLine;
+	{
+		TArray<FString> Lines;
+		StdOut.ParseIntoArrayLines(Lines, true);
+		for (const FString& Line : Lines)
+		{
+			if (Line.TrimStartAndEnd().StartsWith(FString(FHFClaudeCli::ServerName()) + TEXT(":")))
+			{
+				ServerLine = Line.TrimStartAndEnd();
+				break;
+			}
+		}
 	}
 
 	const EHFClaudeState Health = FHFClaudeCli::ParseMcpList(StdOut, FHFClaudeCli::ServerName());
@@ -115,8 +179,8 @@ void SHFClaudePanel::RunCheck()
 	case EHFClaudeState::NotAuthenticated:
 		GStatus.State = Health;
 		GStatus.Message = TEXT(
-			"Claude Code needs signing in. Open a terminal, run 'claude', and log in with your "
-			"Claude account - you only do this once.");
+			"The MCP server is asking for a login. Run 'claude mcp login unreal-mcp' in a terminal "
+			"in the project folder.");
 		return;
 
 	case EHFClaudeState::PendingApproval:
@@ -125,7 +189,19 @@ void SHFClaudePanel::RunCheck()
 			TEXT("The server is running, but Claude Code will not connect to it until you approve "
 				 "it once. Open a terminal in '%s', run 'claude', and approve the 'unreal-mcp' "
 				 "server it asks about. You only do this once for this project."),
-			*FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
+			*CheckDirectory);
+		return;
+
+	case EHFClaudeState::Failed:
+		// SHOWS THE LINE IT COULD NOT READ. A status this parse has not been taught is a fact
+		// about the CLI, not about the server, and printing it is what turns "it says something
+		// odd" into a bug report somebody can act on in one round trip.
+		GStatus.State = Health;
+		GStatus.Message = ServerLine.IsEmpty()
+			? TEXT("Claude Code answered, but said nothing about the HouseForge server.")
+			: FString::Printf(
+				TEXT("Claude Code reported a state this panel does not recognise:\n\n%s"),
+				*ServerLine);
 		return;
 
 	default:
@@ -152,7 +228,7 @@ void SHFClaudePanel::RunCheck()
 
 FReply SHFClaudePanel::OnCheckClicked()
 {
-	RunCheck();
+	BeginCheck();
 	return FReply::Handled();
 }
 
@@ -168,7 +244,7 @@ FReply SHFClaudePanel::OnStartServerClicked()
 	// Re-checked immediately, so the button either clears the problem or proves it is something
 	// else. Leaving the old failure on screen after acting on it is how a fixed thing keeps
 	// looking broken.
-	RunCheck();
+	BeginCheck();
 	return FReply::Handled();
 }
 
@@ -186,6 +262,7 @@ FText SHFClaudePanel::StatusLine() const
 	switch (GStatus.State)
 	{
 	case EHFClaudeState::Unknown:          return LOCTEXT("Unknown", "Not checked yet");
+	case EHFClaudeState::Checking:         return LOCTEXT("Checking", "Checking...");
 	case EHFClaudeState::Ready:            return LOCTEXT("Ready", "Connected");
 	case EHFClaudeState::CliNotFound:      return LOCTEXT("NoCli", "Claude Code not found");
 	case EHFClaudeState::ConfigMissing:    return LOCTEXT("NoConfig", "Server not configured");
@@ -201,9 +278,13 @@ FSlateColor SHFClaudePanel::StatusColour() const
 {
 	switch (GStatus.State)
 	{
-	case EHFClaudeState::Unknown: return FSlateColor::UseSubduedForeground();
-	case EHFClaudeState::Ready:   return FSlateColor(FLinearColor(0.35f, 0.85f, 0.45f));
-	default:                      return FSlateColor(FLinearColor(1.0f, 0.45f, 0.35f));
+	case EHFClaudeState::Unknown:  return FSlateColor::UseSubduedForeground();
+
+	// Subdued rather than the failure colour. A check in flight is not a failure, and painting it
+	// red for the seconds it takes teaches an artist to read the red as noise.
+	case EHFClaudeState::Checking: return FSlateColor::UseSubduedForeground();
+	case EHFClaudeState::Ready:    return FSlateColor(FLinearColor(0.35f, 0.85f, 0.45f));
+	default:                       return FSlateColor(FLinearColor(1.0f, 0.45f, 0.35f));
 	}
 }
 
@@ -232,6 +313,7 @@ void SHFClaudePanel::Construct(const FArguments& InArgs)
 			[
 				SAssignNew(CheckButton, SButton)
 				.Text(LOCTEXT("Check", "Check connection"))
+				.IsEnabled_Lambda([this]() { return IsCheckIdle(); })
 				.ToolTipText(LOCTEXT("CheckTip",
 					"Confirms Claude Code is installed, signed in, and can see HouseForge - before "
 					"you spend time on a drawing set."))
