@@ -109,9 +109,23 @@ EHFClaudeState FHFClaudeCli::ParseMcpList(const FString& Output, const FString& 
 			return EHFClaudeState::PendingApproval;
 		}
 
-		// "Failed to connect", "ConnectionRefused", and anything else this line can say all mean
-		// the same thing for a server the plugin itself hosts: nothing is listening yet.
-		return EHFClaudeState::ServerNotRunning;
+		// ONLY ON POSITIVE EVIDENCE OF FAILURE.
+		//
+		// This used to be a fall-through: anything not recognised became "the server is not
+		// running". That is a confident wrong answer, and it is the same shape of mistake as the
+		// Pending-approval state it already cost us - a status this parse has not been taught
+		// becomes an instruction to go and start something that may well be running.
+		//
+		// A line whose status has not resolved yet, or a wording added by a later CLI, now says so
+		// instead of guessing.
+		if (Trimmed.Contains(TEXT("Failed to connect"), ESearchCase::IgnoreCase)
+			|| Trimmed.Contains(TEXT("ConnectionRefused"), ESearchCase::IgnoreCase)
+			|| Trimmed.Contains(TEXT("ECONNREFUSED"), ESearchCase::IgnoreCase))
+		{
+			return EHFClaudeState::ServerNotRunning;
+		}
+
+		return EHFClaudeState::Failed;
 	}
 
 	// Named nowhere in the list. Either .mcp.json was never written or it does not carry our

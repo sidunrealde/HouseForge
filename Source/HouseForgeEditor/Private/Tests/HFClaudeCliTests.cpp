@@ -6,6 +6,7 @@
 
 #include "Claude/HFClaudeCli.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Paths.h"
 
 #define HF_TEST_FLAGS (EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -283,6 +284,69 @@ bool FHFClaudeFindExecutableTest::RunTest(const FString& Parameters)
 
 	TestTrue(FString::Printf(TEXT("The path it returned exists: '%s'"), *Found),
 		FPlatformFileManager::Get().GetPlatformFile().FileExists(*Found));
+
+	return true;
+}
+
+/**
+ * THAT STARTING A RUN DOES NOT WAIT FOR IT - the property the connection check now depends on.
+ *
+ * This looks like a performance assertion and is not. `claude mcp list` health-checks the MCP
+ * server by connecting to it, and that server IS this editor, answered by an HTTP listener that
+ * only runs while the game thread ticks. A caller that blocks on the child therefore deadlocks
+ * against the very thing it is asking about: the editor stops answering, and `claude` reports the
+ * server unreachable after its full 30-second timeout. Measured, from the panel:
+ *
+ *   unreal-mcp: ... - Failed to connect - MCP server "unreal-mcp" connection timed out after 30000ms
+ *
+ * against Connected in two seconds for the identical command run by hand.
+ *
+ * So the assertion is about CONTROL RETURNING, not about speed. It is written against a child that
+ * is deliberately slow, and it fails - by roughly the child's whole duration - against the
+ * RunToCompletion the panel used to call.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFClaudeStartIsAsyncTest,
+	"HouseForge.Claude.StartingARunDoesNotWaitForIt", HF_TEST_FLAGS)
+
+bool FHFClaudeStartIsAsyncTest::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS
+	// Roughly three seconds of doing nothing, with no console input and no dependency on anything
+	// installed. `timeout` would be the obvious choice and cannot be used: it fails immediately
+	// when stdin is redirected, which is exactly what Start does to it.
+	const FString Shell = TEXT("cmd.exe");
+	const FString Args = TEXT("/c ping -n 4 127.0.0.1");
+	const double ChildSeconds = 3.0;
+
+	FHFClaudeCli::FRun Run;
+	FString Error;
+
+	const double Before = FPlatformTime::Seconds();
+	const bool bStarted = FHFClaudeCli::Start(Shell, Args, FPaths::ProjectDir(), Run, Error);
+	const double Elapsed = FPlatformTime::Seconds() - Before;
+
+	if (!TestTrue(FString::Printf(TEXT("The child started: %s"), *Error), bStarted))
+	{
+		return false;
+	}
+
+	// A third of the child's life. Generous enough to survive a loaded machine, and nowhere near
+	// the full duration a blocking call would have cost.
+	TestTrue(
+		FString::Printf(TEXT("Start returned in %.2fs, well inside the child's %.0fs"),
+			Elapsed, ChildSeconds),
+		Elapsed < ChildSeconds / 3.0);
+
+	// AND THE CHILD IS GENUINELY STILL GOING. Without this, a Start that failed to launch anything
+	// at all would satisfy the timing assertion perfectly.
+	TArray<FString> Lines;
+	FHFClaudeCli::Pump(Run, Lines);
+	TestFalse(TEXT("The run is still in flight, so control came back mid-run"), Run.bFinished);
+
+	FHFClaudeCli::Finish(Run);
+#else
+	AddInfo(TEXT("Skipped: this asserts the contract using a Windows shell command."));
+#endif
 
 	return true;
 }
