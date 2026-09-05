@@ -2009,6 +2009,75 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 				FString::Printf(TEXT("Fixture '%s' sits at (%.1f, %.1f), outside room '%s'. Check the position or the room it was assigned to."),
 					*Describe(Fixture.Id), Fixture.Position.X, Fixture.Position.Y, *Describe(Room->Id)));
 		}
+
+		// Spec units, for the messages below - both rules quote real dimensions back at the reader,
+		// and a figure in the wrong unit in an error message is worse than no figure.
+		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+
+		// ------------------------------------------------- is it standing across its wall or along it
+		//
+		// A WARDROBE 60 WIDE AND 180 DEEP IS NOT A WARDROBE. `footprint` is in the fixture's OWN
+		// frame - x runs along its face, y back into it - and `rotationDegrees` turns that frame.
+		// Read as world extents instead, which is the natural reading and the wrong one, every
+		// fitting on a north-south wall comes out quarter-turned: its depth runs along the wall and
+		// its width across it, so it juts into the room and is too narrow to be what it is.
+		//
+		// The first flat an artist walked had ten of them - both wardrobes, a TV unit, a study table,
+		// the kitchen counter and base runs, the chimney, the shoe rack and the consumer unit - and
+		// every one was on a wall running north-south. None of it validated as anything: the spec was
+		// self-consistent, the areas were right, and the error was only visible standing in the room.
+		//
+		// CAUGHT BY THE BACK DIRECTION, not by comparing width to depth. A bed IS deeper than it is
+		// wide, and so is a WC, so a shape test would have flagged four correct fixtures and made the
+		// rule something to ignore. What is actually wrong is the AXIS: a fitting put against a wall
+		// faces across it, so its back must not run along it.
+		if (const FHFWall* Anchor = Spec.FindWall(Fixture.AnchorWallId))
+		{
+			const FVector2D WallRun = (Anchor->End - Anchor->Start);
+
+			if (!WallRun.IsNearlyZero())
+			{
+				const FVector2D Along = WallRun.GetSafeNormal();
+				const double Radians = FMath::DegreesToRadians(Fixture.RotationDegrees);
+				const FVector2D Back(-FMath::Sin(Radians), FMath::Cos(Radians));
+
+				// 30 degrees of slack. A fitting set at a slight angle to its wall is a real thing an
+				// artist may want; one within 30 degrees of parallel is a transposed footprint.
+				const double AlongComponent = FMath::Abs(FVector2D::DotProduct(Back, Along));
+
+				if (AlongComponent > 0.866)
+				{
+					Result.Add(EHFValidationSeverity::Error, TEXT("FixtureFacesAlongItsWall"), Fixture.Id,
+						FString::Printf(TEXT("Fixture '%s' is anchored to wall '%s' but its depth runs ALONG that wall rather than into it, so it stands %.1f cm out from the wall and is only %.1f cm wide. 'footprint' is in the fixture's own frame - x along its face, y back into it - and 'rotationDegrees' turns that frame; it is not a pair of world extents. Either turn it %.0f degrees or swap its footprint."),
+							*Describe(Fixture.Id), *Describe(Anchor->Id),
+							Fixture.Footprint.Y * ScaleToCm, Fixture.Footprint.X * ScaleToCm,
+							FMath::Abs(FMath::Fmod(Fixture.RotationDegrees + 90.0, 360.0))));
+				}
+			}
+		}
+
+		// ----------------------------------------------------- and does a ceiling fitting clear a head
+		//
+		// BaseZ ON A CEILING-MOUNTED FIXTURE IS A DROP FROM THE CEILING, not a height above the floor
+		// - the opposite of what it means on every other fixture, and of what the schema said it meant
+		// until this rule was written. A fan given the drawing's mounting height of 2400 came out at
+		// 300 - 240 = 60 cm, spinning at knee height in a finished bedroom.
+		//
+		// Judged on the RESULT rather than on the number, so it holds whichever way a later reader
+		// takes the convention: whatever baseZ means, a ceiling fan that ends up below head height is
+		// wrong, and nothing that reads a drawing correctly can produce one.
+		if (Fixture.IsCeilingMounted() && Room->CeilingHeight > 0.0)
+		{
+			const double MountedZ = (Room->CeilingHeight - Fixture.BaseZ) * ScaleToCm;
+
+			if (MountedZ < 195.0)
+			{
+				Result.Add(EHFValidationSeverity::Error, TEXT("CeilingFixtureBelowHeadHeight"), Fixture.Id,
+					FString::Printf(TEXT("Fixture '%s' hangs at %.0f cm above the floor, which is below head height. On a ceiling-mounted fixture 'baseZ' is the drop DOWN from the ceiling, not the height above the floor: %.0f cm of ceiling less a %.0f cm drop leaves %.0f cm. A drawing's mounting height has to be converted to a drop before it goes in the spec."),
+						*Describe(Fixture.Id), MountedZ,
+						Room->CeilingHeight * ScaleToCm, Fixture.BaseZ * ScaleToCm, MountedZ));
+			}
+		}
 		// A centred-but-oversized fixture passes the point test while its geometry pokes straight
 		// through a wall. Wall-anchored fixtures are exempt: room boundaries run along wall
 		// centrelines, so a wardrobe backing onto its wall is meant to cross the boundary.

@@ -267,9 +267,29 @@ Joinery, furniture, sanitary ware and electrical fittings.
 | `label` | string | The drawing's own label, if any |
 | `position` | `{x, y}` | Centre of the footprint |
 | `rotationDegrees` | number | Yaw about the centre; `0` means `footprint.x` runs along +X |
+
+> **`footprint` is in the fixture's own frame, not the world's.** `x` runs along the fixture's
+> face and `y` back into it, and `rotationDegrees` turns that frame. They are *not* a pair of
+> world extents. A 1800-wide wardrobe against an **east or west** wall is
+> `footprint: {x: 180, y: 60}` with `rotationDegrees: 90` — not `{x: 60, y: 180}` at `0`, which
+> builds a wardrobe 600 wide that juts 1800 into the room.
+>
+> This is the single most common way a spec passes every other rule and is still wrong. The
+> first generated flat had ten of them, every one on a wall running north–south. The validator
+> now rejects it as `FixtureFacesAlongItsWall`.
+
 | `footprint` | `{x, y}` | Width × depth **before** rotation |
 | `height` | number | |
-| `baseZ` | number | Underside above the room floor. Non-zero for wall cabinets and counters |
+| `baseZ` | number | Underside above the room floor. Non-zero for wall cabinets and counters. **Except on ceiling-mounted fixtures — see below** |
+
+> **On `CeilingFan` and `LightFixture`, `baseZ` is the drop DOWN from the ceiling**, not the
+> height above the floor. It is the opposite of what it means on every other fixture.
+>
+> A drawing gives a fan's mounting height above the floor — 2400 in a 3000 room. That has to be
+> converted: the drop is `3000 − 2400 = 600`. Writing `baseZ: 2400` hangs it at
+> `3000 − 2400 = 600` — knee height. That is exactly what happened on the first generated flat,
+> and it validated clean. The validator now rejects it as `CeilingFixtureBelowHeadHeight`.
+
 | `anchorWallId` | name | Wall this fixture backs onto. Optional but important — see below |
 | `params` | object | see below |
 

@@ -1518,4 +1518,59 @@ bool FHFServicesDegenerateTest::RunTest(const FString&)
 	return true;
 }
 
+/**
+ * A SWITCH PLATE STANDS OFF THE WALL LIKE A COVER, NOT LIKE ITS BACK BOX.
+ *
+ * Measured on the built mesh rather than on the parameter, because the parameter is exactly what was
+ * wrong: ParamsFor copied the fixture's drawn depth into Depth, and OnWallFace lands a fixture's
+ * back on the plaster, so the whole drawn box ended up in the room. An artist walking the first
+ * generated flat reported the switch boards protruding and asked for almost flush with a slight
+ * bump; every plate in that spec is drawn 40 mm deep, which is a back box, and back boxes are chased
+ * into the wall.
+ *
+ * The drawn depth is deliberately a REAL one from that spec, so this fails against the behaviour it
+ * replaced by the full 40 mm rather than by a rounding.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFAccessoryPlateSitsFlushTest,
+	"HouseForge.Services.ASwitchPlateSitsAlmostFlush", HF_TEST_FLAGS)
+
+bool FHFAccessoryPlateSitsFlushTest::RunTest(const FString& Parameters)
+{
+	// F_Switch_Living, verbatim from the first flat an artist looked at.
+	FHFFixture Drawn;
+	Drawn.Type = EHFFixtureType::SwitchPlate;
+	Drawn.Footprint = FVector2D(26.0, 4.0);
+	Drawn.Height = 14.0;
+
+	const FHFAccessoryPlateParams P = AHFAccessoryPlateActor::ParamsFor(Drawn);
+	const FAxisAlignedBox3d Bounds = FHFWallPlateKit::BuildAccessoryPlate(P).Shell.GetBounds();
+
+	// The whole build-up, front of cover to back of plate. What OnWallFace puts in front of plaster.
+	const double StandOff = Bounds.Max.Y - Bounds.Min.Y;
+
+	TestTrue(FString::Printf(
+		TEXT("A plate drawn 40 mm deep does not stand 40 mm off the wall (it stands %.1f mm)"),
+		StandOff * 10.0),
+		StandOff <= 1.5);
+
+	// AND IT IS STILL A BUMP, not a decal. Zero depth would satisfy the assertion above perfectly
+	// and would read as a sticker on the plaster under any raking light.
+	TestTrue(FString::Printf(TEXT("It still stands proud of the wall (%.1f mm)"), StandOff * 10.0),
+		StandOff >= 0.6);
+
+	// THE WIDTH IS UNTOUCHED. Only the depth is a back box; a plate drawn 260 mm wide is 260 mm wide,
+	// and a fix that quietly shrank the whole fitting would pass both assertions above.
+	TestEqual(TEXT("The drawn width is still the plate's width"), P.Width, 26.0, 0.01);
+	TestEqual(TEXT("The drawn height is still the plate's height"), P.Height, 14.0, 0.01);
+
+	// A DRAWING THAT ASKS FOR LESS STILL GETS LESS. A slim cover is a real product, and clamping to a
+	// constant rather than to a maximum would silently thicken it.
+	FHFFixture Slim = Drawn;
+	Slim.Footprint = FVector2D(26.0, 0.8);
+	TestEqual(TEXT("A slimmer cover than the default is honoured"),
+		AHFAccessoryPlateActor::ParamsFor(Slim).Depth, 0.8, 0.01);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

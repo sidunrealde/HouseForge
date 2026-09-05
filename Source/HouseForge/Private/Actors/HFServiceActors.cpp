@@ -33,8 +33,30 @@ FHFAccessoryPlateParams AHFAccessoryPlateActor::ParamsFor(const FHFFixture& Fixt
 	FHFAccessoryPlateParams P;
 
 	P.Width = Fixture.Footprint.X;
-	P.Depth = Fixture.Footprint.Y;
 	P.Height = Fixture.Height;
+
+	// THE BACK BOX IS IN THE WALL. ONLY THE COVER STANDS OFF IT.
+	//
+	// This was `P.Depth = Fixture.Footprint.Y`, which put the WHOLE fitting in front of the plaster:
+	// OnWallFace lands a fixture's BACK on the wall face, so a plate drawn 40 mm deep stood 40 mm out
+	// of the room. Every plate in a real electrical layout is drawn that way, because 40 mm is the
+	// back box - the part that is chased into the wall and never seen. Found by an artist walking the
+	// first generated flat, who said the switch boards were protruding and should be almost flush
+	// with a slight bump. They were standing off nearly four times what a cover projects, which reads
+	// as a junction box screwed to the plaster rather than as a switch.
+	//
+	// SAME ARGUMENT AS ModuleHeight, and for the same reason: a bought size, not a share of the drawn
+	// box. A plate drawn 150 mm tall does not have a 150 mm rocker in it, and a plate drawn 40 mm
+	// deep does not project 40 mm. The drawn depth describes the fitting including its box; what is
+	// visible is the cover, and every modular range sold projects about 10 to 12 mm.
+	//
+	// THE SPEC STILL WINS WHEN IT ASKS FOR LESS. A slim cover is a real product, so a drawing that
+	// says 8 mm gets 8 mm. What it cannot ask for is a switch that stands off the wall like a box,
+	// because that is not a reading of the drawing - it is the back box escaping the wall.
+	constexpr double CoverProjection = 1.1;
+	P.Depth = Fixture.Footprint.Y > 0.0
+		? FMath::Min(Fixture.Footprint.Y, CoverProjection)
+		: CoverProjection;
 
 	// TWO, NOT ZERO. A drawing that marked no gang count has said nothing rather than asked for a
 	// plate with no modules on it, and a blank plate is a real product this is not: it would come out
