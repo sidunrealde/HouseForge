@@ -561,6 +561,19 @@ public:
 	/** The whole basin: bowl, ledge, waste, whatever carries it, and the tap's two parts. */
 	static FHFBasinBuild BuildBasin(const FHFBasinParams& Params);
 
+	/**
+	 * The outline of a basin's OUTER BODY at a height, in the basin's own space.
+	 *
+	 * A BOX RATHER THAN A HALF-EXTENT, because a basin is not symmetric front to back: its sections
+	 * walk BACKWARDS as they descend while the bowl's mouth sits FORWARD of centre, so the ceramic
+	 * left in front of the bowl is not the ceramic left behind it. A half-width comparison misses
+	 * the front, and the front is where the floor escaped worst.
+	 *
+	 * Public because the floor is built from it and a test has to hold the built shell against it -
+	 * one definition of the shape, used by both.
+	 */
+	static FBox2D BasinBodyOutlineAt(const FHFBasinParams& Params, double Z);
+
 	/** The whole shower: gully, threshold, mixer, riser, arm and rose, with the lever and the tilt. */
 	static FHFShowerBuild BuildShower(const FHFShowerParams& Params);
 

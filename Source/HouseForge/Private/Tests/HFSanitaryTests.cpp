@@ -1215,4 +1215,128 @@ bool FHFTowelRailTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * NOTHING INSIDE A BASIN STANDS OUTSIDE ITS SHELL - ON THE BASIN THE PLUGIN ACTUALLY BUILDS.
+ *
+ * The bowl cavity is cut CLEAN THROUGH the body and the floor is put back underneath. It used to go
+ * back shaped like the CAVITY, which is nearly vertical, extended DOWNWARDS into a body that tapers
+ * hard - so the slab's bottom edge stood proud of the shell and tore through it. In a render: a
+ * white ledge flaring out under the bowl with the shell visibly torn either side.
+ *
+ * THE SIZE IS THE POINT OF THIS TEST. Four earlier attempts at it all passed against the defect,
+ * every one because it built a basin nobody ships:
+ *
+ *   - MakeBasin is 500 x 400 x 180 with BowlDepth hand-set to 13. Its bowl floor lands where the
+ *     slab and the shell agree to within a hair, so the escape is zero. The plugin never builds it.
+ *   - AHFBasinActor::ApplyFixture DERIVES BowlDepth = Height - 3 x CeramicThickness, so the real
+ *     bowl is deeper and reaches where the body has tapered further and walked backwards.
+ *   - The real fixture is 550 x 400 x 200. Guessing the height as 180 was enough to hide it again.
+ *
+ * So this derives the parameters the way the actor does, from the dimensions the drawing gives.
+ * A reference fixture that no code path produces is a test of a shape nobody ships.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBasinFloorInsideTest,
+	"HouseForge.Sanitary.BasinFloorStaysInsideTheShell", HF_TEST_FLAGS)
+
+bool FHFBasinFloorInsideTest::RunTest(const FString& Parameters)
+{
+	// F_Basin2, the master bathroom's vanity basin: 55 x 40 x 20 off the drawing, the rest derived
+	// exactly as AHFBasinActor::ApplyFixture derives it.
+	FHFBasinParams P;
+	P.Width = 55.0;
+	P.Depth = 40.0;
+	P.Height = 20.0;
+	P.BowlDepth = FMath::Max(P.Height - P.CeramicThickness * 3.0, 0.0);
+	P.TapLedgeWidth = FMath::Clamp(P.Depth * 0.22, 6.0, 11.0);
+	P.CornerRadius = FMath::Min(P.Width, P.Depth) * 0.2;
+	P.Mount = EHFBasinMount::CounterTop;
+
+	const FHFBasinBuild Built = FHFSanitaryKit::BuildBasin(P);
+	if (!TestTrue(TEXT("The basin built"), Built.Shell.TriangleCount() > 0))
+	{
+		return false;
+	}
+
+	// THE ACTUAL CROSS-SECTION, cut with a plane. A loft carries vertices only at its stations, so
+	// bucketing vertices by height measures where the rings are, not where the surface is.
+	//
+	// AND IN BOTH AXES. The body walks backwards as it descends while the bowl sits forward, so the
+	// room in front of the bowl is not the room behind it - a half-width test misses the front,
+	// which is where the escape was worst.
+	auto WorstEscapeAt = [&Built, &P](double Z, FVector2D& OutWhere) -> double
+	{
+		const FBox2D Body = FHFSanitaryKit::BasinBodyOutlineAt(P, Z);
+		double Worst = -BIG_NUMBER;
+
+		for (const int32 Triangle : Built.Shell.TriangleIndicesItr())
+		{
+			const FIndex3i Corners = Built.Shell.GetTriangle(Triangle);
+			const FVector3d V[3] = {
+				Built.Shell.GetVertex(Corners.A),
+				Built.Shell.GetVertex(Corners.B),
+				Built.Shell.GetVertex(Corners.C),
+			};
+
+			for (int32 Edge = 0; Edge < 3; ++Edge)
+			{
+				const FVector3d& A = V[Edge];
+				const FVector3d& B = V[(Edge + 1) % 3];
+
+				if ((A.Z < Z && B.Z < Z) || (A.Z > Z && B.Z > Z)
+					|| FMath::Abs(B.Z - A.Z) < UE_KINDA_SMALL_NUMBER)
+				{
+					continue;
+				}
+
+				const double T = (Z - A.Z) / (B.Z - A.Z);
+				const FVector2D Hit(A.X + (B.X - A.X) * T, A.Y + (B.Y - A.Y) * T);
+
+				const double Escape = FMath::Max(
+					FMath::Max(Body.Min.X - Hit.X, Hit.X - Body.Max.X),
+					FMath::Max(Body.Min.Y - Hit.Y, Hit.Y - Body.Max.Y));
+
+				if (Escape > Worst)
+				{
+					Worst = Escape;
+					OutWhere = Hit;
+				}
+			}
+		}
+
+		return Worst;
+	};
+
+	// Sampled across the whole body, densely enough to land inside the floor slab - which is only
+	// 3 cm tall on this basin, so a coarse sweep steps straight over the one thing being tested.
+	constexpr int32 Samples = 80;
+	double WorstEscape = -BIG_NUMBER;
+	double WorstZ = 0.0;
+	FVector2D WorstPoint = FVector2D::ZeroVector;
+
+	for (int32 Sample = 0; Sample <= Samples; ++Sample)
+	{
+		// Inset from both caps: a plane exactly on a flat face crosses no edge transversally.
+		const double Z = FMath::Lerp(0.2, P.Height - 0.2, static_cast<double>(Sample) / Samples);
+
+		FVector2D Where = FVector2D::ZeroVector;
+		const double Escape = WorstEscapeAt(Z, Where);
+
+		if (Escape > WorstEscape)
+		{
+			WorstEscape = Escape;
+			WorstZ = Z;
+			WorstPoint = Where;
+		}
+	}
+
+	// A millimetre of slack for faceting: a rounded rectangle is a polygon, so a section can cut a
+	// corner where the outline box reports the flat.
+	TestTrue(FString::Printf(
+		TEXT("Nothing stands outside the shell (worst %.2f cm at z = %.2f, at (%.2f, %.2f))"),
+		WorstEscape, WorstZ, WorstPoint.X, WorstPoint.Y),
+		WorstEscape <= 0.1);
+
+	return true;
+}
+
 #endif	// WITH_DEV_AUTOMATION_TESTS
