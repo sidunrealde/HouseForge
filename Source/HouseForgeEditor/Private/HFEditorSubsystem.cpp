@@ -121,6 +121,110 @@ bool UHFEditorSubsystem::IsReadableDrawing(const FString& Path)
 		|| Extension == TEXT("pdf");
 }
 
+FHFOperationResult UHFEditorSubsystem::CropDrawing(const FString& Drawing, const float Left,
+	const float Top, const float Width, const float Height, FString& OutPath) const
+{
+	OutPath.Reset();
+
+	// ---------------------------------------------------------------------------- find the sheet
+	const FString Root = GetDrawingsDirectory();
+	FString Source = FPaths::ConvertRelativePathToFull(Root / Drawing);
+
+	// THE DRAWINGS FOLDER FIRST, because that is what ListDrawings hands out and so what a caller
+	// will nearly always be quoting back. But a relative path is not always relative to THAT: it can
+	// be relative to the process, which is where an engine path like AutomationTransientDir lands.
+	// Resolving only one way turns a file that is plainly there into "no drawing at ...", which
+	// reads as the drawing being missing rather than as the path being interpreted differently.
+	if (!FPaths::FileExists(Source))
+	{
+		const FString AsGiven = FPaths::ConvertRelativePathToFull(Drawing);
+		if (FPaths::FileExists(AsGiven))
+		{
+			Source = AsGiven;
+		}
+	}
+
+	if (!FPaths::FileExists(Source))
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("No drawing at '%s', looked for under %s and as given. ListDrawings reports the paths that exist."),
+			*Drawing, *Root));
+	}
+
+	// -------------------------------------------------------------- the rectangle, in real pixels
+	//
+	// CLAMPED RATHER THAN REFUSED for being off the edge: an estimate off a downscaled sheet is
+	// meant to be approximate, and a crop that runs a little past a margin should give back the
+	// part that exists. A rectangle with no area at all is a different thing and is refused,
+	// because there is nothing to hand back and silence would read as an empty drawing.
+	if (!(Width > 0.0f) || !(Height > 0.0f))
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("A crop needs a positive width and height, as fractions of the sheet; got %.3f x %.3f."),
+			Width, Height));
+	}
+
+	FImage Sheet;
+	if (!FImageUtils::LoadImage(*Source, Sheet) || Sheet.SizeX <= 0 || Sheet.SizeY <= 0)
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("Could not read '%s' as an image."), *Source));
+	}
+
+	const int32 X0 = FMath::Clamp(FMath::FloorToInt32(Left * Sheet.SizeX), 0, Sheet.SizeX - 1);
+	const int32 Y0 = FMath::Clamp(FMath::FloorToInt32(Top * Sheet.SizeY), 0, Sheet.SizeY - 1);
+	const int32 X1 = FMath::Clamp(FMath::CeilToInt32((Left + Width) * Sheet.SizeX), X0 + 1, Sheet.SizeX);
+	const int32 Y1 = FMath::Clamp(FMath::CeilToInt32((Top + Height) * Sheet.SizeY), Y0 + 1, Sheet.SizeY);
+
+	const int32 CropW = X1 - X0;
+	const int32 CropH = Y1 - Y0;
+
+	// ------------------------------------------------------------------------------- copy it out
+	//
+	// Through BGRA8 whatever the sheet arrived as, so one row copy covers every format LoadImage
+	// accepts rather than a branch per format that only the PNG path is ever exercised on.
+	FImage Rgba;
+	Sheet.CopyTo(Rgba, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+
+	FImage Crop;
+	Crop.Init(CropW, CropH, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+
+	const TArrayView64<FColor> From = Rgba.AsBGRA8();
+	const TArrayView64<FColor> To = Crop.AsBGRA8();
+
+	for (int32 Row = 0; Row < CropH; ++Row)
+	{
+		FMemory::Memcpy(&To[static_cast<int64>(Row) * CropW],
+			&From[static_cast<int64>(Row + Y0) * Rgba.SizeX + X0],
+			static_cast<int64>(CropW) * sizeof(FColor));
+	}
+
+	// ------------------------------------------------------------------------------- write it out
+	//
+	// UNDER Saved, NOT into the drawings folder. A crop is working material rather than a sheet
+	// somebody was given: dropped in beside the drawings it would be listed by ListDrawings as
+	// another sheet to read, imported along with the set, and committed with it.
+	const FString Folder = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("HouseForge"), TEXT("Saved"), TEXT("Crops")));
+	IFileManager::Get().MakeDirectory(*Folder, /*Tree*/ true);
+
+	const FString Name = FString::Printf(TEXT("%s_%d-%d_%dx%d.png"),
+		*FPaths::GetBaseFilename(Source), X0, Y0, CropW, CropH);
+	const FString Written = FPaths::Combine(Folder, Name);
+
+	if (!FImageUtils::SaveImageByExtension(*Written, Crop))
+	{
+		return FHFOperationResult::Fail(FString::Printf(
+			TEXT("Could not write the crop to '%s'."), *Written));
+	}
+
+	OutPath = Written;
+
+	return FHFOperationResult::Ok(FString::Printf(
+		TEXT("Cropped %d x %d px from '%s' (%d x %d) at (%d, %d) to %s. These are the sheet's own pixels, not a resample - read it to see the detail the whole sheet loses."),
+		CropW, CropH, *FPaths::GetCleanFilename(Source), Sheet.SizeX, Sheet.SizeY, X0, Y0, *Written));
+}
+
 TArray<FString> UHFEditorSubsystem::ListDrawings() const
 {
 	TArray<FString> Result;

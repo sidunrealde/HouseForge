@@ -1618,6 +1618,95 @@ bool FHFValidatorHeadroomUnitsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * THE TWO CONVENTION TRAPS, BOTH FOUND BY AN ARTIST WALKING THE FIRST GENERATED FLAT.
+ *
+ * Neither produced an invalid spec. Both produced a spec that was self-consistent, passed every
+ * rule, built without complaint, and was wrong in a way only visible standing in the room - which
+ * is the worst place for a drawing error to surface and the reason these are rules rather than
+ * documentation.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorConventionTrapsTest,
+	"HouseForge.Model.Validator.FixtureConventionsAreCaught", HF_TEST_FLAGS)
+
+bool FHFValidatorConventionTrapsTest::RunTest(const FString& Parameters)
+{
+	// W_East runs (400,0) to (400,300) - north to south, which is where every one of the ten real
+	// cases was.
+	{
+		// The wardrobe from the first flat: 60 along X, 180 along Y, written as WORLD extents. Against
+		// an east wall that makes it 60 wide and 180 deep - it juts most of two metres into a bedroom.
+		FHFHouseSpec Spec = MakeValidSpec();
+		FHFFixture& Wardrobe =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Wardrobe"), EHFFixtureType::Wardrobe, FVector2D(360.0, 150.0)));
+		Wardrobe.Footprint = FVector2D(60.0, 180.0);
+		Wardrobe.RotationDegrees = 0.0;
+		Wardrobe.AnchorWallId = TEXT("W_East");
+		Wardrobe.Height = 210.0;
+
+		ExpectIssue(*this, Spec, TEXT("FixtureFacesAlongItsWall"), EHFValidationSeverity::Error);
+	}
+	{
+		// The same wardrobe, turned. 180 now runs along the wall and 60 into the room, which is a
+		// wardrobe. The rule must accept the fix or it is just noise.
+		FHFHouseSpec Spec = MakeValidSpec();
+		FHFFixture& Wardrobe =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Wardrobe"), EHFFixtureType::Wardrobe, FVector2D(360.0, 150.0)));
+		Wardrobe.Footprint = FVector2D(180.0, 60.0);
+		Wardrobe.RotationDegrees = 90.0;
+		Wardrobe.AnchorWallId = TEXT("W_East");
+		Wardrobe.Height = 210.0;
+
+		TestFalse(TEXT("A wardrobe standing across its wall is not flagged"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("FixtureFacesAlongItsWall")));
+	}
+	{
+		// AND A BED IS DEEPER THAN IT IS WIDE. This is why the rule tests the axis rather than the
+		// shape: 165 x 205 against a south wall is exactly right, and a width-versus-depth test would
+		// have flagged it along with three other correct fixtures and taught everyone to ignore the
+		// rule.
+		FHFHouseSpec Spec = MakeValidSpec();
+		FHFFixture& Bed =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Bed"), EHFFixtureType::Bed, FVector2D(200.0, 110.0)));
+		Bed.Footprint = FVector2D(165.0, 205.0);
+		Bed.RotationDegrees = 0.0;
+		Bed.AnchorWallId = TEXT("W_South");
+		Bed.Height = 60.0;
+
+		TestFalse(TEXT("A bed deeper than it is wide, standing correctly, is not flagged"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("FixtureFacesAlongItsWall")));
+	}
+
+	// ------------------------------------------------------------------------ and the ceiling drop
+	{
+		// The fan from the first flat. The electrical layout gives a mounting height of 2400 above the
+		// floor; baseZ on a ceiling-mounted fixture is the drop DOWN from the ceiling, so 300 - 240
+		// hung it at 60 cm - spinning at knee height.
+		FHFHouseSpec Spec = MakeValidSpec();
+		FHFFixture& Fan =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Fan"), EHFFixtureType::CeilingFan, FVector2D(200.0, 150.0)));
+		Fan.Footprint = FVector2D(120.0, 120.0);
+		Fan.Height = 40.0;
+		Fan.BaseZ = 240.0;
+
+		ExpectIssue(*this, Spec, TEXT("CeilingFixtureBelowHeadHeight"), EHFValidationSeverity::Error);
+	}
+	{
+		// The same fan as a drop: 30 cm of rod below a 300 ceiling puts it at 270.
+		FHFHouseSpec Spec = MakeValidSpec();
+		FHFFixture& Fan =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Fan"), EHFFixtureType::CeilingFan, FVector2D(200.0, 150.0)));
+		Fan.Footprint = FVector2D(120.0, 120.0);
+		Fan.Height = 40.0;
+		Fan.BaseZ = 30.0;
+
+		TestFalse(TEXT("A fan hung 30 cm below the ceiling is not flagged"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("CeilingFixtureBelowHeadHeight")));
+	}
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

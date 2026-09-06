@@ -91,3 +91,12 @@ Scripts/__pycache__/
 # for a decision that ships someone's floor plan to a public repo.
 Reference/Drawings/*/
 !Reference/Drawings/Sample2BHK/
+
+# Specs generated from an artist's own drawings.
+#
+# Reference/Specs holds the plugin's own reference spec AND is where SaveSpec writes, so a
+# generation leaves someone's flat in the plugin's repo. Same reasoning as the drawings above:
+# their spec is their work. Sample2BHK.json is tracked and so is unaffected; a new reference spec
+# takes `git add -f`.
+Reference/Specs/*.json
+!Reference/Specs/Sample2BHK.json

@@ -181,6 +181,42 @@ public:
 	FHFOperationResult ImportDrawings(const TArray<FString>& SourcePaths, const FString& SetName,
 		TArray<FString>& OutImported);
 
+	/**
+	 * Writes a rectangle of a drawing out as its own image, so it can be read at full resolution.
+	 *
+	 * WHY THIS EXISTS. A drawing sheet is 2480 x 1754 and an image handed to a model is downscaled
+	 * to fit its budget - so a dimension string 14 px tall on the sheet arrives 11 px tall and
+	 * illegible. That is not a rendering nicety: on the first flat an artist tested, Claude said
+	 *
+	 *     "Let me crop the plan sheets so I can read the detail properly"
+	 *
+	 * reached for a shell to do it, was correctly refused, and fell back to
+	 *
+	 *     "Shell access is blocked, so I'll work from the elevation sheets"
+	 *
+	 * which is how a furniture layout ended up inferred from elevations instead of read off the
+	 * plan. Every misplaced sofa in that flat traces back to those two lines.
+	 *
+	 * A crop is not a smaller picture of the same thing - it is the SAME PIXELS with fewer of them,
+	 * so nothing is downscaled away. It adds no information that was not on the sheet; it stops
+	 * information being thrown away on the way in.
+	 *
+	 * FRACTIONS, NOT PIXELS. A caller looking at a downscaled sheet would otherwise have to
+	 * multiply every coordinate by a scale factor it was told once, and a silent arithmetic slip
+	 * there returns a crop of the wrong part of the drawing - which looks like a correct answer to
+	 * a different question. Fractions of the sheet need no arithmetic and survive any downscaling.
+	 *
+	 * @param Drawing    Path of the drawing, relative to the drawings directory or absolute.
+	 * @param Left       Left edge, 0..1 across the sheet.
+	 * @param Top        Top edge, 0..1 down the sheet.
+	 * @param Width      Width as a fraction of the sheet, 0..1.
+	 * @param Height     Height as a fraction of the sheet, 0..1.
+	 * @param OutPath    Absolute path of the crop that was written.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "HouseForge|Drawings")
+	FHFOperationResult CropDrawing(const FString& Drawing, float Left, float Top,
+		float Width, float Height, FString& OutPath) const;
+
 	// ------------------------------------------------------------------------------- specs
 
 	/** Validates spec JSON without building anything. Returns the full validation report. */

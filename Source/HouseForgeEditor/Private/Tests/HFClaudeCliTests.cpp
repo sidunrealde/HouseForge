@@ -144,7 +144,64 @@ bool FHFClaudeGenerateArgumentsTest::RunTest(const FString& Parameters)
 		Arguments.Contains(TEXT("--strict-mcp-config")));
 
 	TestTrue(TEXT("HouseForge's own tools are the ones allowed without asking"),
-		Arguments.Contains(FString::Printf(TEXT("--allowedTools \"mcp__%s__*\""), FHFClaudeCli::ServerName())));
+		Arguments.Contains(FString::Printf(TEXT("--allowedTools \"mcp__%s__*"), FHFClaudeCli::ServerName())));
+
+	// ---------------------------------------------------------------------------- AND SUFFICIENT
+	//
+	// THE OTHER HALF OF THE CONTRACT, and the half this test was missing.
+	//
+	// Every assertion above asks whether the run is confined. None asked whether what remains can
+	// do the job - so an allow-list of nothing but the MCP tools passed the whole suite while being
+	// unable to read a single drawing. That shipped, and the first real generation died on it: the
+	// MCP tools return PATHS (ListDrawings names the sheets, CaptureTopDown says where it wrote the
+	// plan), so reading a drawing is reading a file, and Read was not allowed. The agent tried a
+	// shell instead and was correctly denied by the mode.
+	//
+	// A confinement test that never checks sufficiency cannot tell "locked down" from "broken",
+	// because both look identical from inside the argument string.
+	// PARSED OUT, not searched for in the whole command line. `Arguments.Contains(TEXT("Read"))`
+	// passes with Read deleted from the allow-list, because the PROMPT begins "Read the interior
+	// drawings" - the same shape of un-failable assertion this test already carries one scar from.
+	FString Allowed;
+	{
+		const FString Flag = TEXT("--allowedTools \"");
+		const int32 Open = Arguments.Find(Flag);
+		if (Open != INDEX_NONE)
+		{
+			const int32 ValueStart = Open + Flag.Len();
+			const int32 Close = Arguments.Find(TEXT("\""), ESearchCase::CaseSensitive,
+				ESearchDir::FromStart, ValueStart);
+			if (Close != INDEX_NONE)
+			{
+				Allowed = Arguments.Mid(ValueStart, Close - ValueStart);
+			}
+		}
+	}
+
+	if (!TestFalse(TEXT("The allow-list could be read out of the command line"), Allowed.IsEmpty()))
+	{
+		return false;
+	}
+
+	TArray<FString> AllowedTools;
+	Allowed.ParseIntoArray(AllowedTools, TEXT(","), true);
+	for (FString& Tool : AllowedTools)
+	{
+		Tool.TrimStartAndEndInline();
+	}
+
+	TestTrue(TEXT("It can read the drawings it is told to read"),
+		AllowedTools.Contains(TEXT("Read")));
+
+	TestTrue(TEXT("It can find files under the drawings folder"),
+		AllowedTools.Contains(TEXT("Glob")));
+
+	// AND WRITE IS STILL ABSENT. The spec travels inline through ValidateSpec and ApplySpec, so
+	// nothing about reading drawings requires letting the model write to the artist's disk - and a
+	// list that has started widening is the one worth pinning.
+	TestFalse(TEXT("Writing to the artist's disk is still not granted"),
+		AllowedTools.Contains(TEXT("Write")) || AllowedTools.Contains(TEXT("Edit"))
+			|| AllowedTools.Contains(TEXT("Bash")));
 
 	// THE FLAG THAT ACTUALLY DENIES, and the reason this assertion is written this way.
 	//

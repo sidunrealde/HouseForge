@@ -329,6 +329,17 @@ void SHFClaudePanel::Construct(const FArguments& InArgs)
 			.AutoWrapText(true)
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 			.Text_Lambda([]() { return FText::FromString(GStatus.Message); })
+
+			// GONE ONCE CONNECTED. This panel is the header of every page now, so its height is
+			// charged to DRAWINGS and SURFACES too - and the Ready message says "drop drawings and
+			// press Generate", which is advice the artist is already acting on by the time they can
+			// read it. What remains is one line: a green word and the button that rechecks it.
+			.Visibility_Lambda([]()
+			{
+				return GStatus.State == EHFClaudeState::Ready
+					? EVisibility::Collapsed
+					: EVisibility::Visible;
+			})
 		]
 
 		+ SVerticalBox::Slot()

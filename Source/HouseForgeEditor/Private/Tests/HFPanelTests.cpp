@@ -138,7 +138,38 @@ bool FHFPanelSurfacesSectionTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("SURFACES is relevant whether or not there is a house in the level"),
 		!Surfaces->IsRelevant || Surfaces->IsRelevant());
-	TestTrue(TEXT("SURFACES starts expanded"), Surfaces->bExpandedByDefault);
+
+	return true;
+}
+
+/**
+ * THE CONNECTION STATUS IS NOT A PAGE, SO IT IS VISIBLE FROM EVERY PAGE.
+ *
+ * Generate lives in DRAWINGS and is disabled when Claude cannot be reached. Put the status on a tab
+ * of its own - which is the obvious thing to do, and what the panel did while it was a stack of
+ * sections - and an artist looking at a greyed-out Generate cannot see why without leaving the page
+ * that shows it. A disabled control whose explanation is one click away reads as a broken control.
+ *
+ * So CLAUDE is the header above the tab strip rather than a section, and its absence from
+ * BuildSections is the thing that makes it so. Asserted, because "add a section for it" is exactly
+ * the tidying a later reader would do: the panel is a list of sections, and there is a section id
+ * sitting right there in HFPanelSectionIds for it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFPanelClaudeIsNotAPageTest,
+	"HouseForge.Editor.Panel.ConnectionStatusIsOnEveryPage", HF_TEST_FLAGS)
+
+bool FHFPanelClaudeIsNotAPageTest::RunTest(const FString& Parameters)
+{
+	const TArray<FHFPanelSection> Sections = SHFHousePanel::BuildSections();
+
+	const FHFPanelSection* Claude = Sections.FindByPredicate(
+		[](const FHFPanelSection& Section) { return Section.Id == HFPanelSectionIds::Claude(); });
+
+	TestNull(TEXT("CLAUDE is the panel's header rather than one of its pages"), Claude);
+
+	// AND THERE ARE STILL PAGES. Without this, deleting BuildSections entirely satisfies the
+	// assertion above perfectly.
+	TestTrue(TEXT("The panel still has pages to switch between"), Sections.Num() >= 2);
 
 	return true;
 }
