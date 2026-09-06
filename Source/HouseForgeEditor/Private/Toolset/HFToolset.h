@@ -40,6 +40,27 @@ public:
 	static FString GetDrawingsPath();
 
 	/**
+	 * Crops a rectangle out of a drawing and returns the path, so it can be read at full size.
+	 *
+	 * USE THIS BEFORE GIVING UP ON A DETAIL. A sheet is around 2480 x 1754 and is downscaled to be
+	 * read, which costs roughly a fifth of every dimension string on it. A crop is the SAME PIXELS
+	 * with fewer of them, so nothing is scaled away - it is how a furniture layout or a dimension
+	 * chain gets read off the plan rather than guessed at from an elevation.
+	 *
+	 * Coordinates are FRACTIONS of the sheet, 0..1, from its top-left. The left third of a plan is
+	 * left 0, top 0, width 0.34, height 1. There is no pixel arithmetic to get wrong.
+	 *
+	 * @param Drawing Path from ListDrawings, or an absolute path.
+	 * @param Left Left edge as a fraction of the sheet's width, 0..1.
+	 * @param Top Top edge as a fraction of the sheet's height, 0..1.
+	 * @param Width Width as a fraction of the sheet's width.
+	 * @param Height Height as a fraction of the sheet's height.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HouseForge")
+	static FString CropDrawing(const FString& Drawing, float Left, float Top,
+		float Width, float Height);
+
+	/**
 	 * Imports drawings into the plugin so they can be read. PDFs are rasterised to one PNG per page.
 	 * @param SourcePaths Semicolon separated absolute paths to .png, .jpg or .pdf files.
 	 * @param SetName Folder to import into. Leave blank to name it after the first file.

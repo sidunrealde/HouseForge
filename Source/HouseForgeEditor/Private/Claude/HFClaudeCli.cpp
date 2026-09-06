@@ -144,7 +144,15 @@ FString FHFClaudeCli::BuildGenerateArguments(const FString& DrawingSet, const FS
 		TEXT("Use the HouseForge tools: list the drawings, read them, write a House Spec, ")
 		TEXT("validate it, and apply it. If validation reports problems, correct the spec and ")
 		TEXT("validate again rather than building a spec with errors. When the level is built, ")
-		TEXT("capture a plan and compare it against the source drawing."),
+		TEXT("capture a plan and compare it against the source drawing. ")
+		// SAID OUT LOUD, because the first real generation did not think to. A sheet is downscaled
+		// to be read, which costs about a fifth of every dimension string on it; the run said "let
+		// me crop the plan sheets so I can read the detail properly", found no way to, and fell
+		// back to inferring the furniture layout from the elevations. Every misplaced piece in that
+		// flat came from those two lines, and the tool that fixes it is no use unread.
+		TEXT("The sheets are large and are downscaled when you read them, so fine dimensions and ")
+		TEXT("labels can be unreadable at full-sheet size. Use CropDrawing to read any region at ")
+		TEXT("full resolution rather than guessing at it or working around it from another sheet."),
 		*DrawingSet);
 
 	FString Arguments;

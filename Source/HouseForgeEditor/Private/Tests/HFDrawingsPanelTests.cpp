@@ -4,7 +4,10 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Editor.h"
 #include "HFEditorSubsystem.h"
+#include "ImageCore.h"
+#include "ImageUtils.h"
 #include "Input/DragAndDrop.h"
 #include "Misc/AutomationTest.h"
 #include "UI/SHFDrawingsPanel.h"
@@ -105,6 +108,121 @@ bool FHFDropAcceptanceTest::RunTest(const FString& Parameters)
 
 	TestFalse(TEXT("A null operation is refused"),
 		SHFDrawingsPanel::CanAcceptDrag(nullptr));
+
+	return true;
+}
+
+/**
+ * A CROP IS THE SHEET'S OWN PIXELS, NOT A PICTURE OF THEM.
+ *
+ * That is the whole point of the tool and the only property worth pinning. A crop that resampled,
+ * or that came back scaled to some tidy size, would add nothing: the detail it exists to recover
+ * is exactly the detail resampling destroys. So this builds a sheet whose every pixel encodes its
+ * own coordinate, crops a rectangle out of the middle, and checks the pixels that come back are
+ * the ones that went in - which fails for a resample, an off-by-one origin, and a flip.
+ *
+ * The tool exists because a real generation ran into the wall it removes. Claude said "let me crop
+ * the plan sheets so I can read the detail properly", had no way to, and fell back to reading the
+ * elevations - and the flat came out with its furniture arranged from inference rather than from
+ * the plan.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFCropDrawingTest,
+	"HouseForge.Drawings.ACropKeepsTheSheetsOwnPixels", HF_TEST_FLAGS)
+
+bool FHFCropDrawingTest::RunTest(const FString& Parameters)
+{
+	UHFEditorSubsystem* Editor = GEditor ? GEditor->GetEditorSubsystem<UHFEditorSubsystem>() : nullptr;
+	if (!TestNotNull(TEXT("The editor subsystem is available"), Editor))
+	{
+		return false;
+	}
+
+	// A sheet where every pixel says where it is: red carries x, green carries y. Any resample
+	// blends neighbours and breaks that; any origin slip shifts it by a known amount.
+	constexpr int32 SheetW = 240;
+	constexpr int32 SheetH = 160;
+
+	FImage Sheet;
+	Sheet.Init(SheetW, SheetH, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+	const TArrayView64<FColor> Pixels = Sheet.AsBGRA8();
+
+	for (int32 Y = 0; Y < SheetH; ++Y)
+	{
+		for (int32 X = 0; X < SheetW; ++X)
+		{
+			Pixels[static_cast<int64>(Y) * SheetW + X] =
+				FColor(static_cast<uint8>(X), static_cast<uint8>(Y), 0, 255);
+		}
+	}
+
+	const FString Source = FPaths::Combine(FPaths::AutomationTransientDir(), TEXT("HFCropSheet.png"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Source), true);
+
+	if (!TestTrue(TEXT("The test sheet was written"),
+		FImageUtils::SaveImageByExtension(*Source, Sheet)))
+	{
+		return false;
+	}
+
+	// The middle quarter: x 60..180, y 40..120.
+	FString CropPath;
+	const FHFOperationResult Result = Editor->CropDrawing(Source, 0.25f, 0.25f, 0.5f, 0.5f, CropPath);
+
+	if (!TestTrue(FString::Printf(TEXT("The crop succeeded: %s"), *Result.Message), Result.bSuccess))
+	{
+		return false;
+	}
+
+	FImage Crop;
+	if (!TestTrue(TEXT("The crop can be read back"), FImageUtils::LoadImage(*CropPath, Crop)))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("The crop is the requested width in real pixels"), Crop.SizeX, SheetW / 2);
+	TestEqual(TEXT("The crop is the requested height in real pixels"), Crop.SizeY, SheetH / 2);
+
+	// AND THE PIXELS ARE THE ORIGINALS. Corners and centre: enough to catch a flip, which samples
+	// the right VALUES from the wrong places and would satisfy any size assertion.
+	FImage Read;
+	Crop.CopyTo(Read, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+	const TArrayView64<FColor> Out = Read.AsBGRA8();
+
+	const int32 X0 = SheetW / 4;
+	const int32 Y0 = SheetH / 4;
+
+	struct FProbe { int32 X; int32 Y; const TCHAR* What; };
+	const FProbe Probes[] = {
+		{ 0, 0, TEXT("top-left") },
+		{ Crop.SizeX - 1, 0, TEXT("top-right") },
+		{ 0, Crop.SizeY - 1, TEXT("bottom-left") },
+		{ Crop.SizeX - 1, Crop.SizeY - 1, TEXT("bottom-right") },
+		{ Crop.SizeX / 2, Crop.SizeY / 2, TEXT("centre") },
+	};
+
+	for (const FProbe& Probe : Probes)
+	{
+		const FColor Got = Out[static_cast<int64>(Probe.Y) * Crop.SizeX + Probe.X];
+
+		TestEqual(FString::Printf(TEXT("The %s pixel's column came from x = %d"),
+			Probe.What, X0 + Probe.X), static_cast<int32>(Got.R), X0 + Probe.X);
+		TestEqual(FString::Printf(TEXT("The %s pixel's row came from y = %d"),
+			Probe.What, Y0 + Probe.Y), static_cast<int32>(Got.G), Y0 + Probe.Y);
+	}
+
+	// A rectangle with no area is refused rather than writing an empty file nobody can read.
+	FString Ignored;
+	TestFalse(TEXT("A zero-width crop is refused"),
+		Editor->CropDrawing(Source, 0.25f, 0.25f, 0.0f, 0.5f, Ignored).bSuccess);
+
+	// Running off the edge is clamped, not refused: an estimate off a downscaled sheet is meant to
+	// be approximate, and the part that exists is still worth having.
+	FString Clamped;
+	const FHFOperationResult Overrun = Editor->CropDrawing(Source, 0.8f, 0.8f, 0.5f, 0.5f, Clamped);
+	TestTrue(FString::Printf(TEXT("A crop running past the edge is clamped: %s"), *Overrun.Message),
+		Overrun.bSuccess);
+
+	IFileManager::Get().Delete(*Source, false, true, true);
 
 	return true;
 }

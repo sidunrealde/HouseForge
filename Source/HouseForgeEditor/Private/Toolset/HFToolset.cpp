@@ -244,6 +244,19 @@ FString UHFToolset::GetDrawingsPath()
 	return Editor ? Editor->GetDrawingsDirectory() : NoEditor();
 }
 
+FString UHFToolset::CropDrawing(const FString& Drawing, const float Left, const float Top,
+	const float Width, const float Height)
+{
+	UHFEditorSubsystem* Editor = GEditor ? GEditor->GetEditorSubsystem<UHFEditorSubsystem>() : nullptr;
+	if (Editor == nullptr)
+	{
+		return NoEditor();
+	}
+
+	FString Path;
+	return Report(Editor->CropDrawing(Drawing, Left, Top, Width, Height, Path));
+}
+
 FString UHFToolset::ImportDrawings(const FString& SourcePaths, const FString& SetName)
 {
 	UHFEditorSubsystem* Editor = Subsystem();
