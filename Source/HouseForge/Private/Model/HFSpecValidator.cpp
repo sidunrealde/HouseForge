@@ -2132,6 +2132,97 @@ FHFValidationResult FHFSpecValidator::Validate(const FHFHouseSpec& Spec,
 		}
 	}
 
+	// ------------------------------------------------------------- has the curtain room to hang
+	//
+	// A CURTAIN HAS TO HANG IN AIR. It is the one fixture with no useful volume of its own: 10 cm
+	// deep against a wall, floor to pelmet. Anything standing in that 10 cm does not overlap it the
+	// way a chair overlaps a table - it CONTAINS it, and the curtain comes out of the render passing
+	// through the furniture. An artist walking the first flat found one through a chest of drawers.
+	//
+	// WHY THE GENERAL OVERLAP RULE BELOW MISSES THIS, which is the whole reason this exists. That
+	// one measures overlapping AREA against the smaller footprint, and a curtain is so thin that
+	// being wholly buried over a short run is a rounding error: the four real cases measured 34%,
+	// 15%, 87% and 3% of the curtain's plan area, so a threshold loose enough to allow a tucked-in
+	// chair lets three of the four through. Every one of them had the curtain's FULL DEPTH inside
+	// the other fixture.
+	//
+	// So this measures depth, not area. Both are placed flush to the same wall face, which is what
+	// puts a 10 cm curtain wholly inside a 200 cm bed; the fix is for the drawing's reading to move
+	// one of them or to hang the curtain from the sill rather than the floor, and both are things
+	// the spec can say.
+	for (const FHFFixture& Curtain : Spec.Fixtures)
+	{
+		if (Curtain.Type != EHFFixtureType::Curtain
+			|| Curtain.Footprint.X <= 0.0 || Curtain.Footprint.Y <= 0.0 || Curtain.Height <= 0.0)
+		{
+			continue;
+		}
+
+		const double ScaleToCm = FHFUnits::ToCentimeterScale(Spec.Units);
+		const double Radians = FMath::DegreesToRadians(Curtain.RotationDegrees);
+
+		// The curtain's own depth axis. Its local Y, which is the direction the fabric has nothing
+		// in - the axis a piece of furniture standing at the same wall eats.
+		const FVector2D Depth(-FMath::Sin(Radians), FMath::Cos(Radians));
+		const double HalfDepth = Curtain.Footprint.Y * 0.5;
+
+		for (const FHFFixture& Other : Spec.Fixtures)
+		{
+			if (&Other == &Curtain || Other.Type == EHFFixtureType::Curtain
+				|| Other.Type == EHFFixtureType::Pelmet || Other.IsCeilingMounted()
+				|| Other.Footprint.X <= 0.0 || Other.Footprint.Y <= 0.0 || Other.Height <= 0.0)
+			{
+				continue;
+			}
+
+			// Sharing a height range. A pelmet above the curtain's top, or a rug below its hem,
+			// is not in its way.
+			if (Other.BaseZ + Other.Height <= Curtain.BaseZ + UE_KINDA_SMALL_NUMBER
+				|| Curtain.BaseZ + Curtain.Height <= Other.BaseZ + UE_KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			if (!OrientedBoxesOverlap(Curtain.Position, Curtain.Footprint, Curtain.RotationDegrees,
+				Other.Position, Other.Footprint, Other.RotationDegrees))
+			{
+				continue;
+			}
+
+			// How much of the curtain's depth the other fixture covers, measured along that axis.
+			const double OtherRadians = FMath::DegreesToRadians(Other.RotationDegrees);
+			const FVector2D OtherX(FMath::Cos(OtherRadians), FMath::Sin(OtherRadians));
+			const FVector2D OtherY(-FMath::Sin(OtherRadians), FMath::Cos(OtherRadians));
+			const FVector2D ToOther = Other.Position - Curtain.Position;
+
+			const double Centre = FVector2D::DotProduct(ToOther, Depth);
+			const double Reach =
+				FMath::Abs(FVector2D::DotProduct(OtherX, Depth)) * Other.Footprint.X * 0.5
+				+ FMath::Abs(FVector2D::DotProduct(OtherY, Depth)) * Other.Footprint.Y * 0.5;
+
+			const double Covered = FMath::Min(Centre + Reach, HalfDepth)
+				- FMath::Max(Centre - Reach, -HalfDepth);
+
+			if (Covered <= 0.0)
+			{
+				continue;
+			}
+
+			const double Fraction = Covered / (HalfDepth * 2.0);
+
+			// HALF ITS DEPTH. Below that the curtain still has fabric in open air and reads as
+			// hanging behind something; at or above it, it is inside the furniture.
+			if (Fraction > 0.5)
+			{
+				Result.Add(EHFValidationSeverity::Error, TEXT("CurtainHasNowhereToHang"), Curtain.Id,
+					FString::Printf(TEXT("Curtain '%s' has %.0f%% of its %.1f cm depth inside fixture '%s' (%s), which shares its height range - so it hangs through it. Move one clear of the other, or hang the curtain from the sill above it."),
+						*Describe(Curtain.Id), Fraction * 100.0,
+						Curtain.Footprint.Y * ScaleToCm, *Describe(Other.Id),
+						*StaticEnum<EHFFixtureType>()->GetNameStringByValue(static_cast<int64>(Other.Type))));
+			}
+		}
+	}
+
 	// Overlapping fixtures are a warning, not an error: a chair tucked under a dining table
 	// overlaps legitimately, and so does a hob set into a counter. Worth flagging, not blocking.
 	for (int32 i = 0; i < Spec.Fixtures.Num(); ++i)

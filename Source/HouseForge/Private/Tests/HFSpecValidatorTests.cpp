@@ -1707,6 +1707,97 @@ bool FHFValidatorConventionTrapsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * A CURTAIN HAS TO HANG IN AIR.
+ *
+ * It is the one fixture with no useful volume of its own - 10 cm deep against a wall, floor to
+ * pelmet - so anything standing in that 10 cm does not overlap it the way a chair overlaps a table.
+ * It CONTAINS it, and the curtain comes out of the render passing through the furniture. An artist
+ * found one through a chest of drawers in the first generated flat; there were four in that spec,
+ * through two beds, a nightstand and a TV unit, and the spec validated clean.
+ *
+ * WHY OverlappingFixtures DID NOT CATCH THEM, which is why this rule is separate rather than a
+ * tightened threshold. That rule measures overlapping AREA against the smaller footprint, and a
+ * curtain is thin enough that being wholly buried over a short run barely registers: the four real
+ * cases were 34%, 15%, 87% and 3% of the curtain's plan area. A threshold loose enough to keep
+ * allowing a chair tucked under a table lets three of the four through. Measured on depth they are
+ * 100%, 65%, 100% and 100% - which is the number that matches what the eye sees.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFValidatorCurtainTest,
+	"HouseForge.Model.Validator.ACurtainHasRoomToHang", HF_TEST_FLAGS)
+
+bool FHFValidatorCurtainTest::RunTest(const FString& Parameters)
+{
+	// The master bedroom's curtain and bed from that flat, reduced to MakeValidSpec's room: both
+	// flush to the same wall, which is what puts a 10 cm curtain inside a 200 cm bed.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		FHFFixture& Curtain =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Curtain"), EHFFixtureType::Curtain, FVector2D(200.0, 289.0)));
+		Curtain.Footprint = FVector2D(190.0, 10.0);
+		Curtain.Height = 225.0;
+		Curtain.BaseZ = 10.0;
+		Curtain.AnchorWallId = TEXT("W_North");
+
+		FHFFixture& Bed =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Bed"), EHFFixtureType::Bed, FVector2D(200.0, 190.0)));
+		Bed.Footprint = FVector2D(165.0, 200.0);
+		Bed.Height = 90.0;
+		Bed.AnchorWallId = TEXT("W_North");
+
+		ExpectIssue(*this, Spec, TEXT("CurtainHasNowhereToHang"), EHFValidationSeverity::Error);
+	}
+
+	// A SILL-LENGTH CURTAIN OVER THE SAME BED IS FINE, and this is the fix the rule is asking for -
+	// so it has to accept it, or it is just an instruction to delete the curtain.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		FHFFixture& Curtain =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Curtain"), EHFFixtureType::Curtain, FVector2D(200.0, 289.0)));
+		Curtain.Footprint = FVector2D(190.0, 10.0);
+		Curtain.Height = 130.0;
+		Curtain.BaseZ = 95.0;			// clear of a 90 cm bed
+		Curtain.AnchorWallId = TEXT("W_North");
+
+		FHFFixture& Bed =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Bed"), EHFFixtureType::Bed, FVector2D(200.0, 190.0)));
+		Bed.Footprint = FVector2D(165.0, 200.0);
+		Bed.Height = 90.0;
+		Bed.AnchorWallId = TEXT("W_North");
+
+		TestFalse(TEXT("A curtain hung above the bed is not flagged"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("CurtainHasNowhereToHang")));
+	}
+
+	// AND SO IS FURNITURE THAT ONLY REACHES PART WAY IN. A console standing proud of the wall
+	// leaves the curtain fabric in open air behind it, which is a real arrangement and reads
+	// correctly - the rule must not fire on it or it will be turned off.
+	{
+		FHFHouseSpec Spec = MakeValidSpec();
+
+		FHFFixture& Curtain =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Curtain"), EHFFixtureType::Curtain, FVector2D(200.0, 289.0)));
+		Curtain.Footprint = FVector2D(190.0, 10.0);
+		Curtain.Height = 225.0;
+		Curtain.BaseZ = 10.0;
+		Curtain.AnchorWallId = TEXT("W_North");
+
+		// The curtain occupies y 284..294. A 45-deep console centred at 264.5 has its back at 287,
+		// so it reaches 3 cm of the curtain's 10 and leaves 7 cm of fabric in open air behind it.
+		FHFFixture& Console =
+			Spec.Fixtures.Add_GetRef(MakeFixture(TEXT("F_Console"), EHFFixtureType::TVUnit, FVector2D(200.0, 264.5)));
+		Console.Footprint = FVector2D(120.0, 45.0);
+		Console.Height = 60.0;
+
+		TestFalse(TEXT("A console standing proud of the curtain is not flagged"),
+			FHFSpecValidator::Validate(Spec).Contains(TEXT("CurtainHasNowhereToHang")));
+	}
+
+	return true;
+}
+
 #undef HF_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS
