@@ -95,6 +95,38 @@ namespace
 		{ 1.00, 0.72, 0.70, 0.03 }
 	};
 
+	/** One station of a lofted form at an ARBITRARY height, interpolated between the rows. */
+	FLoftStation StationAt(const FLoftStation* Stations, int32 StationCount, double TopZ,
+		double BottomZ, double Z)
+	{
+		const double Span = TopZ - BottomZ;
+		const double Depth = FMath::Abs(Span) < UE_KINDA_SMALL_NUMBER
+			? 0.0
+			: FMath::Clamp((TopZ - Z) / Span, 0.0, 1.0);
+
+		for (int32 Index = 1; Index < StationCount; ++Index)
+		{
+			const FLoftStation& Lower = Stations[Index];
+			if (Depth > Lower.Depth)
+			{
+				continue;
+			}
+
+			const FLoftStation& Upper = Stations[Index - 1];
+			const double Range = Lower.Depth - Upper.Depth;
+			const double T = Range < UE_KINDA_SMALL_NUMBER ? 0.0 : (Depth - Upper.Depth) / Range;
+
+			FLoftStation At = Lower;
+			At.Depth = Depth;
+			At.WidthScale = FMath::Lerp(Upper.WidthScale, Lower.WidthScale, T);
+			At.LengthScale = FMath::Lerp(Upper.LengthScale, Lower.LengthScale, T);
+			At.BackShift = FMath::Lerp(Upper.BackShift, Lower.BackShift, T);
+			return At;
+		}
+
+		return Stations[StationCount - 1];
+	}
+
 	/**
 	 * Builds the rings of a lofted form and the height of each, bottom-up.
 	 *
@@ -961,6 +993,19 @@ FHFBasinParams FHFSanitaryKit::SanitiseBasin(const FHFBasinParams& Params)
 	return P;
 }
 
+FBox2D FHFSanitaryKit::BasinBodyOutlineAt(const FHFBasinParams& Params, const double Z)
+{
+	const FHFBasinParams P = SanitiseBasin(Params);
+	const FVector2D RimHalf(P.Width * 0.5, P.Depth * 0.5);
+
+	const FLoftStation At = StationAt(BasinStations, UE_ARRAY_COUNT(BasinStations), P.Height, 0.0, Z);
+
+	const FVector2D Half(RimHalf.X * At.WidthScale, RimHalf.Y * At.LengthScale);
+	const FVector2D Centre(0.0, RimHalf.Y * At.BackShift);
+
+	return FBox2D(Centre - Half, Centre + Half);
+}
+
 FHFBasinBuild FHFSanitaryKit::BuildBasin(const FHFBasinParams& Params)
 {
 	FHFBasinBuild Out;
@@ -1030,7 +1075,20 @@ FHFBasinBuild FHFSanitaryKit::BuildBasin(const FHFBasinParams& Params)
 				MouthRadius * 0.86, LoftCornerSteps),
 			FHFMeshOps::RoundedRectangle(BowlCentre, BowlHalf, MouthRadius, LoftCornerSteps)
 		};
-		const TArray<double> CavityHeights = { -1.0, P.Height + 1.0 };
+		// STOPS AT THE BOWL FLOOR. It used to run to -1, cutting clean through the body and out of
+		// its underside, on the reasoning that a tool ending inside the target shares a plane with
+		// it and the boolean resolves that badly. The cost of that was worse than the risk:
+		//
+		// The cavity tapers only to 0.86 of the BOWL while the body tapers to 0.72 of the RIM, so
+		// near the foot the cavity is the wider of the two - on the 550 x 400 x 200 basin the
+		// plugin builds, 20.45 against 20.16 at z = 0.6. Below where those cross, the subtraction
+		// removes the ENTIRE wall, and the basin is left open at the bottom with the shell torn
+		// either side. A floor slab was then put back to plug it, and got its own shape wrong.
+		//
+		// Ending at the bowl floor removes only what the bowl is, so there is nothing to plug and
+		// no slab to get wrong. The tool's bottom cap lands strictly INSIDE solid ceramic rather
+		// than on a face of it, which is the well-defined case rather than the coplanar one.
+		const TArray<double> CavityHeights = { BowlFloorZ, P.Height + 1.0 };
 
 		if (FHFMeshOps::AppendLoft(Cavity, CavityRings, CavityHeights, true, true,
 			EHFSurfaceRole::Sanitary))
@@ -1039,23 +1097,6 @@ FHFBasinBuild FHFSanitaryKit::BuildBasin(const FHFBasinParams& Params)
 		}
 
 		FHFMeshOps::AppendPreservingRoles(Out.Shell, Body);
-
-		// And the floor put back under it, thicker than the wall and downwards only, so the inside of
-		// the bowl stays exactly where it was measured to be. Sized from the cavity AT THAT HEIGHT,
-		// because the cavity tapers - a slab cut to the mouth would stand outside the bowl.
-		FDynamicMesh3 Floor;
-		FHFMeshOps::InitialiseMesh(Floor);
-
-		const double FloorScale = FMath::Lerp(0.86, 1.0,
-			P.Height > 0.0 ? FMath::Clamp(BowlFloorZ / P.Height, 0.0, 1.0) : 1.0);
-
-		if (FHFMeshOps::AppendPrism(Floor,
-			FHFMeshOps::RoundedRectangle(BowlCentre, BowlHalf * FloorScale,
-				MouthRadius * FloorScale, LoftCornerSteps),
-			BowlFloorZ - P.CeramicThickness * 2.5, BowlFloorZ, EHFSurfaceRole::Sanitary))
-		{
-			FHFMeshOps::AppendPreservingRoles(Out.Shell, Floor);
-		}
 
 		Out.BowlVolume = (2.0 * BowlHalf.X) * (2.0 * BowlHalf.Y) * P.BowlDepth * 0.7;
 
