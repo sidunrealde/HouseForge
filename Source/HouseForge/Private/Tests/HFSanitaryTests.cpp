@@ -1339,4 +1339,90 @@ bool FHFBasinFloorInsideTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * THE BOWL IS HOLLOWED OUT OF THE BASIN, NOT CUT THROUGH ITS CORNERS.
+ *
+ * The body and the bowl are both rounded rectangles, and they had DIFFERENT corner radii: the body
+ * took 0.8 of its own short side for every ring below the rim - 13.3 cm on the 550 x 400 basin the
+ * plugin builds - while the bowl kept CornerRadius - RimWidth = 4, scaled. A square-ish bowl inside
+ * a nearly elliptical body crosses it at the corners while agreeing on width and depth everywhere,
+ * so the subtraction took the wall away and left a ragged hole at the front corners. An artist
+ * found it in a render.
+ *
+ * MEASURED AS WALL THICKNESS ROUND THE WHOLE PERIMETER, because that is the only measure that can
+ * see it. Every axis-aligned test - bounding box, half-width, front-and-back extent - passes on
+ * this defect, because the extremes of both shapes are exactly where they should be. It is only
+ * between the axes that they cross.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBasinWallTest,
+	"HouseForge.Sanitary.BasinKeepsCeramicAllTheWayRound", HF_TEST_FLAGS)
+
+bool FHFBasinWallTest::RunTest(const FString& Parameters)
+{
+	// F_Basin2, the master bathroom's vanity basin, derived as AHFBasinActor::ApplyFixture does.
+	FHFBasinParams P;
+	P.Width = 55.0;
+	P.Depth = 40.0;
+	P.Height = 20.0;
+	P.BowlDepth = FMath::Max(P.Height - P.CeramicThickness * 3.0, 0.0);
+	P.TapLedgeWidth = FMath::Clamp(P.Depth * 0.22, 6.0, 11.0);
+	P.CornerRadius = FMath::Min(P.Width, P.Depth) * 0.2;
+
+	const double FloorZ = P.Height - P.BowlDepth;
+
+	double Thinnest = BIG_NUMBER;
+	double ThinnestZ = 0.0;
+
+	for (int32 Sample = 0; Sample <= 60; ++Sample)
+	{
+		const double Z = FMath::Lerp(FloorZ, P.Height, static_cast<double>(Sample) / 60.0);
+		const double Wall = FHFSanitaryKit::BasinWallThicknessAt(P, Z);
+
+		if (Wall < Thinnest)
+		{
+			Thinnest = Wall;
+			ThinnestZ = Z;
+		}
+	}
+
+	// POSITIVE, WITH ENOUGH MARGIN TO BE MORE THAN FACETING. That is what this test is for and all
+	// it claims: the defect it guards against is the wall being GONE, measured at -0.84 cm.
+	//
+	// It deliberately does NOT assert a comfortable wall. The two basins in the reference flat come
+	// out at 0.61 cm and 0.33 cm at their tightest, both thinner than any ceramic
+	// is cast - but that is a second finding about how the bowl is proportioned, not this one, and
+	// a threshold quietly set to swallow it would turn a real observation into a passing test.
+	// Recorded here instead, so the next person to touch the proportions can see it.
+	AddInfo(FString::Printf(TEXT("Thinnest wall: %.2f cm at z = %.2f (55 x 40 basin)."),
+		Thinnest, ThinnestZ));
+
+	TestTrue(FString::Printf(
+		TEXT("There is ceramic all the way round the bowl (thinnest %.2f cm at z = %.2f)"),
+		Thinnest, ThinnestZ),
+		Thinnest >= 0.1);
+
+	// AND THE OTHER BASIN IN THE SAME FLAT, which is a different shape: 55 x 45, so its ledge and
+	// bowl work out differently. One passing size is a coincidence until a second one agrees.
+	FHFBasinParams Other = P;
+	Other.Depth = 45.0;
+	Other.TapLedgeWidth = FMath::Clamp(Other.Depth * 0.22, 6.0, 11.0);
+	Other.CornerRadius = FMath::Min(Other.Width, Other.Depth) * 0.2;
+
+	double OtherThinnest = BIG_NUMBER;
+	for (int32 Sample = 0; Sample <= 60; ++Sample)
+	{
+		const double Z = FMath::Lerp(Other.Height - Other.BowlDepth, Other.Height,
+			static_cast<double>(Sample) / 60.0);
+		OtherThinnest = FMath::Min(OtherThinnest, FHFSanitaryKit::BasinWallThicknessAt(Other, Z));
+	}
+
+	AddInfo(FString::Printf(TEXT("Thinnest wall: %.2f cm (55 x 45 basin) - thin, see above."),
+		OtherThinnest));
+
+	TestTrue(FString::Printf(TEXT("The common bathroom's basin too (thinnest %.2f cm)"), OtherThinnest),
+		OtherThinnest >= 0.1);
+
+	return true;
+}
+
 #endif	// WITH_DEV_AUTOMATION_TESTS
