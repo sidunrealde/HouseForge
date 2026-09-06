@@ -753,4 +753,91 @@ bool FHFBakeProbeLightmapTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * PROBE: what the mesh-description converter does with the SPARSE material ids HouseForge emits.
+ *
+ * Every element sets MaterialID = the surface ROLE index, so a wall using roles 0 and 14 hands the
+ * converter ids 0 and 14 with fourteen gaps, against NumMaterialSlots = 18. That is unusual - most
+ * callers number their materials densely from zero - and it is the shape that makes a converter
+ * create polygon groups while it is walking them.
+ *
+ * Which is what the gate caught, once, inside a bake:
+ *
+ *   Ensure condition failed: !CurrentNum || CurrentNum[0] == InitialNum
+ *   Array has changed during ranged-for iteration!
+ *   TMeshAttributeArraySet<int>::Insert -> FMeshElementContainer::Add
+ *     -> FDynamicMeshToMeshDescription::Convert_NoSharedInstances
+ *     -> UE::AssetUtils::CreateStaticMeshAsset -> FHFBakeService::BakeOnePart
+ *
+ * A MEASUREMENT, NOT AN ASSERTION. It reports what the conversion does and only fails if the
+ * conversion fails outright, because the question it exists to answer is whether sparse ids are
+ * what provokes that ensure - and a probe that asserted an answer would be assuming one.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHFBakeSparseMaterialIdProbe,
+	"HouseForge.Bake.Probe.SparseMaterialIds", HF_TEST_FLAGS)
+
+bool FHFBakeSparseMaterialIdProbe::RunTest(const FString& Parameters)
+{
+	using namespace UE::Geometry;
+
+	// The widest gap the roles allow: first and last, nothing between.
+	const int32 Roles = FHFMeshOps::NumSurfaceRoles();
+
+	FDynamicMesh3 Mesh;
+	FHFMeshOps::InitialiseMesh(Mesh);
+
+	if (!FHFMeshOps::AppendPrism(Mesh,
+		{ FVector2D(-10, -10), FVector2D(10, -10), FVector2D(10, 10), FVector2D(-10, 10) },
+		0.0, 10.0, EHFSurfaceRole::WallPaint))
+	{
+		AddError(TEXT("The probe could not build a box to convert."));
+		return false;
+	}
+
+	Mesh.EnableAttributes();
+	Mesh.Attributes()->EnableMaterialID();
+	FDynamicMeshMaterialAttribute* Ids = Mesh.Attributes()->GetMaterialID();
+
+	int32 Index = 0;
+	for (const int32 Tid : Mesh.TriangleIndicesItr())
+	{
+		// Half at 0, half at the last role: sparse, and both ends of the range in use.
+		Ids->SetValue(Tid, (Index++ % 2 == 0) ? 0 : Roles - 1);
+	}
+
+	AddInfo(FString::Printf(TEXT("%d triangles, material ids 0 and %d, %d slots."),
+		Mesh.TriangleCount(), Roles - 1, Roles));
+
+	UE::AssetUtils::FStaticMeshAssetOptions Options;
+	Options.NewAssetPath = TEXT("/Game/HouseForge/Probe/SM_HFSparseIds");
+	Options.NumSourceModels = 1;
+	Options.NumMaterialSlots = Roles;
+	Options.bGenerateLightmapUVs = false;
+	Options.bAllowDistanceField = true;
+	Options.bSupportRayTracing = true;
+	Options.bCreatePhysicsBody = true;
+	Options.CollisionType = ECollisionTraceFlag::CTF_UseComplexAsSimple;
+	Options.SourceMeshes.DynamicMeshes.Add(&Mesh);
+
+	UE::AssetUtils::FStaticMeshResults Results;
+	const UE::AssetUtils::ECreateStaticMeshResult Code =
+		UE::AssetUtils::CreateStaticMeshAsset(Options, Results);
+
+	TestTrue(TEXT("The conversion produced an asset"),
+		Code == UE::AssetUtils::ECreateStaticMeshResult::Ok && Results.StaticMesh != nullptr);
+
+	if (Results.StaticMesh != nullptr)
+	{
+		FStaticMeshCompilingManager::Get().FinishCompilation({ Results.StaticMesh });
+
+		const FMeshDescription* Description = Results.StaticMesh->GetMeshDescription(0);
+		AddInfo(FString::Printf(TEXT("Converted: %d polygon groups, %d triangles, %d slots on the asset."),
+			Description ? Description->PolygonGroups().Num() : -1,
+			Description ? Description->Triangles().Num() : -1,
+			Results.StaticMesh->GetStaticMaterials().Num()));
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
