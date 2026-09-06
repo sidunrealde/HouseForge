@@ -248,6 +248,61 @@ function Invoke-TestStage {
 
     $StageExit = $LASTEXITCODE
 
+    # ------------------------------------------------------------------ what this run actually did
+    #
+    # ONE LINE PER STAGE, PASS OR FAIL, APPENDED FOREVER.
+    #
+    # "The gate is flaky" was, until this existed, an anecdote. It failed twice in three attempts on
+    # one afternoon - an access violation in embree4 under FSparseMeshDistanceFieldAsyncTask, then an
+    # engine ensure in FDynamicMeshToMeshDescription reached through FHFBakeService::BakeOnePart -
+    # and passed on the third with no code change between them. Both faults were in engine code, in
+    # different subsystems, and neither reproduced: the suite alone ran clean four times, and a probe
+    # aimed at the most likely cause (the sparse material ids HouseForge emits) ran clean three
+    # times and refuted it.
+    #
+    # What could not be answered was the only question that matters for what to do about it: HOW
+    # OFTEN. A gate that fails one run in twenty is a nuisance to re-run; one that fails one in three
+    # teaches everybody that red means "try again", and the next real regression goes through on the
+    # retry. Those need opposite responses and they are indistinguishable without a count.
+    #
+    # NOT A RETRY. It would be easy to re-run a stage that crashed with no failed assertion and call
+    # the gate fixed, and that is exactly the change this evidence has to justify BEFORE it is made:
+    # our own races would be laundered by it just as well as the engine's. So this only counts.
+    #
+    # Machine-local by design - it lives under Saved, which is gitignored - because it is a record of
+    # what happened on this machine's hardware, not a fact about the source.
+    $HistoryPath = Join-Path $PluginDir 'Saved\GateHistory.tsv'
+    if (-not (Test-Path $HistoryPath)) {
+        Set-Content -Path $HistoryPath -Encoding utf8 `
+            -Value "when`tstage`tfilter`trhi`teditor_exit`tfailed`tpassed`tfault"
+    }
+
+    # The distinction the count exists to draw: an engine fault with nothing of ours asserting is a
+    # different event from a test of ours failing, and only the second is evidence about the code.
+    $Fault = ''
+    $RecentCrash = Get-ChildItem (Join-Path $ProjectDir 'Saved\Logs\HouseBuilder*.log') -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
+        Select-String -Pattern 'Unhandled Exception: (\w+)|Ensure condition failed' |
+        Select-Object -First 1
+    if ($RecentCrash) { $Fault = ($RecentCrash.Line.Trim() -replace "`t", ' ') }
+
+    $HistFailed = 'na'
+    $HistPassed = 'na'
+    $HistIndex  = Join-Path $Reports 'index.json'
+    if (Test-Path $HistIndex) {
+        try {
+            $H = Get-Content $HistIndex -Raw | ConvertFrom-Json
+            $HistFailed = $H.failed
+            $HistPassed = $H.succeeded + $H.succeededWithWarnings
+        } catch { }
+    }
+
+    Add-Content -Path $HistoryPath -Encoding utf8 -Value (
+        "{0}`t{1}`t{2}`t{3}`t{4}`t{5}`t{6}`t{7}" -f `
+        (Get-Date -Format 's'), $EvidenceKey, $Filter, ($RhiArgs -join ' '),
+        $StageExit, $HistFailed, $HistPassed, $Fault)
+
+
     # The editor's exit code is the primary signal, but read the report too: it distinguishes
     # "everything passed" from "nothing ran", which otherwise look identical.
     $IndexPath = Join-Path $Reports 'index.json'
