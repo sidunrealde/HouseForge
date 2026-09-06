@@ -574,6 +574,19 @@ public:
 	 */
 	static FBox2D BasinBodyOutlineAt(const FHFBasinParams& Params, double Z);
 
+	/**
+	 * The thinnest ceramic between the bowl and the outside of the basin at a height, in cm.
+	 *
+	 * NEGATIVE MEANS THE BOWL IS OUTSIDE THE BODY, and that the subtraction has taken the wall away
+	 * rather than hollowed it: a hole, wherever on the perimeter it goes negative.
+	 *
+	 * A NUMBER RATHER THAN THE TWO OUTLINES, because the failure is at the CORNERS and every
+	 * axis-aligned measure misses it. The body and the bowl are rounded rectangles with different
+	 * corner radii, so they can agree on width and depth at every height and still cross where the
+	 * corners are - which is exactly what happened, and what a bounding-box test cannot see.
+	 */
+	static double BasinWallThicknessAt(const FHFBasinParams& Params, double Z);
+
 	/** The whole shower: gully, threshold, mixer, riser, arm and rose, with the lever and the tilt. */
 	static FHFShowerBuild BuildShower(const FHFShowerParams& Params);
 

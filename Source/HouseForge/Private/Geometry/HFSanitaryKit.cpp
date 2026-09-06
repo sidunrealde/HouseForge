@@ -95,6 +95,44 @@ namespace
 		{ 1.00, 0.72, 0.70, 0.03 }
 	};
 
+	/** Signed distance from a point to a closed polygon: positive inside, negative outside. */
+	double SignedDistanceToPolygon(const FVector2D& P, const TArray<FVector2D>& Poly)
+	{
+		double Nearest = BIG_NUMBER;
+		bool bInside = false;
+
+		for (int32 i = 0, j = Poly.Num() - 1; i < Poly.Num(); j = i++)
+		{
+			const FVector2D& A = Poly[i];
+			const FVector2D& B = Poly[j];
+
+			Nearest = FMath::Min(Nearest,
+				FVector2D::Distance(P, FMath::ClosestPointOnSegment2D(P, A, B)));
+
+			if (((A.Y > P.Y) != (B.Y > P.Y))
+				&& (P.X < (B.X - A.X) * (P.Y - A.Y) / (B.Y - A.Y) + A.X))
+			{
+				bInside = !bInside;
+			}
+		}
+
+		return bInside ? Nearest : -Nearest;
+	}
+
+	/**
+	 * The corner radius a BASIN's body is lofted with.
+	 *
+	 * ONE PLACE, because BuildBasin lofts the body and BasinWallThicknessAt measures the gap to the
+	 * bowl inside it, and if those two disagree about the shape the measurement is of a basin that
+	 * was never built. That is not hypothetical: the first version of this measured a body it had
+	 * recomputed with the corrected rule while the build still used the old one, so the test passed
+	 * against the very defect it was written for.
+	 */
+	double BasinBodyRimCornerRadius(const FHFBasinParams& P)
+	{
+		return P.CornerRadius;
+	}
+
 	/** One station of a lofted form at an ARBITRARY height, interpolated between the rows. */
 	FLoftStation StationAt(const FLoftStation* Stations, int32 StationCount, double TopZ,
 		double BottomZ, double Z)
@@ -134,9 +172,15 @@ namespace
 	 * @param TopZ       Height of the rim section.
 	 * @param BottomZ    Height of the last section.
 	 */
+	/**
+	 * @param RimCornerRadius  the rim's own corner radius, scaled down the loft with each section.
+	 *                         Zero falls back to a proportion of the section, which is right for a
+	 *                         form whose plan is only ever "rounded" - a WC pan - and wrong for one
+	 *                         the drawing dimensions. See the note at the call site in BuildBasin.
+	 */
 	void LoftSections(const FLoftStation* Stations, int32 StationCount, const FVector2D& RimCentre,
 		const FVector2D& RimHalf, double TopZ, double BottomZ, double Inset,
-		TArray<TArray<FVector2D>>& OutRings, TArray<double>& OutZ)
+		TArray<TArray<FVector2D>>& OutRings, TArray<double>& OutZ, double RimCornerRadius = 0.0)
 	{
 		OutRings.Reset();
 		OutZ.Reset();
@@ -153,8 +197,13 @@ namespace
 
 			const FVector2D Centre(RimCentre.X, RimCentre.Y + RimHalf.Y * Station.BackShift);
 
-			OutRings.Add(FHFMeshOps::RoundedRectangle(Centre, Half,
-				FMath::Min(Half.X, Half.Y) * LoftCornerFraction, LoftCornerSteps));
+			// The rim's radius carried down the loft, or a proportion of the section when the form
+			// has no stated one. Clamped so a section narrower than the radius still closes.
+			const double Radius = RimCornerRadius > 0.0
+				? FMath::Min(RimCornerRadius * Station.WidthScale, FMath::Min(Half.X, Half.Y))
+				: FMath::Min(Half.X, Half.Y) * LoftCornerFraction;
+
+			OutRings.Add(FHFMeshOps::RoundedRectangle(Centre, Half, Radius, LoftCornerSteps));
 			OutZ.Add(FMath::Lerp(TopZ, BottomZ, Station.Depth));
 		}
 	}
@@ -1006,6 +1055,47 @@ FBox2D FHFSanitaryKit::BasinBodyOutlineAt(const FHFBasinParams& Params, const do
 	return FBox2D(Centre - Half, Centre + Half);
 }
 
+double FHFSanitaryKit::BasinWallThicknessAt(const FHFBasinParams& Params, const double Z)
+{
+	const FHFBasinParams P = SanitiseBasin(Params);
+	const FVector2D RimHalf(P.Width * 0.5, P.Depth * 0.5);
+
+	// The body, exactly as BuildBasin lofts it.
+	const FLoftStation At = StationAt(BasinStations, UE_ARRAY_COUNT(BasinStations), P.Height, 0.0, Z);
+	const FVector2D BodyHalf(RimHalf.X * At.WidthScale, RimHalf.Y * At.LengthScale);
+	const TArray<FVector2D> Body = FHFMeshOps::RoundedRectangle(
+		FVector2D(0.0, RimHalf.Y * At.BackShift), BodyHalf,
+		BasinBodyRimCornerRadius(P) > 0.0
+			? FMath::Min(BasinBodyRimCornerRadius(P) * At.WidthScale,
+				FMath::Min(BodyHalf.X, BodyHalf.Y))
+			: FMath::Min(BodyHalf.X, BodyHalf.Y) * LoftCornerFraction,
+		LoftCornerSteps);
+
+	// The bowl, exactly as BuildBasin lofts the cavity: 0.86 at its floor to 1.0 a little past the
+	// rim, so its scale at a height has to be read off that same span.
+	const FVector2D BowlCentre(0.0, -(P.TapLedgeWidth - P.RimWidth) * 0.5);
+	const FVector2D BowlHalf(
+		FMath::Max(P.Width * 0.5 - P.RimWidth, 0.0),
+		FMath::Max((P.Depth - P.RimWidth - P.TapLedgeWidth) * 0.5, 0.0));
+
+	const double FloorZ = P.Height - P.BowlDepth;
+	const double Span = (P.Height + 1.0) - FloorZ;
+	const double T = Span > UE_KINDA_SMALL_NUMBER ? FMath::Clamp((Z - FloorZ) / Span, 0.0, 1.0) : 1.0;
+	const double Scale = FMath::Lerp(0.86, 1.0, T);
+
+	const double MouthRadius = FMath::Max(P.CornerRadius - P.RimWidth, 0.5);
+	const TArray<FVector2D> Bowl = FHFMeshOps::RoundedRectangle(
+		BowlCentre, BowlHalf * Scale, MouthRadius * Scale, LoftCornerSteps);
+
+	double Thinnest = BIG_NUMBER;
+	for (const FVector2D& Point : Bowl)
+	{
+		Thinnest = FMath::Min(Thinnest, SignedDistanceToPolygon(Point, Body));
+	}
+
+	return Thinnest;
+}
+
 FHFBasinBuild FHFSanitaryKit::BuildBasin(const FHFBasinParams& Params)
 {
 	FHFBasinBuild Out;
@@ -1040,8 +1130,21 @@ FHFBasinBuild FHFSanitaryKit::BuildBasin(const FHFBasinParams& Params)
 	{
 		TArray<TArray<FVector2D>> Rings;
 		TArray<double> Heights;
+		// THE RIM'S OWN CORNER RADIUS, CARRIED DOWN. Without it every ring below the rim took
+		// 0.8 of its own short side - 13.3 cm on a 550 x 400 basin, against the 8 cm the rim is
+		// drawn with - so the body became nearly elliptical below the rim while the BOWL stayed
+		// square-ish at MouthRadius = CornerRadius - RimWidth = 4.
+		//
+		// A square bowl inside a round body cuts through it at the corners. Measured at z = 6: the
+		// bowl's front corner reaches 14.12 from the body's corner arc centre, which has a radius
+		// of 13.28 - 8.4 mm outside the shell, four times over, which is the ragged tear an artist
+		// found at the front corners of the basin in a render. Carrying the rim's radius down puts
+		// that same point 1.82 cm inside.
+		//
+		// The rim ring is overridden to P.CornerRadius immediately below, so this also stops the
+		// body's own corners jumping between the rim and the section under it.
 		LoftSections(BasinStations, UE_ARRAY_COUNT(BasinStations), RimCentre, RimHalf,
-			P.Height, 0.0, 0.0, Rings, Heights);
+			P.Height, 0.0, 0.0, Rings, Heights, BasinBodyRimCornerRadius(P));
 
 		// The rim's own corner radius rather than the loft's fraction: a basin's plan is a stated
 		// figure on the drawing, where a WC pan's is only ever "rounded".
